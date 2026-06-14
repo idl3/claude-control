@@ -1,5 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { uploadServeUrl } from '../lib/api';
+import { authFetch, uploadServeUrl } from '../lib/api';
+
+/**
+ * Fetch an upload by basename through authFetch (sends the bearer header) and
+ * expose it as an object URL. `<img src>` / `<a href>` can't carry an
+ * Authorization header, so when a token is set we must fetch the bytes and
+ * blob-URL them instead of pointing the element at the raw path. Returns the
+ * object URL (revoked on unmount/basename change) or null while loading/failed.
+ */
+function useAuthedBlobUrl(basename: string): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    authFetch(uploadServeUrl(basename))
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (!blob || revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        /* leave null — the element renders empty/broken, acceptable for a preview */
+      });
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setUrl(null);
+    };
+  }, [basename]);
+  return url;
+}
 
 // Image extensions we render as thumbnails (must match server IMAGE_MIME keys).
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif', '.svg']);
@@ -88,17 +119,20 @@ interface AttachPreviewProps {
 
 export function AttachPreviewItem({ ref_ }: AttachPreviewProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const serveUrl = uploadServeUrl(ref_.basename);
+  // Fetched with the bearer header and exposed as an object URL (img/href can't
+  // send Authorization). Null while loading / on failure.
+  const serveUrl = useAuthedBlobUrl(ref_.basename);
 
   if (!ref_.isImage) {
-    // Non-image: render a tappable file chip linking to the raw download.
+    // Non-image: render a tappable file chip linking to the blob download.
     return (
       <a
         className="transcript-file-chip"
-        href={serveUrl}
+        href={serveUrl ?? undefined}
         download={ref_.basename}
         aria-label={`Download ${ref_.basename}`}
         title={ref_.basename}
+        aria-disabled={serveUrl ? undefined : true}
       >
         <span className="chip-icon" aria-hidden="true">📎</span>
         <span className="chip-name">{ref_.basename}</span>
@@ -115,14 +149,18 @@ export function AttachPreviewItem({ ref_ }: AttachPreviewProps) {
         title={ref_.basename}
         onClick={() => setLightboxOpen(true)}
       >
-        <img
-          className="transcript-thumb"
-          src={serveUrl}
-          alt={ref_.basename}
-          loading="lazy"
-        />
+        {serveUrl ? (
+          <img
+            className="transcript-thumb"
+            src={serveUrl}
+            alt={ref_.basename}
+            loading="lazy"
+          />
+        ) : (
+          <span className="transcript-thumb transcript-thumb-loading" aria-hidden="true" />
+        )}
       </button>
-      {lightboxOpen ? (
+      {lightboxOpen && serveUrl ? (
         <Lightbox
           src={serveUrl}
           alt={ref_.basename}
