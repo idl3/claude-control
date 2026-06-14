@@ -20,6 +20,7 @@ import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
+import { TerminalPanel } from './components/TerminalPanel';
 import type { ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -189,6 +190,9 @@ export default function App() {
   // Settings modal.
   const [configOpen, setConfigOpen] = useState(false);
 
+  // Raw-terminal escape hatch: the session id whose ttyd panel is open, or null.
+  const [terminalId, setTerminalId] = useState<string | null>(null);
+
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
   // tmux window + types /rename into the pane). The rail picks up the new name
@@ -344,19 +348,30 @@ export default function App() {
                         'claude control'}
                     </span>
                     {selectedSession ? (
-                      <button
-                        type="button"
-                        className="rename-btn"
-                        aria-label="Rename session"
-                        title="Rename session"
-                        onClick={() =>
-                          setRenaming(
-                            selectedSession.name ?? selectedSession.id,
-                          )
-                        }
-                      >
-                        ✎
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="rename-btn"
+                          aria-label="Rename session"
+                          title="Rename session"
+                          onClick={() =>
+                            setRenaming(
+                              selectedSession.name ?? selectedSession.id,
+                            )
+                          }
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          className="rename-btn term-btn"
+                          aria-label="Open raw terminal"
+                          title="Raw terminal"
+                          onClick={() => setTerminalId(selectedSession.id)}
+                        >
+                          ⛶
+                        </button>
+                      </>
                     ) : null}
                   </span>
                 )}
@@ -425,6 +440,18 @@ export default function App() {
           <ConfigModal
             onClose={() => setConfigOpen(false)}
             onToast={showToast}
+          />
+        ) : null}
+
+        {terminalId ? (
+          <TerminalPanel
+            key={terminalId}
+            sessionId={terminalId}
+            label={
+              cockpit.sessions.find((s) => s.id === terminalId)?.name ??
+              terminalId
+            }
+            onClose={() => setTerminalId(null)}
           />
         ) : null}
 
