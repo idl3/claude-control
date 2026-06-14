@@ -14,6 +14,8 @@ import { Thread } from './components/Thread';
 import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
+import { ConfigModal } from './components/ConfigModal';
+import { NewSessionForm } from './components/NewSessionForm';
 import type { ServerMessage } from './lib/types';
 
 // Extract the plain text the user typed in the composer.
@@ -147,6 +149,9 @@ export default function App() {
   // toolUseId) arrives, without needing the server to clear pending first.
   const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
 
+  // Settings modal.
+  const [configOpen, setConfigOpen] = useState(false);
+
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
   const select = useCallback(
@@ -172,6 +177,10 @@ export default function App() {
 
         <div className="app-body">
           <aside className="rail">
+            <NewSessionForm
+              onToast={showToast}
+              onOpenSettings={() => setConfigOpen(true)}
+            />
             <SessionRail
               sessions={cockpit.sessions}
               selectedId={cockpit.selectedId}
@@ -219,6 +228,13 @@ export default function App() {
               setDismissedAsk(cockpit.pending?.toolUseId ?? null);
               cockpit.clearCapture();
             }}
+          />
+        ) : null}
+
+        {configOpen ? (
+          <ConfigModal
+            onClose={() => setConfigOpen(false)}
+            onToast={showToast}
           />
         ) : null}
 

@@ -18,6 +18,7 @@ import { ResourceMonitor } from './lib/resources.js';
 import { buildAnswerProgram } from './lib/answer.js';
 import { sweepUploads } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
+import { readConfig, writeConfig } from './lib/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -126,6 +127,17 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleUpload(req, res, u);
   }
+  if (u.pathname === '/api/config') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (req.method === 'GET') return endJson(res, 200, readConfig());
+    if (req.method === 'POST') return handleConfigSave(req, res);
+    return endJson(res, 405, { error: 'method not allowed' });
+  }
+  if (u.pathname === '/api/session/new') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleSessionNew(req, res);
+  }
 
   // static
   serveStatic(u.pathname, res);
@@ -210,6 +222,94 @@ function handleUpload(req, res, u) {
   req.on('error', () => {
     if (!aborted) endJson(res, 400, { error: 'upload stream error' });
   });
+}
+
+// Read a small JSON request body with a hard size cap (control payloads are
+// tiny — same defense as handleUpload's byte cap, just much smaller). Resolves
+// to the parsed object, or {} for an empty body. Rejects on overflow/bad JSON.
+function readJsonBody(req, maxBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let aborted = false;
+    req.on('data', (c) => {
+      if (aborted) return;
+      size += c.length;
+      if (size > maxBytes) {
+        aborted = true;
+        req.destroy();
+        reject(new Error('request body too large'));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      const raw = Buffer.concat(chunks).toString('utf8').trim();
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error('invalid JSON body'));
+      }
+    });
+    req.on('error', (err) => {
+      if (!aborted) reject(err);
+    });
+  });
+}
+
+// POST /api/config — validate + persist the launch config. 400 on bad input.
+async function handleConfigSave(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  try {
+    const saved = writeConfig(body);
+    return endJson(res, 200, saved);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/session/new — create a new tmux window in the configured (or
+// body-overridden) cwd, then type the launch command into it via send-keys so
+// the interactive shell resolves aliases. Security: the command is operator
+// config and is only ever sent into a pane (never shell-exec'd), consistent
+// with this app already typing into live sessions. Token-gated + localhost.
+async function handleSessionNew(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  const config = readConfig();
+  const cwd =
+    typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
+  // Name is required-with-default: sanitize the requested name, falling back to
+  // `session-<short-ts>` so a session is ALWAYS named (the rail reads the tmux
+  // window name until a transcript title exists).
+  const name = tmux.sanitizeName(body.name) || tmux.defaultSessionName();
+  try {
+    // (1) Reliable named path: the tmux window name. createWindow sets it via
+    //     `new-window -n`, so the rail shows the name immediately.
+    const target = await tmux.createWindow({ cwd, name });
+    // (2) Claude's own session title: `claude --help` exposes `-n/--name`
+    //     (display name in the prompt box, /resume picker, terminal title), so
+    //     we append it to the launch command rather than relying on a delayed
+    //     `/rename`. The name is shell-quoted (sanitizeName already stripped
+    //     control chars/newlines) since the command is typed into an interactive
+    //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
+    const launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
+    await tmux.sendText(target, launch);
+    return endJson(res, 200, { ok: true, target, name });
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
 }
 
 function serveStatic(pathname, res) {
