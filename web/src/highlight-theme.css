@@ -1,0 +1,95 @@
+/*
+ * Syntax-highlight token colors (GitHub Dark palette), scoped to our markdown
+ * code blocks. Token colors are taken verbatim from highlight.js's github-dark
+ * theme; we deliberately do NOT pull the theme's own .hljs background/padding so
+ * the existing dark/compact `.aui-md pre code` layout (styles.css) stays intact.
+ * Bundled locally — no runtime CDN.
+ */
+
+/* The code element carries `class="hljs"`; keep it transparent so the
+   surrounding <pre> background (var(--bg)) shows through unchanged. */
+.aui-md pre code.hljs {
+  background: transparent;
+  color: var(--text);
+}
+
+/* prettylights-syntax-keyword */
+.aui-md .hljs-doctag,
+.aui-md .hljs-keyword,
+.aui-md .hljs-meta .hljs-keyword,
+.aui-md .hljs-template-tag,
+.aui-md .hljs-template-variable,
+.aui-md .hljs-type,
+.aui-md .hljs-variable.language_ {
+  color: #ff7b72;
+}
+/* prettylights-syntax-entity */
+.aui-md .hljs-title,
+.aui-md .hljs-title.class_,
+.aui-md .hljs-title.class_.inherited__,
+.aui-md .hljs-title.function_ {
+  color: #d2a8ff;
+}
+/* prettylights-syntax-constant */
+.aui-md .hljs-attr,
+.aui-md .hljs-attribute,
+.aui-md .hljs-literal,
+.aui-md .hljs-meta,
+.aui-md .hljs-number,
+.aui-md .hljs-operator,
+.aui-md .hljs-variable,
+.aui-md .hljs-selector-attr,
+.aui-md .hljs-selector-class,
+.aui-md .hljs-selector-id {
+  color: #79c0ff;
+}
+/* prettylights-syntax-string */
+.aui-md .hljs-regexp,
+.aui-md .hljs-string,
+.aui-md .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+/* prettylights-syntax-variable */
+.aui-md .hljs-built_in,
+.aui-md .hljs-symbol {
+  color: #ffa657;
+}
+/* prettylights-syntax-comment */
+.aui-md .hljs-comment,
+.aui-md .hljs-code,
+.aui-md .hljs-formula {
+  color: #8b949e;
+}
+/* prettylights-syntax-entity-tag */
+.aui-md .hljs-name,
+.aui-md .hljs-quote,
+.aui-md .hljs-selector-tag,
+.aui-md .hljs-selector-pseudo {
+  color: #7ee787;
+}
+.aui-md .hljs-subst {
+  color: var(--text);
+}
+.aui-md .hljs-section {
+  color: #1f6feb;
+  font-weight: bold;
+}
+.aui-md .hljs-bullet {
+  color: #f2cc60;
+}
+.aui-md .hljs-emphasis {
+  color: var(--text);
+  font-style: italic;
+}
+.aui-md .hljs-strong {
+  color: var(--text);
+  font-weight: bold;
+}
+.aui-md .hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+.aui-md .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
+}

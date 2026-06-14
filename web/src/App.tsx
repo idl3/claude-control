@@ -6,6 +6,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { useCockpit } from './hooks/useCockpit';
+import { usePushNotifications } from './hooks/usePushNotifications';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession } from './lib/api';
@@ -21,6 +22,15 @@ import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import type { ServerMessage } from './lib/types';
 
+// How many trailing messages to render initially. assistant-ui (0.14.14) has no
+// thread virtualizer, so it renders every message in the runtime's list; with the
+// 500-message server cap, each potentially large, mounting all of them can jank
+// on mobile. We feed the runtime only the last N converted messages and expose a
+// "load earlier" affordance that reveals older ones in chunks. (Virtualization
+// was evaluated and deferred — see the note in the change summary.)
+const INITIAL_VISIBLE = 150;
+const LOAD_EARLIER_STEP = 150;
+
 // Extract the plain text the user typed in the composer.
 function appendMessageText(message: AppendMessage): string {
   if (typeof message.content === 'string') return message.content;
@@ -32,6 +42,7 @@ function appendMessageText(message: AppendMessage): string {
 
 export default function App() {
   const cockpit = useCockpit();
+  const push = usePushNotifications();
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastSeq = useRef(0);
 
@@ -117,11 +128,26 @@ export default function App() {
     return () => clearTimeout(t);
   }, [optimistic, cockpit.selectedId, cockpit.messages.length]);
 
+  // Render cap: how many trailing messages are currently shown. Reset whenever
+  // the active session changes so reopening a long session starts capped again.
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE);
+  }, [cockpit.selectedId]);
+
   // Convert the whole transcript at once so tool_result blocks (which arrive in
-  // later messages) fold into their originating tool-call part. We feed the
+  // later messages) fold into their originating tool-call part, THEN cap to the
+  // last `visibleCount` so the runtime only mounts the recent tail. We feed the
   // runtime already-converted messages with an identity convertMessage.
+  const fullConverted = useMemo<ThreadMessageLike[]>(
+    () => convertMessages(cockpit.messages),
+    [cockpit.messages],
+  );
+  const hiddenCount = Math.max(0, fullConverted.length - visibleCount);
+
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
-    const base = convertMessages(cockpit.messages);
+    const base =
+      hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
     if (optimistic && optimistic.sessionId === cockpit.selectedId) {
       // User echo only for typed sends; answers (text === '') show just the
       // working indicator (the choice is already shown in the AskUserQuestion).
@@ -141,7 +167,11 @@ export default function App() {
       } as ThreadMessageLike);
     }
     return base;
-  }, [cockpit.messages, cockpit.selectedId, optimistic]);
+  }, [fullConverted, hiddenCount, cockpit.selectedId, optimistic]);
+
+  const loadEarlier = useCallback(() => {
+    setVisibleCount((c) => c + LOAD_EARLIER_STEP);
+  }, []);
 
   const runtime = useExternalStoreRuntime({
     messages: convertedMessages,
@@ -198,6 +228,28 @@ export default function App() {
     [cockpit],
   );
 
+  // The service worker posts {type:'open-session', id} when a push notification
+  // is tapped — jump straight to that session.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { type?: string; id?: string } | undefined;
+      if (data?.type === 'open-session' && data.id) select(data.id);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [select]);
+
+  // One-line iOS hint: push only works after Add to Home Screen. Show it when on
+  // iOS, push is supported-but-off (or unsupported because not yet installed),
+  // and not already running as an installed standalone PWA.
+  const isStandalone =
+    typeof window !== 'undefined' &&
+    (window.matchMedia?.('(display-mode: standalone)').matches ||
+      // iOS Safari legacy flag
+      (navigator as unknown as { standalone?: boolean }).standalone === true);
+  const showIosHint = push.iosHint && !isStandalone && push.status !== 'on';
   // Restore the selected session from the URL hash on load (once the sessions
   // list arrives), and follow back/forward navigation.
   const restoredHash = useRef(false);
@@ -228,8 +280,18 @@ export default function App() {
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
       >
-        <ResourceHud resources={cockpit.resources} conn={cockpit.conn} />
+        <ResourceHud
+          resources={cockpit.resources}
+          conn={cockpit.conn}
+          push={push}
+        />
         <UpdateBanner />
+        {showIosHint ? (
+          <div className="ios-push-hint" role="note">
+            On iPhone/iPad, add this site to your Home Screen to receive push
+            notifications.
+          </div>
+        ) : null}
 
         <div className="app-body">
           <aside className="rail">
@@ -320,7 +382,11 @@ export default function App() {
                 <Composer disabled={false} />
               </div>
             ) : (
-              <Thread hasSelection={!!cockpit.selectedId} />
+              <Thread
+                hasSelection={!!cockpit.selectedId}
+                hiddenCount={hiddenCount}
+                onLoadEarlier={loadEarlier}
+              />
             )}
           </main>
         </div>
