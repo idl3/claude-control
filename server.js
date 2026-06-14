@@ -22,6 +22,11 @@ import { sweepUploads } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+// Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
+// library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
+// and echoes it, so we never reflect the raw token back and need no custom
+// handleProtocols here. checkWsToken just verifies the token is among the offers.
+import { checkToken as authCheckToken, checkWsToken } from './lib/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -101,7 +106,19 @@ function sessionById(id) {
   return registry.getSessions().find((s) => s.id === id) || null;
 }
 
-function checkToken(reqUrl) {
+// Authenticate an HTTP/API request: the token rides `Authorization: Bearer
+// <token>` (NOT the URL). Tokenless server → always authorized. Thin wrapper
+// over lib/auth so CONFIG.token isn't threaded through every call site.
+function checkToken(req) {
+  return authCheckToken(req, CONFIG.token);
+}
+
+// ttyd exception: the raw-terminal surface is opened with `window.open` to a
+// separately-proxied URL and CANNOT send an Authorization header, so it keeps a
+// `?token=` in its own URL. This gate reads the token from the query string for
+// /term/* requests ONLY — the rest of the app is header/subprotocol-based.
+// Tokenless server → always authorized.
+function checkTerminalToken(reqUrl) {
   if (!CONFIG.token) return true;
   try {
     const u = new URL(reqUrl, 'http://localhost');
@@ -135,36 +152,36 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
 
   if (u.pathname === '/api/sessions') {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
   }
   if (u.pathname === '/api/health') {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { ok: true, snapshot: resources.snapshot() });
   }
   if (u.pathname === '/api/version') {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return getVersionInfo()
       .then((info) => endJson(res, 200, info))
       .catch(() => endJson(res, 200, { current: currentVersion(), latest: null, behind: 0, updateAvailable: false }));
   }
   if (u.pathname === '/api/update') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleUpdate(res);
   }
   if (u.pathname === '/api/upload') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleUpload(req, res, u);
   }
   if (u.pathname === '/api/push/vapid') {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { publicKey: push.getPublicKey() });
   }
   if (u.pathname === '/api/push/subscribe') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return readJsonBody(req)
       .then((sub) => {
         if (!sub || typeof sub.endpoint !== 'string') {
@@ -177,7 +194,7 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/api/push/unsubscribe') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return readJsonBody(req)
       .then((body) => {
         const endpoint = typeof body?.endpoint === 'string' ? body.endpoint : null;
@@ -188,19 +205,19 @@ const server = http.createServer((req, res) => {
       .catch((err) => endJson(res, 400, { error: String(err?.message || err) }));
   }
   if (u.pathname === '/api/config') {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     if (req.method === 'GET') return endJson(res, 200, readConfig());
     if (req.method === 'POST') return handleConfigSave(req, res);
     return endJson(res, 405, { error: 'method not allowed' });
   }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionNew(req, res);
   }
   if (u.pathname === '/api/session/rename') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionRename(req, res);
   }
   // GET /api/uploads/<basename> — token-gated, path-traversal-guarded.
@@ -208,7 +225,7 @@ const server = http.createServer((req, res) => {
   // segments are allowed. Used by the React UI to render inline attachment
   // previews (thumbnails + lightbox) without exposing the filesystem path.
   if (u.pathname.startsWith('/api/uploads/')) {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleServeUpload(req, res, u);
   }
 
@@ -216,7 +233,7 @@ const server = http.createServer((req, res) => {
   // loopback-bound ttyd attached to this session's tmux pane. ttyd itself runs
   // with no auth; this branch (and the matching upgrade branch) is the gate.
   if (u.pathname.startsWith('/term/')) {
-    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!checkTerminalToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return proxyTerminalHttp(req, res, u);
   }
 
@@ -548,24 +565,37 @@ function serveStatic(pathname, res) {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
 server.on('upgrade', (req, socket, head) => {
+  // Origin check first (403) — applies to every upgrade regardless of path.
   if (!isAllowedOrigin(req.headers.origin)) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
     return;
   }
-  if (!checkToken(req.url)) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
-    return;
-  }
+  const upgradePath = new URL(req.url, 'http://localhost').pathname;
+
   // Raw-terminal escape hatch: relay /term/* WS upgrades to the session's ttyd
   // via a raw TCP pipe (ttyd speaks its own WS protocol; we are a transparent
-  // byte relay, not a `ws` endpoint). All other upgrades go to the existing
-  // claude-control WebSocketServer untouched — this branch must never reach
-  // wss.handleUpgrade, and wss.handleUpgrade must never see /term/*.
-  const upgradePath = new URL(req.url, 'http://localhost').pathname;
+  // byte relay, not a `ws` endpoint). Browsers can't set headers on the ttyd
+  // WebSocket, so this surface authenticates via the `?token=` it keeps in its
+  // URL. All other upgrades go to the existing claude-control WebSocketServer.
   if (upgradePath.startsWith('/term/')) {
+    if (!checkTerminalToken(req.url)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     relayTerminalUpgrade(req, socket, head);
+    return;
+  }
+
+  // Main cockpit WS: the browser can't set an Authorization header on
+  // `new WebSocket(...)`, so the client offers the token as a subprotocol
+  // (Sec-WebSocket-Protocol). Tokenless server → accept. We do NOT echo the
+  // raw token back; if a subprotocol must be selected, we pick the non-secret
+  // WS_PROTOCOL label (which the client always offers alongside the token).
+  if (!checkWsToken(req, CONFIG.token)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
@@ -852,10 +882,14 @@ async function main() {
   uploadSweepTimer.unref();
 
   server.listen(CONFIG.port, CONFIG.host, () => {
-    const tokenHint = CONFIG.token ? `?token=${CONFIG.token}` : '';
     // eslint-disable-next-line no-console
-    console.log(`claude-control → http://${CONFIG.host}:${CONFIG.port}/${tokenHint}`);
-    if (!CONFIG.token) {
+    console.log(`claude-control → http://${CONFIG.host}:${CONFIG.port}/`);
+    if (CONFIG.token) {
+      // The token is no longer carried in the URL — the web app prompts for it
+      // on load and sends it as an Authorization header (HTTP) / subprotocol
+      // (WS). Print it so the operator can paste it into the login prompt.
+      console.log(`   (access token: ${CONFIG.token} — enter it at the login prompt)`);
+    } else {
       console.log('   (no COCKPIT_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
     }
   });

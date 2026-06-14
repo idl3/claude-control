@@ -1,8 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// ws.ts imports wsUrl from ./api, which reads window.location. Stub it so the
-// client gets a stable URL in a plain Node env (no DOM).
-vi.mock('./api', () => ({ wsUrl: () => 'ws://test/' }));
+// ws.ts imports wsUrl + handleUnauthorized from ./api (which read
+// window.location / localStorage) and getToken + WS_PROTOCOL from ./auth. Stub
+// both so the client runs in a plain Node env (no DOM). unauthorizedCalls lets
+// the auth-close test assert the unauthorized flow fired.
+const unauthorizedCalls = { n: 0 };
+vi.mock('./api', () => ({
+  wsUrl: () => 'ws://test/',
+  handleUnauthorized: () => {
+    unauthorizedCalls.n += 1;
+  },
+}));
+let fakeToken: string | null = null;
+vi.mock('./auth', () => ({
+  getToken: () => fakeToken,
+  WS_PROTOCOL: 'claude-control',
+}));
 
 import { CockpitSocket } from './ws';
 import type { ServerMessage } from './types';
@@ -23,10 +36,12 @@ class FakeWebSocket {
   readyState = FakeWebSocket.CONNECTING;
   sent: string[] = [];
   url: string;
+  protocols: string | string[] | undefined;
   private listeners: Record<string, Set<Listener>> = {};
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url;
+    this.protocols = protocols;
     FakeWebSocket.instances.push(this);
   }
 
@@ -40,9 +55,9 @@ class FakeWebSocket {
   send(data: string): void {
     this.sent.push(data);
   }
-  close(): void {
+  close(code?: number): void {
     this.readyState = FakeWebSocket.CLOSED;
-    this.emit('close', {});
+    this.emit('close', { code });
   }
 
   // --- test drivers ---
@@ -56,9 +71,9 @@ class FakeWebSocket {
   messageRaw(data: string): void {
     this.emit('message', { data });
   }
-  drop(): void {
+  drop(code?: number): void {
     this.readyState = FakeWebSocket.CLOSED;
-    this.emit('close', {});
+    this.emit('close', { code });
   }
   error(): void {
     this.emit('error', {});
@@ -71,6 +86,8 @@ class FakeWebSocket {
 
 beforeEach(() => {
   FakeWebSocket.instances = [];
+  fakeToken = null;
+  unauthorizedCalls.n = 0;
   vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
   vi.useFakeTimers();
 });
@@ -104,6 +121,51 @@ describe('CockpitSocket — connection', () => {
     FakeWebSocket.last().open();
     s.connect();
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe('CockpitSocket — token subprotocol auth', () => {
+  it('offers no subprotocols when tokenless', () => {
+    fakeToken = null;
+    const s = new CockpitSocket();
+    s.connect();
+    expect(FakeWebSocket.last().protocols).toBeUndefined();
+  });
+
+  it('offers [WS_PROTOCOL, token] (safe label first, token second)', () => {
+    fakeToken = 'secret-123';
+    const s = new CockpitSocket();
+    s.connect();
+    expect(FakeWebSocket.last().protocols).toEqual(['claude-control', 'secret-123']);
+  });
+
+  it('connects to a clean URL with no ?token= in it', () => {
+    fakeToken = 'secret-123';
+    const s = new CockpitSocket();
+    s.connect();
+    expect(FakeWebSocket.last().url).toBe('ws://test/');
+    expect(FakeWebSocket.last().url).not.toContain('token');
+  });
+
+  it('fires the unauthorized flow on a 1008 (auth) close and does NOT reconnect', () => {
+    const s = new CockpitSocket();
+    s.connect();
+    const ws = FakeWebSocket.last();
+    ws.open();
+    ws.drop(1008);
+    expect(unauthorizedCalls.n).toBe(1);
+    // No reconnect scheduled for an auth close.
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('still reconnects on a non-auth close (e.g. 1006)', () => {
+    const s = new CockpitSocket();
+    s.connect();
+    FakeWebSocket.last().drop(1006);
+    expect(unauthorizedCalls.n).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });
 

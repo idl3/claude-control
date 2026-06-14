@@ -1,21 +1,66 @@
-// Token + URL helpers. The page is loaded as `?token=<t>`; every API call and
-// the WS URL must carry it. Same-origin throughout.
+// API helpers. The token is sent as an `Authorization: Bearer <token>` header
+// (never in the URL — URLs leak via history/logs/referrer). The token lives in
+// localStorage via lib/auth. Same-origin throughout.
+//
+// ttyd raw-terminal surface is the ONE exception: it is opened via window.open /
+// an iframe to a separately-proxied URL that cannot send an Authorization
+// header, so terminalUrl() keeps a `?token=` sourced from the stored token.
 
-export function getToken(): string | null {
-  return new URLSearchParams(window.location.search).get('token');
+import { getToken, clearToken } from './auth';
+
+// --- 401 handling -----------------------------------------------------------
+// When any authenticated request comes back 401, the stored token is stale or
+// wrong: clear it and notify listeners (App's TokenGate) to drop back to the
+// login prompt. Centralized here so every fetch path triggers it uniformly.
+type UnauthHandler = () => void;
+const unauthHandlers = new Set<UnauthHandler>();
+
+/** Subscribe to 401/unauthorized events. Returns an unsubscribe fn. */
+export function onUnauthorized(fn: UnauthHandler): () => void {
+  unauthHandlers.add(fn);
+  return () => unauthHandlers.delete(fn);
 }
 
-/** Returns `&token=<t>` (already URL-encoded) or '' when no token present. */
-export function authQuery(): string {
-  const t = getToken();
-  return t ? `&token=${encodeURIComponent(t)}` : '';
+/** Fire the unauthorized flow: clear the token and notify listeners. */
+export function handleUnauthorized(): void {
+  clearToken();
+  for (const fn of unauthHandlers) fn();
+}
+
+/**
+ * Build request headers carrying the bearer token (omitted when no token is
+ * stored, i.e. tokenless server). Merge-friendly: pass extra headers to add.
+ */
+export function authHeaders(extra?: Record<string, string>): HeadersInit {
+  const token = getToken();
+  const headers: Record<string, string> = { ...(extra ?? {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+/**
+ * Authenticated fetch: injects the bearer header and routes 401s through the
+ * unauthorized flow (clears token + returns to login). Returns the Response so
+ * callers can branch on other statuses.
+ */
+export async function authFetch(
+  input: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const res = await fetch(input, {
+    ...init,
+    headers: authHeaders(init?.headers as Record<string, string> | undefined),
+  });
+  if (res.status === 401) handleUnauthorized();
+  return res;
 }
 
 /**
  * Build the token-gated URL for a session's raw-terminal (ttyd) surface. The id
  * is a tmux target (e.g. `name:0`) and is percent-encoded into a single path
  * segment to match the server's `/term/<encoded-id>` route + ttyd `-b` base.
- * Same-origin; the `?token=` rides claude-control's existing gate.
+ * ttyd cannot send an Authorization header, so this surface keeps a `?token=`
+ * sourced from the stored token (the only place a URL token survives).
  */
 export function terminalUrl(id: string): string {
   const base = `/term/${encodeURIComponent(id)}/`;
@@ -26,9 +71,8 @@ export function terminalUrl(id: string): string {
 export function wsUrl(): string {
   const loc = window.location;
   const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-  const base = `${proto}//${loc.host}/`;
-  const t = getToken();
-  return t ? `${base}?token=${encodeURIComponent(t)}` : base;
+  // Clean URL — the token rides the WS subprotocol, not the query string.
+  return `${proto}//${loc.host}/`;
 }
 
 export interface UploadResult {
@@ -47,7 +91,7 @@ export interface VersionInfo {
 /** Fetch running vs latest-on-npm version info (best-effort; null on error). */
 export async function getVersion(): Promise<VersionInfo | null> {
   try {
-    const res = await fetch(`/api/version?${authQuery().slice(1)}`);
+    const res = await authFetch('/api/version');
     if (!res.ok) return null;
     return (await res.json()) as VersionInfo;
   } catch {
@@ -63,9 +107,7 @@ export async function getVersion(): Promise<VersionInfo | null> {
  */
 export async function triggerUpdate(): Promise<boolean> {
   try {
-    const res = await fetch(`/api/update?${authQuery().slice(1)}`, {
-      method: 'POST',
-    });
+    const res = await authFetch('/api/update', { method: 'POST' });
     const j = (await res.json().catch(() => ({}))) as { ok?: boolean };
     return res.ok && !!j.ok;
   } catch {
@@ -76,7 +118,7 @@ export async function triggerUpdate(): Promise<boolean> {
 /** Fetch the server's VAPID public key (token-gated). Null on error. */
 export async function getVapidPublicKey(): Promise<string | null> {
   try {
-    const res = await fetch(`/api/push/vapid?${authQuery().slice(1)}`);
+    const res = await authFetch('/api/push/vapid');
     if (!res.ok) return null;
     const j = (await res.json()) as { publicKey?: string };
     return j.publicKey ?? null;
@@ -88,7 +130,7 @@ export async function getVapidPublicKey(): Promise<string | null> {
 /** POST a PushSubscription JSON to the server (token-gated). */
 export async function postPushSubscribe(sub: PushSubscriptionJSON): Promise<boolean> {
   try {
-    const res = await fetch(`/api/push/subscribe?${authQuery().slice(1)}`, {
+    const res = await authFetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub),
@@ -102,7 +144,7 @@ export async function postPushSubscribe(sub: PushSubscriptionJSON): Promise<bool
 /** Tell the server to drop a subscription by endpoint (token-gated). */
 export async function postPushUnsubscribe(endpoint: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/push/unsubscribe?${authQuery().slice(1)}`, {
+    const res = await authFetch('/api/push/unsubscribe', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint }),
@@ -120,7 +162,7 @@ export interface ControlConfig {
 
 /** Fetch the persisted launch config. */
 export async function getConfig(): Promise<ControlConfig> {
-  const res = await fetch(`/api/config?${authQuery().slice(1)}`);
+  const res = await authFetch('/api/config');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as ControlConfig;
 }
@@ -129,7 +171,7 @@ export async function getConfig(): Promise<ControlConfig> {
 export async function saveConfig(
   partial: Partial<ControlConfig>,
 ): Promise<ControlConfig> {
-  const res = await fetch(`/api/config?${authQuery().slice(1)}`, {
+  const res = await authFetch('/api/config', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(partial),
@@ -161,7 +203,7 @@ export async function createSession(opts?: {
   cwd?: string;
   name?: string;
 }): Promise<CreateSessionResult> {
-  const res = await fetch(`/api/session/new?${authQuery().slice(1)}`, {
+  const res = await authFetch('/api/session/new', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(opts ?? {}),
@@ -182,7 +224,7 @@ export async function createSession(opts?: {
  * the pane so Claude updates its own session title. Throws on a non-OK response.
  */
 export async function renameSession(id: string, name: string): Promise<void> {
-  const res = await fetch(`/api/session/rename?${authQuery().slice(1)}`, {
+  const res = await authFetch('/api/session/rename', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, name }),
@@ -198,15 +240,14 @@ export async function renameSession(id: string, name: string): Promise<void> {
 
 /**
  * Build the token-gated URL for serving an uploaded file by basename.
- * Used by the transcript preview renderer to fetch thumbnails without
- * exposing the absolute server filesystem path to the browser.
- *
- * @param basename - the filename portion only (e.g. "1717000000000-photo.jpg")
+ * Used by the transcript preview renderer to fetch thumbnails. Image GETs go
+ * through a plain <img src>, which can't send an Authorization header — but the
+ * /api/uploads route is same-origin and image previews are non-sensitive, so
+ * when a token is set these are fetched via authFetch + object URLs instead
+ * (see AttachmentPreview). The bare path is returned here for that fetch.
  */
 export function uploadServeUrl(basename: string): string {
-  const t = getToken();
-  const query = t ? `?token=${encodeURIComponent(t)}` : '';
-  return `/api/uploads/${encodeURIComponent(basename)}${query}`;
+  return `/api/uploads/${encodeURIComponent(basename)}`;
 }
 
 /**
@@ -214,8 +255,8 @@ export function uploadServeUrl(basename: string): string {
  * Returns the absolute server path so it can be injected into the composer.
  */
 export async function uploadFile(file: File): Promise<UploadResult> {
-  const url = `/api/upload?name=${encodeURIComponent(file.name)}${authQuery()}`;
-  const res = await fetch(url, { method: 'POST', body: file });
+  const url = `/api/upload?name=${encodeURIComponent(file.name)}`;
+  const res = await authFetch(url, { method: 'POST', body: file });
   let json: unknown = null;
   try {
     json = await res.json();
