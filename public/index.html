@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claude-cockpit</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Left session rail -->
+    <aside id="session-rail" role="navigation" aria-label="Sessions">
+      <div class="rail-header">
+        <span class="rail-title">sessions</span>
+        <span id="connection-dot" class="conn-dot conn-disconnected" title="disconnected"></span>
+      </div>
+      <ul id="session-list" role="listbox" aria-label="Available sessions">
+        <!-- populated by app.js -->
+      </ul>
+    </aside>
+
+    <!-- Center: transcript + composer -->
+    <main id="main-pane">
+      <div id="transcript-header" class="transcript-header" hidden>
+        <button id="mobile-back" class="mobile-back" aria-label="Back to session list">‹ sessions</button>
+        <span id="header-session-name" class="header-name"></span>
+        <span id="header-cwd" class="header-cwd"></span>
+      </div>
+
+      <div id="transcript" role="log" aria-live="polite" aria-label="Conversation transcript">
+        <!-- empty-state placeholder is injected by app.js init() -->
+      </div>
+
+      <div id="composer" class="composer" hidden>
+        <button id="attach-btn" class="btn-attach" aria-label="Attach image or file" title="Attach image or file">📎</button>
+        <input id="attach-input" type="file" multiple accept="image/*,application/pdf,text/*" hidden aria-hidden="true">
+        <textarea
+          id="reply-input"
+          placeholder="reply… (Enter to send, Shift+Enter for newline)"
+          rows="3"
+          aria-label="Reply message"
+          autocomplete="off"
+          spellcheck="false"
+        ></textarea>
+        <button id="send-btn" class="btn-send" aria-label="Send reply">send</button>
+      </div>
+    </main>
+
+    <!-- Right resource HUD -->
+    <aside id="resource-hud" role="complementary" aria-label="Resource monitor" aria-live="polite">
+      <div class="hud-section">
+        <div class="hud-label">self</div>
+        <div class="hud-row">
+          <span class="hud-key">cpu</span>
+          <span id="hud-cpu" class="hud-val">—</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-key">rss</span>
+          <span id="hud-rss" class="hud-val">—</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-key">heap</span>
+          <span id="hud-heap" class="hud-val">—</span>
+        </div>
+      </div>
+      <div class="hud-divider"></div>
+      <div class="hud-section">
+        <div class="hud-label">system</div>
+        <div class="hud-row">
+          <span class="hud-key">load</span>
+          <span id="hud-load" class="hud-val">—</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-key">mem</span>
+          <span id="hud-mem" class="hud-val">—</span>
+        </div>
+      </div>
+      <div id="hud-warn" class="hud-warn" hidden>
+        <span id="hud-warn-text">over limit</span>
+      </div>
+    </aside>
+  </div>
+
+  <!-- AskUserQuestion modal -->
+  <div
+    id="ask-modal"
+    class="modal-backdrop"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="ask-modal-title"
+    hidden
+  >
+    <div class="modal-box" id="ask-modal-box">
+      <header class="modal-header">
+        <h2 id="ask-modal-title" class="modal-title">claude is asking</h2>
+        <button class="modal-close" id="ask-modal-close" aria-label="Dismiss modal">✕</button>
+      </header>
+
+      <div id="ask-questions" class="ask-questions">
+        <!-- question blocks injected by app.js -->
+      </div>
+
+      <footer class="modal-footer">
+        <button id="ask-capture-btn" class="btn-secondary">show terminal</button>
+        <div id="ask-capture-output" class="capture-output" hidden>
+          <pre id="ask-capture-pre"></pre>
+        </div>
+        <div class="modal-actions">
+          <button id="ask-cancel-btn" class="btn-ghost">cancel</button>
+          <button id="ask-send-btn" class="btn-primary">send answer</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

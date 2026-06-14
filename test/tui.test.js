@@ -1,0 +1,33 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseTuiStatus, prettyModel } from '../lib/tui.js';
+
+test('parseTuiStatus extracts ctx% and model from a real status line', () => {
+  const line = '    /claude-cockpit Opus 4.8 (1M context) ctx:35%         Remote Control active';
+  const r = parseTuiStatus(line);
+  assert.equal(r.ctxPct, 35);
+  assert.equal(r.model, 'Opus 4.8 (1M context)');
+});
+
+test('parseTuiStatus tolerates a missing ctx indicator', () => {
+  const r = parseTuiStatus('/olam-wt/rm-docker-world on  feat/x Opus 4.8 (1M context)');
+  assert.equal(r.ctxPct, null);
+  assert.equal(r.model, 'Opus 4.8 (1M context)');
+});
+
+test('parseTuiStatus handles ANSI and absent fields', () => {
+  const r = parseTuiStatus('\x1b[2m some shell output \x1b[0m');
+  assert.equal(r.ctxPct, null);
+  assert.equal(r.model, null);
+});
+
+test('parseTuiStatus rejects out-of-range ctx', () => {
+  assert.equal(parseTuiStatus('ctx:250%').ctxPct, null);
+});
+
+test('prettyModel shortens transcript model ids', () => {
+  assert.equal(prettyModel('claude-opus-4-8'), 'Opus 4.8');
+  assert.equal(prettyModel('claude-sonnet-4-6'), 'Sonnet 4.6');
+  assert.equal(prettyModel(null), null);
+  assert.equal(prettyModel('weird-id'), 'weird-id');
+});
