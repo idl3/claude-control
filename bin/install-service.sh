@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install claude-control as a launchd service: auto-start on login, restart on
-# crash, reading a persisted token so the phone URL stays stable across reboots.
-# Idempotent — safe to re-run after pulling updates.
+# crash. Token auth is OPTIONAL: gates on ~/.claude-control/token if present,
+# else runs tokenless (tailnet-only). Idempotent — safe to re-run after updates.
 set -euo pipefail
 
 LABEL="com.ernest.claude-control"
@@ -14,15 +14,17 @@ PORT="${CLAUDE_CONTROL_PORT:-4317}"
 
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
-# Token: reuse the existing one (keeps the bookmarked URL valid); else generate.
-# Create the file with 0600 from the start (umask) so the secret is never briefly
-# world-readable between creation and chmod.
-if [ ! -s "$TOKEN_FILE" ]; then
-  ( umask 077; node -e "console.log(require('crypto').randomBytes(16).toString('hex'))" > "$TOKEN_FILE" )
-  chmod 600 "$TOKEN_FILE"
-  echo "generated a new token at $TOKEN_FILE"
+# Token (OPTIONAL): if ~/.claude-control/token exists, gate the UI on it;
+# otherwise run tokenless — open to anything that can reach the port (the
+# 127.0.0.1 bind + tailnet ACL + cross-origin check are the remaining guards).
+# To (re-)enable token auth: write a token to that file and re-run this script.
+TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null || true)"
+if [ -n "$TOKEN" ]; then
+  TOKEN_ENV="    <key>CLAUDE_CONTROL_TOKEN</key><string>$TOKEN</string>"
+else
+  TOKEN_ENV=""
+  echo "no token file ($TOKEN_FILE) — installing TOKENLESS (open on the tailnet)"
 fi
-TOKEN="$(cat "$TOKEN_FILE")"
 
 # launchd runs with a minimal PATH — resolve absolute binaries and a PATH that
 # lets the server find tmux.
@@ -66,7 +68,7 @@ cat > "$PLIST" <<PLIST
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>CLAUDE_CONTROL_TOKEN</key><string>$TOKEN</string>
+$TOKEN_ENV
     <key>CLAUDE_CONTROL_PORT</key><string>$PORT</string>
     <key>HOME</key><string>$HOME</string>
     <key>PATH</key><string>$SVC_PATH</string>
@@ -91,12 +93,13 @@ fi
 
 HOSTDNS="$(tailscale status --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write((JSON.parse(d).Self?.DNSName||"").replace(/\.$/,""))}catch{}})' 2>/dev/null || true)"
 
+QS=""; [ -n "$TOKEN" ] && QS="?token=$TOKEN"
 echo ""
 echo "✓ claude-control installed as $LABEL (auto-starts on login, restarts on crash)"
 echo "  logs:  $LOG_DIR/{out,err}.log"
-echo "  token: $TOKEN_FILE"
+echo "  auth:  $([ -n "$TOKEN" ] && echo "token ($TOKEN_FILE)" || echo "TOKENLESS (tailnet-only)")"
 if [ -n "$HOSTDNS" ]; then
-  echo "  phone: https://$HOSTDNS/?token=$TOKEN"
+  echo "  phone: https://$HOSTDNS/$QS"
 else
-  echo "  local: http://127.0.0.1:$PORT/?token=$TOKEN"
+  echo "  local: http://127.0.0.1:$PORT/$QS"
 fi
