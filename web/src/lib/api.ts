@@ -125,6 +125,26 @@ export async function createSession(opts?: {
 }
 
 /**
+ * Rename an existing session: POST /api/session/rename renames its tmux window
+ * (instant in the rail on the next ~4s refresh) AND types `/rename <name>` into
+ * the pane so Claude updates its own session title. Throws on a non-OK response.
+ */
+export async function renameSession(id: string, name: string): Promise<void> {
+  const res = await fetch(`/api/session/rename?${authQuery().slice(1)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, name }),
+  });
+  const json = (await res.json().catch(() => ({}))) as
+    | { ok: true }
+    | { error?: string };
+  if (!res.ok || !('ok' in json) || !json.ok) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+}
+
+/**
  * Upload a single file as raw bytes (NOT multipart) to /api/upload.
  * Returns the absolute server path so it can be injected into the composer.
  */

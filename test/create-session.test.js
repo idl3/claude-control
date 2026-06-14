@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { access } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 
-import { sanitizeName, defaultSessionName, shellQuoteName } from '../lib/tmux.js';
+import { sanitizeName, defaultSessionName, shellQuoteName, renameWindow } from '../lib/tmux.js';
 
 const execFile = promisify(_execFile);
 
@@ -69,6 +69,51 @@ async function tmuxBin() {
   }
   return null;
 }
+
+// ── renameWindow target validation (no tmux contact) ────────────────────────
+test('renameWindow rejects a syntactically invalid target before touching tmux', async () => {
+  // assertTarget throws synchronously-in-promise; an invalid target must never
+  // reach a `rename-window` call (which would otherwise hit the live server).
+  await assert.rejects(
+    () => renameWindow('not a target', 'x'),
+    /Invalid tmux target/,
+  );
+});
+
+// ── tmux `rename-window` semantics (isolated server, benign command) ─────────
+test('tmux rename-window renames the window (the rename rail path)', async (t) => {
+  const bin = await tmuxBin();
+  if (!bin) return t.skip('tmux not installed');
+
+  const socket = `cc-test-${process.pid}-${Date.now().toString(36)}-rn`;
+  const L = ['-L', socket];
+  const before = sanitizeName('before name');
+  const after = sanitizeName('after name');
+
+  try {
+    // Isolated server: a detached window running `cat` (benign, NOT claude).
+    await execFile(bin, [...L, 'new-session', '-d', '-s', 'box', '-n', before, 'cat']);
+
+    // Resolve the real target — tmux base-index may not be 0, so we read it back
+    // from the server rather than assuming "box:0".
+    const idxFmt = '#{session_name}:#{window_index}';
+    const { stdout: tgtOut } = await execFile(bin, [...L, 'list-windows', '-a', '-F', idxFmt]);
+    const target = tgtOut.trim();
+
+    // Mirror renameWindow's exact argv shape: rename-window -t <target> -- <name>.
+    await execFile(bin, [...L, 'rename-window', '-t', target, '--', after]);
+
+    const fmt = '#{window_name}\x1f#{pane_current_command}';
+    const { stdout } = await execFile(bin, [...L, 'list-windows', '-a', '-F', fmt]);
+    const [winName, paneCmd] = stdout.trim().split('\x1f');
+
+    assert.equal(winName, after, 'window name should reflect the rename');
+    assert.equal(paneCmd, 'cat', 'benign test command should still be running, not claude');
+  } finally {
+    // Tear down the WHOLE isolated server — never touches the operator's tmux.
+    await execFile(bin, [...L, 'kill-server']).catch(() => {});
+  }
+});
 
 test('tmux new-window -n names the window (the reliable rail path)', async (t) => {
   const bin = await tmuxBin();

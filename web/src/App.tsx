@@ -8,9 +8,12 @@ import {
 import { useCockpit } from './hooks/useCockpit';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
+import { renameSession } from './lib/api';
 import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
+import { LivePane } from './components/LivePane';
+import { Composer } from './components/Composer';
 import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -156,6 +159,32 @@ export default function App() {
   // Settings modal.
   const [configOpen, setConfigOpen] = useState(false);
 
+  // Inline session rename: null when not editing, else the draft name. Opening
+  // prefills the current name; saving POSTs to /api/session/rename (renames the
+  // tmux window + types /rename into the pane). The rail picks up the new name
+  // on the next ~4s registry refresh.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (renaming !== null) renameInputRef.current?.select();
+  }, [renaming]);
+
+  const submitRename = useCallback(async () => {
+    const id = cockpit.selectedId;
+    const name = (renaming ?? '').trim();
+    setRenaming(null);
+    if (!id || !name) return;
+    try {
+      await renameSession(id, name);
+      showToast('Renamed →', 'ok');
+    } catch (err) {
+      showToast(
+        `rename failed: ${err instanceof Error ? err.message : 'error'}`,
+        'error',
+      );
+    }
+  }, [cockpit.selectedId, renaming, showToast]);
+
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
   const select = useCallback(
@@ -226,16 +255,73 @@ export default function App() {
                 ‹
               </button>
               <div className="detail-title">
-                <span className="detail-name">
-                  {selectedSession?.name || cockpit.selectedId || 'claude control'}
-                </span>
+                {renaming !== null ? (
+                  <input
+                    ref={renameInputRef}
+                    className="detail-rename-input"
+                    type="text"
+                    value={renaming}
+                    aria-label="Session name"
+                    onChange={(e) => setRenaming(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void submitRename();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setRenaming(null);
+                      }
+                    }}
+                    onBlur={() => void submitRename()}
+                  />
+                ) : (
+                  <span className="detail-name-row">
+                    <span className="detail-name">
+                      {selectedSession?.name ||
+                        cockpit.selectedId ||
+                        'claude control'}
+                    </span>
+                    {selectedSession ? (
+                      <button
+                        type="button"
+                        className="rename-btn"
+                        aria-label="Rename session"
+                        title="Rename session"
+                        onClick={() =>
+                          setRenaming(
+                            selectedSession.name ?? selectedSession.id,
+                          )
+                        }
+                      >
+                        ✎
+                      </button>
+                    ) : null}
+                  </span>
+                )}
                 {selectedSession?.cwd ? (
                   <span className="detail-cwd">{selectedSession.cwd}</span>
                 ) : null}
               </div>
             </header>
 
-            <Thread hasSelection={!!cockpit.selectedId} />
+            {selectedSession && !selectedSession.transcriptPath ? (
+              // Transcript-less live session (e.g. a worktree cwd Claude records
+              // under a different path): the assistant-ui thread would render an
+              // empty "no messages yet", so show the live tmux pane instead. The
+              // composer still works — replies go via tmux send-keys regardless
+              // of whether a transcript was matched.
+              <div className="thread-root">
+                <LivePane
+                  sessionId={selectedSession.id}
+                  capture={cockpit.capture}
+                  requestCapture={cockpit.requestCapture}
+                  clearCapture={cockpit.clearCapture}
+                />
+                <Composer disabled={false} />
+              </div>
+            ) : (
+              <Thread hasSelection={!!cockpit.selectedId} />
+            )}
           </main>
         </div>
 

@@ -307,6 +307,71 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.detail-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.rename-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.rename-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.detail-rename-input {
+  width: 100%;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 7px;
+  outline: none;
+}
+.detail-rename-input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Live pane (transcript-less session fallback) ──────────────── */
+.live-pane {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 12px 6px;
+}
+.live-pane-head {
+  flex: 0 0 auto;
+  font-size: var(--txt-meta);
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.live-pane-body {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-transcript);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* ── Thread ───────────────────────────────────────────────────── */
 .thread-root {

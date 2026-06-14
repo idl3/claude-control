@@ -138,6 +138,11 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionNew(req, res);
   }
+  if (u.pathname === '/api/session/rename') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleSessionRename(req, res);
+  }
 
   // static
   serveStatic(u.pathname, res);
@@ -307,6 +312,40 @@ async function handleSessionNew(req, res) {
     const launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
     await tmux.sendText(target, launch);
     return endJson(res, 200, { ok: true, target, name });
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/session/rename — rename an existing session's tmux window. We do
+// BOTH: (1) `rename-window` so the rail shows the new name on the next refresh,
+// and (2) type `/rename <name>` into the pane so Claude updates its own session
+// title (which the transcript records as a custom-title). The name is
+// sanitized (control chars/newlines stripped) before either path. Token-gated +
+// localhost, consistent with the rest of the control surface.
+async function handleSessionRename(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  const id = typeof body.id === 'string' ? body.id : '';
+  const name = tmux.sanitizeName(body.name);
+  if (!name) return endJson(res, 400, { error: 'name is required' });
+  const session = sessionById(id);
+  if (!session) return endJson(res, 404, { error: 'unknown session' });
+  if (!tmux.isValidTarget(session.target)) {
+    return endJson(res, 400, { error: 'invalid tmux target' });
+  }
+  try {
+    // (1) tmux window name — instant in the rail (read until a transcript title exists).
+    await tmux.renameWindow(session.target, name);
+    // (2) Claude's own session title via the /rename slash command, typed into
+    //     the pane (sanitizeName already removed newlines/control chars). The
+    //     name follows /rename verbatim as a single argument to the command.
+    await tmux.sendText(session.target, `/rename ${name}`);
+    return endJson(res, 200, { ok: true });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
