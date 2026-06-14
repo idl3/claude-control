@@ -203,9 +203,14 @@ function AppInner() {
   // on the next ~4s registry refresh.
   const [renaming, setRenaming] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  // Select-all only when ENTERING rename mode (open), never per-keystroke.
+  // Depending on `renaming` re-selected the whole input after each character,
+  // so the next keystroke replaced the entire value (only the last char stuck).
+  // Depend on the open/closed boolean, which is stable while typing.
+  const isRenaming = renaming !== null;
   useEffect(() => {
-    if (renaming !== null) renameInputRef.current?.select();
-  }, [renaming]);
+    if (isRenaming) renameInputRef.current?.select();
+  }, [isRenaming]);
 
   const submitRename = useCallback(async () => {
     const id = cockpit.selectedId;
