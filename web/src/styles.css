@@ -1087,3 +1087,46 @@ details.block-tool[open] > summary .tool-arrow {
 .chip-thumb {
   cursor: zoom-in;
 }
+
+/* Push notification bell in the resource HUD */
+.hud-spacer {
+  flex: 1 1 auto;
+}
+.notify-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex: 0 0 auto;
+  -webkit-tap-highlight-color: transparent;
+}
+.notify-bell:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.notify-bell[data-state='on'] {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.notify-bell:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* One-line iOS "add to home screen" push hint */
+.ios-push-hint {
+  padding: 8px 12px;
+  font-size: var(--txt-meta);
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--amber-bg);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}

@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Local web UI to watch and drive your Claude Code sessions running in tmux — live transcripts, reply, answer AskUserQuestion, attach files, from a browser or phone.",
-  "keywords": ["claude", "claude-code", "tmux", "dashboard", "agent"],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "tmux",
+    "dashboard",
+    "agent"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -24,6 +30,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   }
 }

@@ -61,6 +61,46 @@ export async function triggerUpdate(): Promise<boolean> {
   }
 }
 
+/** Fetch the server's VAPID public key (token-gated). Null on error. */
+export async function getVapidPublicKey(): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/push/vapid?${authQuery().slice(1)}`);
+    if (!res.ok) return null;
+    const j = (await res.json()) as { publicKey?: string };
+    return j.publicKey ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** POST a PushSubscription JSON to the server (token-gated). */
+export async function postPushSubscribe(sub: PushSubscriptionJSON): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/push/subscribe?${authQuery().slice(1)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Tell the server to drop a subscription by endpoint (token-gated). */
+export async function postPushUnsubscribe(endpoint: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/push/unsubscribe?${authQuery().slice(1)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Upload a single file as raw bytes (NOT multipart) to /api/upload.
  * Returns the absolute server path so it can be injected into the composer.

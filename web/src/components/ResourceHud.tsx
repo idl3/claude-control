@@ -1,9 +1,12 @@
 import type { ConnState } from '../lib/ws';
 import type { ResourceState } from '../hooks/useCockpit';
+import type { PushController } from '../hooks/usePushNotifications';
+import { NotifyBell } from './NotifyBell';
 
 interface ResourceHudProps {
   resources: ResourceState;
   conn: ConnState;
+  push: PushController;
 }
 
 function fmt(n: number | undefined, suffix = ''): string {
@@ -11,7 +14,7 @@ function fmt(n: number | undefined, suffix = ''): string {
 }
 
 // Slim top bar: self cpu/rss + system load/mem, warning-tinted when over limit.
-export function ResourceHud({ resources, conn }: ResourceHudProps) {
+export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
   const snap = resources.snapshot;
   const self = snap?.self ?? {};
   const sys = snap?.system ?? {};
@@ -43,6 +46,8 @@ export function ResourceHud({ resources, conn }: ResourceHudProps) {
       {over ? (
         <span className="hud-warn-text">{resources.warning || 'over limit'}</span>
       ) : null}
+      <span className="hud-spacer" />
+      <NotifyBell push={push} />
     </div>
   );
 }

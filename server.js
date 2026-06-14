@@ -18,6 +18,7 @@ import { ResourceMonitor } from './lib/resources.js';
 import { buildAnswerProgram } from './lib/answer.js';
 import { sweepUploads } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
+import * as push from './lib/push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -32,6 +33,19 @@ const PUBLIC_DIR = fs.existsSync(path.join(DIST_DIR, 'index.html'))
 const env = (name) =>
   process.env[`CLAUDE_CONTROL_${name}`] ?? process.env[`COCKPIT_${name}`];
 
+// Durable token: when no token env var is set, read the persisted one at
+// ~/.claude-control/token (written by bin/install-service.sh / first run). This
+// keeps the same token — and therefore the same phone URL — across restarts and
+// /tmp wipes, without relying on a launcher to inject the env var.
+function readPersistedToken() {
+  try {
+    const t = fs.readFileSync(path.join(os.homedir(), '.claude-control', 'token'), 'utf8').trim();
+    return t || null;
+  } catch {
+    return null;
+  }
+}
+
 const CONFIG = {
   port: Number(env('PORT')) || 4317,
   host: env('HOST') || '127.0.0.1',
@@ -41,7 +55,7 @@ const CONFIG = {
   // web app) baselines ~300-450MB of V8 heap + RSS, so the old 350MB budget
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
   rssLimitMB: Number(env('RSS_LIMIT_MB')) || 768,
-  token: env('TOKEN') || null,
+  token: env('TOKEN') || readPersistedToken() || null,
   maxBuffer: Number(env('MAX_BUFFER')) || 500,
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
   uploadsDir:
@@ -56,6 +70,8 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 // --- shared state -----------------------------------------------------------
@@ -126,6 +142,31 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleUpload(req, res, u);
   }
+  if (u.pathname === '/api/push/vapid') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return endJson(res, 200, { publicKey: push.getPublicKey() });
+  }
+  if (u.pathname === '/api/push/subscribe') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return readJsonBody(req, res, (sub) => {
+      if (!sub || typeof sub.endpoint !== 'string') {
+        return endJson(res, 400, { error: 'invalid subscription' });
+      }
+      push.addSubscription(sub);
+      return endJson(res, 200, { ok: true });
+    });
+  }
+  if (u.pathname === '/api/push/unsubscribe') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return readJsonBody(req, res, (body) => {
+      const endpoint = typeof body?.endpoint === 'string' ? body.endpoint : null;
+      if (!endpoint) return endJson(res, 400, { error: 'endpoint required' });
+      push.removeSubscription(endpoint);
+      return endJson(res, 200, { ok: true });
+    });
+  }
 
   // static
   serveStatic(u.pathname, res);
@@ -158,6 +199,44 @@ function endJson(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'content-type': MIME['.json'], 'content-length': Buffer.byteLength(body) });
   res.end(body);
+}
+
+// Read a small (<=64 KB) JSON request body and invoke `onParsed(obj)`. Caps the
+// body size and responds 400 on overflow or parse failure — callers never see a
+// malformed payload. PushSubscription JSON is tiny, so 64 KB is generous.
+const JSON_BODY_MAX = 64 * 1024;
+function readJsonBody(req, res, onParsed) {
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+  req.on('data', (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > JSON_BODY_MAX) {
+      aborted = true;
+      endJson(res, 413, { error: 'body too large' });
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    if (aborted) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
+    } catch {
+      return endJson(res, 400, { error: 'invalid JSON' });
+    }
+    try {
+      onParsed(parsed);
+    } catch (err) {
+      endJson(res, 500, { error: String(err?.message || err) });
+    }
+  });
+  req.on('error', () => {
+    if (!aborted) endJson(res, 400, { error: 'request stream error' });
+  });
 }
 
 // Sanitize an uploaded filename to a safe basename (no path traversal).
@@ -410,7 +489,49 @@ async function handleClientMessage(ws, msg) {
 }
 
 // --- wiring -----------------------------------------------------------------
-registry.on('change', (sessions) => broadcast({ type: 'sessions', sessions }));
+// Edge-detect AskUserQuestion pending per session so a phone gets exactly one
+// push when a question opens (re-arms once it's answered). id -> last pending.
+const lastPending = new Map();
+// Skip the very first 'change' so already-pending sessions present at startup
+// don't all fire a push when the server boots.
+let pushPrimed = false;
+
+function firePushForChange(sessions) {
+  try {
+    if (!pushPrimed) {
+      for (const s of sessions) lastPending.set(s.id, !!s.pending);
+      pushPrimed = true;
+      return;
+    }
+    const seen = new Set();
+    for (const s of sessions) {
+      seen.add(s.id);
+      const was = lastPending.get(s.id) ?? false;
+      if (s.pending && !was) {
+        push
+          .sendToAll({
+            title: s.name || s.id,
+            body: s.pendingQuestion || 'is asking a question',
+            data: { id: s.id },
+          })
+          .catch((err) => console.error('push: sendToAll failed:', err?.message || err));
+      }
+      lastPending.set(s.id, !!s.pending);
+    }
+    // Forget sessions that disappeared so a returning id re-arms cleanly.
+    for (const id of [...lastPending.keys()]) {
+      if (!seen.has(id)) lastPending.delete(id);
+    }
+  } catch (err) {
+    // Never let push logic break the session broadcast.
+    console.error('push: firePushForChange error:', err?.message || err);
+  }
+}
+
+registry.on('change', (sessions) => {
+  firePushForChange(sessions);
+  broadcast({ type: 'sessions', sessions });
+});
 resources.on('sample', (snapshot) => broadcast({ type: 'resources', snapshot }));
 resources.on('overlimit', (snapshot) => {
   // Trim memory pressure: drop tailers nobody is watching, then halve the
