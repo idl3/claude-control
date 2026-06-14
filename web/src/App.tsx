@@ -21,6 +21,7 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { TerminalPanel } from './components/TerminalPanel';
+import { TokenGate } from './components/TokenGate';
 import type { ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -41,7 +42,10 @@ function appendMessageText(message: AppendMessage): string {
     .join('\n');
 }
 
-export default function App() {
+// The authenticated app. Mounted ONLY after TokenGate confirms access, so the
+// WebSocket (opened by useCockpit on mount) never connects with a bad/absent
+// token before the gate has cleared.
+function AppInner() {
   const cockpit = useCockpit();
   const push = usePushNotifications();
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -231,7 +235,8 @@ export default function App() {
       cockpit.select(id);
       setRailOpenMobile(false);
       // Deep-link: reflect the selection in the URL hash so a reload restores
-      // it. Hash (not query) avoids clobbering the ?token=… param.
+      // it. The token no longer lives in the URL (it's in localStorage), so the
+      // hash is the only stateful part of the URL.
       window.location.hash = encodeURIComponent(id);
     },
     [cockpit],
@@ -463,5 +468,16 @@ export default function App() {
         <ToastView toast={toast} />
       </div>
     </AssistantRuntimeProvider>
+  );
+}
+
+// Root: gate the whole app behind the token login. TokenGate probes
+// /api/health and only renders AppInner (which opens the WS) once authorized.
+// Tokenless servers probe 200 → AppInner renders immediately, no prompt.
+export default function App() {
+  return (
+    <TokenGate>
+      <AppInner />
+    </TokenGate>
   );
 }

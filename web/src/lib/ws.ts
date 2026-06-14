@@ -1,5 +1,12 @@
-import { wsUrl } from './api';
+import { handleUnauthorized, wsUrl } from './api';
+import { getToken, WS_PROTOCOL } from './auth';
 import type { ClientMessage, ServerMessage } from './types';
+
+// WS policy close code for auth failures. Browsers can't read a 401 on the
+// upgrade (it surfaces only as an error+close), but if a server ever closes an
+// established socket for auth it uses 1008 (policy violation). Treat it as a
+// signal to drop back to the login gate.
+const WS_AUTH_CLOSE = 1008;
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -35,7 +42,13 @@ export class CockpitSocket {
       return;
     }
     this.emitState('connecting');
-    const ws = new WebSocket(wsUrl());
+    // The browser can't set an Authorization header on a WebSocket, so the
+    // token rides as a subprotocol. We offer the non-secret WS_PROTOCOL label
+    // first (a clean value the server may select/echo) and the token second
+    // (what the server matches against). Tokenless → no subprotocols at all.
+    const token = getToken();
+    const protocols = token ? [WS_PROTOCOL, token] : undefined;
+    const ws = new WebSocket(wsUrl(), protocols);
     this.ws = ws;
 
     ws.addEventListener('open', () => {
@@ -58,9 +71,16 @@ export class CockpitSocket {
       for (const h of this.msgHandlers) h(parsed);
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (evt) => {
       this.ws = null;
       this.emitState('disconnected');
+      // Auth-driven close (server rejected the token on an established socket):
+      // drop the token and bounce to the login gate instead of reconnect-looping
+      // with a bad credential.
+      if ((evt as CloseEvent).code === WS_AUTH_CLOSE) {
+        handleUnauthorized();
+        return;
+      }
       if (!this.closed) this.scheduleReconnect();
     });
 
