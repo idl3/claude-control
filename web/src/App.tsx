@@ -158,9 +158,32 @@ export default function App() {
     (id: string) => {
       cockpit.select(id);
       setRailOpenMobile(false);
+      // Deep-link: reflect the selection in the URL hash so a reload restores
+      // it. Hash (not query) avoids clobbering the ?token=… param.
+      window.location.hash = encodeURIComponent(id);
     },
     [cockpit],
   );
+
+  // Restore the selected session from the URL hash on load (once the sessions
+  // list arrives), and follow back/forward navigation.
+  const restoredHash = useRef(false);
+  useEffect(() => {
+    const fromHash = () => {
+      const id = decodeURIComponent(window.location.hash.replace(/^#/, ''));
+      if (id && id !== cockpit.selectedId && cockpit.sessions.some((s) => s.id === id)) {
+        cockpit.select(id);
+        setRailOpenMobile(false);
+      }
+    };
+    // Initial restore: wait until at least one session is known.
+    if (!restoredHash.current && cockpit.sessions.length > 0) {
+      restoredHash.current = true;
+      fromHash();
+    }
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, [cockpit, cockpit.sessions, cockpit.selectedId]);
 
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,

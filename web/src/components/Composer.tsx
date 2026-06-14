@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
+  useComposerRuntime,
   type Attachment,
 } from '@assistant-ui/react';
 
@@ -84,6 +85,7 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
  *   text. Paths are NEVER injected into the textarea.
  */
 export function Composer({ disabled }: ComposerProps) {
+  const composer = useComposerRuntime();
   return (
     <ComposerPrimitive.Root className="composer">
       {/* children render form: invoked once per composer attachment. */}
@@ -105,8 +107,15 @@ export function Composer({ disabled }: ComposerProps) {
         </ComposerPrimitive.AddAttachment>
         <ComposerPrimitive.Input
           className="composer-input"
-          placeholder={disabled ? 'select a session…' : 'reply…  (Enter for newline · ↑ to send)'}
+          placeholder={disabled ? 'select a session…' : 'reply…  (⌘/Ctrl+↵ to send · Enter = newline)'}
           submitOnEnter={false}
+          onKeyDown={(e) => {
+            // Enter inserts a newline; ⌘/Ctrl+Enter sends.
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              if (!disabled) composer.send();
+            }
+          }}
           rows={1}
           disabled={disabled}
           autoComplete="off"
