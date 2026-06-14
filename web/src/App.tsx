@@ -17,6 +17,15 @@ import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import type { ServerMessage } from './lib/types';
 
+// How many trailing messages to render initially. assistant-ui (0.14.14) has no
+// thread virtualizer, so it renders every message in the runtime's list; with the
+// 500-message server cap, each potentially large, mounting all of them can jank
+// on mobile. We feed the runtime only the last N converted messages and expose a
+// "load earlier" affordance that reveals older ones in chunks. (Virtualization
+// was evaluated and deferred — see the note in the change summary.)
+const INITIAL_VISIBLE = 150;
+const LOAD_EARLIER_STEP = 150;
+
 // Extract the plain text the user typed in the composer.
 function appendMessageText(message: AppendMessage): string {
   if (typeof message.content === 'string') return message.content;
@@ -114,11 +123,26 @@ export default function App() {
     return () => clearTimeout(t);
   }, [optimistic, cockpit.selectedId, cockpit.messages.length]);
 
+  // Render cap: how many trailing messages are currently shown. Reset whenever
+  // the active session changes so reopening a long session starts capped again.
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE);
+  }, [cockpit.selectedId]);
+
   // Convert the whole transcript at once so tool_result blocks (which arrive in
-  // later messages) fold into their originating tool-call part. We feed the
+  // later messages) fold into their originating tool-call part, THEN cap to the
+  // last `visibleCount` so the runtime only mounts the recent tail. We feed the
   // runtime already-converted messages with an identity convertMessage.
+  const fullConverted = useMemo<ThreadMessageLike[]>(
+    () => convertMessages(cockpit.messages),
+    [cockpit.messages],
+  );
+  const hiddenCount = Math.max(0, fullConverted.length - visibleCount);
+
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
-    const base = convertMessages(cockpit.messages);
+    const base =
+      hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
     if (optimistic && optimistic.sessionId === cockpit.selectedId) {
       base.push({
         role: 'user',
@@ -134,7 +158,11 @@ export default function App() {
       } as ThreadMessageLike);
     }
     return base;
-  }, [cockpit.messages, cockpit.selectedId, optimistic]);
+  }, [fullConverted, hiddenCount, cockpit.selectedId, optimistic]);
+
+  const loadEarlier = useCallback(() => {
+    setVisibleCount((c) => c + LOAD_EARLIER_STEP);
+  }, []);
 
   const runtime = useExternalStoreRuntime({
     messages: convertedMessages,
@@ -234,7 +262,11 @@ export default function App() {
               </div>
             </header>
 
-            <Thread hasSelection={!!cockpit.selectedId} />
+            <Thread
+              hasSelection={!!cockpit.selectedId}
+              hiddenCount={hiddenCount}
+              onLoadEarlier={loadEarlier}
+            />
           </main>
         </div>
 

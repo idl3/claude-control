@@ -15,8 +15,10 @@ PORT="${CLAUDE_CONTROL_PORT:-4317}"
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
 # Token: reuse the existing one (keeps the bookmarked URL valid); else generate.
+# Create the file with 0600 from the start (umask) so the secret is never briefly
+# world-readable between creation and chmod.
 if [ ! -s "$TOKEN_FILE" ]; then
-  node -e "console.log(require('crypto').randomBytes(16).toString('hex'))" > "$TOKEN_FILE"
+  ( umask 077; node -e "console.log(require('crypto').randomBytes(16).toString('hex'))" > "$TOKEN_FILE" )
   chmod 600 "$TOKEN_FILE"
   echo "generated a new token at $TOKEN_FILE"
 fi

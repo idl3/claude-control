@@ -329,6 +329,29 @@ body {
   color: var(--text-faint);
   text-align: center;
 }
+/* "Load earlier messages" — revealed only when the render cap hides older
+   messages. Sits at the top of the scrollback, centered, low-emphasis. */
+.load-earlier {
+  align-self: center;
+  flex: 0 0 auto;
+  margin: 2px 0 4px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.load-earlier:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.load-earlier:active {
+  background: var(--line);
+}
 
 /* ── Message rows ─────────────────────────────────────────────── */
 .msg-row {
