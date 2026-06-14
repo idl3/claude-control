@@ -11,6 +11,18 @@ export function authQuery(): string {
   return t ? `&token=${encodeURIComponent(t)}` : '';
 }
 
+/**
+ * Build the token-gated URL for a session's raw-terminal (ttyd) surface. The id
+ * is a tmux target (e.g. `name:0`) and is percent-encoded into a single path
+ * segment to match the server's `/term/<encoded-id>` route + ttyd `-b` base.
+ * Same-origin; the `?token=` rides claude-control's existing gate.
+ */
+export function terminalUrl(id: string): string {
+  const base = `/term/${encodeURIComponent(id)}/`;
+  const t = getToken();
+  return t ? `${base}?token=${encodeURIComponent(t)}` : base;
+}
+
 export function wsUrl(): string {
   const loc = window.location;
   const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
