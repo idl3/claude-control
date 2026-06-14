@@ -1,0 +1,3 @@
+# overrides web/.gitignore for npm so the built dist/ ships
+node_modules/
+src/

@@ -1,5 +1,5 @@
 {
-  "name": "claude-control",
+  "name": "@idl3/claude-control",
   "version": "0.1.0",
   "type": "module",
   "description": "Local web UI to watch and drive your Claude Code sessions running in tmux — live transcripts, reply, answer AskUserQuestion, attach files, from a browser or phone.",
@@ -17,17 +17,30 @@
   },
   "homepage": "https://github.com/idl3/claude-control#readme",
   "bin": {
-    "claude-control": "./server.js"
+    "claude-control": "bin/cli.js"
   },
+  "files": [
+    "server.js",
+    "lib/",
+    "public/",
+    "web/dist/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test",
     "build:web": "cd web && npm install && npm run build",
-    "build": "npm run build:web"
+    "build": "npm run build:web",
+    "prepack": "npm run build"
   },
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "web-push": "^3.6.7",
