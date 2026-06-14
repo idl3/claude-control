@@ -4,7 +4,8 @@ A tiny, local web UI to **watch and drive your Claude Code sessions from a
 browser or phone**. It discovers the Claude sessions you already run inside
 **tmux**, streams each session's transcript live, lets you reply, answer
 `AskUserQuestion` prompts, attach screenshots/files, and capture the pane — all
-over `127.0.0.1` (or your Tailscale tailnet), guarded by a token.
+over `127.0.0.1` (or your Tailscale tailnet), behind an optional token you enter
+in-app (never in the URL).
 
 No daemon to babysit, no database: it reads Claude Code's transcript files and
 talks to tmux. Bind is localhost-only by default.
@@ -40,11 +41,13 @@ git clone https://github.com/idl3/claude-control.git
 cd claude-control
 npm install
 npm run build        # builds the web UI (web/dist)
-npm start            # prints a URL with a token
+npm start            # prints the URL
 ```
 
-Open the printed URL (e.g. `http://127.0.0.1:4317/?token=…`). Any Claude Code
-session running in tmux shows up in the left rail.
+Open the printed URL (e.g. `http://127.0.0.1:4317/`). If a token is configured,
+the app prompts for it on first load and remembers it in your browser — it's
+never put in the URL. Any Claude Code session running in tmux shows up in the
+left rail.
 
 > **Already have tmux running with Claude sessions?** You're done — just run
 > `npm start` and they appear automatically.
@@ -104,7 +107,7 @@ All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
 |---|---|---|
 | `CLAUDE_CONTROL_PORT` | `4317` | HTTP/WS port |
 | `CLAUDE_CONTROL_HOST` | `127.0.0.1` | Bind address |
-| `CLAUDE_CONTROL_TOKEN` | _(none)_ | Require `?token=` on every request (recommended if exposed beyond localhost) |
+| `CLAUDE_CONTROL_TOKEN` | _(none)_ | Access token. Also read from `~/.claude-control/token`. Sent as `Authorization: Bearer` (HTTP) / WS subprotocol — never in the URL. Unset **and** no file ⇒ tokenless. |
 | `CLAUDE_CONTROL_PROJECTS` | `~/.claude/projects` | Where Claude Code transcripts live |
 | `CLAUDE_CONTROL_UPLOADS` | `~/.claude-control/uploads` | Where attachments are stored (TTL-swept) |
 | `CLAUDE_CONTROL_TMUX` | _(auto)_ | tmux binary override |
@@ -115,8 +118,20 @@ All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
 ## Security
 
 - Binds `127.0.0.1` by default; cross-origin WebSocket upgrades are rejected.
-- Set `CLAUDE_CONTROL_TOKEN` before exposing it (e.g. via `tailscale serve`) —
-  **this UI can type into your live sessions.**
+- **Token auth** — strongly recommended before exposing it (e.g. via
+  `tailscale serve`): *this UI can type into your live sessions.* The token is
+  resolved in order from `CLAUDE_CONTROL_TOKEN`, else the file
+  `~/.claude-control/token` (mode `0600`). With neither set it runs **tokenless**
+  (open to anything that can reach the port — the `127.0.0.1` bind, tailnet ACL,
+  and cross-origin check are the only guards).
+  - The web app **prompts for the token on first load** and stores it in
+    `localStorage`. It's sent as an `Authorization: Bearer` header (and a WS
+    subprotocol) — **never placed in the URL** (URLs leak via history, server
+    logs, and referrer headers). A `401` returns you to the prompt.
+  - **Set or rotate**: write the token to `~/.claude-control/token`, then
+    restart — `launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control`
+    (launchd service), or just re-run `npm start` / `claude-control`. Each
+    browser re-prompts once. `bin/install-service.sh` reads the same file.
 - Uploads are written `0600` under the uploads dir and swept after a TTL.
 
 ---
