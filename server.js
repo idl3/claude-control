@@ -114,7 +114,7 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return getVersionInfo()
       .then((info) => endJson(res, 200, info))
-      .catch(() => endJson(res, 200, { current: currentVersion(), latest: null, updateAvailable: false }));
+      .catch(() => endJson(res, 200, { current: currentVersion(), latest: null, behind: 0, updateAvailable: false }));
   }
   if (u.pathname === '/api/update') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });

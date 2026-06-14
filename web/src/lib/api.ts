@@ -28,6 +28,7 @@ export interface UploadResult {
 export interface VersionInfo {
   current: string;
   latest: string | null;
+  behind?: number;
   updateAvailable: boolean;
 }
 

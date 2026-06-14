@@ -63,13 +63,14 @@ matching transcript under `~/.claude/projects/`.
 
 ## Updating
 
-claude-control checks npm for a newer `claude-control` and shows an **update
-banner** when one exists. Click **Update now** — the server pulls the latest
-source, rebuilds, and restarts itself in place; the page reconnects
-automatically. (Equivalent manual update: `git pull && npm install && npm run
-build`, then restart.)
+claude-control compares your checkout against its git upstream (`origin`) and
+shows an **update banner** when new commits are available. Click **Update now**
+— the server pulls, reinstalls, rebuilds the web bundle, and restarts itself in
+place; the page reconnects automatically. (Equivalent manual update: `git pull
+&& npm install && npm run build`, then restart.)
 
-Versioning follows npm semver; this is **v0.1.0**.
+Version numbers follow npm semver (bump `package.json` per release); this is
+**v0.1.0**.
 
 ---
 
