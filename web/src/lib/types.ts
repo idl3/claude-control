@@ -17,6 +17,7 @@ export interface Session {
   transcriptPath?: string;
   lastActivity?: number;
   pending?: boolean;
+  pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
   model?: string | null;

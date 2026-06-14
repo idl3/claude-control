@@ -4,6 +4,10 @@ import { Composer } from './Composer';
 
 interface ThreadProps {
   hasSelection: boolean;
+  /** Messages older than the render cap that are currently hidden. */
+  hiddenCount: number;
+  /** Reveal an older chunk of messages. */
+  onLoadEarlier: () => void;
 }
 
 const messageComponents = {
@@ -14,7 +18,7 @@ const messageComponents = {
   SystemMessage: AssistantMessage,
 } as const;
 
-export function Thread({ hasSelection }: ThreadProps) {
+export function Thread({ hasSelection, hiddenCount, onLoadEarlier }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
       <ThreadPrimitive.Viewport className="thread-viewport" autoScroll>
@@ -25,6 +29,15 @@ export function Thread({ hasSelection }: ThreadProps) {
             <div className="thread-empty">no messages yet</div>
           </ThreadPrimitive.Empty>
         )}
+        {hasSelection && hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="load-earlier"
+            onClick={onLoadEarlier}
+          >
+            Load earlier messages ({hiddenCount} hidden)
+          </button>
+        ) : null}
         <ThreadPrimitive.Messages components={messageComponents} />
       </ThreadPrimitive.Viewport>
       <Composer disabled={!hasSelection} />
