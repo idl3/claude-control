@@ -4,6 +4,7 @@
 // monitoring into a localhost web UI. Bind 127.0.0.1 only; never shell out with user text.
 
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,7 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
+import * as terminal from './lib/terminal.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SessionRegistry } from './lib/sessions.js';
 import { ResourceMonitor } from './lib/resources.js';
@@ -73,6 +75,19 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
+};
+
+// Image MIME types served from the uploads route (extensions → content-type).
+const IMAGE_MIME = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.svg': 'image/svg+xml',
 };
 
 // --- shared state -----------------------------------------------------------
@@ -188,6 +203,22 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionRename(req, res);
   }
+  // GET /api/uploads/<basename> — token-gated, path-traversal-guarded.
+  // Serves a single file from uploadsDir by basename only; no directory
+  // segments are allowed. Used by the React UI to render inline attachment
+  // previews (thumbnails + lightbox) without exposing the filesystem path.
+  if (u.pathname.startsWith('/api/uploads/')) {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleServeUpload(req, res, u);
+  }
+
+  // Raw-terminal escape hatch: token-gated reverse proxy to an on-demand,
+  // loopback-bound ttyd attached to this session's tmux pane. ttyd itself runs
+  // with no auth; this branch (and the matching upgrade branch) is the gate.
+  if (u.pathname.startsWith('/term/')) {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return proxyTerminalHttp(req, res, u);
+  }
 
   // static
   serveStatic(u.pathname, res);
@@ -271,6 +302,47 @@ function handleUpload(req, res, u) {
 
   req.on('error', () => {
     if (!aborted) endJson(res, 400, { error: 'upload stream error' });
+  });
+}
+
+// GET /api/uploads/<basename> — serve a single upload by basename.
+// Security:
+//   1. Only the basename is taken from the URL segment — no sub-dirs allowed.
+//   2. sanitizeName strips any remaining path traversal characters.
+//   3. The resolved absolute path is checked to start with uploadsDir + sep.
+// Returns: 404 if the file doesn't exist, 200 with the correct content-type.
+// Only image types get an image/* content-type; everything else is
+// application/octet-stream with Content-Disposition: attachment to prevent
+// the browser from executing arbitrary served files.
+function handleServeUpload(req, res, u) {
+  // Extract the last path segment only (drop any leading slashes / sub-dirs).
+  const rawSegment = u.pathname.replace(/^\/api\/uploads\//, '');
+  // Reject if the caller tried to include a sub-directory.
+  if (rawSegment.includes('/') || rawSegment.includes('\\')) {
+    res.writeHead(404); return res.end('not found');
+  }
+  const basename = sanitizeName(rawSegment);
+  if (!basename) { res.writeHead(404); return res.end('not found'); }
+
+  const full = path.join(CONFIG.uploadsDir, basename);
+  // Defense-in-depth: resolved path must stay inside uploadsDir.
+  if (!full.startsWith(CONFIG.uploadsDir + path.sep)) {
+    res.writeHead(404); return res.end('not found');
+  }
+
+  fs.stat(full, (statErr) => {
+    if (statErr) { res.writeHead(404); return res.end('not found'); }
+    const ext = path.extname(basename).toLowerCase();
+    const imageMime = IMAGE_MIME[ext];
+    const headers = imageMime
+      ? { 'content-type': imageMime, 'cache-control': 'private, max-age=3600' }
+      : {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${basename}"`,
+          'cache-control': 'private, max-age=3600',
+        };
+    res.writeHead(200, headers);
+    fs.createReadStream(full).pipe(res);
   });
 }
 
@@ -396,6 +468,60 @@ async function handleSessionRename(req, res) {
   }
 }
 
+// Extract and validate the session id (== tmux target) from a /term/ path.
+// The id is the first path segment after /term/, percent-decoded. Returns the
+// decoded id only if it is both a known session AND a valid tmux target;
+// otherwise null (caller responds 404/401). This is the injection guard: an id
+// never reaches `spawn` unless it matches the CONTRACT target pattern.
+function termIdFromPath(pathname) {
+  const m = /^\/term\/([^/]+)/.exec(pathname);
+  if (!m) return null;
+  let id;
+  try { id = decodeURIComponent(m[1]); } catch { return null; }
+  if (!tmux.isValidTarget(id)) return null;
+  const session = sessionById(id);
+  if (!session) return null;
+  return { id, target: session.target };
+}
+
+// HTTP pass-through to a session's ttyd. Ensures the process is up, then pipes
+// the request/response verbatim. Registers the response socket as a client for
+// idle ref-counting (the long-lived ttyd HTTP keep-alive / SSE keeps the proc
+// warm; the WS upgrade is the real liveness signal).
+async function proxyTerminalHttp(req, res, u) {
+  const parsed = termIdFromPath(u.pathname);
+  if (!parsed) { res.writeHead(404); return res.end('unknown terminal'); }
+
+  let port;
+  try {
+    ({ port } = await terminal.ensureTerminal(parsed.id, parsed.target));
+  } catch (err) {
+    res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end(`terminal unavailable: ${err?.message || err}`);
+  }
+
+  // Forward the original path+query unchanged; ttyd was started with `-b` set to
+  // /term/<encoded-id> so its own asset/WS links already match this prefix.
+  const proxyReq = http.request(
+    {
+      host: '127.0.0.1',
+      port,
+      method: req.method,
+      path: u.pathname + (u.search || ''),
+      headers: req.headers,
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    },
+  );
+  proxyReq.on('error', (err) => {
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
+    res.end(`terminal proxy error: ${err.message}`);
+  });
+  req.pipe(proxyReq);
+}
+
 function serveStatic(pathname, res) {
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const full = path.join(PUBLIC_DIR, rel);
@@ -432,8 +558,62 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
+  // Raw-terminal escape hatch: relay /term/* WS upgrades to the session's ttyd
+  // via a raw TCP pipe (ttyd speaks its own WS protocol; we are a transparent
+  // byte relay, not a `ws` endpoint). All other upgrades go to the existing
+  // claude-control WebSocketServer untouched — this branch must never reach
+  // wss.handleUpgrade, and wss.handleUpgrade must never see /term/*.
+  const upgradePath = new URL(req.url, 'http://localhost').pathname;
+  if (upgradePath.startsWith('/term/')) {
+    relayTerminalUpgrade(req, socket, head);
+    return;
+  }
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
+
+// Relay a /term/* WebSocket upgrade to the session's loopback ttyd as a raw
+// TCP byte pipe. We reconstruct the upgrade request line + headers verbatim and
+// replay them (plus any bytes already buffered in `head`) onto a fresh socket
+// to 127.0.0.1:<port>, then pipe both directions. Auth was already enforced by
+// the origin+token checks above; this inherits it.
+async function relayTerminalUpgrade(req, socket, head) {
+  const upgradePath = new URL(req.url, 'http://localhost').pathname;
+  const parsed = termIdFromPath(upgradePath);
+  if (!parsed) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  let port;
+  try {
+    ({ port } = await terminal.ensureTerminal(parsed.id, parsed.target));
+  } catch {
+    socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const upstream = net.connect(port, '127.0.0.1', () => {
+    // Replay the original upgrade request to ttyd verbatim.
+    const headerLines = [`${req.method} ${req.url} HTTP/1.1`];
+    const h = req.rawHeaders;
+    for (let i = 0; i < h.length; i += 2) headerLines.push(`${h[i]}: ${h[i + 1]}`);
+    upstream.write(headerLines.join('\r\n') + '\r\n\r\n');
+    if (head && head.length) upstream.write(head);
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+
+  // Ref-count this connection for idle teardown; release on either end closing.
+  terminal.addClient(parsed.id, socket);
+  const release = () => terminal.removeClient(parsed.id, socket);
+
+  upstream.on('error', () => { socket.destroy(); });
+  socket.on('error', () => { upstream.destroy(); });
+  upstream.on('close', () => { release(); socket.destroy(); });
+  socket.on('close', () => { release(); upstream.destroy(); });
+}
 
 function send(ws, obj) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -683,6 +863,7 @@ async function main() {
 
 function shutdown() {
   for (const [, sub] of subscriptions) sub.tailer?.stop();
+  terminal.shutdownAll();
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
