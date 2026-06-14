@@ -2,6 +2,7 @@ import type { ConnState } from '../lib/ws';
 import type { ResourceState } from '../hooks/useCockpit';
 import type { PushController } from '../hooks/usePushNotifications';
 import { NotifyBell } from './NotifyBell';
+import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 
 interface ResourceHudProps {
   resources: ResourceState;
@@ -23,7 +24,10 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
 
   return (
     <div className="hud" data-warn={over ? 'true' : 'false'} role="status">
-      <span className="hud-brand">control</span>
+      <span className="hud-brand">
+        <ClaudeRobotIcon size={18} />
+        claude control
+      </span>
       <span className={`conn-dot conn-${conn}`} title={conn} aria-label={conn} />
       <span className="hud-group">
         <span className="hud-k">cpu</span>
