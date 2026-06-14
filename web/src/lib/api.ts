@@ -185,6 +185,19 @@ export async function renameSession(id: string, name: string): Promise<void> {
 }
 
 /**
+ * Build the token-gated URL for serving an uploaded file by basename.
+ * Used by the transcript preview renderer to fetch thumbnails without
+ * exposing the absolute server filesystem path to the browser.
+ *
+ * @param basename - the filename portion only (e.g. "1717000000000-photo.jpg")
+ */
+export function uploadServeUrl(basename: string): string {
+  const t = getToken();
+  const query = t ? `?token=${encodeURIComponent(t)}` : '';
+  return `/api/uploads/${encodeURIComponent(basename)}${query}`;
+}
+
+/**
  * Upload a single file as raw bytes (NOT multipart) to /api/upload.
  * Returns the absolute server path so it can be injected into the composer.
  */
