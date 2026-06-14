@@ -5,6 +5,7 @@ import type {
   Pending,
   ResourceSnapshot,
   Session,
+  SubAgent,
 } from '../lib/types';
 
 export interface ResourceState {
@@ -17,6 +18,7 @@ export interface CockpitStore {
   selectedId: string | null;
   messages: Msg[];
   pending: Pending | null;
+  subagents: SubAgent[];
   conn: ConnState;
   resources: ResourceState;
   capture: string | null;
@@ -50,6 +52,11 @@ export function useCockpit(): CockpitStore {
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
+  // sessionId -> (agentId -> SubAgent). Sub-agents stream independently of the
+  // main transcript; keyed by agentId so updates upsert in place.
+  const [subagentsById, setSubagentsById] = useState<
+    Record<string, Record<string, SubAgent>>
+  >({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -89,6 +96,22 @@ export function useCockpit(): CockpitStore {
           break;
         case 'capture':
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
+          break;
+        case 'subagents':
+          // Snapshot: replace this session's sub-agent map.
+          setSubagentsById((prev) => ({
+            ...prev,
+            [msg.id]: Object.fromEntries(
+              (msg.subagents ?? []).map((a) => [a.agentId, a]),
+            ),
+          }));
+          break;
+        case 'subagent':
+          // Incremental upsert by agentId.
+          setSubagentsById((prev) => ({
+            ...prev,
+            [msg.id]: { ...(prev[msg.id] ?? {}), [msg.subagent.agentId]: msg.subagent },
+          }));
           break;
         case 'ack':
           // Surfaced to the toast layer via the custom event below so the
@@ -156,12 +179,22 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? pendingById[selectedId] ?? null : null),
     [selectedId, pendingById],
   );
+  // Sub-agents for the selected session: running first, then by description.
+  const subagents = useMemo<SubAgent[]>(() => {
+    const map = selectedId ? subagentsById[selectedId] : null;
+    if (!map) return [];
+    return Object.values(map).sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'running' ? -1 : 1;
+      return (a.description ?? '').localeCompare(b.description ?? '');
+    });
+  }, [selectedId, subagentsById]);
 
   return {
     sessions,
     selectedId,
     messages,
     pending,
+    subagents,
     conn,
     resources,
     capture,

@@ -25,6 +25,14 @@ export interface UploadResult {
   name: string;
 }
 
+/**
+ * URL to fetch a previously-uploaded file back (token-gated). The server only
+ * serves paths inside its uploads dir; any other path 403s (and the <img> hides).
+ */
+export function fileUrl(absPath: string): string {
+  return `/api/file?path=${encodeURIComponent(absPath)}${authQuery()}`;
+}
+
 export interface VersionInfo {
   current: string;
   latest: string | null;

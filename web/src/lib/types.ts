@@ -64,6 +64,16 @@ export interface Pending {
   questions: PendingQuestion[];
 }
 
+// A sub-agent (Task/Agent) running under a session, with its own transcript.
+export interface SubAgent {
+  agentId: string;
+  toolUseId: string | null;
+  agentType: string | null;
+  description: string | null;
+  status: 'running' | 'done';
+  messages: Msg[];
+}
+
 export interface ResourceSnapshot {
   self?: { cpuPct?: number; rssMB?: number; heapMB?: number };
   system?: {
@@ -84,6 +94,8 @@ export type ServerMessage =
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }
+  | { type: 'subagents'; id: string; subagents: SubAgent[] }
+  | { type: 'subagent'; id: string; subagent: SubAgent }
   | { type: 'ack'; op: string; ok: boolean; error?: string };
 
 // Client -> server WebSocket frames.

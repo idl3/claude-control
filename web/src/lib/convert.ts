@@ -4,6 +4,7 @@ import type { Block, Msg } from './types';
 // assistant-ui content part shapes we emit (subset of ThreadMessageLike content).
 type TextPart = { type: 'text'; text: string };
 type ReasoningPart = { type: 'reasoning'; text: string };
+type ImagePart = { type: 'image'; image: string };
 type ToolCallPart = {
   type: 'tool-call';
   toolCallId: string;
@@ -13,6 +14,32 @@ type ToolCallPart = {
   result?: unknown;
   isError?: boolean;
 };
+
+// File extensions we render inline as image previews.
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+
+/**
+ * Pull uploaded image file paths out of a user message. The composer appends each
+ * attachment's absolute server path to the reply text (space-separated), so an
+ * image upload arrives in the transcript as a bare path token. We surface those
+ * as inline previews and strip them from the rendered text. A token counts only
+ * if it's an absolute path ending in an image extension.
+ */
+export function extractImagePaths(text: string): { paths: string[]; rest: string } {
+  const paths: string[] = [];
+  // Split keeping whitespace so the remaining text reads naturally once stripped.
+  const out = text
+    .split(/(\s+)/)
+    .filter((tok) => {
+      if (/^\/\S+/.test(tok) && IMG_EXT_RE.test(tok)) {
+        paths.push(tok);
+        return false;
+      }
+      return true;
+    })
+    .join('');
+  return { paths, rest: out.replace(/\s{2,}/g, ' ').trim() };
+}
 
 // Reserved key on a tool-call's args carrying the one-line input summary the
 // converter precomputed. Kept separate from the real tool input so the native
@@ -137,16 +164,27 @@ function buildParts(
   blocks: Block[],
   resultsById: Map<string, CockpitToolResult>,
   isUser = false,
-): Array<TextPart | ReasoningPart | ToolCallPart> {
-  const parts: Array<TextPart | ReasoningPart | ToolCallPart> = [];
+): Array<TextPart | ReasoningPart | ImagePart | ToolCallPart> {
+  const parts: Array<TextPart | ReasoningPart | ImagePart | ToolCallPart> = [];
 
   for (const block of blocks) {
     switch (block.kind) {
       case 'text': {
         // Empty text parts are dropped by assistant-ui; skip to avoid noise.
         if (block.text && block.text.length > 0) {
-          const compact = isUser ? compactSystemText(block.text) : null;
-          parts.push({ type: 'text', text: compact ?? block.text });
+          if (isUser) {
+            const compact = compactSystemText(block.text);
+            if (compact != null) {
+              parts.push({ type: 'text', text: compact });
+            } else {
+              // Surface uploaded images inline; render the remaining prose.
+              const { paths, rest } = extractImagePaths(block.text);
+              if (rest) parts.push({ type: 'text', text: rest });
+              for (const p of paths) parts.push({ type: 'image', image: p });
+            }
+          } else {
+            parts.push({ type: 'text', text: block.text });
+          }
         }
         break;
       }

@@ -4,6 +4,7 @@ import {
   ComposerPrimitive,
   type Attachment,
 } from '@assistant-ui/react';
+import { useLightbox } from './Lightbox';
 
 interface ComposerProps {
   disabled: boolean;
@@ -13,13 +14,14 @@ interface ComposerProps {
 // otherwise a placeholder. Object URLs are revoked on unmount.
 function AttachmentThumb({ file }: { file: File }) {
   const [url, setUrl] = useState<string | null>(null);
+  const { open } = useLightbox();
   useEffect(() => {
     const u = URL.createObjectURL(file);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
   }, [file]);
   if (!url) return <div className="chip-thumb chip-thumb-empty" />;
-  // Tap the thumbnail to open the full image in a new tab (preview).
+  // Tap the thumbnail to open the full image in the lightbox (not a new tab).
   return (
     <img
       className="chip-thumb"
@@ -28,11 +30,11 @@ function AttachmentThumb({ file }: { file: File }) {
       role="button"
       tabIndex={0}
       title="Open preview"
-      onClick={() => window.open(url, '_blank', 'noopener')}
+      onClick={() => open(url, file.name)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          window.open(url, '_blank', 'noopener');
+          open(url, file.name);
         }
       }}
     />

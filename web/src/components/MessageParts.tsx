@@ -1,10 +1,44 @@
+import { useState } from 'react';
 import type {
+  ImageMessagePartComponent,
   ReasoningMessagePartComponent,
   TextMessagePartComponent,
   ToolCallMessagePartComponent,
 } from '@assistant-ui/react';
 import { toolInput, toolResult, toolSummary } from '../lib/convert';
+import { fileUrl } from '../lib/api';
 import { MarkdownText } from './MarkdownText';
+import { useLightbox } from './Lightbox';
+
+// Inline image preview (uploaded attachment surfaced in the transcript). The
+// `image` field carries the absolute uploaded path; we fetch it back through the
+// token-gated /api/file route. Tap to open the lightbox. If the server refuses
+// the path (not inside its uploads dir), the <img> errors and we render nothing.
+export const ImagePart: ImageMessagePartComponent = ({ image }) => {
+  const { open } = useLightbox();
+  const [failed, setFailed] = useState(false);
+  if (!image || failed) return null;
+  const src = fileUrl(image);
+  return (
+    <img
+      className="transcript-img"
+      src={src}
+      alt=""
+      loading="lazy"
+      role="button"
+      tabIndex={0}
+      title="Open preview"
+      onClick={() => open(src)}
+      onError={() => setFailed(true)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open(src);
+        }
+      }}
+    />
+  );
+};
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored

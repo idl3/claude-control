@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   convertMessages,
   compactSystemText,
+  extractImagePaths,
   toolSummary,
   toolInput,
   toolResult,
@@ -13,6 +14,55 @@ type AnyPart = Record<string, unknown> & { type: string };
 function parts(m: { content: unknown }): AnyPart[] {
   return (m.content as AnyPart[]) ?? [];
 }
+
+describe('extractImagePaths', () => {
+  it('pulls an uploaded image path and strips it from the prose', () => {
+    const { paths, rest } = extractImagePaths(
+      'look at this /Users/x/.claude-control/uploads/123-shot.png please',
+    );
+    expect(paths).toEqual(['/Users/x/.claude-control/uploads/123-shot.png']);
+    expect(rest).toBe('look at this please');
+  });
+
+  it('handles an image-only message', () => {
+    const { paths, rest } = extractImagePaths('/tmp/a.jpeg');
+    expect(paths).toEqual(['/tmp/a.jpeg']);
+    expect(rest).toBe('');
+  });
+
+  it('captures multiple images', () => {
+    const { paths } = extractImagePaths('/a/one.png /b/two.webp');
+    expect(paths).toEqual(['/a/one.png', '/b/two.webp']);
+  });
+
+  it('ignores non-image paths and plain words', () => {
+    const { paths, rest } = extractImagePaths('see /etc/hosts and report.pdf');
+    expect(paths).toEqual([]);
+    expect(rest).toBe('see /etc/hosts and report.pdf');
+  });
+});
+
+describe('convertMessages — image parts for user uploads', () => {
+  it('emits an image part for an uploaded image path in a user message', () => {
+    const msgs: Msg[] = [
+      {
+        uuid: 'u1',
+        role: 'user',
+        blocks: [{ kind: 'text', text: 'check /u/p/pic.png' }],
+      },
+    ];
+    const [m] = convertMessages(msgs);
+    const ps = parts(m);
+    expect(ps.find((p) => p.type === 'image')).toEqual({
+      type: 'image',
+      image: '/u/p/pic.png',
+    });
+    expect(ps.find((p) => p.type === 'text')).toEqual({
+      type: 'text',
+      text: 'check',
+    });
+  });
+});
 
 describe('convertMessages — role mapping', () => {
   it('maps a user text message to role "user"', () => {

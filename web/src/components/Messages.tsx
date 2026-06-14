@@ -1,17 +1,25 @@
 import { MessagePrimitive, useMessage } from '@assistant-ui/react';
-import { ReasoningPart, TextPart, ToolPart } from './MessageParts';
+import { ImagePart, ReasoningPart, TextPart, ToolPart } from './MessageParts';
 
 const partComponents = {
   Text: TextPart,
   Reasoning: ReasoningPart,
+  Image: ImagePart,
   tools: { Fallback: ToolPart },
 } as const;
 
-// User transcript message: right-aligned bubble.
+// User transcript message: right-aligned bubble. Queued (not-yet-echoed) sends
+// are tagged via metadata.custom.queued so they render dimmed with a "queued"
+// marker until their real transcript echo arrives.
 export function UserMessage() {
+  const queued = useMessage((m) => m.metadata?.custom?.queued) === true;
   return (
-    <MessagePrimitive.Root className="msg-row" data-role="user">
-      <div className="msg-role">user</div>
+    <MessagePrimitive.Root
+      className="msg-row"
+      data-role="user"
+      data-queued={queued ? 'true' : undefined}
+    >
+      <div className="msg-role">{queued ? 'queued' : 'user'}</div>
       <div className="msg-body">
         <MessagePrimitive.Parts components={partComponents} />
       </div>

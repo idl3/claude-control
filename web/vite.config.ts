@@ -3,11 +3,14 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Built for claude-cockpit's Node server, which serves this from web/dist.
-// base: './' keeps asset URLs relative so it loads behind `tailscale serve`
-// or any sub-path. Everything is bundled — no runtime CDN calls.
+// base: '/' (absolute asset URLs) is required for path-based routing
+// (/<session>/<window>/<pane>): a relative base would resolve /assets against
+// the deep path and 404. `tailscale serve` maps the tailnet host root to the
+// server root (see bin/install-service.sh), so absolute asset paths are fine.
+// The server serves index.html for unknown non-asset paths (SPA fallback).
 export default defineConfig({
   plugins: [react()],
-  base: './',
+  base: '/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
