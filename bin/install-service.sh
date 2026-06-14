@@ -31,6 +31,18 @@ TMUX_BIN="$(command -v tmux 2>/dev/null || echo /opt/homebrew/bin/tmux)"
 TMUX_DIR="$(dirname "$TMUX_BIN")"
 SVC_PATH="$TMUX_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+# launchd gives a LaunchAgent a different $TMPDIR than the login session, so the
+# bundled tmux can't find the running server's socket (-> 0 sessions). Pin
+# TMUX_TMPDIR to where the socket actually lives.
+TMUX_TMPDIR_VAL="$("$TMUX_BIN" display-message -p '#{socket_path}' 2>/dev/null | sed -E 's#/tmux-[0-9]+/[^/]+$##')"
+if [ -z "$TMUX_TMPDIR_VAL" ]; then
+  for d in /private/tmp /tmp "${TMPDIR:-}"; do
+    [ -n "$d" ] && [ -S "$d/tmux-$(id -u)/default" ] && { TMUX_TMPDIR_VAL="$d"; break; }
+  done
+fi
+TMUX_TMPDIR_VAL="${TMUX_TMPDIR_VAL:-/tmp}"
+echo "tmux socket dir: $TMUX_TMPDIR_VAL"
+
 # Build the web bundle if absent (server falls back to public/ otherwise).
 if [ ! -f "$REPO/web/dist/index.html" ]; then
   echo "building web bundle…"; (cd "$REPO" && npm run build)
@@ -58,6 +70,7 @@ cat > "$PLIST" <<PLIST
     <key>CLAUDE_CONTROL_PORT</key><string>$PORT</string>
     <key>HOME</key><string>$HOME</string>
     <key>PATH</key><string>$SVC_PATH</string>
+    <key>TMUX_TMPDIR</key><string>$TMUX_TMPDIR_VAL</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
