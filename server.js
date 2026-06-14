@@ -75,6 +75,19 @@ const MIME = {
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
+// Image MIME types served from the uploads route (extensions → content-type).
+const IMAGE_MIME = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.svg': 'image/svg+xml',
+};
+
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
@@ -188,6 +201,14 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionRename(req, res);
   }
+  // GET /api/uploads/<basename> — token-gated, path-traversal-guarded.
+  // Serves a single file from uploadsDir by basename only; no directory
+  // segments are allowed. Used by the React UI to render inline attachment
+  // previews (thumbnails + lightbox) without exposing the filesystem path.
+  if (u.pathname.startsWith('/api/uploads/')) {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleServeUpload(req, res, u);
+  }
 
   // static
   serveStatic(u.pathname, res);
@@ -271,6 +292,47 @@ function handleUpload(req, res, u) {
 
   req.on('error', () => {
     if (!aborted) endJson(res, 400, { error: 'upload stream error' });
+  });
+}
+
+// GET /api/uploads/<basename> — serve a single upload by basename.
+// Security:
+//   1. Only the basename is taken from the URL segment — no sub-dirs allowed.
+//   2. sanitizeName strips any remaining path traversal characters.
+//   3. The resolved absolute path is checked to start with uploadsDir + sep.
+// Returns: 404 if the file doesn't exist, 200 with the correct content-type.
+// Only image types get an image/* content-type; everything else is
+// application/octet-stream with Content-Disposition: attachment to prevent
+// the browser from executing arbitrary served files.
+function handleServeUpload(req, res, u) {
+  // Extract the last path segment only (drop any leading slashes / sub-dirs).
+  const rawSegment = u.pathname.replace(/^\/api\/uploads\//, '');
+  // Reject if the caller tried to include a sub-directory.
+  if (rawSegment.includes('/') || rawSegment.includes('\\')) {
+    res.writeHead(404); return res.end('not found');
+  }
+  const basename = sanitizeName(rawSegment);
+  if (!basename) { res.writeHead(404); return res.end('not found'); }
+
+  const full = path.join(CONFIG.uploadsDir, basename);
+  // Defense-in-depth: resolved path must stay inside uploadsDir.
+  if (!full.startsWith(CONFIG.uploadsDir + path.sep)) {
+    res.writeHead(404); return res.end('not found');
+  }
+
+  fs.stat(full, (statErr) => {
+    if (statErr) { res.writeHead(404); return res.end('not found'); }
+    const ext = path.extname(basename).toLowerCase();
+    const imageMime = IMAGE_MIME[ext];
+    const headers = imageMime
+      ? { 'content-type': imageMime, 'cache-control': 'private, max-age=3600' }
+      : {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${basename}"`,
+          'cache-control': 'private, max-age=3600',
+        };
+    res.writeHead(200, headers);
+    fs.createReadStream(full).pipe(res);
   });
 }
 
