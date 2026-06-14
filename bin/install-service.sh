@@ -36,7 +36,9 @@ SVC_PATH="$TMUX_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sb
 # launchd gives a LaunchAgent a different $TMPDIR than the login session, so the
 # bundled tmux can't find the running server's socket (-> 0 sessions). Pin
 # TMUX_TMPDIR to where the socket actually lives.
-TMUX_TMPDIR_VAL="$("$TMUX_BIN" display-message -p '#{socket_path}' 2>/dev/null | sed -E 's#/tmux-[0-9]+/[^/]+$##')"
+# `|| true`: with no tmux server running, display-message fails and (under
+# pipefail + set -e) would abort the whole install. Tolerate it and fall back.
+TMUX_TMPDIR_VAL="$("$TMUX_BIN" display-message -p '#{socket_path}' 2>/dev/null | sed -E 's#/tmux-[0-9]+/[^/]+$##' || true)"
 if [ -z "$TMUX_TMPDIR_VAL" ]; then
   for d in /private/tmp /tmp "${TMPDIR:-}"; do
     [ -n "$d" ] && [ -S "$d/tmux-$(id -u)/default" ] && { TMUX_TMPDIR_VAL="$d"; break; }
@@ -86,12 +88,18 @@ PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
-# Expose over Tailscale (tailnet-only HTTPS). Harmless if already configured.
-if command -v tailscale >/dev/null 2>&1; then
-  tailscale serve --bg --https=443 "localhost:$PORT" >/dev/null 2>&1 || true
+# Expose over Tailscale (tailnet-only HTTPS). Resolve the CLI from PATH, else the
+# macOS app binary (Tailscale.app doesn't put `tailscale` on PATH by default).
+TS="$(command -v tailscale 2>/dev/null || true)"
+[ -z "$TS" ] && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ] && TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+if [ -n "$TS" ]; then
+  "$TS" serve --bg --https=443 "localhost:$PORT" >/dev/null 2>&1 || true
 fi
 
-HOSTDNS="$(tailscale status --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write((JSON.parse(d).Self?.DNSName||"").replace(/\.$/,""))}catch{}})' 2>/dev/null || true)"
+HOSTDNS=""
+if [ -n "$TS" ]; then
+  HOSTDNS="$("$TS" status --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write((JSON.parse(d).Self?.DNSName||"").replace(/\.$/,""))}catch{}})' 2>/dev/null || true)"
+fi
 
 BASE="$([ -n "$HOSTDNS" ] && echo "https://$HOSTDNS/" || echo "http://127.0.0.1:$PORT/")"
 echo ""
