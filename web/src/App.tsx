@@ -120,12 +120,16 @@ export default function App() {
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base = convertMessages(cockpit.messages);
     if (optimistic && optimistic.sessionId === cockpit.selectedId) {
-      base.push({
-        role: 'user',
-        id: 'optimistic-user',
-        content: [{ type: 'text', text: optimistic.text }],
-        metadata: { custom: { cockpitRole: 'user', optimistic: true } },
-      } as ThreadMessageLike);
+      // User echo only for typed sends; answers (text === '') show just the
+      // working indicator (the choice is already shown in the AskUserQuestion).
+      if (optimistic.text) {
+        base.push({
+          role: 'user',
+          id: 'optimistic-user',
+          content: [{ type: 'text', text: optimistic.text }],
+          metadata: { custom: { cockpitRole: 'user', optimistic: true } },
+        } as ThreadMessageLike);
+      }
       base.push({
         role: 'assistant',
         id: 'optimistic-working',
@@ -245,6 +249,17 @@ export default function App() {
               cockpit.sendAnswer(toolUseId, selections);
               setDismissedAsk(toolUseId);
               cockpit.clearCapture();
+              // Show a working indicator after answering (no user echo — the
+              // choice is shown in the AskUserQuestion widget), cleared when the
+              // agent's transcript activity arrives.
+              if (cockpit.selectedId) {
+                setOptimistic({
+                  sessionId: cockpit.selectedId,
+                  text: '',
+                  baseCount: cockpit.messages.length,
+                  at: Date.now(),
+                });
+              }
             }}
             onCapture={cockpit.requestCapture}
             onClose={() => {
