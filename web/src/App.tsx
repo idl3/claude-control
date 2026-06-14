@@ -200,7 +200,7 @@ export default function App() {
               </button>
               <div className="detail-title">
                 <span className="detail-name">
-                  {selectedSession?.name || cockpit.selectedId || 'cockpit'}
+                  {selectedSession?.name || cockpit.selectedId || 'claude control'}
                 </span>
                 {selectedSession?.cwd ? (
                   <span className="detail-cwd">{selectedSession.cwd}</span>
