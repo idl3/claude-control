@@ -11,6 +11,18 @@ export function authQuery(): string {
   return t ? `&token=${encodeURIComponent(t)}` : '';
 }
 
+/**
+ * Build the token-gated URL for a session's raw-terminal (ttyd) surface. The id
+ * is a tmux target (e.g. `name:0`) and is percent-encoded into a single path
+ * segment to match the server's `/term/<encoded-id>` route + ttyd `-b` base.
+ * Same-origin; the `?token=` rides claude-control's existing gate.
+ */
+export function terminalUrl(id: string): string {
+  const base = `/term/${encodeURIComponent(id)}/`;
+  const t = getToken();
+  return t ? `${base}?token=${encodeURIComponent(t)}` : base;
+}
+
 export function wsUrl(): string {
   const loc = window.location;
   const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -182,6 +194,19 @@ export async function renameSession(id: string, name: string): Promise<void> {
     const err = ('error' in json && json.error) || `HTTP ${res.status}`;
     throw new Error(err);
   }
+}
+
+/**
+ * Build the token-gated URL for serving an uploaded file by basename.
+ * Used by the transcript preview renderer to fetch thumbnails without
+ * exposing the absolute server filesystem path to the browser.
+ *
+ * @param basename - the filename portion only (e.g. "1717000000000-photo.jpg")
+ */
+export function uploadServeUrl(basename: string): string {
+  const t = getToken();
+  const query = t ? `?token=${encodeURIComponent(t)}` : '';
+  return `/api/uploads/${encodeURIComponent(basename)}${query}`;
 }
 
 /**

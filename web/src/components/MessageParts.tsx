@@ -5,6 +5,7 @@ import type {
 } from '@assistant-ui/react';
 import { toolInput, toolResult, toolSummary } from '../lib/convert';
 import { MarkdownText } from './MarkdownText';
+import { InlineAttachmentPreviews } from './AttachmentPreview';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -19,7 +20,16 @@ export const TextPart: TextMessagePartComponent = (props) => {
       </span>
     );
   }
-  return <MarkdownText {...props} />;
+  // Render the markdown text + any inline attachment previews detected in the
+  // raw text. Previews appear below the text block (thumbnails / file chips).
+  return (
+    <>
+      <MarkdownText {...props} />
+      {typeof props.text === 'string' ? (
+        <InlineAttachmentPreviews text={props.text} />
+      ) : null}
+    </>
+  );
 };
 
 // Thinking → native Reasoning content part: collapsible, dimmed. Collapsed by
