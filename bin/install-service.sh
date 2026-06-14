@@ -93,13 +93,15 @@ fi
 
 HOSTDNS="$(tailscale status --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write((JSON.parse(d).Self?.DNSName||"").replace(/\.$/,""))}catch{}})' 2>/dev/null || true)"
 
-QS=""; [ -n "$TOKEN" ] && QS="?token=$TOKEN"
+BASE="$([ -n "$HOSTDNS" ] && echo "https://$HOSTDNS/" || echo "http://127.0.0.1:$PORT/")"
 echo ""
 echo "✓ claude-control installed as $LABEL (auto-starts on login, restarts on crash)"
 echo "  logs:  $LOG_DIR/{out,err}.log"
-echo "  auth:  $([ -n "$TOKEN" ] && echo "token ($TOKEN_FILE)" || echo "TOKENLESS (tailnet-only)")"
-if [ -n "$HOSTDNS" ]; then
-  echo "  phone: https://$HOSTDNS/$QS"
+echo "  url:   $BASE"
+if [ -n "$TOKEN" ]; then
+  # Don't put the token in the URL (it leaks via history/logs); the web app
+  # prompts for it and stores it in localStorage.
+  echo "  auth:  token — enter it at the login prompt: $TOKEN"
 else
-  echo "  local: http://127.0.0.1:$PORT/$QS"
+  echo "  auth:  TOKENLESS (tailnet-only)"
 fi
