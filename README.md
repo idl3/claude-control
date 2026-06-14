@@ -11,7 +11,29 @@ talks to tmux. Bind is localhost-only by default.
 
 ---
 
-## Quick start
+## Install (npm)
+
+```bash
+npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
+```
+
+**Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). The web UI ships prebuilt — no build step on install.
+
+```bash
+claude-control                    # start the server (prints the URL)
+claude-control --help             # config + subcommands
+claude-control install-service    # macOS: launchd auto-start on login + restart on crash
+claude-control uninstall-service
+```
+
+Open the printed URL. If a token is configured (env `CLAUDE_CONTROL_TOKEN`, or a
+token in `~/.claude-control/token`), the app **prompts for it on first load** and
+stores it in your browser — the token is never placed in the URL. With no token
+set, it runs open on `127.0.0.1` / your tailnet.
+
+---
+
+## Quick start (from source)
 
 ```bash
 git clone https://github.com/idl3/claude-control.git

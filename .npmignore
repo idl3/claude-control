@@ -1,0 +1,12 @@
+# NOTE: the presence of this file makes npm ignore .gitignore for packing, so the
+# (gitignored) built web/dist bundle ships. The `files` allowlist in package.json
+# is the primary control; this only excludes dev cruft inside allowed paths.
+node_modules/
+web/node_modules/
+web/src/
+outputs/
+test/
+*.log
+.DS_Store
+.env
+.env.*
