@@ -14,7 +14,8 @@ import { WebSocketServer } from 'ws';
 import * as tmux from './lib/tmux.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher } from './lib/subagents.js';
-import { SessionRegistry } from './lib/sessions.js';
+import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
+import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { ResourceMonitor } from './lib/resources.js';
 import { buildAnswerProgram } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
@@ -62,6 +63,8 @@ const CONFIG = {
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
   uploadTtlHours: Number(env('UPLOAD_TTL_HOURS')) || 24,
+  pinsFile:
+    env('PINS') || path.join(os.homedir(), '.claude-control', 'pins.json'),
 };
 
 const MIME = {
@@ -78,6 +81,10 @@ const MIME = {
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
+
+// Manual transcript pins (windowId.paneIndex -> transcript path). Loaded at boot,
+// applied to the registry, and editable via /api/pins.
+let pins = loadPins(CONFIG.pinsFile);
 
 /** id -> { tailer, clients:Set<ws>, pending } */
 const subscriptions = new Map();
@@ -146,6 +153,17 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/file') {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
     return handleServeFile(res, u);
+  }
+  if (u.pathname === '/api/pins') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    if (req.method === 'POST') return handleSetPin(req, res);
+    return endJson(res, 200, { pins });
+  }
+  if (u.pathname === '/api/transcripts') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return listRecentTranscripts({ projectsRoot: CONFIG.projectsRoot })
+      .then((list) => endJson(res, 200, { transcripts: list }))
+      .catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
   }
   if (u.pathname === '/api/push/vapid') {
     if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
@@ -325,6 +343,34 @@ function handleServeFile(res, u) {
       'cache-control': 'private, max-age=3600',
     });
     res.end(data);
+  });
+}
+
+// Set or clear a manual transcript pin. Body: { id, transcriptPath }.
+// transcriptPath null/empty clears the pin. The pin is keyed by the session's
+// stable windowId.paneIndex so it survives tmux window renumbering.
+function handleSetPin(req, res) {
+  return readJsonBody(req, res, (body) => {
+    const id = typeof body?.id === 'string' ? body.id : '';
+    const session = sessionById(id);
+    if (!session) return endJson(res, 404, { error: 'unknown session' });
+    const key = pinKey(session.windowId, session.paneIndex);
+
+    const raw = body?.transcriptPath;
+    if (raw == null || raw === '') {
+      delete pins[key];
+    } else {
+      const full = validateTranscriptPath(raw, CONFIG.projectsRoot);
+      if (!full) return endJson(res, 400, { error: 'invalid transcript path' });
+      pins = { ...pins, [key]: full };
+    }
+    try {
+      savePins(CONFIG.pinsFile, pins);
+    } catch (err) {
+      return endJson(res, 500, { error: String(err?.message || err) });
+    }
+    registry.setPins(pins);
+    return endJson(res, 200, { ok: true, pins });
   });
 }
 
@@ -636,6 +682,7 @@ async function runUploadSweep() {
 }
 
 async function main() {
+  registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
   resources.start();
   await registry.refresh().catch(() => {});

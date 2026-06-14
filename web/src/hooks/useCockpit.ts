@@ -23,6 +23,7 @@ export interface CockpitStore {
   resources: ResourceState;
   capture: string | null;
   select: (id: string) => void;
+  resubscribe: () => void;
   sendReply: (text: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
   requestCapture: () => boolean;
@@ -170,6 +171,7 @@ export function useCockpit(): CockpitStore {
   }, [socket]);
 
   const clearCapture = useCallback(() => setCapture(null), []);
+  const resubscribe = useCallback(() => socket.resubscribe(), [socket]);
 
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
@@ -199,6 +201,7 @@ export function useCockpit(): CockpitStore {
     resources,
     capture,
     select,
+    resubscribe,
     sendReply,
     sendAnswer,
     requestCapture,

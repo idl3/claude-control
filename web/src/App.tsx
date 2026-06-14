@@ -18,6 +18,7 @@ import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { LightboxProvider } from './components/Lightbox';
 import { SubAgentPanel } from './components/SubAgentPanel';
+import { PinModal } from './components/PinModal';
 import type { Msg, ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -240,8 +241,11 @@ export default function App() {
   const [railOpenMobile, setRailOpenMobile] = useState(true);
   // Sub-agent side panel (drawer) visibility; reset when the session changes.
   const [panelOpen, setPanelOpen] = useState(false);
+  // Pin-transcript modal.
+  const [pinOpen, setPinOpen] = useState(false);
   useEffect(() => {
     setPanelOpen(false);
+    setPinOpen(false);
   }, [cockpit.selectedId]);
   // Select a session AND reflect it in the URL (/<session>/<window>/<pane>) so
   // it's deep-linkable and back/forward works. The token query is preserved.
@@ -360,6 +364,17 @@ export default function App() {
                   <span className="detail-cwd">{selectedSession.cwd}</span>
                 ) : null}
               </div>
+              {cockpit.selectedId ? (
+                <button
+                  type="button"
+                  className="pin-toggle"
+                  aria-pressed={!!selectedSession?.pinned}
+                  title={selectedSession?.pinned ? 'Transcript pinned' : 'Pin a transcript'}
+                  onClick={() => setPinOpen(true)}
+                >
+                  {selectedSession?.pinned ? '📌' : '📍'}
+                </button>
+              ) : null}
               {cockpit.subagents.length > 0 ? (
                 <button
                   type="button"
@@ -408,6 +423,15 @@ export default function App() {
         ) : null}
 
         <ToastView toast={toast} />
+
+        {pinOpen && selectedSession ? (
+          <PinModal
+            session={selectedSession}
+            onClose={() => setPinOpen(false)}
+            onToast={showToast}
+            onPinned={() => cockpit.resubscribe()}
+          />
+        ) : null}
       </div>
       </LightboxProvider>
     </AssistantRuntimeProvider>

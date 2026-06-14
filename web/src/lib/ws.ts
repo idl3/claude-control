@@ -95,6 +95,18 @@ export class CockpitSocket {
     if (id) this.send({ type: 'subscribe', id });
   }
 
+  /**
+   * Force a re-subscribe of the current session (unsubscribe + subscribe). Used
+   * after pinning a transcript so the server upgrades a tailer-less subscription
+   * to a real tailer and streams the now-matched transcript.
+   */
+  resubscribe(): void {
+    const id = this.selectedId;
+    if (!id) return;
+    this.send({ type: 'unsubscribe', id });
+    this.send({ type: 'subscribe', id });
+  }
+
   onMessage(h: MsgHandler): () => void {
     this.msgHandlers.add(h);
     return () => this.msgHandlers.delete(h);

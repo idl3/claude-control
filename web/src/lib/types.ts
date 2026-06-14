@@ -15,6 +15,7 @@ export interface Session {
   active?: boolean;
   cwd?: string;
   transcriptPath?: string;
+  pinned?: boolean;
   lastActivity?: number;
   pending?: boolean;
   pendingQuestion?: string | null;
