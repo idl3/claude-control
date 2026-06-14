@@ -101,6 +101,89 @@ export async function postPushUnsubscribe(endpoint: string): Promise<boolean> {
   }
 }
 
+export interface ControlConfig {
+  launchCommand: string;
+  defaultCwd: string;
+}
+
+/** Fetch the persisted launch config. */
+export async function getConfig(): Promise<ControlConfig> {
+  const res = await fetch(`/api/config?${authQuery().slice(1)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as ControlConfig;
+}
+
+/** Persist a partial config update; returns the saved config (throws on 400). */
+export async function saveConfig(
+  partial: Partial<ControlConfig>,
+): Promise<ControlConfig> {
+  const res = await fetch(`/api/config?${authQuery().slice(1)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(partial),
+  });
+  const json = (await res.json().catch(() => ({}))) as
+    | ControlConfig
+    | { error?: string };
+  if (!res.ok) {
+    throw new Error(('error' in json && json.error) || `HTTP ${res.status}`);
+  }
+  return json as ControlConfig;
+}
+
+export interface CreateSessionResult {
+  ok: true;
+  target: string;
+  /** Resolved name (server-generated default when the request name was blank). */
+  name: string;
+}
+
+/**
+ * Create a new session: POST /api/session/new creates a NAMED tmux window and
+ * types the configured launch command (with `--name <name>`) into it. The new
+ * window shows up in the rail on the next ~4s registry refresh — no optimistic
+ * insert needed. A blank `name` is fine: the server fills a `session-<ts>`
+ * default and returns it.
+ */
+export async function createSession(opts?: {
+  cwd?: string;
+  name?: string;
+}): Promise<CreateSessionResult> {
+  const res = await fetch(`/api/session/new?${authQuery().slice(1)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(opts ?? {}),
+  });
+  const json = (await res.json().catch(() => ({}))) as
+    | CreateSessionResult
+    | { error?: string };
+  if (!res.ok || !('ok' in json) || !json.ok) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+  return json;
+}
+
+/**
+ * Rename an existing session: POST /api/session/rename renames its tmux window
+ * (instant in the rail on the next ~4s refresh) AND types `/rename <name>` into
+ * the pane so Claude updates its own session title. Throws on a non-OK response.
+ */
+export async function renameSession(id: string, name: string): Promise<void> {
+  const res = await fetch(`/api/session/rename?${authQuery().slice(1)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, name }),
+  });
+  const json = (await res.json().catch(() => ({}))) as
+    | { ok: true }
+    | { error?: string };
+  if (!res.ok || !('ok' in json) || !json.ok) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+}
+
 /**
  * Upload a single file as raw bytes (NOT multipart) to /api/upload.
  * Returns the absolute server path so it can be injected into the composer.

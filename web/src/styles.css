@@ -307,6 +307,71 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.detail-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.rename-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.rename-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.detail-rename-input {
+  width: 100%;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 7px;
+  outline: none;
+}
+.detail-rename-input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Live pane (transcript-less session fallback) ──────────────── */
+.live-pane {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 12px 6px;
+}
+.live-pane-head {
+  flex: 0 0 auto;
+  font-size: var(--txt-meta);
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.live-pane-body {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-transcript);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* ── Thread ───────────────────────────────────────────────────── */
 .thread-root {
@@ -1152,4 +1217,234 @@ details.block-tool[open] > summary .tool-arrow {
   background: var(--amber-bg);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
+}
+
+/* ── Rail header: new-session + settings ──────────────────────── */
+.rail-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.rail-new {
+  flex: 1;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: border-color var(--ease) 150ms, background var(--ease) 150ms;
+}
+.rail-new:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.rail-new:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.rail-gear {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms;
+}
+.rail-gear:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Expanded new-session form (name + create/cancel) */
+.rail-new-form {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.rail-new-name {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: var(--txt-composer);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.rail-new-name:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.rail-new-name:disabled {
+  opacity: 0.6;
+}
+.rail-new-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.rail-new-cancel,
+.rail-new-create {
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.rail-new-cancel {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+}
+.rail-new-cancel:hover:not(:disabled) {
+  color: var(--text);
+}
+.rail-new-create {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+}
+.rail-new-create:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.rail-new-cancel:disabled,
+.rail-new-create:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Settings modal ───────────────────────────────────────────── */
+.config-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: oklch(0% 0 0 / 0.55);
+}
+.config-modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 12px 40px oklch(0% 0 0 / 0.4);
+}
+.config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.config-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.config-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.config-close:hover {
+  color: var(--text);
+}
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.config-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.config-input {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: var(--txt-composer);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.config-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.config-input:disabled {
+  opacity: 0.6;
+}
+.config-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.config-hint code {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.config-cancel,
+.config-save {
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.config-cancel {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+}
+.config-cancel:hover:not(:disabled) {
+  color: var(--text);
+}
+.config-save {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+}
+.config-save:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.config-save:disabled,
+.config-cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

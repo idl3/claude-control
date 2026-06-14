@@ -9,12 +9,17 @@ import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
+import { renameSession } from './lib/api';
 import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
+import { LivePane } from './components/LivePane';
+import { Composer } from './components/Composer';
 import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
+import { ConfigModal } from './components/ConfigModal';
+import { NewSessionForm } from './components/NewSessionForm';
 import type { ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -144,12 +149,16 @@ export default function App() {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
     if (optimistic && optimistic.sessionId === cockpit.selectedId) {
-      base.push({
-        role: 'user',
-        id: 'optimistic-user',
-        content: [{ type: 'text', text: optimistic.text }],
-        metadata: { custom: { cockpitRole: 'user', optimistic: true } },
-      } as ThreadMessageLike);
+      // User echo only for typed sends; answers (text === '') show just the
+      // working indicator (the choice is already shown in the AskUserQuestion).
+      if (optimistic.text) {
+        base.push({
+          role: 'user',
+          id: 'optimistic-user',
+          content: [{ type: 'text', text: optimistic.text }],
+          metadata: { custom: { cockpitRole: 'user', optimistic: true } },
+        } as ThreadMessageLike);
+      }
       base.push({
         role: 'assistant',
         id: 'optimistic-working',
@@ -177,12 +186,44 @@ export default function App() {
   // toolUseId) arrives, without needing the server to clear pending first.
   const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
 
+  // Settings modal.
+  const [configOpen, setConfigOpen] = useState(false);
+
+  // Inline session rename: null when not editing, else the draft name. Opening
+  // prefills the current name; saving POSTs to /api/session/rename (renames the
+  // tmux window + types /rename into the pane). The rail picks up the new name
+  // on the next ~4s registry refresh.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (renaming !== null) renameInputRef.current?.select();
+  }, [renaming]);
+
+  const submitRename = useCallback(async () => {
+    const id = cockpit.selectedId;
+    const name = (renaming ?? '').trim();
+    setRenaming(null);
+    if (!id || !name) return;
+    try {
+      await renameSession(id, name);
+      showToast('Renamed →', 'ok');
+    } catch (err) {
+      showToast(
+        `rename failed: ${err instanceof Error ? err.message : 'error'}`,
+        'error',
+      );
+    }
+  }, [cockpit.selectedId, renaming, showToast]);
+
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
   const select = useCallback(
     (id: string) => {
       cockpit.select(id);
       setRailOpenMobile(false);
+      // Deep-link: reflect the selection in the URL hash so a reload restores
+      // it. Hash (not query) avoids clobbering the ?token=… param.
+      window.location.hash = encodeURIComponent(id);
     },
     [cockpit],
   );
@@ -209,6 +250,25 @@ export default function App() {
       // iOS Safari legacy flag
       (navigator as unknown as { standalone?: boolean }).standalone === true);
   const showIosHint = push.iosHint && !isStandalone && push.status !== 'on';
+  // Restore the selected session from the URL hash on load (once the sessions
+  // list arrives), and follow back/forward navigation.
+  const restoredHash = useRef(false);
+  useEffect(() => {
+    const fromHash = () => {
+      const id = decodeURIComponent(window.location.hash.replace(/^#/, ''));
+      if (id && id !== cockpit.selectedId && cockpit.sessions.some((s) => s.id === id)) {
+        cockpit.select(id);
+        setRailOpenMobile(false);
+      }
+    };
+    // Initial restore: wait until at least one session is known.
+    if (!restoredHash.current && cockpit.sessions.length > 0) {
+      restoredHash.current = true;
+      fromHash();
+    }
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, [cockpit, cockpit.sessions, cockpit.selectedId]);
 
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
@@ -235,6 +295,10 @@ export default function App() {
 
         <div className="app-body">
           <aside className="rail">
+            <NewSessionForm
+              onToast={showToast}
+              onOpenSettings={() => setConfigOpen(true)}
+            />
             <SessionRail
               sessions={cockpit.sessions}
               selectedId={cockpit.selectedId}
@@ -253,20 +317,77 @@ export default function App() {
                 ‹
               </button>
               <div className="detail-title">
-                <span className="detail-name">
-                  {selectedSession?.name || cockpit.selectedId || 'cockpit'}
-                </span>
+                {renaming !== null ? (
+                  <input
+                    ref={renameInputRef}
+                    className="detail-rename-input"
+                    type="text"
+                    value={renaming}
+                    aria-label="Session name"
+                    onChange={(e) => setRenaming(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void submitRename();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setRenaming(null);
+                      }
+                    }}
+                    onBlur={() => void submitRename()}
+                  />
+                ) : (
+                  <span className="detail-name-row">
+                    <span className="detail-name">
+                      {selectedSession?.name ||
+                        cockpit.selectedId ||
+                        'claude control'}
+                    </span>
+                    {selectedSession ? (
+                      <button
+                        type="button"
+                        className="rename-btn"
+                        aria-label="Rename session"
+                        title="Rename session"
+                        onClick={() =>
+                          setRenaming(
+                            selectedSession.name ?? selectedSession.id,
+                          )
+                        }
+                      >
+                        ✎
+                      </button>
+                    ) : null}
+                  </span>
+                )}
                 {selectedSession?.cwd ? (
                   <span className="detail-cwd">{selectedSession.cwd}</span>
                 ) : null}
               </div>
             </header>
 
-            <Thread
-              hasSelection={!!cockpit.selectedId}
-              hiddenCount={hiddenCount}
-              onLoadEarlier={loadEarlier}
-            />
+            {selectedSession && !selectedSession.transcriptPath ? (
+              // Transcript-less live session (e.g. a worktree cwd Claude records
+              // under a different path): the assistant-ui thread would render an
+              // empty "no messages yet", so show the live tmux pane instead. The
+              // composer still works — replies go via tmux send-keys regardless
+              // of whether a transcript was matched.
+              <div className="thread-root">
+                <LivePane
+                  sessionId={selectedSession.id}
+                  capture={cockpit.capture}
+                  requestCapture={cockpit.requestCapture}
+                  clearCapture={cockpit.clearCapture}
+                />
+                <Composer disabled={false} />
+              </div>
+            ) : (
+              <Thread
+                hasSelection={!!cockpit.selectedId}
+                hiddenCount={hiddenCount}
+                onLoadEarlier={loadEarlier}
+              />
+            )}
           </main>
         </div>
 
@@ -280,12 +401,30 @@ export default function App() {
               cockpit.sendAnswer(toolUseId, selections);
               setDismissedAsk(toolUseId);
               cockpit.clearCapture();
+              // Show a working indicator after answering (no user echo — the
+              // choice is shown in the AskUserQuestion widget), cleared when the
+              // agent's transcript activity arrives.
+              if (cockpit.selectedId) {
+                setOptimistic({
+                  sessionId: cockpit.selectedId,
+                  text: '',
+                  baseCount: cockpit.messages.length,
+                  at: Date.now(),
+                });
+              }
             }}
             onCapture={cockpit.requestCapture}
             onClose={() => {
               setDismissedAsk(cockpit.pending?.toolUseId ?? null);
               cockpit.clearCapture();
             }}
+          />
+        ) : null}
+
+        {configOpen ? (
+          <ConfigModal
+            onClose={() => setConfigOpen(false)}
+            onToast={showToast}
           />
         ) : null}
 

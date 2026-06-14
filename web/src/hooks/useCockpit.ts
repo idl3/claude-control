@@ -23,7 +23,7 @@ export interface CockpitStore {
   select: (id: string) => void;
   sendReply: (text: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
-  requestCapture: () => boolean;
+  requestCapture: (lines?: number) => boolean;
   clearCapture: () => void;
 }
 
@@ -140,11 +140,14 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
-  const requestCapture = useCallback((): boolean => {
-    const id = selectedRef.current;
-    if (!id) return false;
-    return socket.send({ type: 'capture', id });
-  }, [socket]);
+  const requestCapture = useCallback(
+    (lines?: number): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'capture', id, lines });
+    },
+    [socket],
+  );
 
   const clearCapture = useCallback(() => setCapture(null), []);
 
