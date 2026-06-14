@@ -1630,3 +1630,146 @@ details.block-tool[open] > summary .tool-arrow {
   border: none;
   background: var(--bg);
 }
+
+/* ── Token login gate ─────────────────────────────────────────── */
+.gate-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 24px;
+  padding-top: max(24px, env(safe-area-inset-top));
+  background:
+    radial-gradient(120% 80% at 50% -10%, var(--bg-1), var(--bg) 60%);
+}
+
+.gate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 320px;
+  padding: 24px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / 0.04) inset,
+    0 20px 50px -20px oklch(0% 0 0 / 0.7);
+}
+
+.gate-card--probing {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-dim);
+}
+
+.gate-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.gate-glyph {
+  font-size: 22px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.gate-title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.gate-label {
+  font-size: var(--txt-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.gate-input {
+  width: 100%;
+  padding: 11px 12px;
+  font-size: var(--txt-composer); /* >=16px: no iOS focus zoom */
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+}
+
+.gate-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-2);
+}
+
+.gate-input[aria-invalid='true'] {
+  border-color: var(--red);
+}
+
+.gate-error {
+  margin: 0;
+  font-size: var(--txt-meta);
+  color: var(--red);
+}
+
+.gate-submit {
+  margin-top: 4px;
+  padding: 11px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: filter 150ms var(--ease), opacity 150ms var(--ease);
+}
+
+.gate-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.gate-submit:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.gate-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gate-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: gate-spin 700ms linear infinite;
+}
+
+@keyframes gate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-spinner {
+    animation: none;
+  }
+}
+
+/* Loading placeholder for an attachment thumbnail being fetched via blob URL. */
+.transcript-thumb-loading {
+  display: inline-block;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
