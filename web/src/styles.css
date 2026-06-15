@@ -722,10 +722,11 @@ body {
 .sa-summary {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 11px 12px;
   cursor: pointer;
   font-size: 12px;
+  line-height: 1.4;
 }
 .sa-dot {
   width: 7px;
@@ -739,17 +740,38 @@ body {
 }
 .sa-type {
   font-weight: 600;
+  /* Desktop: agent type stays on one line (never breaks "100x-officer"). */
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .sa-desc {
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .sa-status {
   margin-left: auto;
   color: var(--text-faint);
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+/* Mobile: let the whole agent name wrap to multiple lines for breathing room. */
+@media (max-width: 760px) {
+  .sa-summary {
+    flex-wrap: wrap;
+  }
+  .sa-desc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex-basis: 100%;
+  }
+  .sa-status {
+    margin-left: auto;
+  }
 }
 .sa-transcript {
   padding: 6px 10px 10px;
