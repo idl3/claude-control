@@ -15,10 +15,13 @@ import { WebSocketServer } from 'ws';
 import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import { TranscriptTailer } from './lib/transcript.js';
-import { SessionRegistry } from './lib/sessions.js';
+import { SubAgentsWatcher } from './lib/subagents.js';
+import { parsePanePrompt } from './lib/prompt.js';
+import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
+import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { ResourceMonitor } from './lib/resources.js';
 import { buildAnswerProgram } from './lib/answer.js';
-import { sweepUploads } from './lib/uploads.js';
+import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -69,6 +72,8 @@ const CONFIG = {
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
   uploadTtlHours: Number(env('UPLOAD_TTL_HOURS')) || 24,
+  pinsFile:
+    env('PINS') || path.join(os.homedir(), '.claude-control', 'pins.json'),
 };
 
 const MIME = {
@@ -98,6 +103,10 @@ const IMAGE_MIME = {
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
+
+// Manual transcript pins (windowId.paneIndex -> transcript path). Loaded at boot,
+// applied to the registry, and editable via /api/pins.
+let pins = loadPins(CONFIG.pinsFile);
 
 /** id -> { tailer, clients:Set<ws>, pending } */
 const subscriptions = new Map();
@@ -174,6 +183,21 @@ const server = http.createServer((req, res) => {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleUpload(req, res, u);
+  }
+  if (u.pathname === '/api/file') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleServeFile(res, u);
+  }
+  if (u.pathname === '/api/pins') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    if (req.method === 'POST') return handleSetPin(req, res);
+    return endJson(res, 200, { pins });
+  }
+  if (u.pathname === '/api/transcripts') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return listRecentTranscripts({ projectsRoot: CONFIG.projectsRoot })
+      .then((list) => endJson(res, 200, { transcripts: list }))
+      .catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
   }
   if (u.pathname === '/api/push/vapid') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -539,6 +563,69 @@ async function proxyTerminalHttp(req, res, u) {
   req.pipe(proxyReq);
 }
 
+// Serve a previously-uploaded file back to the UI by absolute path (used by the
+// in-transcript image previews / lightbox). Coexists with /api/uploads/<basename>
+// above; both confine strictly to uploadsDir.
+const FILE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+};
+function handleServeFile(res, u) {
+  const full = resolveUploadPath(u.searchParams.get('path') || '', CONFIG.uploadsDir);
+  // Confinement: only files strictly inside uploadsDir are served.
+  if (!full) {
+    return endJson(res, 403, { error: 'forbidden' });
+  }
+  fs.readFile(full, (err, data) => {
+    if (err) { res.writeHead(404); return res.end('not found'); }
+    const ext = path.extname(full).toLowerCase();
+    res.writeHead(200, {
+      'content-type': FILE_MIME[ext] || 'application/octet-stream',
+      'cache-control': 'private, max-age=3600',
+    });
+    res.end(data);
+  });
+}
+
+// Set or clear a manual transcript pin. Body: { id, transcriptPath }.
+// transcriptPath null/empty clears the pin. The pin is keyed by the session's
+// stable windowId.paneIndex so it survives tmux window renumbering.
+async function handleSetPin(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  const id = typeof body?.id === 'string' ? body.id : '';
+  const session = sessionById(id);
+  if (!session) return endJson(res, 404, { error: 'unknown session' });
+  const key = pinKey(session.windowId, session.paneIndex);
+
+  const raw = body?.transcriptPath;
+  if (raw == null || raw === '') {
+    delete pins[key];
+  } else {
+    const full = validateTranscriptPath(raw, CONFIG.projectsRoot);
+    if (!full) return endJson(res, 400, { error: 'invalid transcript path' });
+    pins = { ...pins, [key]: full };
+  }
+  try {
+    savePins(CONFIG.pinsFile, pins);
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
+  registry.setPins(pins);
+  return endJson(res, 200, { ok: true, pins });
+}
+
 function serveStatic(pathname, res) {
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const full = path.join(PUBLIC_DIR, rel);
@@ -547,12 +634,32 @@ function serveStatic(pathname, res) {
     res.writeHead(403); return res.end('forbidden');
   }
   fs.readFile(full, (err, data) => {
-    if (err) { res.writeHead(404); return res.end('not found'); }
+    if (err) {
+      // SPA fallback: a missing path with no file extension is a client-side
+      // route (e.g. /0/1/1, a deep link to a session) — serve index.html so the
+      // app boots and reads the path. Real missing assets (with an extension)
+      // still 404.
+      if (!path.extname(rel)) return serveIndexHtml(res);
+      res.writeHead(404);
+      return res.end('not found');
+    }
     const ext = path.extname(full).toLowerCase();
     res.writeHead(200, {
       'content-type': MIME[ext] || 'application/octet-stream',
       // Personal tool under active iteration: never let a phone serve a stale
       // UI. Always revalidate so CSS/JS fixes show up on the next load.
+      'cache-control': 'no-store, must-revalidate',
+    });
+    res.end(data);
+  });
+}
+
+// Serve the SPA shell (index.html) for client-side routes.
+function serveIndexHtml(res) {
+  fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (err, data) => {
+    if (err) { res.writeHead(404); return res.end('not found'); }
+    res.writeHead(200, {
+      'content-type': MIME['.html'],
       'cache-control': 'no-store, must-revalidate',
     });
     res.end(data);
@@ -685,14 +792,32 @@ function ensureSubscription(id) {
   if (!session.transcriptPath) {
     sub = { tailer: null, clients: new Set(), pending: null, ready: Promise.resolve() };
     subscriptions.set(id, sub);
+    startPromptPoller(id, sub);
     return sub;
   }
 
   const tailer = new TranscriptTailer(session.transcriptPath, { maxBuffer: CONFIG.maxBuffer });
-  sub = { tailer, clients: new Set(), pending: null };
+  // Watch this session's sub-agent transcripts (Task/Agent). Discovery is polled
+  // when the parent transcript grows (when sub-agents spawn) + once at subscribe.
+  const subagents = new SubAgentsWatcher(session.transcriptPath);
+  sub = { tailer, subagents, clients: new Set(), pending: null };
   subscriptions.set(id, sub);
 
-  tailer.on('append', (msgs) => broadcastTo(id, { type: 'append', id, messages: msgs }));
+  subagents.on('change', (entry) =>
+    broadcastTo(id, { type: 'subagent', id, subagent: entry }),
+  );
+
+  tailer.on('append', (msgs) => {
+    broadcastTo(id, { type: 'append', id, messages: msgs });
+    // A sub-agent may have just spawned (poll for its files) or finished (its
+    // Task tool-call produced a tool_result → mark it done).
+    subagents.poll();
+    for (const m of msgs) {
+      for (const b of m.blocks ?? []) {
+        if (b.kind === 'tool_result' && b.forId) subagents.markDone(b.forId);
+      }
+    }
+  });
   tailer.on('pending', (pending) => {
     sub.pending = pending;
     registry.setPending(id, !!pending);
@@ -701,16 +826,59 @@ function ensureSubscription(id) {
   tailer.on('error', (err) => broadcastTo(id, { type: 'ack', op: 'tail', ok: false, error: String(err?.message || err) }));
 
   // Kick off the bounded tail load once; all clients await this same promise so
-  // the initial `messages` frame never races the first read.
-  sub.ready = tailer.start();
+  // the initial `messages` frame never races the first read. Poll sub-agents
+  // after the initial load so an already-running sub-agent shows immediately.
+  sub.ready = tailer.start().then(() => {
+    subagents.poll();
+    // Mark already-finished sub-agents done from the EXISTING buffer: their
+    // parent tool_result arrived before subscribe and is never re-streamed, so
+    // without this they'd be stuck showing "running".
+    const doneIds = new Set();
+    for (const m of tailer.getMessages()) {
+      for (const b of m.blocks ?? []) {
+        if (b.kind === 'tool_result' && b.forId) doneIds.add(b.forId);
+      }
+    }
+    if (doneIds.size) subagents.markDone(doneIds);
+  });
   sub.ready.catch(() => {}); // errors surface via the per-subscribe await below
+  startPromptPoller(id, sub);
   return sub;
+}
+
+// Poll the live pane for a TUI selection prompt (permission/trust/numbered menu).
+// These never reach the transcript, so without this the cockpit shows a pending
+// tool-call and looks stuck. Broadcasts a `prompt` frame only when it changes.
+function startPromptPoller(id, sub) {
+  if (sub.promptTimer) return;
+  sub._lastPrompt = undefined;
+  const tick = async () => {
+    const session = sessionById(id);
+    if (!session || !tmux.isValidTarget(session.target)) return;
+    let prompt = null;
+    try {
+      const cap = await tmux.capturePane(session.target, 40);
+      prompt = parsePanePrompt(cap);
+    } catch {
+      return;
+    }
+    const json = prompt ? JSON.stringify(prompt) : null;
+    if (json !== sub._lastPrompt) {
+      sub._lastPrompt = json;
+      broadcastTo(id, { type: 'prompt', id, prompt });
+    }
+  };
+  sub.promptTimer = setInterval(() => tick().catch(() => {}), 2000);
+  if (sub.promptTimer.unref) sub.promptTimer.unref();
+  tick().catch(() => {});
 }
 
 function maybeTeardown(id) {
   const sub = subscriptions.get(id);
   if (sub && sub.clients.size === 0) {
     if (sub.tailer) sub.tailer.stop();
+    if (sub.subagents) sub.subagents.stop();
+    if (sub.promptTimer) clearInterval(sub.promptTimer);
     subscriptions.delete(id);
   }
 }
@@ -759,6 +927,9 @@ async function handleClientMessage(ws, msg) {
         messages: sub.tailer ? sub.tailer.getMessages() : [],
         pending: sub.tailer ? sub.tailer.getPending() : null,
       });
+      // Snapshot any already-running sub-agents for this session.
+      const subs = sub.subagents ? sub.subagents.snapshot() : [];
+      if (subs.length) send(ws, { type: 'subagents', id: msg.id, subagents: subs });
       return;
     }
     case 'unsubscribe': {
@@ -797,6 +968,20 @@ async function handleClientMessage(ws, msg) {
       const lines = Math.max(1, Math.min(10000, Number(msg.lines) || 40));
       const text = await tmux.capturePane(session.target, lines);
       return send(ws, { type: 'capture', id: msg.id, text });
+    }
+    case 'promptkey': {
+      // Respond to a live TUI selection prompt (permission/menu). Whitelisted
+      // keys only — never arbitrary text — so this can't be used to inject input.
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      const ALLOWED = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down']);
+      if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
+      await tmux.sendRawKeys(session.target, [msg.key]);
+      // Force the next poll tick to broadcast (the prompt should now change/clear).
+      const sub = subscriptions.get(msg.id);
+      if (sub) sub._lastPrompt = '__force__';
+      return send(ws, { type: 'ack', op: 'promptkey', ok: true });
     }
     default:
       return;
@@ -872,6 +1057,7 @@ async function runUploadSweep() {
 }
 
 async function main() {
+  registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
   resources.start();
   await registry.refresh().catch(() => {});

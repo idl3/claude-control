@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CockpitSocket, type ConnState } from '../lib/ws';
 import type {
   Msg,
+  PanePrompt,
   Pending,
   ResourceSnapshot,
   Session,
+  SubAgent,
 } from '../lib/types';
 
 export interface ResourceState {
@@ -17,11 +19,15 @@ export interface CockpitStore {
   selectedId: string | null;
   messages: Msg[];
   pending: Pending | null;
+  prompt: PanePrompt | null;
+  subagents: SubAgent[];
   conn: ConnState;
   resources: ResourceState;
   capture: string | null;
   select: (id: string) => void;
+  resubscribe: () => void;
   sendReply: (text: string) => boolean;
+  sendPromptKey: (key: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
   requestCapture: (lines?: number) => boolean;
   clearCapture: () => void;
@@ -50,6 +56,12 @@ export function useCockpit(): CockpitStore {
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
+  // sessionId -> (agentId -> SubAgent). Sub-agents stream independently of the
+  // main transcript; keyed by agentId so updates upsert in place.
+  const [subagentsById, setSubagentsById] = useState<
+    Record<string, Record<string, SubAgent>>
+  >({});
+  const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -89,6 +101,25 @@ export function useCockpit(): CockpitStore {
           break;
         case 'capture':
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
+          break;
+        case 'prompt':
+          setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
+          break;
+        case 'subagents':
+          // Snapshot: replace this session's sub-agent map.
+          setSubagentsById((prev) => ({
+            ...prev,
+            [msg.id]: Object.fromEntries(
+              (msg.subagents ?? []).map((a) => [a.agentId, a]),
+            ),
+          }));
+          break;
+        case 'subagent':
+          // Incremental upsert by agentId.
+          setSubagentsById((prev) => ({
+            ...prev,
+            [msg.id]: { ...(prev[msg.id] ?? {}), [msg.subagent.agentId]: msg.subagent },
+          }));
           break;
         case 'ack':
           // Surfaced to the toast layer via the custom event below so the
@@ -150,6 +181,15 @@ export function useCockpit(): CockpitStore {
   );
 
   const clearCapture = useCallback(() => setCapture(null), []);
+  const resubscribe = useCallback(() => socket.resubscribe(), [socket]);
+  const sendPromptKey = useCallback(
+    (key: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'promptkey', id, key });
+    },
+    [socket],
+  );
 
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
@@ -159,17 +199,34 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? pendingById[selectedId] ?? null : null),
     [selectedId, pendingById],
   );
+  const prompt = useMemo(
+    () => (selectedId ? promptById[selectedId] ?? null : null),
+    [selectedId, promptById],
+  );
+  // Sub-agents for the selected session: running first, then by description.
+  const subagents = useMemo<SubAgent[]>(() => {
+    const map = selectedId ? subagentsById[selectedId] : null;
+    if (!map) return [];
+    return Object.values(map).sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'running' ? -1 : 1;
+      return (a.description ?? '').localeCompare(b.description ?? '');
+    });
+  }, [selectedId, subagentsById]);
 
   return {
     sessions,
     selectedId,
     messages,
     pending,
+    prompt,
+    subagents,
     conn,
     resources,
     capture,
     select,
+    resubscribe,
     sendReply,
+    sendPromptKey,
     sendAnswer,
     requestCapture,
     clearCapture,
