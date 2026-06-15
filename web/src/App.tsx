@@ -25,7 +25,19 @@ import { TokenGate } from './components/TokenGate';
 import { PinModal } from './components/PinModal';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
-import type { ServerMessage } from './lib/types';
+import type { Msg, ServerMessage } from './lib/types';
+
+// Concatenate a transcript message's text blocks (to match a real user echo
+// against a queued send).
+function msgText(msg: Msg): string {
+  return (msg.blocks ?? [])
+    .filter((b): b is { kind: 'text'; text: string } => b.kind === 'text')
+    .map((b) => b.text)
+    .join(' ');
+}
+
+// How long a queued send waits for its transcript echo before we stop showing it.
+const PENDING_SEND_TTL_MS = 120_000;
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
 // thread virtualizer, so it renders every message in the runtime's list; with the
@@ -90,11 +102,20 @@ function AppInner() {
   // dead after sending. On send we immediately show the typed text as a user
   // bubble + a "working…" assistant indicator, cleared once real transcript
   // activity arrives (or the session changes / a safety timeout fires).
-  const [optimistic, setOptimistic] = useState<{
+  // Queued / in-flight sends, FIFO. A send may sit in tmux's input queue while
+  // Claude is busy, and the echo only appears later. Each entry persists as a
+  // user bubble until ITS OWN echo (matched by text) lands in the transcript —
+  // so unrelated chunks arriving in the meantime no longer make it vanish.
+  // `text` = what was sent (for matching); `label` = what we display.
+  const [pendingSends, setPendingSends] = useState<
+    { key: number; sessionId: string; text: string; label: string; at: number }[]
+  >([]);
+  const sendSeq = useRef(0);
+  // Working indicator after answering an AskUserQuestion — the answer is sent as
+  // keystrokes (no transcript echo to match), so it clears on the next activity.
+  const [answering, setAnswering] = useState<{
     sessionId: string;
-    text: string;
     baseCount: number;
-    at: number;
   } | null>(null);
 
   const onNew = useCallback(
@@ -110,31 +131,80 @@ function AppInner() {
       if (ok && cockpit.selectedId) {
         const label =
           typed || (paths.length ? `📎 ${paths.length} attachment(s)` : text);
-        setOptimistic({
-          sessionId: cockpit.selectedId,
-          text: label,
-          baseCount: cockpit.messages.length,
-          at: Date.now(),
-        });
+        setPendingSends((q) => [
+          ...q,
+          {
+            key: ++sendSeq.current,
+            sessionId: cockpit.selectedId as string,
+            text,
+            label,
+            at: Date.now(),
+          },
+        ]);
       }
     },
     [cockpit, showToast],
   );
 
-  // Clear the optimistic echo when real transcript content arrives for that
-  // session, when the session changes, or after a 90s safety timeout.
+  // Reconcile queued sends: as new user messages arrive for the selected
+  // session, drop the oldest queued send whose sent text matches (so multiple
+  // queued messages clear one-by-one, in order). Per-session "processed length"
+  // so transcript history is never re-matched.
+  const processedRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (!optimistic) return;
-    const stale =
-      cockpit.selectedId !== optimistic.sessionId ||
-      cockpit.messages.length > optimistic.baseCount;
-    if (stale) {
-      setOptimistic(null);
+    const sid = cockpit.selectedId;
+    if (!sid) return;
+    const msgs = cockpit.messages;
+    const prev = processedRef.current[sid];
+    const start = prev == null ? msgs.length : Math.min(prev, msgs.length);
+    if (msgs.length > start) {
+      const echoes: string[] = [];
+      for (let i = start; i < msgs.length; i++) {
+        if (msgs[i].role !== 'user') continue;
+        const t = msgText(msgs[i]).trim();
+        if (t) echoes.push(t);
+      }
+      if (echoes.length) {
+        setPendingSends((q) => {
+          const next = [...q];
+          for (const t of echoes) {
+            const idx = next.findIndex(
+              (e) => e.sessionId === sid && e.text.trim() === t,
+            );
+            if (idx >= 0) next.splice(idx, 1);
+          }
+          return next;
+        });
+      }
+    }
+    processedRef.current[sid] = msgs.length;
+  }, [cockpit.selectedId, cockpit.messages]);
+
+  // TTL backstop for queued sends whose echo never arrived.
+  useEffect(() => {
+    if (pendingSends.length === 0) return;
+    const t = setInterval(() => {
+      const cutoff = Date.now() - PENDING_SEND_TTL_MS;
+      setPendingSends((q) =>
+        q.some((e) => e.at < cutoff) ? q.filter((e) => e.at >= cutoff) : q,
+      );
+    }, 5_000);
+    return () => clearInterval(t);
+  }, [pendingSends.length]);
+
+  // Clear the post-answer working indicator on the next activity / session change.
+  useEffect(() => {
+    if (!answering) return;
+    if (
+      cockpit.selectedId !== answering.sessionId ||
+      cockpit.messages.length > answering.baseCount
+    ) {
+      setAnswering(null);
       return;
     }
-    const t = setTimeout(() => setOptimistic(null), 90_000);
+    const t = setTimeout(() => setAnswering(null), 90_000);
     return () => clearTimeout(t);
-  }, [optimistic, cockpit.selectedId, cockpit.messages.length]);
+  }, [answering, cockpit.selectedId, cockpit.messages.length]);
 
   // Render cap: how many trailing messages are currently shown. Reset whenever
   // the active session changes so reopening a long session starts capped again.
@@ -153,20 +223,27 @@ function AppInner() {
   );
   const hiddenCount = Math.max(0, fullConverted.length - visibleCount);
 
+  const selectedPending = useMemo(
+    () => pendingSends.filter((e) => e.sessionId === cockpit.selectedId),
+    [pendingSends, cockpit.selectedId],
+  );
+
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
-    if (optimistic && optimistic.sessionId === cockpit.selectedId) {
-      // User echo only for typed sends; answers (text === '') show just the
-      // working indicator (the choice is already shown in the AskUserQuestion).
-      if (optimistic.text) {
-        base.push({
-          role: 'user',
-          id: 'optimistic-user',
-          content: [{ type: 'text', text: optimistic.text }],
-          metadata: { custom: { cockpitRole: 'user', optimistic: true } },
-        } as ThreadMessageLike);
-      }
+    // Each still-unmatched queued send shows as a user bubble (oldest first).
+    for (const e of selectedPending) {
+      base.push({
+        role: 'user',
+        id: `queued-${e.key}`,
+        content: [{ type: 'text', text: e.label }],
+        metadata: { custom: { cockpitRole: 'user', optimistic: true } },
+      } as ThreadMessageLike);
+    }
+    const working =
+      selectedPending.length > 0 ||
+      (answering !== null && answering.sessionId === cockpit.selectedId);
+    if (working) {
       base.push({
         role: 'assistant',
         id: 'optimistic-working',
@@ -175,7 +252,7 @@ function AppInner() {
       } as ThreadMessageLike);
     }
     return base;
-  }, [fullConverted, hiddenCount, cockpit.selectedId, optimistic]);
+  }, [fullConverted, hiddenCount, cockpit.selectedId, selectedPending, answering]);
 
   const loadEarlier = useCallback(() => {
     setVisibleCount((c) => c + LOAD_EARLIER_STEP);
@@ -188,6 +265,17 @@ function AppInner() {
     onNew,
     adapters: { attachments: attachmentAdapter },
   });
+
+  // Composer drafts are per-session: clear the composer (text + attachments)
+  // whenever the active session changes, so a draft typed for one session can
+  // never carry over and be sent into another.
+  useEffect(() => {
+    try {
+      runtime.thread.composer.reset();
+    } catch {
+      /* no-op if the runtime isn't ready */
+    }
+  }, [cockpit.selectedId, runtime]);
 
   // Locally dismissed AskUserQuestion (keyed by toolUseId). The modal is driven
   // by server-pushed `pending`; dismissing hides it until a *new* question (new
@@ -469,11 +557,9 @@ function AppInner() {
               // choice is shown in the AskUserQuestion widget), cleared when the
               // agent's transcript activity arrives.
               if (cockpit.selectedId) {
-                setOptimistic({
+                setAnswering({
                   sessionId: cockpit.selectedId,
-                  text: '',
                   baseCount: cockpit.messages.length,
-                  at: Date.now(),
                 });
               }
             }}
