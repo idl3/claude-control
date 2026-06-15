@@ -18,7 +18,7 @@ talks to tmux. Bind is localhost-only by default.
 npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 ```
 
-**Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). The web UI ships prebuilt — no build step on install.
+**Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). Optional: **ttyd** for the in-browser raw terminal (`brew install ttyd` · `sudo apt install ttyd`) — set `CLAUDE_CONTROL_TTYD` to override its path. The web UI ships prebuilt — no build step on install.
 
 ```bash
 claude-control                    # start the server (prints the URL)
