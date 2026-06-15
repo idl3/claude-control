@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CockpitSocket, type ConnState } from '../lib/ws';
 import type {
   Msg,
+  PanePrompt,
   Pending,
   ResourceSnapshot,
   Session,
@@ -18,6 +19,7 @@ export interface CockpitStore {
   selectedId: string | null;
   messages: Msg[];
   pending: Pending | null;
+  prompt: PanePrompt | null;
   subagents: SubAgent[];
   conn: ConnState;
   resources: ResourceState;
@@ -25,6 +27,7 @@ export interface CockpitStore {
   select: (id: string) => void;
   resubscribe: () => void;
   sendReply: (text: string) => boolean;
+  sendPromptKey: (key: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
   requestCapture: () => boolean;
   clearCapture: () => void;
@@ -58,6 +61,7 @@ export function useCockpit(): CockpitStore {
   const [subagentsById, setSubagentsById] = useState<
     Record<string, Record<string, SubAgent>>
   >({});
+  const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -97,6 +101,9 @@ export function useCockpit(): CockpitStore {
           break;
         case 'capture':
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
+          break;
+        case 'prompt':
+          setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
           break;
         case 'subagents':
           // Snapshot: replace this session's sub-agent map.
@@ -172,6 +179,14 @@ export function useCockpit(): CockpitStore {
 
   const clearCapture = useCallback(() => setCapture(null), []);
   const resubscribe = useCallback(() => socket.resubscribe(), [socket]);
+  const sendPromptKey = useCallback(
+    (key: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'promptkey', id, key });
+    },
+    [socket],
+  );
 
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
@@ -180,6 +195,10 @@ export function useCockpit(): CockpitStore {
   const pending = useMemo(
     () => (selectedId ? pendingById[selectedId] ?? null : null),
     [selectedId, pendingById],
+  );
+  const prompt = useMemo(
+    () => (selectedId ? promptById[selectedId] ?? null : null),
+    [selectedId, promptById],
   );
   // Sub-agents for the selected session: running first, then by description.
   const subagents = useMemo<SubAgent[]>(() => {
@@ -196,6 +215,7 @@ export function useCockpit(): CockpitStore {
     selectedId,
     messages,
     pending,
+    prompt,
     subagents,
     conn,
     resources,
@@ -203,6 +223,7 @@ export function useCockpit(): CockpitStore {
     select,
     resubscribe,
     sendReply,
+    sendPromptKey,
     sendAnswer,
     requestCapture,
     clearCapture,

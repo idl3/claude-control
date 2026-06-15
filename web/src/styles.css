@@ -445,6 +445,70 @@ body {
   cursor: pointer;
 }
 
+/* ── Login (token gate) ───────────────────────────────────────── */
+.login {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #0b0d10);
+  padding: 24px;
+}
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(340px, 88vw);
+}
+.login-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.login-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.login-input {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--text);
+  font-size: 16px;
+}
+.login-err {
+  min-height: 16px;
+  font-size: 12px;
+  color: #f87171;
+}
+.login-btn {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-btn:disabled {
+  opacity: 0.55;
+}
+.hud-logout {
+  margin-left: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ── Pin transcript modal ─────────────────────────────────────── */
 .pin-modal { display: flex; flex-direction: column; gap: 10px; max-height: 80vh; }
 .pin-search {

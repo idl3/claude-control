@@ -1,8 +1,71 @@
 // Token + URL helpers. The page is loaded as `?token=<t>`; every API call and
 // the WS URL must carry it. Same-origin throughout.
 
+const TOKEN_KEY = 'cc_token';
+
+/**
+ * Active token. A token entered via the login screen (localStorage) wins over a
+ * URL `?token=` — so a stale/wrong link can be overridden without editing the URL.
+ */
 export function getToken(): string | null {
+  try {
+    const stored = localStorage.getItem(TOKEN_KEY);
+    if (stored) return stored;
+  } catch {
+    /* localStorage blocked — fall back to URL */
+  }
   return new URLSearchParams(window.location.search).get('token');
+}
+
+/** Persist a token entered at the login screen. */
+export function setToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Log out: drop the stored token AND strip `?token=` from the URL so a bad link
+ * doesn't immediately re-authenticate on the next check.
+ */
+export function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.has('token')) {
+      u.searchParams.delete('token');
+      window.history.replaceState(null, '', u.pathname + u.search);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Seed localStorage from a URL `?token=` on first load (share-link convenience). */
+export function persistTokenFromUrl(): void {
+  try {
+    if (localStorage.getItem(TOKEN_KEY)) return;
+    const fromUrl = new URLSearchParams(window.location.search).get('token');
+    if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Verify the current token against a token-gated endpoint. true = authorized. */
+export async function checkAuth(): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/health?${authQuery().slice(1)}`);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Returns `&token=<t>` (already URL-encoded) or '' when no token present. */

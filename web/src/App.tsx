@@ -10,6 +10,8 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { buildPath, parsePath } from './lib/route';
+import { checkAuth, clearToken, persistTokenFromUrl } from './lib/api';
+import { Login } from './components/Login';
 import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -19,6 +21,7 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { LightboxProvider } from './components/Lightbox';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import { PinModal } from './components/PinModal';
+import { PromptModal } from './components/PromptModal';
 import type { Msg, ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -52,7 +55,29 @@ function msgText(msg: Msg): string {
 // showing it (safety backstop — normally the echo clears it far sooner).
 const PENDING_SEND_TTL_MS = 90_000;
 
+// Auth gate: verify the token before mounting the cockpit (which opens the WS).
+// On failure show the login screen so the user can key in the right token.
 export default function App() {
+  const [auth, setAuth] = useState<'checking' | 'ok' | 'needed'>('checking');
+
+  useEffect(() => {
+    persistTokenFromUrl();
+    checkAuth().then((ok) => setAuth(ok ? 'ok' : 'needed'));
+  }, []);
+
+  if (auth === 'checking') return <div className="login" aria-busy="true" />;
+  if (auth === 'needed') return <Login onAuthed={() => setAuth('ok')} />;
+  return (
+    <CockpitApp
+      onLogout={() => {
+        clearToken();
+        setAuth('needed');
+      }}
+    />
+  );
+}
+
+function CockpitApp({ onLogout }: { onLogout: () => void }) {
   const cockpit = useCockpit();
   const push = usePushNotifications();
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -236,6 +261,9 @@ export default function App() {
   // by server-pushed `pending`; dismissing hides it until a *new* question (new
   // toolUseId) arrives, without needing the server to clear pending first.
   const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
+  // Locally-hidden pane prompt (keyed by its JSON signature). Re-shows when the
+  // prompt changes; tapping an option clears it server-side via the poller.
+  const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
 
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
@@ -328,6 +356,7 @@ export default function App() {
           resources={cockpit.resources}
           conn={cockpit.conn}
           push={push}
+          onLogout={onLogout}
         />
         <UpdateBanner />
         {showIosHint ? (
@@ -419,6 +448,18 @@ export default function App() {
               setDismissedAsk(cockpit.pending?.toolUseId ?? null);
               cockpit.clearCapture();
             }}
+          />
+        ) : null}
+
+        {cockpit.prompt &&
+        !cockpit.pending &&
+        JSON.stringify(cockpit.prompt) !== dismissedPrompt ? (
+          <PromptModal
+            prompt={cockpit.prompt}
+            onKey={(key) => cockpit.sendPromptKey(key)}
+            onClose={() =>
+              setDismissedPrompt(JSON.stringify(cockpit.prompt))
+            }
           />
         ) : null}
 

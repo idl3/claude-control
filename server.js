@@ -14,6 +14,7 @@ import { WebSocketServer } from 'ws';
 import * as tmux from './lib/tmux.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher } from './lib/subagents.js';
+import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { ResourceMonitor } from './lib/resources.js';
@@ -473,6 +474,7 @@ function ensureSubscription(id) {
   if (!session.transcriptPath) {
     sub = { tailer: null, clients: new Set(), pending: null, ready: Promise.resolve() };
     subscriptions.set(id, sub);
+    startPromptPoller(id, sub);
     return sub;
   }
 
@@ -508,9 +510,49 @@ function ensureSubscription(id) {
   // Kick off the bounded tail load once; all clients await this same promise so
   // the initial `messages` frame never races the first read. Poll sub-agents
   // after the initial load so an already-running sub-agent shows immediately.
-  sub.ready = tailer.start().then(() => subagents.poll());
+  sub.ready = tailer.start().then(() => {
+    subagents.poll();
+    // Mark already-finished sub-agents done from the EXISTING buffer: their
+    // parent tool_result arrived before subscribe and is never re-streamed, so
+    // without this they'd be stuck showing "running".
+    const doneIds = new Set();
+    for (const m of tailer.getMessages()) {
+      for (const b of m.blocks ?? []) {
+        if (b.kind === 'tool_result' && b.forId) doneIds.add(b.forId);
+      }
+    }
+    if (doneIds.size) subagents.markDone(doneIds);
+  });
   sub.ready.catch(() => {}); // errors surface via the per-subscribe await below
+  startPromptPoller(id, sub);
   return sub;
+}
+
+// Poll the live pane for a TUI selection prompt (permission/trust/numbered menu).
+// These never reach the transcript, so without this the cockpit shows a pending
+// tool-call and looks stuck. Broadcasts a `prompt` frame only when it changes.
+function startPromptPoller(id, sub) {
+  if (sub.promptTimer) return;
+  sub._lastPrompt = undefined;
+  const tick = async () => {
+    const session = sessionById(id);
+    if (!session || !tmux.isValidTarget(session.target)) return;
+    let prompt = null;
+    try {
+      const cap = await tmux.capturePane(session.target, 40);
+      prompt = parsePanePrompt(cap);
+    } catch {
+      return;
+    }
+    const json = prompt ? JSON.stringify(prompt) : null;
+    if (json !== sub._lastPrompt) {
+      sub._lastPrompt = json;
+      broadcastTo(id, { type: 'prompt', id, prompt });
+    }
+  };
+  sub.promptTimer = setInterval(() => tick().catch(() => {}), 2000);
+  if (sub.promptTimer.unref) sub.promptTimer.unref();
+  tick().catch(() => {});
 }
 
 function maybeTeardown(id) {
@@ -518,6 +560,7 @@ function maybeTeardown(id) {
   if (sub && sub.clients.size === 0) {
     if (sub.tailer) sub.tailer.stop();
     if (sub.subagents) sub.subagents.stop();
+    if (sub.promptTimer) clearInterval(sub.promptTimer);
     subscriptions.delete(id);
   }
 }
@@ -607,6 +650,20 @@ async function handleClientMessage(ws, msg) {
       const lines = Math.max(1, Math.min(10000, Number(msg.lines) || 40));
       const text = await tmux.capturePane(session.target, lines);
       return send(ws, { type: 'capture', id: msg.id, text });
+    }
+    case 'promptkey': {
+      // Respond to a live TUI selection prompt (permission/menu). Whitelisted
+      // keys only — never arbitrary text — so this can't be used to inject input.
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      const ALLOWED = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down']);
+      if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
+      await tmux.sendRawKeys(session.target, [msg.key]);
+      // Force the next poll tick to broadcast (the prompt should now change/clear).
+      const sub = subscriptions.get(msg.id);
+      if (sub) sub._lastPrompt = '__force__';
+      return send(ws, { type: 'ack', op: 'promptkey', ok: true });
     }
     default:
       return;

@@ -7,6 +7,7 @@ interface ResourceHudProps {
   resources: ResourceState;
   conn: ConnState;
   push: PushController;
+  onLogout: () => void;
 }
 
 function fmt(n: number | undefined, suffix = ''): string {
@@ -14,7 +15,7 @@ function fmt(n: number | undefined, suffix = ''): string {
 }
 
 // Slim top bar: self cpu/rss + system load/mem, warning-tinted when over limit.
-export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
+export function ResourceHud({ resources, conn, push, onLogout }: ResourceHudProps) {
   const snap = resources.snapshot;
   const self = snap?.self ?? {};
   const sys = snap?.system ?? {};
@@ -48,6 +49,15 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
       ) : null}
       <span className="hud-spacer" />
       <NotifyBell push={push} />
+      <button
+        type="button"
+        className="hud-logout"
+        title="Log out (clear token)"
+        aria-label="Log out"
+        onClick={onLogout}
+      >
+        ⎋
+      </button>
     </div>
   );
 }

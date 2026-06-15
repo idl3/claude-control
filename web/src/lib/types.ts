@@ -75,6 +75,18 @@ export interface SubAgent {
   messages: Msg[];
 }
 
+// A live TUI selection prompt (permission / trust / numbered menu) detected from
+// the pane — NOT from the transcript (these never appear there).
+export interface PanePromptOption {
+  key: string;
+  label: string;
+  selected?: boolean;
+}
+export interface PanePrompt {
+  question: string;
+  options: PanePromptOption[];
+}
+
 export interface ResourceSnapshot {
   self?: { cpuPct?: number; rssMB?: number; heapMB?: number };
   system?: {
@@ -95,6 +107,7 @@ export type ServerMessage =
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }
+  | { type: 'prompt'; id: string; prompt: PanePrompt | null }
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
   | { type: 'ack'; op: string; ok: boolean; error?: string };
@@ -105,4 +118,5 @@ export type ClientMessage =
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
-  | { type: 'capture'; id: string; lines?: number };
+  | { type: 'capture'; id: string; lines?: number }
+  | { type: 'promptkey'; id: string; key: string };
