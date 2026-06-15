@@ -27,13 +27,42 @@ test('parses a Claude Code permission prompt with selected option', () => {
   assert.equal(p.options[1].selected, true);
 });
 
-test('strips ANSI from labels', () => {
-  const cap = 'Do you want to proceed?\n 1. \x1b[32mYes\x1b[0m\n 2. No\n';
+test('strips ANSI from labels (with Esc footer as the signal)', () => {
+  const cap =
+    'Do you want to proceed?\n 1. \x1b[32mYes\x1b[0m\n 2. No\nEsc to cancel\n';
   const p = parsePanePrompt(cap);
+  assert.ok(p);
   assert.equal(p.options[0].label, 'Yes');
 });
 
-test('rejects a normal numbered list (no prompt hint)', () => {
+test('accepts a plan-approval prompt (cursor signal)', () => {
+  const cap = [
+    'Would you like to proceed?',
+    ' ❯ 1. Yes, and auto-accept edits',
+    ' 2. Yes, and manually approve edits',
+    ' 3. No, keep planning',
+  ].join('\n');
+  const p = parsePanePrompt(cap);
+  assert.ok(p);
+  assert.equal(p.options.length, 3);
+  assert.equal(p.options[0].selected, true);
+});
+
+test('rejects assistant numbered PROSE (no cursor, no Esc footer)', () => {
+  // The exact false-positive class: a plan written as a numbered list, followed
+  // by more prose — must NOT pop an approval modal.
+  const cap = [
+    "Here's what I'll do next:",
+    ' 1. Resolve the delegate and assign the ticket',
+    ' 2. Watch the four signals as it runs',
+    '',
+    'Just ping me with "live" and I will fire it.',
+    'bypass permissions on · 1 shell',
+  ].join('\n');
+  assert.equal(parsePanePrompt(cap), null);
+});
+
+test('rejects a numbered list with no TUI signal', () => {
   assert.equal(parsePanePrompt('steps:\n 1. one\n 2. two\nmore prose'), null);
 });
 
@@ -42,5 +71,5 @@ test('rejects a pane with no numbered options', () => {
 });
 
 test('requires options to start at 1', () => {
-  assert.equal(parsePanePrompt('Do you want to proceed?\n 2. a\n 3. b'), null);
+  assert.equal(parsePanePrompt('Would you like to proceed?\n 2. a\n 3. b\nEsc to cancel'), null);
 });
