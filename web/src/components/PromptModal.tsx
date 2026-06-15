@@ -1,32 +1,79 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AssistantRuntimeProvider,
+  ThreadPrimitive,
+  useExternalStoreRuntime,
+  type ThreadMessageLike,
+} from '@assistant-ui/react';
+import { AssistantMessage, UserMessage } from './Messages';
 import type { PanePrompt } from '../lib/types';
 
 interface PromptModalProps {
   prompt: PanePrompt;
   onKey: (key: string) => void;
   onClose: () => void;
+  /** When the prompt is a plan approval, the plan markdown to render for review. */
+  planMarkdown?: string | null;
+}
+
+const messageComponents = {
+  UserMessage,
+  AssistantMessage,
+  SystemMessage: AssistantMessage,
+} as const;
+
+/**
+ * Render the plan as rich markdown using the SAME renderer as the chat (so
+ * headings, lists, tables, fenced code all read properly) before the user is
+ * asked to approve. A throwaway read-only runtime holds a single assistant
+ * message = the plan text.
+ */
+function PlanReview({ markdown }: { markdown: string }) {
+  const messages = useMemo<ThreadMessageLike[]>(
+    () => [
+      {
+        role: 'assistant',
+        id: 'plan',
+        content: [{ type: 'text', text: markdown }],
+        metadata: { custom: { cockpitRole: 'assistant' } },
+      } as ThreadMessageLike,
+    ],
+    [markdown],
+  );
+  const runtime = useExternalStoreRuntime({
+    messages,
+    isDisabled: true,
+    convertMessage: (m: ThreadMessageLike) => m,
+    onNew: async () => {},
+  });
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Root className="plan-review">
+        <ThreadPrimitive.Viewport className="plan-review-viewport">
+          <ThreadPrimitive.Messages components={messageComponents} />
+        </ThreadPrimitive.Viewport>
+      </ThreadPrimitive.Root>
+    </AssistantRuntimeProvider>
+  );
 }
 
 /**
- * Live TUI selection prompt (permission / trust / numbered menu) detected from
- * the pane. Tapping an option sends its key — that single tap IS the submit
- * (no separate Confirm), so we show immediate "sending…" feedback and disable
- * the buttons to prevent a confused double-tap from sending the key twice. The
- * modal clears on its own once the server's pane poll sees the prompt resolve.
- * These prompts never reach the transcript, so this is the only way the cockpit
- * can surface them.
+ * Live TUI selection prompt (permission / plan approval / numbered menu) detected
+ * from the pane. Tapping an option sends its key — that single tap IS the submit
+ * (no separate Confirm), so we show immediate "sending…" feedback and disable the
+ * buttons to prevent a double-tap from sending twice. For plan approvals we first
+ * render the full plan as markdown (scrollable) and put the approval options at
+ * the very bottom, so the plan can be reviewed before deciding.
  */
-export function PromptModal({ prompt, onKey, onClose }: PromptModalProps) {
+export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModalProps) {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  // Re-enable when a new/changed prompt arrives (server only re-broadcasts on
-  // change), so a follow-up prompt isn't stuck disabled.
   const sig = JSON.stringify(prompt);
   useEffect(() => {
     setPendingKey(null);
   }, [sig]);
 
   const submit = (key: string) => {
-    if (pendingKey) return; // guard: one submission per prompt
+    if (pendingKey) return;
     setPendingKey(key);
     onKey(key);
   };
@@ -43,6 +90,7 @@ export function PromptModal({ prompt, onKey, onClose }: PromptModalProps) {
   }, [onClose]);
 
   const sending = pendingKey !== null;
+  const isPlan = !!planMarkdown;
 
   return (
     <div
@@ -51,17 +99,24 @@ export function PromptModal({ prompt, onKey, onClose }: PromptModalProps) {
         if (e.target === e.currentTarget && !sending) onClose();
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label="Terminal prompt">
+      <div
+        className={isPlan ? 'modal modal-plan' : 'modal'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isPlan ? 'Review plan' : 'Terminal prompt'}
+      >
         <div className="modal-head">
-          <span className="modal-title">Claude needs a choice</span>
+          <span className="modal-title">{isPlan ? 'Review plan' : 'Claude needs a choice'}</span>
           <button type="button" className="modal-close" aria-label="Hide" onClick={onClose}>
             ✕
           </button>
         </div>
 
         <div className="modal-body">
+          {isPlan ? <PlanReview markdown={planMarkdown as string} /> : null}
+
           <div className="question">
-            <div className="q-text">{prompt.question}</div>
+            {!isPlan ? <div className="q-text">{prompt.question}</div> : null}
             <div className="q-options">
               {prompt.options.map((opt) => (
                 <button

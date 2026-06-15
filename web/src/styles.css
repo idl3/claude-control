@@ -1408,6 +1408,26 @@ details.block-tool[open] > summary .tool-arrow {
   flex-direction: column;
   gap: 18px;
 }
+/* Plan-review modal: wider, the plan renders as a full-width markdown doc that
+   scrolls with the body, and the approval options sit at the very bottom. */
+.modal-plan {
+  max-width: 760px;
+}
+.plan-review {
+  width: 100%;
+}
+.plan-review-viewport {
+  display: flex;
+  flex-direction: column;
+}
+.plan-review .msg-row {
+  max-width: 100%;
+  align-self: stretch;
+  align-items: stretch;
+}
+.plan-review .msg-role {
+  display: none; /* read as a plan doc, not a chat bubble */
+}
 .question {
   display: flex;
   flex-direction: column;

@@ -245,6 +245,22 @@ function AppInner() {
     [pendingSends, cockpit.selectedId],
   );
 
+  // When a prompt is active, surface the plan being approved (the most recent
+  // ExitPlanMode tool-call's markdown) so it can be reviewed inside the modal.
+  const planMarkdown = useMemo<string | null>(() => {
+    if (!cockpit.prompt) return null;
+    const msgs = cockpit.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      for (const b of msgs[i].blocks ?? []) {
+        if (b.kind === 'tool_use' && b.name === 'ExitPlanMode') {
+          const plan = (b.input as { plan?: unknown } | undefined)?.plan;
+          if (typeof plan === 'string' && plan.trim()) return plan;
+        }
+      }
+    }
+    return null;
+  }, [cockpit.prompt, cockpit.messages]);
+
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
@@ -651,6 +667,7 @@ function AppInner() {
         JSON.stringify(cockpit.prompt) !== dismissedPrompt ? (
           <PromptModal
             prompt={cockpit.prompt}
+            planMarkdown={planMarkdown}
             onKey={(key) => cockpit.sendPromptKey(key)}
             onClose={() => setDismissedPrompt(JSON.stringify(cockpit.prompt))}
           />

@@ -203,12 +203,12 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
-  // Sub-agents for the selected session: running first, then by description.
+  // Sub-agents for the selected session, newest first (by created-at).
   const subagents = useMemo<SubAgent[]>(() => {
     const map = selectedId ? subagentsById[selectedId] : null;
     if (!map) return [];
     return Object.values(map).sort(
-      (a, b) => (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity),
+      (a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity),
     );
   }, [selectedId, subagentsById]);
 
