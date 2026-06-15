@@ -81,6 +81,59 @@ export interface UploadResult {
   name: string;
 }
 
+/**
+ * Bare URL to fetch a previously-uploaded file back by absolute path. Pass this
+ * to authFetch (Bearer header) — NOT to an <img src>, which can't authenticate;
+ * callers fetch it and build an object URL (see ImagePart). The server confines
+ * the path to its uploads dir; anything else 403s.
+ */
+export function fileUrl(absPath: string): string {
+  return `/api/file?path=${encodeURIComponent(absPath)}`;
+}
+
+// ── Manual transcript pins ─────────────────────────────────────────
+
+export interface TranscriptInfo {
+  transcriptPath: string;
+  title: string | null;
+  sessionId: string | null;
+  cwd: string | null;
+  lastActivity: string | null;
+}
+
+/** Current pins map (pin key -> transcript path). */
+export async function getPins(): Promise<Record<string, string>> {
+  const res = await authFetch('/api/pins');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { pins?: Record<string, string> }).pins ?? {};
+}
+
+/** Pin (or, with null, unpin) a session's transcript. Returns the updated map. */
+export async function setPin(
+  id: string,
+  transcriptPath: string | null,
+): Promise<Record<string, string>> {
+  const res = await authFetch('/api/pins', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, transcriptPath }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    pins?: Record<string, string>;
+    error?: string;
+  };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json.pins ?? {};
+}
+
+/** Recent transcripts across all projects, for the pin picker. */
+export async function listTranscripts(): Promise<TranscriptInfo[]> {
+  const res = await authFetch('/api/transcripts');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { transcripts?: TranscriptInfo[] }).transcripts ?? [];
+}
+
 export interface VersionInfo {
   current: string;
   latest: string | null;
