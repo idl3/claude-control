@@ -4,7 +4,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { sweepUploads } from '../lib/uploads.js';
+import { sweepUploads, resolveUploadPath } from '../lib/uploads.js';
+
+test('resolveUploadPath confines to uploadsDir', () => {
+  const dir = '/Users/x/.claude-control/uploads';
+  // inside → resolved absolute path
+  assert.equal(
+    resolveUploadPath(`${dir}/123-pic.png`, dir),
+    `${dir}/123-pic.png`,
+  );
+  // traversal / outside → null
+  assert.equal(resolveUploadPath(`${dir}/../../etc/passwd`, dir), null);
+  assert.equal(resolveUploadPath('/etc/passwd', dir), null);
+  assert.equal(resolveUploadPath('', dir), null);
+  assert.equal(resolveUploadPath(null, dir), null);
+  // the dir itself (no trailing file) → null (must be strictly inside)
+  assert.equal(resolveUploadPath(dir, dir), null);
+});
 
 test('sweepUploads removes files older than ttl, keeps fresh ones', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-sweep-'));

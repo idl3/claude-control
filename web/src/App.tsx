@@ -22,6 +22,9 @@ import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
+import { PinModal } from './components/PinModal';
+import { PromptModal } from './components/PromptModal';
+import { SubAgentPanel } from './components/SubAgentPanel';
 import type { ServerMessage } from './lib/types';
 
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
@@ -196,6 +199,17 @@ function AppInner() {
 
   // Raw-terminal escape hatch: the session id whose ttyd panel is open, or null.
   const [terminalId, setTerminalId] = useState<string | null>(null);
+
+  // Pin-transcript modal, sub-agent side panel, and locally-hidden pane prompt
+  // (keyed by JSON signature so it re-shows when the prompt changes). Reset when
+  // the active session changes.
+  const [pinOpen, setPinOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    setPinOpen(false);
+    setPanelOpen(false);
+  }, [cockpit.selectedId]);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -381,6 +395,31 @@ function AppInner() {
                         >
                           ⛶
                         </button>
+                        <button
+                          type="button"
+                          className="rename-btn pin-btn"
+                          aria-pressed={!!selectedSession.pinned}
+                          aria-label={
+                            selectedSession.pinned ? 'Transcript pinned' : 'Pin a transcript'
+                          }
+                          title={
+                            selectedSession.pinned ? 'Transcript pinned' : 'Pin a transcript'
+                          }
+                          onClick={() => setPinOpen(true)}
+                        >
+                          {selectedSession.pinned ? '📌' : '📍'}
+                        </button>
+                        {cockpit.subagents.length > 0 ? (
+                          <button
+                            type="button"
+                            className="rename-btn agents-btn"
+                            aria-pressed={panelOpen}
+                            title="Sub-agents"
+                            onClick={() => setPanelOpen((v) => !v)}
+                          >
+                            🤖 {cockpit.subagents.length}
+                          </button>
+                        ) : null}
                       </>
                     ) : null}
                   </span>
@@ -462,6 +501,31 @@ function AppInner() {
               terminalId
             }
             onClose={() => setTerminalId(null)}
+          />
+        ) : null}
+
+        <SubAgentPanel
+          subagents={cockpit.subagents}
+          open={panelOpen && cockpit.subagents.length > 0}
+          onClose={() => setPanelOpen(false)}
+        />
+
+        {pinOpen && selectedSession ? (
+          <PinModal
+            session={selectedSession}
+            onClose={() => setPinOpen(false)}
+            onToast={showToast}
+            onPinned={() => cockpit.resubscribe()}
+          />
+        ) : null}
+
+        {cockpit.prompt &&
+        !cockpit.pending &&
+        JSON.stringify(cockpit.prompt) !== dismissedPrompt ? (
+          <PromptModal
+            prompt={cockpit.prompt}
+            onKey={(key) => cockpit.sendPromptKey(key)}
+            onClose={() => setDismissedPrompt(JSON.stringify(cockpit.prompt))}
           />
         ) : null}
 
