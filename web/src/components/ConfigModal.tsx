@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getConfig, saveConfig } from '../lib/api';
+import { getConfig, saveConfig, getVersion } from '../lib/api';
 
 interface ConfigModalProps {
   onClose: () => void;
@@ -16,6 +16,21 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const [defaultCwd, setDefaultCwd] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [version, setVersion] = useState<{
+    current: string;
+    latest: string | null;
+    updateAvailable: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getVersion()
+      .then((v) => alive && v && setVersion(v))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -119,6 +134,19 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
             Must be an existing directory. New sessions start here.
           </span>
         </label>
+
+        <div className="config-version">
+          {version ? (
+            <>
+              <span>claude-control v{version.current}</span>
+              {version.updateAvailable && version.latest ? (
+                <span className="config-version-update">
+                  · update available: v{version.latest}
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
 
         <div className="config-actions">
           <button

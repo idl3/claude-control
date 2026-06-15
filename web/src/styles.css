@@ -1866,6 +1866,19 @@ details.block-tool[open] > summary .tool-arrow {
   padding: 0 4px;
   border-radius: 4px;
 }
+.config-version {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.config-version-update {
+  color: var(--accent, #3b82f6);
+}
 .config-actions {
   display: flex;
   justify-content: flex-end;
