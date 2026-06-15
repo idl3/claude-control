@@ -207,10 +207,9 @@ export function useCockpit(): CockpitStore {
   const subagents = useMemo<SubAgent[]>(() => {
     const map = selectedId ? subagentsById[selectedId] : null;
     if (!map) return [];
-    return Object.values(map).sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'running' ? -1 : 1;
-      return (a.description ?? '').localeCompare(b.description ?? '');
-    });
+    return Object.values(map).sort(
+      (a, b) => (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity),
+    );
   }, [selectedId, subagentsById]);
 
   return {
