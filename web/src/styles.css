@@ -677,7 +677,10 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  /* Clear the iOS status bar (clock/5G/battery): the panel is fixed at top:0,
+     so the head needs the top safe-area inset or its title + close button sit
+     under the notch cluster. On desktop the inset is 0 → unchanged 10px. */
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
   border-bottom: 1px solid var(--line);
 }
 .sa-panel-title {
@@ -2095,7 +2098,8 @@ details.block-tool[open] > summary .tool-arrow {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  /* Same fixed-at-top status-bar clearance as .sa-panel-head. */
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
