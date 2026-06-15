@@ -73,6 +73,7 @@ export interface SubAgent {
   description: string | null;
   status: 'running' | 'done';
   messages: Msg[];
+  createdAt?: number | null;
 }
 
 // A live TUI selection prompt (permission / trust / numbered menu) detected from
