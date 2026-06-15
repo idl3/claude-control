@@ -39,6 +39,23 @@ function msgText(msg: Msg): string {
 // How long a queued send waits for its transcript echo before we stop showing it.
 const PENDING_SEND_TTL_MS = 120_000;
 
+// Per-session composer drafts (staged prompt text), persisted across reloads.
+const DRAFTS_KEY = 'cc_drafts';
+function loadDrafts(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+function saveDrafts(drafts: Record<string, string>): void {
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 // How many trailing messages to render initially. assistant-ui (0.14.14) has no
 // thread virtualizer, so it renders every message in the runtime's list; with the
 // 500-message server cap, each potentially large, mounting all of them can jank
@@ -266,12 +283,36 @@ function AppInner() {
     adapters: { attachments: attachmentAdapter },
   });
 
-  // Composer drafts are per-session: clear the composer (text + attachments)
-  // whenever the active session changes, so a draft typed for one session can
-  // never carry over and be sent into another.
+  // Per-session composer drafts: each session retains its staged prompt text
+  // across switches AND reloads (localStorage). Attachments are still cleared on
+  // switch (File objects can't be serialized) so they never bleed between sessions.
+  const draftsRef = useRef<Record<string, string>>(loadDrafts());
+  const draftSessionRef = useRef<string | null>(cockpit.selectedId);
+
+  // Save the active session's draft as the composer text changes.
   useEffect(() => {
+    const composer = runtime.thread.composer;
+    const persist = () => {
+      const sid = draftSessionRef.current;
+      if (!sid) return;
+      const text = composer.getState().text ?? '';
+      if (text) draftsRef.current[sid] = text;
+      else delete draftsRef.current[sid];
+      saveDrafts(draftsRef.current);
+    };
+    return composer.subscribe(persist);
+  }, [runtime]);
+
+  // On session switch: load the incoming session's draft (read BEFORE reset so
+  // the reset's empty save can't clobber it), clear attachments, restore text.
+  useEffect(() => {
+    const composer = runtime.thread.composer;
+    const sid = cockpit.selectedId;
+    const draft = sid ? draftsRef.current[sid] ?? '' : '';
+    draftSessionRef.current = sid;
     try {
-      runtime.thread.composer.reset();
+      composer.reset();
+      if (draft) composer.setText(draft);
     } catch {
       /* no-op if the runtime isn't ready */
     }
