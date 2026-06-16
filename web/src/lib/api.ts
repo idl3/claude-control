@@ -208,6 +208,29 @@ export async function postPushUnsubscribe(endpoint: string): Promise<boolean> {
   }
 }
 
+/**
+ * Replace the PWA home-screen icon with a user-supplied PNG (token-gated POST
+ * of the raw bytes). Server validates the PNG signature. Throws on rejection.
+ */
+export async function uploadIcon(file: File): Promise<void> {
+  const res = await authFetch('/api/icon', { method: 'POST', body: file });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+}
+
+/** Remove the custom home-screen icon, reverting to the bundled default. */
+export async function resetIcon(): Promise<void> {
+  const res = await authFetch('/api/icon', { method: 'DELETE' });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+}
+
 export interface ControlConfig {
   launchCommand: string;
   defaultCwd: string;

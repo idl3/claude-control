@@ -78,6 +78,11 @@ const CONFIG = {
   uploadTtlHours: Number(env('UPLOAD_TTL_HOURS')) || 24,
   pinsFile:
     env('PINS') || path.join(os.homedir(), '.claude-control', 'pins.json'),
+  // Custom PWA home-screen icon (PNG). When present it overrides the bundled
+  // default robot logo for the manifest icons + apple-touch-icon. Uploaded via
+  // POST /api/icon, removed via DELETE /api/icon.
+  iconFile:
+    env('ICON') || path.join(os.homedir(), '.claude-control', 'icon.png'),
 };
 
 const MIME = {
@@ -255,6 +260,22 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/api/uploads/')) {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleServeUpload(req, res, u);
+  }
+
+  // PWA home-screen icon. GET is token-FREE: the OS fetches manifest icons and
+  // the apple-touch-icon with no Authorization header, so this surface must be
+  // open (it only ever returns an image). POST/DELETE (replace/reset the custom
+  // icon) are token-gated.
+  if (u.pathname === '/api/icon') {
+    if (req.method === 'POST') {
+      if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+      return handleIconUpload(req, res);
+    }
+    if (req.method === 'DELETE') {
+      if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+      return handleIconReset(res);
+    }
+    return handleServeIcon(res, u);
   }
 
   // Raw-terminal escape hatch: token-gated reverse proxy to an on-demand,
@@ -596,6 +617,70 @@ function handleServeFile(res, u) {
     });
     res.end(data);
   });
+}
+
+// 8-byte PNG file signature.
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+// GET /api/icon[?size=192|512] — serve the custom icon if one was uploaded,
+// else the bundled default robot logo at the closest bundled size. Token-free
+// (see the route guard) because the OS fetches it without auth headers.
+function handleServeIcon(res, u) {
+  const size = Number(u.searchParams.get('size')) || 192;
+  const fallback = path.join(PUBLIC_DIR, size >= 512 ? 'icon-512.png' : 'icon-192.png');
+  const file = fs.existsSync(CONFIG.iconFile) ? CONFIG.iconFile : fallback;
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); return res.end('not found'); }
+    res.writeHead(200, {
+      'content-type': 'image/png',
+      // The home-screen icon may change at runtime; never let the phone pin a
+      // stale one (it already re-reads the manifest on reinstall).
+      'cache-control': 'no-store, must-revalidate',
+    });
+    res.end(data);
+  });
+}
+
+// POST /api/icon — replace the custom home-screen icon with the raw PNG body.
+// PNG-only (validated by signature) so handleServeIcon's image/png is honest.
+function handleIconUpload(req, res) {
+  const maxBytes = 4 * 1024 * 1024;
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+  req.on('data', (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > maxBytes) {
+      aborted = true;
+      endJson(res, 413, { error: 'icon exceeds 4 MB limit' });
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on('end', async () => {
+    if (aborted) return;
+    const buf = Buffer.concat(chunks);
+    if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIG)) {
+      return endJson(res, 400, { error: 'icon must be a PNG image' });
+    }
+    try {
+      await fs.promises.mkdir(path.dirname(CONFIG.iconFile), { recursive: true });
+      await fs.promises.writeFile(CONFIG.iconFile, buf, { mode: 0o600 });
+      endJson(res, 200, { ok: true, custom: true });
+    } catch (err) {
+      endJson(res, 500, { error: String(err?.message || err) });
+    }
+  });
+}
+
+// DELETE /api/icon — drop the custom icon, reverting to the bundled default.
+function handleIconReset(res) {
+  fs.promises
+    .rm(CONFIG.iconFile, { force: true })
+    .then(() => endJson(res, 200, { ok: true, custom: false }))
+    .catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
 }
 
 // Set or clear a manual transcript pin. Body: { id, transcriptPath }.
