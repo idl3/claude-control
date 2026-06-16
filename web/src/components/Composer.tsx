@@ -93,7 +93,7 @@ export function Composer({ disabled }: ComposerProps) {
       <div className="composer-card">
         <ComposerPrimitive.Input
           className="composer-input"
-          placeholder={disabled ? 'select a session…' : 'reply…  (⌘/Ctrl+↵ to send · Enter = newline)'}
+          placeholder={disabled ? 'Select a session…' : 'Reply…  (⌘/Ctrl+↵ to send · Enter = newline)'}
           submitOnEnter={false}
           onKeyDown={(e) => {
             // Enter inserts a newline; ⌘/Ctrl+Enter sends.
