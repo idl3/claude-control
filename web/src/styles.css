@@ -395,6 +395,30 @@ body {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+}
+/* Top scrim over the message area. Hidden by default; fades in while the
+   composer (a descendant) is focused so messages scrolling up under the header
+   dissolve smoothly, and fades out when the input is dismissed. */
+.thread-fade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: linear-gradient(to bottom, var(--bg-1), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease, ease);
+  z-index: 5;
+}
+.thread-root:focus-within .thread-fade {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-fade {
+    transition: none;
+  }
 }
 .thread-viewport {
   flex: 1 1 auto;
@@ -1815,7 +1839,9 @@ details.block-tool[open] > summary .tool-arrow {
 .toast {
   position: fixed;
   left: 50%;
-  top: calc(56px + env(safe-area-inset-top));
+  /* Sit clear of BOTH top bars: the resource HUD (--hud-h + safe-area) and the
+     detail header below it, so toasts never overlap the nav. */
+  top: calc(env(safe-area-inset-top) + var(--hud-h) + 56px);
   transform: translate(-50%, -12px);
   background: var(--bg-2);
   border: 1px solid var(--line);

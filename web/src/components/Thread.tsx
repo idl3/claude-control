@@ -21,6 +21,10 @@ const messageComponents = {
 export function Thread({ hasSelection, hiddenCount, onLoadEarlier }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
+      {/* Top scrim: fades messages under the header while the composer is
+          focused (CSS :focus-within), so text scrolling up behind the nav bar
+          dissolves instead of hard-cutting. Fades out on blur. */}
+      <div className="thread-fade" aria-hidden="true" />
       <ThreadPrimitive.Viewport className="thread-viewport" autoScroll>
         {!hasSelection ? (
           <div className="thread-empty">select a session</div>

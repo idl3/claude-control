@@ -67,11 +67,10 @@ const CONFIG = {
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
   rssLimitMB: Number(env('RSS_LIMIT_MB')) || 768,
   token: env('TOKEN') || readPersistedToken() || null,
-  // 1500: raised from 500 so that, within lib/transcript's enlarged byte tail,
-  // the message-count cap governs how much history a fresh subscribe serves —
-  // recent user turns no longer fall outside the window on reload. Shares the
-  // CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript's default.
-  maxBuffer: Number(env('MAX_BUFFER')) || 1500,
+  // 4000: within lib/transcript's 8 MB byte tail, the message-count cap governs
+  // how much history a fresh subscribe serves. Raised 1500 → 4000 for deeper
+  // scrollback. Shares the CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript.
+  maxBuffer: Number(env('MAX_BUFFER')) || 4000,
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
