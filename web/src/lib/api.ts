@@ -353,6 +353,19 @@ export function uploadServeUrl(basename: string): string {
   return `/api/uploads/${encodeURIComponent(basename)}`;
 }
 
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: 'user' | 'plugin';
+}
+
+/** Fetch the list of available slash-command skills from the server. */
+export async function listSkills(): Promise<SkillEntry[]> {
+  const res = await authFetch('/api/skills');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { skills?: SkillEntry[] }).skills ?? [];
+}
+
 /**
  * Upload a single file as raw bytes (NOT multipart) to /api/upload.
  * Returns the absolute server path so it can be injected into the composer.

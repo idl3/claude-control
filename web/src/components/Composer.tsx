@@ -8,6 +8,7 @@ import {
 import { Kbd } from './Kbd';
 import { optimizePrompt, type OptimizeResult } from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
+import { SkillBrowser } from './SkillBrowser';
 
 interface ComposerProps {
   disabled: boolean;
@@ -92,9 +93,23 @@ export function Composer({ disabled }: ComposerProps) {
   const [optimizing, setOptimizing] = useState(false);
   const [review, setReview] = useState<(OptimizeResult & { original: string }) | null>(null);
   const [empty, setEmpty] = useState(true);
+  const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
 
   useEffect(
     () => composer.subscribe(() => setEmpty(!(composer.getState().text ?? '').trim())),
+    [composer],
+  );
+
+  const pickSkill = useCallback(
+    (name: string) => {
+      composer.setText(`/${name} `);
+      setSkillBrowserOpen(false);
+      // Return focus to the composer input so the user can add args and send.
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>('.composer-input');
+        el?.focus();
+      });
+    },
     [composer],
   );
 
@@ -171,6 +186,16 @@ export function Composer({ disabled }: ComposerProps) {
           >
             <PlusIcon />
           </ComposerPrimitive.AddAttachment>
+          <button
+            type="button"
+            className="composer-skills-btn"
+            aria-label="Browse skills"
+            title="Browse skills"
+            disabled={disabled}
+            onClick={() => setSkillBrowserOpen((v) => !v)}
+          >
+            <SlashIcon />
+          </button>
           <span className="composer-toolbar-spacer" />
           <ComposerPrimitive.Send
             className="composer-send"
@@ -206,6 +231,12 @@ export function Composer({ disabled }: ComposerProps) {
           onClose={() => setReview(null)}
         />
       ) : null}
+      {skillBrowserOpen ? (
+        <SkillBrowser
+          onPick={pickSkill}
+          onClose={() => setSkillBrowserOpen(false)}
+        />
+      ) : null}
     </ComposerPrimitive.Root>
   );
 }
@@ -227,6 +258,19 @@ function ArrowUpIcon() {
         strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SlashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 20L17 4"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
       />
     </svg>
   );

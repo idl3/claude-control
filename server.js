@@ -27,6 +27,7 @@ import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { optimizePrompt } from './lib/optimize.js';
 import { complete as claudeCliComplete } from './lib/claude-cli.js';
+import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -173,6 +174,10 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/api/sessions') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
+  }
+  if (u.pathname === '/api/skills') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return endJson(res, 200, { skills: listSkills() });
   }
   if (u.pathname === '/api/health') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
