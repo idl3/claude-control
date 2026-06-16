@@ -529,7 +529,12 @@ body {
 }
 .msg-row[data-role='user'] .msg-body {
   background: var(--user);
-  border-color: transparent;
+  /* Accent stripe on the leading edge so an interjection ALWAYS reads as the
+     operator's turn and clearly splits the assistant's tool-call chain — even a
+     long one that spans most of the width (where alignment alone isn't enough,
+     now that the role label is gone). */
+  border: 1px solid transparent;
+  border-left: 2px solid var(--accent);
   padding: 8px 10px;
 }
 .msg-row[data-role='system'] .msg-body {

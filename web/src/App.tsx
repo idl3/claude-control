@@ -38,7 +38,12 @@ function msgText(msg: Msg): string {
 }
 
 // How long a queued send waits for its transcript echo before we stop showing it.
-const PENDING_SEND_TTL_MS = 120_000;
+// Keep an unconfirmed optimistic send visible for a long time: the user must
+// ALWAYS see what they sent. The real transcript echo normally reconciles it
+// away within seconds, but on a busy session the echo can lag minutes — the
+// bubble must bridge that gap rather than vanish. This is only a last-resort
+// cleanup for sends whose echo never arrives at all.
+const PENDING_SEND_TTL_MS = 1_800_000;
 
 // Per-session composer drafts (staged prompt text), persisted across reloads.
 const DRAFTS_KEY = 'cc_drafts';
