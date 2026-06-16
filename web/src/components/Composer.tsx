@@ -88,23 +88,9 @@ export function Composer({ disabled }: ComposerProps) {
   const composer = useComposerRuntime();
   return (
     <ComposerPrimitive.Root className="composer">
-      {/* children render form: invoked once per composer attachment. */}
-      <div className="composer-attachments">
-        <ComposerPrimitive.Attachments>
-          {({ attachment }) => <AttachmentChip attachment={attachment} />}
-        </ComposerPrimitive.Attachments>
-      </div>
-
-      <div className="composer-row">
-        <ComposerPrimitive.AddAttachment
-          className="composer-attach"
-          aria-label="Attach a file"
-          title="Attach a file"
-          multiple
-          disabled={disabled}
-        >
-          📎
-        </ComposerPrimitive.AddAttachment>
+      {/* Centered card (max-width on desktop): input on top, attachments below,
+          then a toolbar with attach on the left and send on the right. */}
+      <div className="composer-card">
         <ComposerPrimitive.Input
           className="composer-input"
           placeholder={disabled ? 'select a session…' : 'reply…  (⌘/Ctrl+↵ to send · Enter = newline)'}
@@ -120,14 +106,56 @@ export function Composer({ disabled }: ComposerProps) {
           disabled={disabled}
           autoComplete="off"
         />
-        <ComposerPrimitive.Send
-          className="composer-send"
-          aria-label="Send reply"
-          disabled={disabled}
-        >
-          ↑
-        </ComposerPrimitive.Send>
+
+        {/* children render form: invoked once per composer attachment. */}
+        <div className="composer-attachments">
+          <ComposerPrimitive.Attachments>
+            {({ attachment }) => <AttachmentChip attachment={attachment} />}
+          </ComposerPrimitive.Attachments>
+        </div>
+
+        <div className="composer-toolbar">
+          <ComposerPrimitive.AddAttachment
+            className="composer-attach"
+            aria-label="Attach a file"
+            title="Attach a file"
+            multiple
+            disabled={disabled}
+          >
+            <PlusIcon />
+          </ComposerPrimitive.AddAttachment>
+          <span className="composer-toolbar-spacer" />
+          <ComposerPrimitive.Send
+            className="composer-send"
+            aria-label="Send reply"
+            disabled={disabled}
+          >
+            <ArrowUpIcon />
+          </ComposerPrimitive.Send>
+        </div>
       </div>
     </ComposerPrimitive.Root>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ArrowUpIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 19V5M6 11l6-6 6 6"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
