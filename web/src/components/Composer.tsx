@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -91,27 +91,37 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
  *   send onNew appends each attachment's uploaded absolute path to the reply
  *   text. Paths are NEVER injected into the textarea.
  */
+/** Per-session enhance state: an in-progress flag + a ready review. */
+type EnhanceState = {
+  optimizing: boolean;
+  review: (OptimizeResult & { original: string }) | null;
+};
+const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
+
 export function Composer({ disabled, sessionId }: ComposerProps) {
   const composer = useComposerRuntime();
-  const [optimizing, setOptimizing] = useState(false);
-  const [review, setReview] = useState<(OptimizeResult & { original: string }) | null>(null);
   const [empty, setEmpty] = useState(true);
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
-  // Latest session id, read by in-flight async callbacks to detect a switch.
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
+  // Enhance state BOUND PER SESSION (keyed by session id), like the per-session
+  // AskUserQuestion pending state. The Composer stays mounted across session
+  // switches, so this map persists: switching away preserves an in-progress or
+  // ready improvement, switching back restores it, and an improvement can never
+  // leak into (or be accepted onto) a different session.
+  const [enhanceBySession, setEnhanceBySession] = useState<Record<string, EnhanceState>>({});
+  const key = sessionId ?? '';
+  const { optimizing, review } = enhanceBySession[key] ?? EMPTY_ENHANCE;
+
+  const patchEnhance = useCallback((sid: string, patch: Partial<EnhanceState>) => {
+    setEnhanceBySession((m) => ({ ...m, [sid]: { ...(m[sid] ?? EMPTY_ENHANCE), ...patch } }));
+  }, []);
 
   useEffect(
     () => composer.subscribe(() => setEmpty(!(composer.getState().text ?? '').trim())),
     [composer],
   );
 
-  // On session switch, drop any stale enhance state — a pending/open improvement
-  // belongs to the PREVIOUS session; accepting it here would overwrite the new
-  // session's prompt with the old session's improved prompt.
+  // Close the (session-agnostic) skill browser on a session switch.
   useEffect(() => {
-    setReview(null);
-    setOptimizing(false);
     setSkillBrowserOpen(false);
   }, [sessionId]);
 
@@ -132,20 +142,17 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     if (disabled || optimizing) return;
     const original = composer.getState().text ?? '';
     if (!original.trim()) return;
-    const sid = sessionId; // session this enhancement belongs to
-    setOptimizing(true);
+    const sid = key; // the session this enhancement belongs to
+    patchEnhance(sid, { optimizing: true });
     try {
       const result = await optimizePrompt(original);
-      // Drop the result if the user switched sessions while it was in flight —
-      // otherwise it would surface a review for the wrong session.
-      if (sessionIdRef.current !== sid) return;
-      setReview({ ...result, original });
+      // Store the review UNDER ITS SESSION — if the user switched away, it waits
+      // there until they return; it never appears on the wrong session.
+      patchEnhance(sid, { optimizing: false, review: { ...result, original } });
     } catch {
-      // swallow — composer stays usable
-    } finally {
-      if (sessionIdRef.current === sid) setOptimizing(false);
+      patchEnhance(sid, { optimizing: false });
     }
-  }, [composer, disabled, optimizing, sessionId]);
+  }, [composer, disabled, optimizing, key, patchEnhance]);
 
   return (
     <ComposerPrimitive.Root className="composer">
@@ -245,9 +252,9 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           result={review}
           onAccept={(text) => {
             composer.setText(text);
-            setReview(null);
+            patchEnhance(key, { review: null });
           }}
-          onClose={() => setReview(null)}
+          onClose={() => patchEnhance(key, { review: null })}
         />
       ) : null}
       {skillBrowserOpen ? (
