@@ -23,6 +23,8 @@ export interface Session {
   isClaude?: boolean;
   model?: string | null;
   ctxPct?: number | null;
+  /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
+  thinking?: boolean;
 }
 
 export type Role = 'user' | 'assistant' | 'system';
