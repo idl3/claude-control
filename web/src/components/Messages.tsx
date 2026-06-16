@@ -225,13 +225,14 @@ export function AssistantMessage() {
   const cockpitRole =
     (useMessage((m) => m.metadata?.custom?.cockpitRole) as string | undefined) ??
     'assistant';
+  const working = useMessage((m) => m.metadata?.custom?.working) as boolean | undefined;
 
   return (
     <MessagePrimitive.Root className="msg-row" data-role={cockpitRole}>
       <div className="msg-body">
         <GroupedBody />
       </div>
-      <MessageActions />
+      {!working && <MessageActions />}
     </MessagePrimitive.Root>
   );
 }
