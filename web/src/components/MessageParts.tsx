@@ -5,6 +5,7 @@ import type {
 import { toolInput, toolResult, toolSummary } from '../lib/convert';
 import { MarkdownText } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
+import { isSkillInvocation, SkillInvocation } from './SkillInvocation';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -18,6 +19,9 @@ export const TextPart: TextMessagePartComponent = (props) => {
         <span className="shimmer-text">Working…</span>
       </span>
     );
+  }
+  if (typeof props.text === 'string' && isSkillInvocation(props.text)) {
+    return <SkillInvocation text={props.text} />;
   }
   // Render the markdown text + any inline attachment previews detected in the
   // raw text. Previews appear below the text block (thumbnails / file chips).
