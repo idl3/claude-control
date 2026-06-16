@@ -25,6 +25,35 @@ test('parseTuiStatus rejects out-of-range ctx', () => {
   assert.equal(parseTuiStatus('ctx:250%').ctxPct, null);
 });
 
+test('parseTuiStatus flags thinking when the working line is present', () => {
+  const capture = [
+    '> some prompt text',
+    '',
+    '✻ Cogitating… (12s · ↑ 3.2k tokens · esc to interrupt)',
+  ].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, true);
+});
+
+test('parseTuiStatus does not flag thinking at an idle prompt', () => {
+  const capture = [
+    '/claude-cockpit Opus 4.8 (1M context) ctx:35%      Remote Control active',
+    '',
+    '> ',
+  ].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, false);
+});
+
+test('parseTuiStatus does NOT flag thinking on the AskUserQuestion picker (esc to cancel)', () => {
+  const capture = [
+    'Which option do you want?',
+    '  1. Yes',
+    '  2. No',
+    '',
+    '(↑↓ to select · enter to confirm · esc to cancel)',
+  ].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, false);
+});
+
 test('prettyModel shortens transcript model ids', () => {
   assert.equal(prettyModel('claude-opus-4-8'), 'Opus 4.8');
   assert.equal(prettyModel('claude-sonnet-4-6'), 'Sonnet 4.6');
