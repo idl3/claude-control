@@ -98,6 +98,21 @@ test('buildAnswerProgram: three single-select questions chain via Enter', () => 
   ]);
 });
 
+test('buildAnswerProgram: two multi-select questions — each Enter advances, final Enter submits', () => {
+  const pending = {
+    questions: [
+      { multiSelect: true, options: [{ label: 'p' }, { label: 'q' }, { label: 'r' }] },
+      { multiSelect: true, options: [{ label: 'x' }, { label: 'y' }, { label: 'z' }] },
+    ],
+  };
+  // Q1 multi: select idx 0 and 2 → Space, Down, Down, Space, Enter (Enter advances to Q2)
+  // Q2 multi: select idx 1 only  → Down, Space, Enter (final Enter submits)
+  assert.deepEqual(buildAnswerProgram(pending, [['p', 'r'], ['y']]), [
+    'Space', 'Down', 'Down', 'Space', 'Enter',
+    'Down', 'Space', 'Enter',
+  ]);
+});
+
 test('buildAnswerProgram: no questions throws', () => {
   assert.throws(() => buildAnswerProgram({ questions: [] }, []), /no questions/i);
 });
