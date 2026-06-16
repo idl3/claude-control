@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react';
-import { getConfig, saveConfig, getVersion } from '../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import {
+  getConfig,
+  saveConfig,
+  getVersion,
+  uploadIcon,
+  resetIcon,
+} from '../lib/api';
 
 interface ConfigModalProps {
   onClose: () => void;
@@ -21,6 +27,11 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
     latest: string | null;
     updateAvailable: boolean;
   } | null>(null);
+  // Cache-buster so the icon preview refreshes after an upload/reset (the icon
+  // URL is stable; the server sends no-store but the <img> may still hold one).
+  const [iconBust, setIconBust] = useState(() => Date.now());
+  const [iconBusy, setIconBusy] = useState(false);
+  const iconInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -57,6 +68,39 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  const onPickIcon = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (file.type !== 'image/png') {
+      onToast('Icon must be a PNG image', 'error');
+      return;
+    }
+    setIconBusy(true);
+    try {
+      await uploadIcon(file);
+      setIconBust(Date.now());
+      onToast('App icon updated — re-add to Home Screen to see it', 'ok');
+    } catch (err) {
+      onToast(`Icon upload failed: ${(err as Error).message}`, 'error');
+    } finally {
+      setIconBusy(false);
+    }
+  };
+
+  const onResetIcon = async () => {
+    setIconBusy(true);
+    try {
+      await resetIcon();
+      setIconBust(Date.now());
+      onToast('App icon reset to default', 'ok');
+    } catch (err) {
+      onToast(`Icon reset failed: ${(err as Error).message}`, 'error');
+    } finally {
+      setIconBusy(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -134,6 +178,49 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
             Must be an existing directory. New sessions start here.
           </span>
         </label>
+
+        <div className="config-field">
+          <span className="config-label">App icon</span>
+          <div className="config-icon-row">
+            <img
+              className="config-icon-preview"
+              src={`/api/icon?size=192&t=${iconBust}`}
+              alt="Current home-screen icon"
+              width={48}
+              height={48}
+            />
+            <div className="config-icon-actions">
+              <button
+                type="button"
+                className="config-cancel"
+                disabled={iconBusy}
+                onClick={() => iconInputRef.current?.click()}
+              >
+                {iconBusy ? 'Working…' : 'Upload PNG'}
+              </button>
+              <button
+                type="button"
+                className="config-cancel"
+                disabled={iconBusy}
+                onClick={onResetIcon}
+              >
+                Reset
+              </button>
+            </div>
+            <input
+              ref={iconInputRef}
+              type="file"
+              accept="image/png"
+              hidden
+              onChange={onPickIcon}
+            />
+          </div>
+          <span className="config-hint">
+            Home-screen icon for this app. Defaults to the Claude Control logo.
+            After changing it, re-add the app to your Home Screen to update the
+            installed icon.
+          </span>
+        </div>
 
         <div className="config-version">
           {version ? (
