@@ -1150,12 +1150,32 @@ body {
   color: var(--text-faint);
   font-style: italic;
   list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
 }
 .block-thinking > summary::before {
-  content: '▸ ';
+  content: '▸';
+  font-style: normal;
+  flex: 0 0 auto;
 }
 .block-thinking[open] > summary::before {
-  content: '▾ ';
+  content: '▾';
+}
+.thinking-label {
+  flex: 0 0 auto;
+}
+/* The latest "thinking" line shown inline on the collapsed accordion. Truncates
+   with ellipsis; rolls via slot-text while the block is live. */
+.thinking-last {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-style: normal;
+  opacity: 0.7;
 }
 .thinking-text {
   margin-top: 4px;
@@ -1164,6 +1184,63 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   opacity: 0.8;
+}
+
+/* ── Live "thinking" flash ─────────────────────────────────────────
+   While the server reports this session is actively generating THIS message,
+   the reasoning text cycles a multicolour gradient (clipped to the glyphs).
+   When generation ends, the [data-thinking] attr drops and it settles to the
+   normal dim gray above. */
+@keyframes thinking-flash {
+  to {
+    background-position: 200% center;
+  }
+}
+.block-thinking[data-thinking='true'] .thinking-label,
+.block-thinking[data-thinking='true'] .thinking-last,
+.block-thinking[data-thinking='true'] .thinking-text {
+  background-image: linear-gradient(
+    90deg,
+    oklch(72% 0.2 20),
+    oklch(80% 0.16 80),
+    oklch(74% 0.17 150),
+    oklch(72% 0.15 250),
+    oklch(70% 0.21 320),
+    oklch(72% 0.2 20)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-flash 2.4s linear infinite;
+  opacity: 1;
+}
+.block-thinking[data-thinking='true'] > summary {
+  font-style: normal;
+}
+
+/* ── Shimmer (loading sequences) ───────────────────────────────────
+   A sweeping highlight clipped to text — used on the "Working…" indicator and
+   any transient loading label. */
+@keyframes shimmer-sweep {
+  to {
+    background-position: 200% center;
+  }
+}
+.shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--text-faint) 0%,
+    var(--text) 50%,
+    var(--text-faint) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 1.6s linear infinite;
 }
 
 /* tool use + result — native tool-call part, expandable.
@@ -1747,6 +1824,17 @@ details.block-tool[open] > summary .tool-arrow {
 @media (prefers-reduced-motion: reduce) {
   .working-spinner {
     animation-duration: 1.6s;
+  }
+  /* No flashing/sweeping for reduced-motion users — settle to a solid accent
+     tint that still reads as "active", and a plain dim shimmer label. */
+  .block-thinking[data-thinking='true'] .thinking-label,
+  .block-thinking[data-thinking='true'] .thinking-last,
+  .block-thinking[data-thinking='true'] .thinking-text,
+  .shimmer-text {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: var(--accent);
+    color: var(--accent);
   }
 }
 
