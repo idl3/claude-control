@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { terminalUrl } from '../lib/api';
+import { initialFocusTarget, shouldCloseOnKey } from './terminalFocus';
 
 interface TerminalPanelProps {
   /** Session id == tmux target (e.g. `name:0`). */
@@ -18,17 +19,31 @@ interface TerminalPanelProps {
  */
 export function TerminalPanel({ sessionId, label, onClose }: TerminalPanelProps) {
   const url = terminalUrl(sessionId);
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
 
-  // Esc closes; focus the close button on open for keyboard users.
+  // Esc closes. We deliberately do NOT focus the close button on open: if it
+  // held focus, a stray Enter/Space (meant for the terminal) would activate it
+  // and close the panel. Only Escape closes (see shouldCloseOnKey); Enter/Space
+  // are left for the terminal. The close button stays Tab-reachable.
   useEffect(() => {
-    closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (shouldCloseOnKey(e.key)) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Move focus into the terminal iframe (initialFocusTarget === 'frame'), never
+  // the close button, so typing goes straight to ttyd. Focusing the <iframe>
+  // element (same-origin proxy) hands keyboard input to the embedded document.
+  // We focus on the iframe's load event and also eagerly on mount, in case the
+  // frame is already loaded when the effect runs (cached / instant load).
+  const focusFrame = () => {
+    if (initialFocusTarget === 'frame') frameRef.current?.focus();
+  };
+  useEffect(() => {
+    focusFrame();
+  }, []);
 
   return (
     <div
@@ -52,7 +67,6 @@ export function TerminalPanel({ sessionId, label, onClose }: TerminalPanelProps)
             ↗ New tab
           </a>
           <button
-            ref={closeRef}
             type="button"
             className="term-close"
             aria-label="Close terminal"
@@ -63,9 +77,11 @@ export function TerminalPanel({ sessionId, label, onClose }: TerminalPanelProps)
         </span>
       </header>
       <iframe
+        ref={frameRef}
         className="term-frame"
         src={url}
         title={`Raw terminal for ${label}`}
+        onLoad={focusFrame}
       />
     </div>
   );
