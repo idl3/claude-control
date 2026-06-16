@@ -1,11 +1,9 @@
+import { useState } from 'react';
 import {
   ActionBarPrimitive,
   MessagePrimitive,
-  groupPartByType,
   useMessage,
   type ReasoningMessagePartProps,
-  type TextMessagePartProps,
-  type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { SlotText } from 'slot-text/react';
 import 'slot-text/style.css';
@@ -46,98 +44,152 @@ function MessageActions() {
   );
 }
 
-// Coalesce adjacent reasoning + tool-call parts into one "chain of thought"
-// group; text stays ungrouped (rendered inline as the assistant's answer).
-const groupBy = groupPartByType({
-  reasoning: ['group-thought'],
-  'tool-call': ['group-thought'],
-});
+type PartLike = { readonly type: string };
+type Group = { groupKey: string | undefined; indices: number[] };
 
-// The collapsible "chain of thought" container wrapping a run of reasoning +
-// tool-call parts. Header shows the step count; while the session is actively
-// generating THIS message it flashes multicolour, auto-opens, and rolls the
-// latest reasoning line via slot-text (textmotion.dev).
+/**
+ * Turn-level work grouping (position-aware, so it needs the whole parts array —
+ * hence Unstable_PartsGrouped rather than the adjacent-only GroupedParts).
+ *
+ * A turn = one merged assistant message (see convert.mergeAssistantTurns). Its
+ * trailing run of text parts is the ANSWER (always shown). Everything before is
+ * WORK (thinking + tool calls + intermediate narration). Rubric:
+ *   - ≥2 work parts → one "chain of thought" group (collapsible).
+ *   - 0–1 work part → shown inline (a chain of one isn't a chain; a lone tool
+ *     or thought just shows).
+ *   - answer text → always inline.
+ */
+function groupTurn(parts: readonly PartLike[]): Group[] {
+  const n = parts.length;
+  let answerStart = n;
+  while (answerStart > 0 && parts[answerStart - 1].type === 'text') answerStart -= 1;
+
+  const work: number[] = [];
+  for (let i = 0; i < answerStart; i += 1) work.push(i);
+
+  // Only group when the turn did ≥2 real ACTIONS (thinking blocks + tool calls).
+  // A lone tool — even with a "let me…" text preamble — just shows inline (a
+  // chain of one isn't a chain).
+  const actions = work.filter(
+    (i) => parts[i].type === 'reasoning' || parts[i].type === 'tool-call',
+  ).length;
+
+  const groups: Group[] = [];
+  if (actions >= 2) {
+    groups.push({ groupKey: 'group-thought', indices: work });
+  } else {
+    for (const i of work) groups.push({ groupKey: undefined, indices: [i] });
+  }
+  for (let i = answerStart; i < n; i += 1) groups.push({ groupKey: undefined, indices: [i] });
+  return groups;
+}
+
+// Reasoning leaf: plain dim text. Inside a group the group owns the disclosure +
+// flash; as a lone inline item it reads as a quiet thought.
+function GroupedReasoning({ text }: ReasoningMessagePartProps) {
+  if (!text || !text.trim()) return null;
+  return <div className="cot-reasoning thinking-text">{text}</div>;
+}
+
+const partComponents = {
+  Text: TextPart,
+  Reasoning: GroupedReasoning,
+  tools: { Fallback: ToolPart },
+} as const;
+
+/**
+ * The collapsible chain-of-thought wrapping a turn's work. Label + step count
+ * derive from the grouped parts: reasoning present → "chain of thought · N
+ * steps"; tools only → "N tool calls". While the session is actively generating
+ * THIS turn it flashes, stays OPEN (live preview of active work) and rolls the
+ * latest reasoning line; when the turn ends it collapses. Children mount only
+ * while open (collapsed history stays cheap).
+ */
 function ChainOfThought({
-  stepCount,
+  indices,
   children,
 }: {
-  stepCount: number;
+  indices: number[];
   children: React.ReactNode;
 }) {
   const messageId = useMessage((m) => m.id);
   const liveId = useLiveThinkingId();
-  const thinking = !!liveId && messageId === liveId;
+  const live = !!liveId && messageId === liveId;
+  const [userOpen, setUserOpen] = useState(false);
+  const open = live || userOpen;
 
-  // Latest reasoning line across this message's parts, for the rolling summary.
-  const lastThought = useMessage((m) => {
-    const parts = m.content;
-    for (let i = parts.length - 1; i >= 0; i--) {
-      const p = parts[i];
-      if (p.type === 'reasoning' && p.text?.trim()) return p.text;
+  // Select the stable content ref (changes only when parts change) and compute
+  // counts in the render body — avoids re-render thrash from a selector that
+  // returns a fresh object each call.
+  const content = useMessage((m) => m.content) as readonly { type: string; text?: string }[];
+  let reasoning = 0;
+  let tools = 0;
+  let lastThought = '';
+  for (const i of indices) {
+    const p = content[i];
+    if (!p) continue;
+    if (p.type === 'reasoning') {
+      reasoning += 1;
+      if (p.text?.trim()) lastThought = p.text;
+    } else if (p.type === 'tool-call') {
+      tools += 1;
     }
-    return '';
-  });
+  }
+
+  const steps = reasoning + tools;
+  const label =
+    reasoning > 0 ? 'chain of thought' : `${tools} tool call${tools === 1 ? '' : 's'}`;
   const last = lastUpdateLine(lastThought);
 
   return (
     <details
       className="block-cot"
-      data-thinking={thinking ? 'true' : undefined}
-      open={thinking ? true : undefined}
+      data-thinking={live ? 'true' : undefined}
+      open={open}
+      onToggle={(e) => setUserOpen(e.currentTarget.open)}
     >
       <summary>
-        <span className="cot-label">{thinking ? 'thinking' : 'chain of thought'}</span>
-        <span className="cot-steps">
-          · {stepCount} step{stepCount === 1 ? '' : 's'}
-        </span>
+        <span className="cot-label">{live ? 'thinking' : label}</span>
+        {reasoning > 0 ? (
+          <span className="cot-steps">
+            · {steps} step{steps === 1 ? '' : 's'}
+          </span>
+        ) : null}
         {last ? (
-          <span className="cot-last">{thinking ? <SlotText text={last} /> : last}</span>
+          <span className="cot-last">{live ? <SlotText text={last} /> : last}</span>
         ) : null}
       </summary>
-      <div className="cot-body">{children}</div>
+      {open ? <div className="cot-body">{children}</div> : null}
     </details>
   );
 }
 
-// Reasoning leaf rendered INSIDE the chain-of-thought group: plain dim text (the
-// group owns the disclosure + flash), not its own accordion.
-function GroupedReasoning({ text }: { text: string }) {
-  if (!text || !text.trim()) return null;
-  return <div className="cot-reasoning thinking-text">{text}</div>;
-}
-
-// Render one message's parts grouped: reasoning+tools fold into a ChainOfThought
-// block; text renders inline. Leaf parts arrive as EnrichedPartState; we pass
-// them straight to the existing renderers.
+// Render a message's parts with turn-level work grouping.
 function GroupedBody() {
   return (
-    <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="never">
-      {({ part, children }) => {
-        switch (part.type) {
-          case 'group-thought':
-            return <ChainOfThought stepCount={part.indices.length}>{children}</ChainOfThought>;
-          case 'text':
-            return <TextPart {...(part as unknown as TextMessagePartProps)} />;
-          case 'reasoning':
-            return <GroupedReasoning {...(part as unknown as ReasoningMessagePartProps)} />;
-          case 'tool-call':
-            return <ToolPart {...(part as unknown as ToolCallMessagePartProps)} />;
-          default:
-            return null;
-        }
+    <MessagePrimitive.Unstable_PartsGrouped
+      groupingFunction={groupTurn}
+      components={{
+        ...partComponents,
+        Group: ({ groupKey, indices, children }) =>
+          groupKey ? (
+            <ChainOfThought indices={indices}>{children}</ChainOfThought>
+          ) : (
+            <>{children}</>
+          ),
       }}
-    </MessagePrimitive.GroupedParts>
+    />
   );
 }
 
-// User transcript message: right-aligned bubble. (No tool/reasoning grouping —
-// user turns are plain text — but keep the copy bar.)
+// User transcript message: right-aligned bubble. (Plain text — no work grouping
+// — but keep the copy bar.)
 export function UserMessage() {
   return (
     <MessagePrimitive.Root className="msg-row" data-role="user">
       <div className="msg-role">user</div>
       <div className="msg-body">
-        <GroupedBody />
+        <MessagePrimitive.Parts components={partComponents} />
       </div>
       <MessageActions />
     </MessagePrimitive.Root>
