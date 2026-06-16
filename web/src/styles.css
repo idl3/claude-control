@@ -487,19 +487,13 @@ body {
   color: var(--accent, var(--text-dim));
 }
 
-/* Copy action bar under a message. Hidden by default, revealed on row hover or
-   focus (autohide="not-last" also keeps it visible on the last message). */
+/* Copy action bar — always visible at the end of each message (not a hover
+   overlay). Sits flush under the bubble. */
 .msg-actions {
   display: flex;
   gap: 4px;
-  margin-top: 1px;
+  margin-top: 2px;
   padding: 0 2px;
-  opacity: 0;
-  transition: opacity var(--ease) 0.15s;
-}
-.msg-row:hover .msg-actions,
-.msg-row:focus-within .msg-actions {
-  opacity: 1;
 }
 .msg-row[data-role='user'] .msg-actions {
   justify-content: flex-end;
@@ -508,7 +502,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 7px;
+  padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
@@ -1140,45 +1134,70 @@ body {
   border-radius: 6px;
 }
 
-/* thinking */
-.block-thinking {
+/* ── Chain of thought ──────────────────────────────────────────────
+   Collapsible group coalescing a run of reasoning + tool-call parts. Header
+   shows a step count; while the session is actively generating this message it
+   flashes multicolour, auto-opens, and rolls the latest reasoning line. */
+.block-cot {
   font-size: 11.5px;
   color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: oklch(18% 0.012 260);
+  padding: 5px 9px;
+  margin: 2px 0;
 }
-.block-thinking > summary {
+.block-cot > summary {
   cursor: pointer;
   color: var(--text-faint);
   font-style: italic;
   list-style: none;
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
-.block-thinking > summary::before {
+.block-cot > summary::-webkit-details-marker {
+  display: none;
+}
+.block-cot > summary::before {
   content: '▸';
   font-style: normal;
   flex: 0 0 auto;
 }
-.block-thinking[open] > summary::before {
+.block-cot[open] > summary::before {
   content: '▾';
 }
-.thinking-label {
+.cot-label {
   flex: 0 0 auto;
+  font-weight: 600;
+  font-style: normal;
 }
-/* The latest "thinking" line shown inline on the collapsed accordion. Truncates
-   with ellipsis; rolls via slot-text while the block is live. */
-.thinking-last {
+.cot-steps {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-style: normal;
+}
+/* The latest reasoning line, inline on the collapsed header. Truncates; rolls
+   via slot-text while live. */
+.cot-last {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-style: normal;
-  opacity: 0.7;
+  opacity: 0.6;
 }
+.cot-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Reasoning inside the group: plain dim text (the group owns the disclosure). */
+.cot-reasoning,
 .thinking-text {
-  margin-top: 4px;
   padding-left: 8px;
   border-left: 2px solid var(--line);
   white-space: pre-wrap;
@@ -1188,17 +1207,17 @@ body {
 
 /* ── Live "thinking" flash ─────────────────────────────────────────
    While the server reports this session is actively generating THIS message,
-   the reasoning text cycles a multicolour gradient (clipped to the glyphs).
-   When generation ends, the [data-thinking] attr drops and it settles to the
-   normal dim gray above. */
+   the chain-of-thought header + reasoning text cycle a multicolour gradient
+   (clipped to the glyphs). When generation ends, [data-thinking] drops and it
+   settles to the normal dim gray. */
 @keyframes thinking-flash {
   to {
     background-position: 200% center;
   }
 }
-.block-thinking[data-thinking='true'] .thinking-label,
-.block-thinking[data-thinking='true'] .thinking-last,
-.block-thinking[data-thinking='true'] .thinking-text {
+.block-cot[data-thinking='true'] .cot-label,
+.block-cot[data-thinking='true'] .cot-last,
+.block-cot[data-thinking='true'] .cot-reasoning {
   background-image: linear-gradient(
     90deg,
     oklch(72% 0.2 20),
@@ -1216,8 +1235,8 @@ body {
   animation: thinking-flash 2.4s linear infinite;
   opacity: 1;
 }
-.block-thinking[data-thinking='true'] > summary {
-  font-style: normal;
+.block-cot[data-thinking='true'] {
+  border-color: oklch(40% 0.06 280);
 }
 
 /* ── Shimmer (loading sequences) ───────────────────────────────────
@@ -1827,9 +1846,9 @@ details.block-tool[open] > summary .tool-arrow {
   }
   /* No flashing/sweeping for reduced-motion users — settle to a solid accent
      tint that still reads as "active", and a plain dim shimmer label. */
-  .block-thinking[data-thinking='true'] .thinking-label,
-  .block-thinking[data-thinking='true'] .thinking-last,
-  .block-thinking[data-thinking='true'] .thinking-text,
+  .block-cot[data-thinking='true'] .cot-label,
+  .block-cot[data-thinking='true'] .cot-last,
+  .block-cot[data-thinking='true'] .cot-reasoning,
   .shimmer-text {
     animation: none;
     background-image: none;

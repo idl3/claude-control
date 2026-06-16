@@ -1,15 +1,10 @@
-import {
-  useMessage,
-  type ReasoningMessagePartComponent,
-  type TextMessagePartComponent,
-  type ToolCallMessagePartComponent,
+import type {
+  TextMessagePartComponent,
+  ToolCallMessagePartComponent,
 } from '@assistant-ui/react';
-import { SlotText } from 'slot-text/react';
-import 'slot-text/style.css';
 import { toolInput, toolResult, toolSummary } from '../lib/convert';
 import { MarkdownText } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
-import { useLiveThinkingId } from './ThinkingContext';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -36,9 +31,10 @@ export const TextPart: TextMessagePartComponent = (props) => {
   );
 };
 
-// The last non-empty line of the reasoning, trimmed for the accordion summary.
+// The last non-empty line of the reasoning, trimmed for the chain-of-thought
+// summary (rolled via slot-text while live — see Messages.tsx ChainOfThought).
 const MAX_LAST = 90;
-function lastUpdateLine(text: string): string {
+export function lastUpdateLine(text: string): string {
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i].trim();
@@ -46,37 +42,6 @@ function lastUpdateLine(text: string): string {
   }
   return '';
 }
-
-// Thinking → native Reasoning content part: a collapsed accordion. The summary
-// shows the latest "thinking" line (rolling via slot-text while live). While the
-// session is actively generating THIS message, the text flashes multicolour
-// (see .block-thinking[data-thinking]); once done it settles to solid/dim.
-export const ReasoningPart: ReasoningMessagePartComponent = ({ text }) => {
-  const messageId = useMessage((m) => m.id);
-  const liveId = useLiveThinkingId();
-  const thinking = !!liveId && messageId === liveId;
-
-  // Empty reasoning is normally hidden — but while live, keep a flashing label
-  // so a thinking block that hasn't emitted text yet still reads as "thinking".
-  const body = text?.trim() ?? '';
-  if (!body && !thinking) return null;
-
-  const last = lastUpdateLine(body);
-
-  return (
-    <details className="block-thinking" data-thinking={thinking ? 'true' : undefined}>
-      <summary>
-        <span className="thinking-label">thinking</span>
-        {last ? (
-          <span className="thinking-last">
-            {thinking ? <SlotText text={last} /> : last}
-          </span>
-        ) : null}
-      </summary>
-      <div className="thinking-text">{body}</div>
-    </details>
-  );
-};
 
 // Pretty-print structured tool input. Falls back to the summary string for
 // primitives / empty objects.
