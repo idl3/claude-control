@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CockpitSocket, type ConnState } from '../lib/ws';
+import { mergeMessages } from '../lib/messages';
 import type {
   Msg,
   PanePrompt,
@@ -75,7 +76,14 @@ export function useCockpit(): CockpitStore {
           setSessions(msg.sessions ?? []);
           break;
         case 'messages':
-          setMessagesById((prev) => ({ ...prev, [msg.id]: msg.messages ?? [] }));
+          // MERGE, don't replace: the server re-sends a snapshot of its bounded
+          // (and periodically trimmed) tail on every (re)subscribe. Replacing
+          // would drop older messages we already showed — the cause of user
+          // chats "disappearing" after a reconnect. See lib/messages.ts.
+          setMessagesById((prev) => ({
+            ...prev,
+            [msg.id]: mergeMessages(prev[msg.id], msg.messages ?? []),
+          }));
           setPendingById((prev) => ({ ...prev, [msg.id]: msg.pending ?? null }));
           break;
         case 'append':
