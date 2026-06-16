@@ -405,8 +405,10 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 44px;
-  background: linear-gradient(to bottom, var(--bg-1), transparent);
+  height: 64px;
+  /* Match the thread's own background (--bg) so messages scrolling up dissolve
+     INTO it rather than getting a faint mismatched tint. Solid cap then fade. */
+  background: linear-gradient(to bottom, var(--bg) 38%, transparent);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.28s var(--ease, ease);
