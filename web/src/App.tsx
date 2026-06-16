@@ -592,6 +592,7 @@ function AppInner() {
               // composer still works — replies go via tmux send-keys regardless
               // of whether a transcript was matched.
               <div className="thread-root">
+                <div className="thread-fade" aria-hidden="true" />
                 <LivePane
                   sessionId={selectedSession.id}
                   capture={cockpit.capture}
