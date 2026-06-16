@@ -1627,7 +1627,9 @@ details.block-tool[open] > summary .tool-arrow {
   display: none;
   align-items: center;
   gap: 8px;
-  font-size: var(--txt-composer);
+  /* One size for the whole hint (lead + connectors) so it reads as a single
+     consistent line; the Kbd caps below are sized to sit on the same baseline. */
+  font-size: var(--txt-meta);
   line-height: 1.45;
   color: var(--text-faint);
   pointer-events: none;
@@ -1641,7 +1643,12 @@ details.block-tool[open] > summary .tool-arrow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--txt-meta);
+}
+/* Match the cap height/text to the hint's font size so nothing looks oversized. */
+.composer-hint .kbd {
+  height: calc(var(--txt-meta) + 5px);
+  min-width: calc(var(--txt-meta) + 5px);
+  font-size: calc(var(--txt-meta) - 1px);
 }
 .composer-hint-dot {
   opacity: 0.6;
