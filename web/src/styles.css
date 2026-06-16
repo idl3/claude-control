@@ -16,9 +16,9 @@
   --red: oklch(64% 0.2 25);
   --red-bg: oklch(30% 0.09 25);
   --green: oklch(72% 0.16 150);
-  --user: oklch(27% 0.045 250);
+  --user: oklch(0.24 0.03 249.98);
 
-  --txt-transcript: 12.5px;
+  --txt-transcript: 13.5px;
   --txt-meta: 11px;
   --txt-composer: 16px; /* >=16px: stops iOS Safari auto-zoom on focus */
 
@@ -29,15 +29,14 @@
   color-scheme: dark;
 }
 
-/* Desktop has the room — bump the type scale one step up from the mobile-first
-   defaults. Everything reads off these tokens, so this lifts transcript, meta,
-   and composer text together. Composer stays >=16px regardless (iOS zoom guard
-   is moot on desktop, but the bump keeps it consistent). */
+/* Desktop has the room — bump transcript + meta one step up from the
+   mobile-first defaults. Composer stays at 16px (one notch below the body bump)
+   for a calmer input on desktop; iOS zoom guard is moot here anyway. */
 @media (min-width: 760px) {
   :root {
-    --txt-transcript: 13.5px;
+    --txt-transcript: 14.5px;
     --txt-meta: 12px;
-    --txt-composer: 17px;
+    --txt-composer: 16px;
   }
 }
 
