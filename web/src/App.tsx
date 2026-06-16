@@ -13,6 +13,7 @@ import { renameSession } from './lib/api';
 import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
+import { LiveThinkingContext } from './components/ThinkingContext';
 import { LivePane } from './components/LivePane';
 import { Composer } from './components/Composer';
 import { AskModal } from './components/AskModal';
@@ -447,6 +448,15 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
+  // The live "thinking" block is the trailing reasoning of the last real
+  // transcript message, but only while the server says this session is actively
+  // generating (`thinking`). Its message id is handed to the reasoning renderer
+  // via context so that block — and only that block — flashes multicolour.
+  const liveThinkingId =
+    selectedSession?.thinking && fullConverted.length > 0
+      ? (fullConverted[fullConverted.length - 1].id ?? null)
+      : null;
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div
@@ -591,11 +601,13 @@ function AppInner() {
                 <Composer disabled={false} />
               </div>
             ) : (
-              <Thread
-                hasSelection={!!cockpit.selectedId}
-                hiddenCount={hiddenCount}
-                onLoadEarlier={loadEarlier}
-              />
+              <LiveThinkingContext.Provider value={liveThinkingId}>
+                <Thread
+                  hasSelection={!!cockpit.selectedId}
+                  hiddenCount={hiddenCount}
+                  onLoadEarlier={loadEarlier}
+                />
+              </LiveThinkingContext.Provider>
             )}
           </main>
         </div>
