@@ -223,13 +223,6 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             <SlashIcon />
           </button>
           <span className="composer-toolbar-spacer" />
-          <ComposerPrimitive.Send
-            className="composer-send"
-            aria-label="Send reply"
-            disabled={disabled || optimizing}
-          >
-            <ArrowUpIcon />
-          </ComposerPrimitive.Send>
           <button
             type="button"
             className="composer-enhance"
@@ -244,6 +237,13 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               <SparkleIcon />
             )}
           </button>
+          <ComposerPrimitive.Send
+            className="composer-send"
+            aria-label="Send reply"
+            disabled={disabled || optimizing}
+          >
+            <ArrowUpIcon />
+          </ComposerPrimitive.Send>
         </div>
       </div>
       {review ? (
