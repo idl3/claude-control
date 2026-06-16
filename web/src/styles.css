@@ -399,6 +399,10 @@ body {
 .thread-viewport {
   flex: 1 1 auto;
   overflow-y: auto;
+  /* Never let the whole transcript scroll sideways: a wide child (code block,
+     table) must scroll WITHIN its own bubble, not push the page off-screen.
+     Pairs with min-width:0 on the message flex chain below. */
+  overflow-x: hidden;
   /* Center the transcript in an 800px column on wide screens; the max() keeps
      the 12px gutter on mobile (where (100% - 800px)/2 is negative). The
      scrollbar stays at the pane edge. Extra bottom room so the last message
@@ -444,6 +448,10 @@ body {
   flex-direction: column;
   gap: 3px;
   max-width: 92%;
+  /* A flex item defaults to min-width:auto (= min-content), which lets a wide
+     child override max-width and overflow the viewport. min-width:0 lets the
+     row honor max-width and keeps inner scrollables (pre/table) within it. */
+  min-width: 0;
 }
 .msg-row[data-role='user'] {
   align-self: flex-end;
@@ -465,6 +473,10 @@ body {
   border-radius: var(--radius);
   padding: 8px 10px;
   font-size: var(--txt-transcript);
+  /* Bound the bubble to the row and allow its flex children to shrink so a wide
+     code block / table scrolls inside instead of widening the bubble. */
+  min-width: 0;
+  max-width: 100%;
 }
 .msg-row[data-role='user'] .msg-body {
   background: var(--user);
@@ -991,6 +1003,10 @@ body {
   font-size: var(--txt-transcript);
   line-height: 1.5;
   overflow-wrap: anywhere;
+  /* Flex child of .msg-body — must be allowed to shrink so wide descendants
+     (pre/table) scroll internally rather than stretching the bubble. */
+  min-width: 0;
+  max-width: 100%;
 }
 .aui-md > :first-child {
   margin-top: 0;
