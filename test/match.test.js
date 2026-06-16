@@ -74,13 +74,13 @@ test('cross-send case: same cwd, no titles → start-time binds 1:1 (NOT swapped
 test('start-time pass rejects transcripts born long before the process', () => {
   const panes = [{ target: '0:1.1', windowName: 'a', cwd, procStartMs: 1_000_000 }];
   const candidates = [
-    // Born ages before the proc started → not this session's; recency picks it
-    // up only in the fallback pass (there is nothing else here).
+    // Born and last-active well before the proc started → belongs to an earlier
+    // session; the temporal gate in Pass 3 now also excludes it from recency.
     cand({ transcriptPath: '/p/stale.jsonl', birthtimeMs: 1, lastActivityMs: 50 }),
   ];
   const out = assignTranscripts(panes, candidates);
-  // Falls through start-time pass, then recency claims it (only candidate).
-  assert.equal(out.get('0:1.1').transcriptPath, '/p/stale.jsonl');
+  // Pass 2 rejects it (born too early); Pass 3 also rejects it (active before pane started).
+  assert.equal(out.has('0:1.1'), false);
 });
 
 test('1:1: a transcript is never assigned to two panes', () => {
@@ -115,6 +115,49 @@ test('descendant cwd is consistent (session cd-ed into a subdir)', () => {
   ];
   const out = assignTranscripts(panes, candidates);
   assert.equal(out.get('0:1.1').transcriptPath, '/p/deep.jsonl');
+});
+
+// ── Pass 3 temporal gate (fresh-pane / resume regression) ────────────────────
+
+test('fresh pane with only stale transcripts stays unmatched (the inheritance bug)', () => {
+  // Reproduces the reported symptom: brand-new session in /Users/ernie/Projects;
+  // every existing transcript in that cwd was last active well before the pane
+  // launched (outside the 5-min slack). Recency fallback must NOT bind any of
+  // them to the new pane.
+  const paneStart = 1_000_000_000; // fixed epoch value
+  const slack = 5 * 60_000;        // matches DEFAULT_START_SLACK_MS
+  const panes = [{ target: '0:5.1', windowName: 'upgrade-present-skill', cwd, procStartMs: paneStart }];
+  const candidates = [
+    cand({ transcriptPath: '/p/old1.jsonl', lastActivityMs: paneStart - slack - 60_000 }),
+    cand({ transcriptPath: '/p/old2.jsonl', lastActivityMs: paneStart - slack - 30 * 60_000 }),
+    cand({ transcriptPath: '/p/old3.jsonl', lastActivityMs: paneStart - slack - 90_000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.has('0:5.1'), false, 'fresh pane must not inherit a stale transcript');
+});
+
+test('resume case: old transcript touched after pane started still binds (Pass 3)', () => {
+  // claude --resume appends to the old file, so its mtime/lastActivityMs becomes
+  // recent (after procStartMs). The gate must pass it through.
+  const paneStart = 1_000_000;
+  const resumeActivity = paneStart + 3_000; // Claude appended ~3 s after launch
+  const panes = [{ target: '0:3.1', windowName: 'resumed', cwd, procStartMs: paneStart }];
+  const candidates = [
+    // No birthtime match (born long ago), but recently written by --resume.
+    cand({ transcriptPath: '/p/resumed.jsonl', birthtimeMs: 1, lastActivityMs: resumeActivity }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:3.1').transcriptPath, '/p/resumed.jsonl', 'resumed transcript must bind');
+});
+
+test('unknown procStartMs: recency fallback runs ungated (no regression)', () => {
+  // When we cannot determine the pane start time, we must not block the fallback.
+  const panes = [{ target: '0:4.1', windowName: 'legacy', cwd, procStartMs: null }];
+  const candidates = [
+    cand({ transcriptPath: '/p/any.jsonl', lastActivityMs: 100 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:4.1').transcriptPath, '/p/any.jsonl', 'must still bind when procStartMs unknown');
 });
 
 test('deterministic regardless of pane input order', () => {
