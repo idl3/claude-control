@@ -957,8 +957,24 @@ async function handleClientMessage(ws, msg) {
         throw new Error('stale question (already answered or changed)');
       }
       const keys = buildAnswerProgram(pending, msg.selections || []);
-      // Sequenced (with delays) so single-select auto-advance settles between keys.
-      await tmux.sendRawKeysSequenced(session.target, keys);
+      // Log the resolved key program so a failure to drive the picker is
+      // diagnosable from ~/.claude-control/logs/out.log (no logging existed before).
+      console.log(
+        `[answer] toolUseId=${msg.toolUseId} target=${session.target} keys=${JSON.stringify(keys)}`,
+      );
+      try {
+        // Sequenced (with delays) so the picker's re-render settles between keys.
+        await tmux.sendRawKeysSequenced(session.target, keys);
+      } catch (err) {
+        // Surface the failure to the log and re-throw so the outer handler nacks
+        // (ok:false) — never let an "answer sent" ack imply success when the keys
+        // never landed in the pane.
+        console.error(
+          `[answer] FAILED toolUseId=${msg.toolUseId} target=${session.target}: ${String(err?.message || err)}`,
+        );
+        throw err;
+      }
+      console.log(`[answer] sent toolUseId=${msg.toolUseId} (${keys.length} keys)`);
       return send(ws, { type: 'ack', op: 'answer', ok: true });
     }
     case 'capture': {
