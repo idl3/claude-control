@@ -108,7 +108,43 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
     } as ThreadMessageLike);
   });
 
-  return out;
+  return mergeAssistantTurns(out);
+}
+
+/**
+ * Claude Code emits ONE assistant turn as MANY JSONL messages — a thinking
+ * message, then a tool-use message (its tool_result lands as a `user` message
+ * that buildParts drops), then more thinking/tools, then a final text message.
+ * Rendered 1:1 that's a repetitive stack of "ASSISTANT · chain of thought · 1
+ * step" blocks. Merge a run of consecutive assistant messages into ONE turn so
+ * the whole turn's work groups into a single chain-of-thought that closes when
+ * the turn ends.
+ *
+ * Turn boundary = a real human `user` message (tool_result user-messages were
+ * already dropped, so they never split a turn). A tagged system message
+ * (cockpitRole==='system') also ends the run so its distinct styling survives.
+ */
+function mergeAssistantTurns(messages: ThreadMessageLike[]): ThreadMessageLike[] {
+  const isPlainAssistant = (m: ThreadMessageLike) =>
+    m.role === 'assistant' &&
+    (m.metadata?.custom?.cockpitRole ?? 'assistant') === 'assistant';
+
+  const merged: ThreadMessageLike[] = [];
+  for (const m of messages) {
+    const prev = merged[merged.length - 1];
+    if (prev && isPlainAssistant(prev) && isPlainAssistant(m)) {
+      merged[merged.length - 1] = {
+        ...prev,
+        content: [
+          ...(prev.content as unknown[]),
+          ...(m.content as unknown[]),
+        ],
+      } as ThreadMessageLike;
+    } else {
+      merged.push(m);
+    }
+  }
+  return merged;
 }
 
 /**
