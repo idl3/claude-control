@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type {
   TextMessagePartComponent,
   ToolCallMessagePartComponent,
@@ -6,6 +7,7 @@ import { toolInput, toolResult, toolSummary } from '../lib/convert';
 import { MarkdownText } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
 import { isSkillInvocation, SkillInvocation } from './SkillInvocation';
+import { useArtifactPanel } from './ArtifactContext';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -60,25 +62,85 @@ function formatInput(args: unknown): string {
   }
 }
 
-// tool_use → native tool-call part rendered as an expandable row:
+// tool_use → controlled expandable row with a panel-open trigger on the name.
 //   ▸ <ToolName> — <one-line input summary>
-// The header is a single non-wrapping flex row (the tool name is nowrap, the
-// summary truncates with ellipsis). The per-flex-child `min-width:0` in CSS is
-// what prevents the old one-letter-per-line wrap. Expanding reveals the full
-// pretty-printed input and the tool result. Result is folded in by toolUseId
-// upstream (convert.ts) and arrives as `result`.
-export const ToolPart: ToolCallMessagePartComponent = ({ toolName, args, result }) => {
+// A caret button toggles inline peek; clicking the name opens the artifact panel
+// with the full tool result (or input as fallback). The caret only appears when
+// there is a body to show. The name is only a button when there is content to send
+// to the panel.
+export const ToolPart: ToolCallMessagePartComponent = ({
+  toolCallId,
+  toolName,
+  args,
+  result,
+}) => {
+  const { open } = useArtifactPanel();
+  const [peek, setPeek] = useState(false);
+
   const summary = toolSummary(args);
   const inputText = formatInput(args);
   const res = toolResult(result);
   const hasDetails = inputText.length > 0 || res != null;
 
+  // Derive file path and language from tool input for panel metadata.
+  const input = toolInput(args);
+  const filePath =
+    input && typeof input === 'object' && 'file_path' in (input as Record<string, unknown>)
+      ? String((input as Record<string, unknown>).file_path)
+      : undefined;
+  const language = filePath
+    ? filePath.includes('.') ? filePath.split('.').pop() : undefined
+    : undefined;
+
+  // Panel content: prefer result text (the rich payload), else input.
+  const panelContent = res?.text ?? inputText;
+  const canOpenPanel = panelContent.length > 0;
+
+  const openInPanel = () => {
+    if (!canOpenPanel) return;
+    open({
+      id: toolCallId,
+      kind: 'tool',
+      title: toolName + (summary ? ` — ${summary}` : ''),
+      language,
+      content: panelContent,
+      filePath,
+    });
+  };
+
+  const nameEl = canOpenPanel ? (
+    <button
+      type="button"
+      className="tool-name tool-name-btn"
+      onClick={openInPanel}
+      title="Open in side panel"
+    >
+      {toolName}
+    </button>
+  ) : (
+    <span className="tool-name">{toolName}</span>
+  );
+
   const header = (
     <span className="tool-head">
-      <span className="tool-arrow" aria-hidden="true">
-        ▸
-      </span>
-      <span className="tool-name">{toolName}</span>
+      {hasDetails ? (
+        <button
+          type="button"
+          className="tool-arrow-btn"
+          aria-expanded={peek}
+          aria-label={peek ? 'Collapse' : 'Expand'}
+          onClick={() => setPeek((v) => !v)}
+        >
+          <span className="tool-arrow" data-peek={peek ? 'true' : 'false'} aria-hidden="true">
+            ▸
+          </span>
+        </button>
+      ) : (
+        <span className="tool-arrow" aria-hidden="true">
+          ▸
+        </span>
+      )}
+      {nameEl}
       {summary ? (
         <>
           <span className="tool-sep">—</span>
@@ -88,30 +150,24 @@ export const ToolPart: ToolCallMessagePartComponent = ({ toolName, args, result 
     </span>
   );
 
-  if (!hasDetails) {
-    return (
-      <div className="block-tool">
-        <div className="block-tool-use">{header}</div>
-      </div>
-    );
-  }
-
   return (
-    <details className="block-tool">
-      <summary className="block-tool-use">{header}</summary>
-      <div className="block-tool-body">
-        {inputText ? (
-          <pre className="block-tool-args">{inputText}</pre>
-        ) : null}
-        {res != null ? (
-          <div
-            className="block-tool-result"
-            data-error={res.isError ? 'true' : 'false'}
-          >
-            {res.text}
-          </div>
-        ) : null}
-      </div>
-    </details>
+    <div className="block-tool">
+      <div className="block-tool-use">{header}</div>
+      {hasDetails && peek ? (
+        <div className="block-tool-body">
+          {inputText ? (
+            <pre className="block-tool-args">{inputText}</pre>
+          ) : null}
+          {res != null ? (
+            <div
+              className="block-tool-result"
+              data-error={res.isError ? 'true' : 'false'}
+            >
+              {res.text}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 };
