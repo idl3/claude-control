@@ -49,7 +49,10 @@ self.addEventListener('notificationclick', (event) => {
           }
         }
         if (self.clients.openWindow) {
-          return self.clients.openWindow('/');
+          // Encode the session id in the URL hash so the freshly-opened app
+          // restores to the right session via its hashchange/fromHash handler.
+          const url = id ? '/#' + encodeURIComponent(id) : '/';
+          return self.clients.openWindow(url);
         }
         return undefined;
       }),
