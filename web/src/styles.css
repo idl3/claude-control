@@ -1914,9 +1914,9 @@ details.block-tool[open] > summary .tool-arrow {
 .toast {
   position: fixed;
   left: 50%;
-  /* Sit clear of BOTH top bars: the resource HUD (--hud-h + safe-area) and the
-     detail header below it, so toasts never overlap the nav. */
-  top: calc(env(safe-area-inset-top) + var(--hud-h) + 56px);
+  /* Desktop: a normal small offset just below the HUD. Mobile overrides this to
+     clear the stacked top bars (see the max-width rule below). */
+  top: calc(env(safe-area-inset-top) + var(--hud-h) + 14px);
   transform: translate(-50%, -12px);
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -1932,6 +1932,12 @@ details.block-tool[open] > summary .tool-arrow {
   z-index: 60;
   max-width: 90vw;
   text-align: center;
+}
+/* Mobile stacks the HUD + detail header, so push the toast clear of both. */
+@media (max-width: 760px) {
+  .toast {
+    top: calc(env(safe-area-inset-top) + var(--hud-h) + 56px);
+  }
 }
 .toast.show {
   opacity: 1;
