@@ -1122,16 +1122,21 @@ body {
   border-bottom: 1px solid var(--line);
   padding: 3px 10px;
 }
-/* tables: scrollable, bordered */
-.aui-md table {
-  display: block;
-  width: max-content;
+/* tables: horizontally scrollable, bordered. The WRAPPER owns the scroll +
+   width clamp; the table keeps its NATURAL width (no max-width clamp on the
+   table itself, which would otherwise crush columns to one char per line
+   instead of overflowing). */
+.md-table-wrap {
   max-width: 100%;
   overflow-x: auto;
-  border-collapse: collapse;
   margin: 0 0 8px;
-  font-size: 11.5px;
   -webkit-overflow-scrolling: touch;
+}
+.aui-md table {
+  width: max-content;
+  max-width: none;
+  border-collapse: collapse;
+  font-size: 11.5px;
 }
 .aui-md th,
 .aui-md td {
@@ -1139,10 +1144,16 @@ body {
   padding: 4px 8px;
   text-align: left;
   vertical-align: top;
+  /* Don't crush narrow columns to one char; cap long cells so the scroll stays
+     reasonable while their prose still wraps. */
+  min-width: 4.5em;
+  max-width: 32em;
+  overflow-wrap: anywhere;
 }
 .aui-md th {
   background: var(--bg-2);
   font-weight: 700;
+  white-space: nowrap;
 }
 .aui-md img {
   max-width: 100%;
