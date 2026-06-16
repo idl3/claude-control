@@ -170,7 +170,7 @@ export function AskModal({
           </button>
           <span className="modal-foot-spacer" />
           <button type="button" className="btn-secondary" onClick={onClose}>
-            cancel
+            Cancel
           </button>
           <button
             type="button"
