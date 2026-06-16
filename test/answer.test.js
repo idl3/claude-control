@@ -87,6 +87,7 @@ test('buildAnswerProgram: multi-question single + multi, final action row submit
   assert.deepEqual(buildAnswerProgram(pending, [['no'], ['a', 'c']]), [
     'Down', 'Enter',
     'Space', 'Down', 'Down', 'Space', 'Down', 'Down', 'Enter',
+    'Enter', // review screen: confirm "Submit answers"
   ]);
 });
 
@@ -102,6 +103,7 @@ test('buildAnswerProgram: three single-select questions chain via Enter', () => 
     'Down', 'Enter',
     'Down', 'Enter',
     'Down', 'Enter',
+    'Enter', // review screen: confirm "Submit answers"
   ]);
 });
 
@@ -117,6 +119,7 @@ test('buildAnswerProgram: two multi-select questions — Q1 Next advances, Q2 Su
   assert.deepEqual(buildAnswerProgram(pending, [['p', 'r'], ['y']]), [
     'Space', 'Down', 'Down', 'Space', 'Down', 'Down', 'Enter',
     'Down', 'Space', 'Down', 'Down', 'Down', 'Enter',
+    'Enter', // review screen: confirm "Submit answers"
   ]);
 });
 
