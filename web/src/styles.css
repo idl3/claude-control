@@ -16,7 +16,7 @@
   --red: oklch(64% 0.2 25);
   --red-bg: oklch(30% 0.09 25);
   --green: oklch(72% 0.16 150);
-  --user: oklch(34% 0.06 250);
+  --user: oklch(27% 0.045 250);
 
   --txt-transcript: 12.5px;
   --txt-meta: 11px;
@@ -509,35 +509,35 @@ body {
   align-self: flex-end;
   align-items: flex-end;
 }
-.msg-role {
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
-  padding: 0 2px;
-}
 .msg-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--bg-1);
-  border: 1px solid var(--line);
+  /* Default (assistant): no bubble — role is implied by left alignment. Only the
+     user message keeps a tinted bubble. */
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 8px 10px;
   font-size: var(--txt-transcript);
   /* Bound the bubble to the row and allow its flex children to shrink so a wide
      code block / table scrolls inside instead of widening the bubble. */
   min-width: 0;
   max-width: 100%;
 }
+/* Assistant: flush plain text, no inner padding (no bubble to inset from). */
+.msg-row[data-role='assistant'] .msg-body {
+  padding: 0;
+}
 .msg-row[data-role='user'] .msg-body {
   background: var(--user);
   border-color: transparent;
+  padding: 8px 10px;
 }
 .msg-row[data-role='system'] .msg-body {
   background: transparent;
-  border-style: dashed;
+  border: 1px dashed var(--line);
   color: var(--text-dim);
+  padding: 8px 10px;
 }
 /* Queued send: not yet echoed by the transcript — dimmed + dashed until confirmed. */
 .msg-row[data-queued='true'] {
@@ -546,9 +546,6 @@ body {
 .msg-row[data-queued='true'] .msg-body {
   border: 1px dashed var(--line);
   background: transparent;
-}
-.msg-row[data-queued='true'] .msg-role {
-  color: var(--accent, var(--text-dim));
 }
 
 /* Copy action bar — always visible at the end of each message (not a hover
@@ -1694,9 +1691,6 @@ details.block-tool[open] > summary .tool-arrow {
   max-width: 100%;
   align-self: stretch;
   align-items: stretch;
-}
-.plan-review .msg-role {
-  display: none; /* read as a plan doc, not a chat bubble */
 }
 .question {
   display: flex;

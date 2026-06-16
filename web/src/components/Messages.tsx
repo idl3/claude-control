@@ -187,7 +187,6 @@ function GroupedBody() {
 export function UserMessage() {
   return (
     <MessagePrimitive.Root className="msg-row" data-role="user">
-      <div className="msg-role">user</div>
       <div className="msg-body">
         <MessagePrimitive.Parts components={partComponents} />
       </div>
@@ -204,7 +203,6 @@ export function AssistantMessage() {
 
   return (
     <MessagePrimitive.Root className="msg-row" data-role={cockpitRole}>
-      <div className="msg-role">{cockpitRole}</div>
       <div className="msg-body">
         <GroupedBody />
       </div>
