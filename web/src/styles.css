@@ -3070,3 +3070,119 @@ details.block-tool[open] > summary .tool-arrow,
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
 }
+
+/* ── Agent chip: name + model tag ──────────────────────────────────
+   Used in sub-agent rows, the detail panel header, and nested lists.
+   Sits inline-flex so it integrates naturally inside flex rows. */
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.agent-chip-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  font-size: inherit;
+}
+.agent-chip-model {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-transform: lowercase;
+  flex: 0 0 auto;
+}
+
+/* ── Agent definition block ────────────────────────────────────────
+   Sits between the panel header and the transcript viewport in the
+   detail view. Shows parsed front-matter: description, tools, model,
+   plus any extra keys. */
+.agent-def {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-size: var(--txt-meta);
+  overflow: hidden;
+}
+.agent-def-no-def {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.agent-def-desc {
+  color: var(--text-dim);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.agent-def-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-def-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-width: 40px;
+}
+.agent-def-val {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Tools value: rendered inline; JSON array brackets are kept as-is. */
+.agent-def-tools {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--accent-2);
+}
+
+/* ── Nested sub-agents list ────────────────────────────────────────
+   One-level listing of child agents below the def block. Each nested
+   agent shows as an agent-chip. Hidden when empty. */
+.agent-nested {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-size: var(--txt-meta);
+}
+.agent-nested-label {
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  padding-top: 2px;
+}
+.agent-nested-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
