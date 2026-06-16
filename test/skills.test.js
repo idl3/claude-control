@@ -96,63 +96,23 @@ test('listSkills skips directories without SKILL.md', () => {
   }
 });
 
-test('listSkills discovers plugin skills', () => {
+test('listSkills discovers prefixed (colon) skill names verbatim', () => {
   _bustCache();
   const orig = process.env.HOME;
   const tmp = makeTmp();
   const skillsDir = path.join(tmp, '.claude', 'skills');
   fs.mkdirSync(skillsDir, { recursive: true });
 
-  // Plugin cache: ~/.claude/plugins/cache/<plugin>/skills/<name>/SKILL.md
-  const pluginSkillsDir = path.join(
-    tmp,
-    '.claude',
-    'plugins',
-    'cache',
-    'my-plugin',
-    'skills',
-  );
-  fs.mkdirSync(pluginSkillsDir, { recursive: true });
-  makeSkill(pluginSkillsDir, 'plugin-skill', 'A plugin-provided skill');
+  // Synced skills keep their prefixed invocation name (the dir name IS the slash
+  // command). Discovery must surface the colon name verbatim.
+  makeSkill(skillsDir, '100x:brainstorm', 'Expand ideas');
 
   process.env.HOME = tmp;
   try {
     const skills = listSkills();
     assert.equal(skills.length, 1);
-    assert.equal(skills[0].name, 'plugin-skill');
-    assert.equal(skills[0].source, 'plugin');
-  } finally {
-    process.env.HOME = orig;
-    _bustCache();
-  }
-});
-
-test('user skill wins over plugin skill with same name (de-dup)', () => {
-  _bustCache();
-  const orig = process.env.HOME;
-  const tmp = makeTmp();
-  const skillsDir = path.join(tmp, '.claude', 'skills');
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  makeSkill(skillsDir, 'shared-skill', 'User version');
-
-  const pluginSkillsDir = path.join(
-    tmp,
-    '.claude',
-    'plugins',
-    'cache',
-    'plugin-a',
-    'skills',
-  );
-  fs.mkdirSync(pluginSkillsDir, { recursive: true });
-  makeSkill(pluginSkillsDir, 'shared-skill', 'Plugin version');
-
-  process.env.HOME = tmp;
-  try {
-    const skills = listSkills();
-    assert.equal(skills.length, 1);
+    assert.equal(skills[0].name, '100x:brainstorm');
     assert.equal(skills[0].source, 'user');
-    assert.equal(skills[0].description, 'User version');
   } finally {
     process.env.HOME = orig;
     _bustCache();
