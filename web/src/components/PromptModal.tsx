@@ -6,6 +6,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
+import { Kbd } from './Kbd';
 import type { PanePrompt } from '../lib/types';
 
 interface PromptModalProps {
@@ -59,35 +60,61 @@ function PlanReview({ markdown }: { markdown: string }) {
 
 /**
  * Live TUI selection prompt (permission / plan approval / numbered menu) detected
- * from the pane. Tapping an option sends its key — that single tap IS the submit
- * (no separate Confirm), so we show immediate "sending…" feedback and disable the
- * buttons to prevent a double-tap from sending twice. For plan approvals we first
- * render the full plan as markdown (scrollable) and put the approval options at
- * the very bottom, so the plan can be reviewed before deciding.
+ * from the pane. Selection and submission are separated (separation of concern):
+ * clicking an option only *selects* it (number keys 1-9 select too); the choice
+ * is sent only when the user hits Confirm (or Enter). This prevents an accidental
+ * tap from instantly approving a plan. For plan approvals we first render the full
+ * plan as markdown (scrollable) and put the approval options at the very bottom,
+ * so the plan can be reviewed before deciding.
  */
 export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModalProps) {
+  // The TUI's own highlighted option is the initial selection; first option as
+  // a fallback so Confirm always has a target.
+  const defaultKey = useMemo(() => {
+    const pre = prompt.options.find((o) => o.selected);
+    return pre?.key ?? prompt.options[0]?.key ?? null;
+  }, [prompt]);
+
+  const [selectedKey, setSelectedKey] = useState<string | null>(defaultKey);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const sig = JSON.stringify(prompt);
   useEffect(() => {
+    setSelectedKey(defaultKey);
     setPendingKey(null);
-  }, [sig]);
+  }, [sig, defaultKey]);
 
   const submit = (key: string) => {
     if (pendingKey) return;
     setPendingKey(key);
     onKey(key);
   };
+  const confirm = () => {
+    if (selectedKey) submit(selectedKey);
+  };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (pendingKey) return; // already submitting
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedKey) submit(selectedKey);
+        return;
+      }
+      // Number keys 1-9 select the matching option (don't submit).
+      if (prompt.options.some((o) => o.key === e.key)) {
+        e.preventDefault();
+        setSelectedKey(e.key);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, pendingKey, selectedKey, sig]);
 
   const sending = pendingKey !== null;
   const isPlan = !!planMarkdown;
@@ -117,16 +144,18 @@ export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModa
 
           <div className="question">
             {!isPlan ? <div className="q-text">{prompt.question}</div> : null}
-            <div className="q-options">
+            <div className="q-options" role="radiogroup" aria-label="Options">
               {prompt.options.map((opt) => (
                 <button
                   type="button"
                   key={opt.key}
                   className="option-btn"
-                  data-on={opt.selected ? 'true' : 'false'}
+                  role="radio"
+                  aria-checked={selectedKey === opt.key}
+                  data-on={selectedKey === opt.key ? 'true' : 'false'}
                   data-sending={pendingKey === opt.key ? 'true' : undefined}
                   disabled={sending}
-                  onClick={() => submit(opt.key)}
+                  onClick={() => setSelectedKey(opt.key)}
                 >
                   <span className="option-label">
                     {opt.key}. {opt.label}
@@ -149,10 +178,18 @@ export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModa
             disabled={sending}
             onClick={() => submit('Escape')}
           >
-            cancel (Esc)
+            Cancel <Kbd>Esc</Kbd>
           </button>
           <span className="modal-foot-spacer" />
           {sending ? <span className="prompt-status">submitting your answer…</span> : null}
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={sending || !selectedKey}
+            onClick={confirm}
+          >
+            Confirm <Kbd>↵</Kbd>
+          </button>
         </div>
       </div>
     </div>
