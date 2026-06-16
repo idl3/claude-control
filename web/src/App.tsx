@@ -463,6 +463,11 @@ function AppInner() {
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
       >
+        {/* Fixed top scrim: on mobile, focusing the composer makes iOS scroll the
+            whole app up to clear the keyboard, pushing the nav bars off and
+            sliding message text under the status bar. This dissolves that text
+            into the background at the very top of the screen while typing. */}
+        <div className="app-top-fade" aria-hidden="true" />
         <ResourceHud
           resources={cockpit.resources}
           conn={cockpit.conn}

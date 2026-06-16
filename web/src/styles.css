@@ -417,6 +417,32 @@ body {
 .thread-root:focus-within .thread-fade {
   opacity: 1;
 }
+/* Fixed scrim pinned to the very top of the viewport, covering the status-bar
+   safe area. Mobile only: when the composer is focused iOS scrolls the app up
+   (nav bars leave, content reaches the status bar), so this fades that content
+   into the background. Hidden on desktop where there's no keyboard scroll. */
+.app-top-fade {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top) + 52px);
+  background: linear-gradient(to bottom, var(--bg) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease, ease);
+  z-index: 40;
+}
+@media (max-width: 760px) {
+  .app:focus-within .app-top-fade {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-top-fade {
+    transition: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .thread-fade {
     transition: none;
