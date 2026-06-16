@@ -3186,3 +3186,176 @@ details.block-tool[open] > summary .tool-arrow,
   flex: 1 1 auto;
   min-width: 0;
 }
+
+/* ── Prompt Enhancer ─────────────────────────────────────────── */
+
+/* Enhance button in the composer toolbar — secondary action, sits after Send */
+.composer-enhance {
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+}
+.composer-enhance:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer-enhance:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.composer-enhance:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Spinner shown while the optimize request is in-flight */
+.composer-enhance-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cockpit-spin 0.7s linear infinite;
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-enhance-spinner {
+    animation-duration: 1.6s;
+  }
+}
+
+/* ── OptimizeReview modal ────────────────────────────────────── */
+
+/* Wider than the standard modal to accommodate the diff + suggestion */
+.modal-optimize {
+  max-width: 680px;
+}
+
+/* Header group: title + badge side by side */
+.modal-head-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Override default amber title for the optimize modal — use accent-2 (teal) */
+.modal-title-optimize {
+  color: var(--accent-2);
+}
+
+/* Mode badge: small pill showing "claude -p" or "rules" */
+.optimize-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--line);
+}
+.optimize-mode-badge[data-mode='llm'] {
+  border-color: oklch(55% 0.1 250 / 0.5);
+  color: var(--accent);
+}
+
+/* Section wrapper with label */
+.optimize-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.optimize-section-label {
+  font-size: var(--txt-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* Editable suggestion textarea */
+.optimize-suggestion {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color var(--ease) 0.15s;
+}
+.optimize-suggestion:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Diff view */
+.optimize-diff {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.diff-same {
+  color: var(--text-dim);
+}
+.diff-add {
+  color: oklch(72% 0.14 150);
+  background: oklch(72% 0.14 150 / 0.07);
+  display: block;
+  margin-inline: -12px;
+  padding-inline: 12px;
+}
+.diff-del {
+  color: oklch(64% 0.16 25);
+  background: oklch(64% 0.16 25 / 0.07);
+  text-decoration: line-through;
+  text-decoration-color: oklch(64% 0.16 25 / 0.5);
+  display: block;
+  margin-inline: -12px;
+  padding-inline: 12px;
+}
+
+/* Rationale / changes lists */
+.optimize-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.optimize-list li {
+  padding-left: 2px;
+}

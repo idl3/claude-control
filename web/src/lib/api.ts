@@ -234,6 +234,33 @@ export async function resetIcon(): Promise<void> {
 export interface ControlConfig {
   launchCommand: string;
   defaultCwd: string;
+  optimizeModel: string;
+  claudeBin: string;
+}
+
+export interface OptimizeResult {
+  optimized: string;
+  rationale: string[];
+  changes: string[];
+  mode: 'llm' | 'rules';
+}
+
+export async function optimizePrompt(text: string, intent?: string): Promise<OptimizeResult> {
+  const res = await authFetch('/api/optimize', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, ...(intent ? { intent } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Partial<OptimizeResult> & { error?: string };
+  if (!res.ok || typeof json.optimized !== 'string') {
+    throw new Error(json.error || `HTTP ${res.status}`);
+  }
+  return {
+    optimized: json.optimized,
+    rationale: json.rationale ?? [],
+    changes: json.changes ?? [],
+    mode: json.mode === 'rules' ? 'rules' : 'llm',
+  };
 }
 
 /** Fetch the persisted launch config. */
