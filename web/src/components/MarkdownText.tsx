@@ -72,6 +72,16 @@ const CodeHighlighter = ({ components, language, code }: SyntaxHighlighterProps)
   );
 };
 
+// Wrap tables in a horizontally-scrollable container so wide tables stay legible
+// (the table keeps its natural column widths and scrolls within the bubble,
+// instead of being clamped to bubble width and crushing columns to one char).
+// `node` is react-markdown's AST node — strip it so it isn't spread onto <table>.
+const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAttributes<HTMLTableElement>) => (
+  <div className="md-table-wrap">
+    <table {...props} />
+  </div>
+);
+
 const MarkdownTextImpl: TextMessagePartComponent = () => (
   <MarkdownTextPrimitive
     className="aui-md"
@@ -79,6 +89,7 @@ const MarkdownTextImpl: TextMessagePartComponent = () => (
     components={{
       CodeHeader,
       SyntaxHighlighter: CodeHighlighter,
+      table: TableWrap,
     }}
   />
 );
