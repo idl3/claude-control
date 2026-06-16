@@ -7,6 +7,7 @@ import type {
 import type { TextMessagePartComponent } from '@assistant-ui/react';
 import remarkGfm from 'remark-gfm';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
+import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
 
 /**
  * GitHub-flavored markdown for assistant/system text parts.
@@ -23,11 +24,42 @@ import { highlightCode, resolveLanguage } from '../lib/highlight';
  * <span class="hljs-*"> wrappers.
  */
 
-// Compact language tag above fenced blocks. The block body is rendered by the
-// SyntaxHighlighter below; this is purely the header chrome.
-const CodeHeader = ({ language }: CodeHeaderProps) => {
+// Compact language tag above fenced blocks, with an "open in panel" button.
+// The block body is rendered by the SyntaxHighlighter below.
+const CodeHeader = ({ language, code }: CodeHeaderProps) => {
+  const { open } = useArtifactPanel();
   if (!language) return null;
-  return <div className="aui-md-code-lang">{language}</div>;
+
+  const hasCode = typeof code === 'string' && code.length > 0;
+
+  const openInPanel = () => {
+    if (!hasCode || typeof code !== 'string') return;
+    const title = language || 'code';
+    open({
+      id: codeArtifactId(language, code),
+      kind: 'code',
+      title,
+      language,
+      content: code,
+    });
+  };
+
+  return (
+    <div className="aui-md-code-lang">
+      <span className="aui-md-code-lang-name">{language}</span>
+      {hasCode ? (
+        <button
+          type="button"
+          className="aui-md-code-open-btn"
+          onClick={openInPanel}
+          title="Open in side panel"
+          aria-label={`Open ${language} code in side panel`}
+        >
+          ↗
+        </button>
+      ) : null}
+    </div>
+  );
 };
 
 // Fenced-code rendering. We attempt to highlight via highlight.js (lazy). While

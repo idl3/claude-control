@@ -1385,7 +1385,8 @@ details.block-tool > summary.block-tool-use {
   flex: 0 0 auto;
   transition: transform var(--ease) 0.15s;
 }
-details.block-tool[open] > summary .tool-arrow {
+details.block-tool[open] > summary .tool-arrow,
+.tool-arrow[data-peek='true'] {
   transform: rotate(90deg);
 }
 .tool-name {
@@ -2806,4 +2807,266 @@ details.block-tool[open] > summary .tool-arrow {
   max-width: 100%;
   align-self: stretch;
   align-items: stretch;
+}
+
+/* ── Tool part: controlled caret button ───────────────────────────
+   Replaces the native <details>/<summary> open/close with a controlled
+   button so the name can also independently open the artifact panel. */
+.tool-arrow-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.tool-name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent-2);
+  font-weight: 600;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--ease) 0.15s;
+}
+.tool-name-btn:hover {
+  text-decoration-color: var(--accent-2);
+}
+
+/* ── Code block header with open-in-panel button ──────────────────
+   The header row is flex; the language tag takes remaining space;
+   the open button appears to the right. */
+.aui-md-code-lang {
+  display: flex;
+  align-items: center;
+}
+.aui-md-code-lang-name {
+  flex: 1 1 auto;
+}
+.aui-md-code-open-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 1;
+  transition: color var(--ease) 0.15s;
+  border-radius: 4px;
+}
+.aui-md-code-open-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+.aui-md-code-open-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── detail-split: chat + artifact panel side by side ─────────────
+   On narrow screens the panel floats as a fixed bottom sheet, so no
+   split layout is needed. */
+.detail-split {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/* The thread fills available width by default. */
+.detail-split > .thread-root {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Desktop split: when the panel is present both sides share 50:50. */
+@media (min-width: 760px) {
+  .detail-split > .thread-root {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .detail-split > .artifact-panel {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* ── Artifact panel ───────────────────────────────────────────────
+   Desktop: flex column inside .detail-split.
+   Mobile: fixed bottom sheet anchored to bottom edge. */
+.artifact-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+}
+/* Mobile sheet */
+.artifact-panel[data-mode='sheet'] {
+  position: fixed;
+  inset: auto 0 0 0;
+  border-left: none;
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  overscroll-behavior: contain;
+  transition: height 0.28s var(--ease);
+}
+.artifact-panel[data-mode='sheet'][data-dragging='true'] {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .artifact-panel[data-mode='sheet'] {
+    transition: none;
+  }
+}
+
+/* Drag handle (mobile only) */
+.artifact-drag-handle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.artifact-drag-pip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+/* Panel header: tab strip + close button */
+.artifact-panel-head {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  min-height: 38px;
+}
+.artifact-tablist {
+  display: flex;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  gap: 0;
+}
+.artifact-tab-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  border-right: 1px solid var(--line);
+  flex: 0 0 auto;
+  max-width: 200px;
+  min-width: 0;
+}
+.artifact-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 6px 8px 6px 10px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.artifact-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.artifact-tab[aria-selected='true'] {
+  color: var(--text);
+  background: var(--bg);
+  border-bottom: 2px solid var(--accent);
+}
+.artifact-tab-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 4px;
+  margin: auto 4px auto 0;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.artifact-tab-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.artifact-close-all {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--line);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 18px;
+  line-height: 1;
+  transition: color var(--ease) 0.15s;
+}
+.artifact-close-all:hover {
+  color: var(--text);
+}
+
+/* Panel body: scrollable code area */
+.artifact-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.artifact-body-wrap {
+  min-height: 100%;
+}
+.artifact-pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.artifact-pre code {
+  display: block;
+}
+.artifact-large-note {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: var(--txt-meta);
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
 }

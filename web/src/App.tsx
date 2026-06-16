@@ -14,6 +14,8 @@ import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { LiveThinkingContext } from './components/ThinkingContext';
+import { ArtifactPanelProvider } from './components/ArtifactContext';
+import { ArtifactPanel } from './components/ArtifactPanel';
 import { LivePane } from './components/LivePane';
 import { Composer } from './components/Composer';
 import { AskModal } from './components/AskModal';
@@ -464,6 +466,7 @@ function AppInner() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+    <ArtifactPanelProvider>
       <div
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
@@ -612,13 +615,16 @@ function AppInner() {
                 <Composer disabled={false} />
               </div>
             ) : (
-              <LiveThinkingContext.Provider value={liveThinkingId}>
-                <Thread
-                  hasSelection={!!cockpit.selectedId}
-                  hiddenCount={hiddenCount}
-                  onLoadEarlier={loadEarlier}
-                />
-              </LiveThinkingContext.Provider>
+              <div className="detail-split">
+                <LiveThinkingContext.Provider value={liveThinkingId}>
+                  <Thread
+                    hasSelection={!!cockpit.selectedId}
+                    hiddenCount={hiddenCount}
+                    onLoadEarlier={loadEarlier}
+                  />
+                </LiveThinkingContext.Provider>
+                <ArtifactPanel />
+              </div>
             )}
           </main>
         </div>
@@ -698,6 +704,7 @@ function AppInner() {
 
         <ToastView toast={toast} />
       </div>
+    </ArtifactPanelProvider>
     </AssistantRuntimeProvider>
   );
 }
