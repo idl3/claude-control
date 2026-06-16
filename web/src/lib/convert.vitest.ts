@@ -361,3 +361,35 @@ describe('toolSummary / toolInput / toolResult accessors', () => {
     expect(toolResult(null)).toBeNull();
   });
 });
+
+describe('convertMessages — assistant turn merging', () => {
+  it('merges consecutive assistant messages into one turn (id = turn start)', () => {
+    const out = convertMessages([
+      { uuid: 'a1', role: 'assistant', blocks: [{ kind: 'thinking', text: 'pondering' }] },
+      { uuid: 'a2', role: 'assistant', blocks: [{ kind: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      { uuid: 'a3', role: 'assistant', blocks: [{ kind: 'text', text: 'done' }] },
+    ] as Msg[]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('a1');
+    expect(parts(out[0]).map((p) => p.type)).toEqual(['reasoning', 'tool-call', 'text']);
+  });
+
+  it('does NOT merge across a real user message (turn boundary)', () => {
+    const out = convertMessages([
+      { uuid: 'a1', role: 'assistant', blocks: [{ kind: 'text', text: 'first' }] },
+      { uuid: 'u1', role: 'user', blocks: [{ kind: 'text', text: 'reply' }] },
+      { uuid: 'a2', role: 'assistant', blocks: [{ kind: 'text', text: 'second' }] },
+    ] as Msg[]);
+    expect(out.map((m) => m.id)).toEqual(['a1', 'u1', 'a2']);
+  });
+
+  it('does NOT merge a tagged system message into an assistant turn', () => {
+    const out = convertMessages([
+      { uuid: 'a1', role: 'assistant', blocks: [{ kind: 'text', text: 'a' }] },
+      { uuid: 's1', role: 'system', blocks: [{ kind: 'text', text: 'sys' }] },
+      { uuid: 'a2', role: 'assistant', blocks: [{ kind: 'text', text: 'b' }] },
+    ] as Msg[]);
+    expect(out).toHaveLength(3);
+    expect(out[1].metadata?.custom?.cockpitRole).toBe('system');
+  });
+});
