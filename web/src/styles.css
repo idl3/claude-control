@@ -29,6 +29,18 @@
   color-scheme: dark;
 }
 
+/* Desktop has the room — bump the type scale one step up from the mobile-first
+   defaults. Everything reads off these tokens, so this lifts transcript, meta,
+   and composer text together. Composer stays >=16px regardless (iOS zoom guard
+   is moot on desktop, but the bump keeps it consistent). */
+@media (min-width: 760px) {
+  :root {
+    --txt-transcript: 13.5px;
+    --txt-meta: 12px;
+    --txt-composer: 17px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1542,6 +1554,9 @@ details.block-tool[open] > summary .tool-arrow {
 }
 .btn-secondary,
 .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 9px 14px;
   border-radius: 9px;
   font: inherit;
@@ -1565,6 +1580,32 @@ details.block-tool[open] > summary .tool-arrow {
 .btn-primary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* Keyboard key-cap (shadcn/ui Kbd look, plain-CSS). Non-interactive hint inside
+   buttons, so it ignores pointer events and rides the button's text color. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.btn-primary .kbd {
+  border-color: oklch(40% 0.02 260 / 0.4);
+  background: oklch(100% 0 0 / 0.18);
+  box-shadow: none;
+  color: oklch(20% 0.02 260);
 }
 
 /* ── Toast ────────────────────────────────────────────────────── */
