@@ -1610,6 +1610,48 @@ details.block-tool[open] > summary .tool-arrow {
 .composer-input::placeholder {
   color: var(--text-faint);
 }
+/* Overlay placeholder: lets the hint use the <Kbd> component (a native
+   placeholder is text-only). Sits exactly over the input's text box, click-
+   through, and is revealed only while the input shows its (blank) placeholder. */
+.composer-input-wrap {
+  position: relative;
+  display: flex;
+}
+.composer-input-wrap .composer-input {
+  flex: 1 1 auto;
+}
+.composer-hint {
+  position: absolute;
+  inset: 0;
+  padding: 2px; /* match .composer-input padding */
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--txt-composer);
+  line-height: 1.45;
+  color: var(--text-faint);
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.composer-input:placeholder-shown + .composer-hint {
+  display: flex;
+}
+.composer-hint-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--txt-meta);
+}
+.composer-hint-dot {
+  opacity: 0.6;
+}
+/* Mobile: no hardware modifier keys, send is a button — show just "Reply…". */
+@media (max-width: 760px) {
+  .composer-hint-keys {
+    display: none;
+  }
+}
 
 /* ── Ask modal ────────────────────────────────────────────────── */
 .modal-backdrop {

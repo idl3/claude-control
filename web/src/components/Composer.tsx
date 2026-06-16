@@ -5,6 +5,7 @@ import {
   useComposerRuntime,
   type Attachment,
 } from '@assistant-ui/react';
+import { Kbd } from './Kbd';
 
 interface ComposerProps {
   disabled: boolean;
@@ -91,21 +92,36 @@ export function Composer({ disabled }: ComposerProps) {
       {/* Centered card (max-width on desktop): input on top, attachments below,
           then a toolbar with attach on the left and send on the right. */}
       <div className="composer-card">
-        <ComposerPrimitive.Input
-          className="composer-input"
-          placeholder={disabled ? 'Select a session…' : 'Reply…  (⌘/Ctrl+↵ to send · Enter = newline)'}
-          submitOnEnter={false}
-          onKeyDown={(e) => {
-            // Enter inserts a newline; ⌘/Ctrl+Enter sends.
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              if (!disabled) composer.send();
-            }
-          }}
-          rows={1}
-          disabled={disabled}
-          autoComplete="off"
-        />
+        {/* Placeholder needs the Kbd component, but a native placeholder is
+            text-only — so use a space placeholder (keeps :placeholder-shown
+            working + invisible) and overlay a hint shown only while empty. */}
+        <div className="composer-input-wrap">
+          <ComposerPrimitive.Input
+            className="composer-input"
+            placeholder={disabled ? 'Select a session…' : ' '}
+            submitOnEnter={false}
+            onKeyDown={(e) => {
+              // Enter inserts a newline; ⌘/Ctrl+Enter sends.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                if (!disabled) composer.send();
+              }
+            }}
+            rows={1}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {!disabled ? (
+            <div className="composer-hint" aria-hidden="true">
+              <span className="composer-hint-lead">Reply…</span>
+              <span className="composer-hint-keys">
+                <Kbd>⌘/Ctrl+↵</Kbd> to send
+                <span className="composer-hint-dot">·</span>
+                <Kbd>↵</Kbd> newline
+              </span>
+            </div>
+          ) : null}
+        </div>
 
         {/* children render form: invoked once per composer attachment. */}
         <div className="composer-attachments">
