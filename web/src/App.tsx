@@ -612,13 +612,14 @@ function AppInner() {
                   requestCapture={cockpit.requestCapture}
                   clearCapture={cockpit.clearCapture}
                 />
-                <Composer disabled={false} />
+                <Composer disabled={false} sessionId={cockpit.selectedId} />
               </div>
             ) : (
               <div className="detail-split">
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   <Thread
                     hasSelection={!!cockpit.selectedId}
+                    sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}
                   />

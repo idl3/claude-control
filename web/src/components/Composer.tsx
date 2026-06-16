@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -12,6 +12,9 @@ import { SkillBrowser } from './SkillBrowser';
 
 interface ComposerProps {
   disabled: boolean;
+  /** Active session id — used to scope the enhance/review state so an
+   *  improvement from one session can't leak into another on switch. */
+  sessionId?: string | null;
 }
 
 // Image preview for an image attachment that still carries its File (pending),
@@ -88,17 +91,29 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
  *   send onNew appends each attachment's uploaded absolute path to the reply
  *   text. Paths are NEVER injected into the textarea.
  */
-export function Composer({ disabled }: ComposerProps) {
+export function Composer({ disabled, sessionId }: ComposerProps) {
   const composer = useComposerRuntime();
   const [optimizing, setOptimizing] = useState(false);
   const [review, setReview] = useState<(OptimizeResult & { original: string }) | null>(null);
   const [empty, setEmpty] = useState(true);
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
+  // Latest session id, read by in-flight async callbacks to detect a switch.
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
   useEffect(
     () => composer.subscribe(() => setEmpty(!(composer.getState().text ?? '').trim())),
     [composer],
   );
+
+  // On session switch, drop any stale enhance state — a pending/open improvement
+  // belongs to the PREVIOUS session; accepting it here would overwrite the new
+  // session's prompt with the old session's improved prompt.
+  useEffect(() => {
+    setReview(null);
+    setOptimizing(false);
+    setSkillBrowserOpen(false);
+  }, [sessionId]);
 
   const pickSkill = useCallback(
     (name: string) => {
@@ -117,16 +132,20 @@ export function Composer({ disabled }: ComposerProps) {
     if (disabled || optimizing) return;
     const original = composer.getState().text ?? '';
     if (!original.trim()) return;
+    const sid = sessionId; // session this enhancement belongs to
     setOptimizing(true);
     try {
       const result = await optimizePrompt(original);
+      // Drop the result if the user switched sessions while it was in flight —
+      // otherwise it would surface a review for the wrong session.
+      if (sessionIdRef.current !== sid) return;
       setReview({ ...result, original });
     } catch {
       // swallow — composer stays usable
     } finally {
-      setOptimizing(false);
+      if (sessionIdRef.current === sid) setOptimizing(false);
     }
-  }, [composer, disabled, optimizing]);
+  }, [composer, disabled, optimizing, sessionId]);
 
   return (
     <ComposerPrimitive.Root className="composer">
@@ -145,7 +164,7 @@ export function Composer({ disabled }: ComposerProps) {
               // Enter inserts a newline; ⌘/Ctrl+Enter sends.
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                if (!disabled) composer.send();
+                if (!disabled && !optimizing) composer.send();
               }
               // ⌘/Ctrl+O triggers the enhance button.
               if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey)) {
@@ -200,7 +219,7 @@ export function Composer({ disabled }: ComposerProps) {
           <ComposerPrimitive.Send
             className="composer-send"
             aria-label="Send reply"
-            disabled={disabled}
+            disabled={disabled || optimizing}
           >
             <ArrowUpIcon />
           </ComposerPrimitive.Send>
