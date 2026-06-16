@@ -20,6 +20,8 @@ interface ConfigModalProps {
 export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const [launchCommand, setLaunchCommand] = useState('');
   const [defaultCwd, setDefaultCwd] = useState('');
+  const [optimizeModel, setOptimizeModel] = useState('');
+  const [claudeBin, setClaudeBin] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState<{
@@ -50,6 +52,8 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
         if (!alive) return;
         setLaunchCommand(c.launchCommand);
         setDefaultCwd(c.defaultCwd);
+        setOptimizeModel(c.optimizeModel ?? '');
+        setClaudeBin(c.claudeBin ?? '');
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -105,9 +109,11 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveConfig({ launchCommand, defaultCwd });
+      const saved = await saveConfig({ launchCommand, defaultCwd, optimizeModel, claudeBin });
       setLaunchCommand(saved.launchCommand);
       setDefaultCwd(saved.defaultCwd);
+      setOptimizeModel(saved.optimizeModel ?? '');
+      setClaudeBin(saved.claudeBin ?? '');
       onToast('Config saved', 'ok');
       onClose();
     } catch (err) {
@@ -176,6 +182,43 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
           />
           <span className="config-hint">
             Must be an existing directory. New sessions start here.
+          </span>
+        </label>
+
+        <label className="config-field">
+          <span className="config-label">Optimize model</span>
+          <input
+            className="config-input"
+            type="text"
+            placeholder="claude-haiku-4-5"
+            value={optimizeModel}
+            disabled={loading}
+            onChange={(e) => setOptimizeModel(e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="config-hint">
+            Model used by the prompt enhancer (<code>claude -p</code>). Default{' '}
+            <code>claude-haiku-4-5</code>.
+          </span>
+        </label>
+
+        <label className="config-field">
+          <span className="config-label">Claude CLI path (optional)</span>
+          <input
+            className="config-input"
+            type="text"
+            placeholder="auto-detected"
+            value={claudeBin}
+            disabled={loading}
+            onChange={(e) => setClaudeBin(e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="config-hint">
+            Absolute path to the <code>claude</code> binary. Leave blank to auto-detect.
           </span>
         </label>
 

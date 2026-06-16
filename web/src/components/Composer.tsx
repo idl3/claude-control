@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -6,6 +6,8 @@ import {
   type Attachment,
 } from '@assistant-ui/react';
 import { Kbd } from './Kbd';
+import { optimizePrompt, type OptimizeResult } from '../lib/api';
+import { OptimizeReview } from './OptimizeReview';
 
 interface ComposerProps {
   disabled: boolean;
@@ -87,6 +89,30 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
  */
 export function Composer({ disabled }: ComposerProps) {
   const composer = useComposerRuntime();
+  const [optimizing, setOptimizing] = useState(false);
+  const [review, setReview] = useState<(OptimizeResult & { original: string }) | null>(null);
+  const [empty, setEmpty] = useState(true);
+
+  useEffect(
+    () => composer.subscribe(() => setEmpty(!(composer.getState().text ?? '').trim())),
+    [composer],
+  );
+
+  const runEnhance = useCallback(async () => {
+    if (disabled || optimizing) return;
+    const original = composer.getState().text ?? '';
+    if (!original.trim()) return;
+    setOptimizing(true);
+    try {
+      const result = await optimizePrompt(original);
+      setReview({ ...result, original });
+    } catch {
+      // swallow — composer stays usable
+    } finally {
+      setOptimizing(false);
+    }
+  }, [composer, disabled, optimizing]);
+
   return (
     <ComposerPrimitive.Root className="composer">
       {/* Centered card (max-width on desktop): input on top, attachments below,
@@ -105,6 +131,11 @@ export function Composer({ disabled }: ComposerProps) {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 if (!disabled) composer.send();
+              }
+              // ⌘/Ctrl+O triggers the enhance button.
+              if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void runEnhance();
               }
             }}
             rows={1}
@@ -148,8 +179,33 @@ export function Composer({ disabled }: ComposerProps) {
           >
             <ArrowUpIcon />
           </ComposerPrimitive.Send>
+          <button
+            type="button"
+            className="composer-enhance"
+            aria-label="Enhance prompt"
+            title="Enhance prompt (⌘/Ctrl+O)"
+            disabled={disabled || optimizing || empty}
+            onClick={() => void runEnhance()}
+          >
+            {optimizing ? (
+              <span className="composer-enhance-spinner" aria-hidden="true" />
+            ) : (
+              <SparkleIcon />
+            )}
+          </button>
         </div>
       </div>
+      {review ? (
+        <OptimizeReview
+          original={review.original}
+          result={review}
+          onAccept={(text) => {
+            composer.setText(text);
+            setReview(null);
+          }}
+          onClose={() => setReview(null)}
+        />
+      ) : null}
     </ComposerPrimitive.Root>
   );
 }
@@ -171,6 +227,24 @@ function ArrowUpIcon() {
         strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      {/* 4-point sparkle: vertical diamond + horizontal diamond */}
+      <path
+        d="M12 2 L13.5 9.5 L21 11 L13.5 12.5 L12 20 L10.5 12.5 L3 11 L10.5 9.5 Z"
+        fill="currentColor"
+        opacity="0.9"
+      />
+      <path
+        d="M19 2 L19.8 4.2 L22 5 L19.8 5.8 L19 8 L18.2 5.8 L16 5 L18.2 4.2 Z"
+        fill="currentColor"
+        opacity="0.6"
       />
     </svg>
   );

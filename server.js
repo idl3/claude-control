@@ -25,6 +25,8 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+import { optimizePrompt } from './lib/optimize.js';
+import { complete as claudeCliComplete } from './lib/claude-cli.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -241,6 +243,11 @@ const server = http.createServer((req, res) => {
     if (req.method === 'GET') return endJson(res, 200, readConfig());
     if (req.method === 'POST') return handleConfigSave(req, res);
     return endJson(res, 405, { error: 'method not allowed' });
+  }
+  if (u.pathname === '/api/optimize') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleOptimize(req, res);
   }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
@@ -459,6 +466,28 @@ async function handleConfigSave(req, res) {
     return endJson(res, 200, saved);
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/optimize — token-gated prompt optimiser. Accepts { text, intent }
+// and returns { optimized, rationale, changes, mode } from optimizePrompt.
+// Falls back to rules-based optimization when the Claude CLI is unavailable.
+async function handleOptimize(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: 'invalid JSON body' });
+  }
+  const text = typeof body.text === 'string' ? body.text : '';
+  if (!text.trim()) return endJson(res, 400, { error: 'text required' });
+  if (text.length > 8000) return endJson(res, 400, { error: 'text exceeds 8000 character limit' });
+  const intent = typeof body.intent === 'string' ? body.intent : undefined;
+  try {
+    const result = await optimizePrompt(text, { complete: claudeCliComplete, intent });
+    return endJson(res, 200, result);
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
   }
 }
 
