@@ -268,7 +268,9 @@ const server = http.createServer((req, res) => {
     const machine = detectMachine();
     return endJson(res, 200, {
       machine,
-      mlxModels: MLX_MODELS,
+      // Mark which MLX models are already in the local HF cache so the UI can
+      // show downloaded vs. will-download (avoids a surprise multi-GB fetch).
+      mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
       claudeModels: CLAUDE_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
@@ -493,6 +495,13 @@ async function handleConfigSave(req, res) {
   }
   try {
     const saved = writeConfig(body);
+    // If the MLX backend is active, (re)warm the selected model now — this
+    // restarts the local server with the new model and starts any needed
+    // download in the background, so the user doesn't hit a cold stall (or a
+    // wrong-model hang) on their next ✨ enhance.
+    if (saved.optimizeBackend === 'mlx' && mlx.resolveMlxPython()) {
+      mlx.warm();
+    }
     return endJson(res, 200, saved);
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });

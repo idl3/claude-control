@@ -134,7 +134,14 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
       setClaudeBin(saved.claudeBin ?? '');
       setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
       setMlxModel(saved.mlxModel ?? '');
-      onToast('Config saved', 'ok');
+      // If the MLX model isn't downloaded yet, the server fetches it in the
+      // background — tell the user the enhancer falls back to claude meanwhile.
+      const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
+      if (saved.optimizeBackend === 'mlx' && chosen && chosen.installed === false) {
+        onToast(`Downloading ${chosen.label} (${chosen.sizeGB} GB)… enhancer uses claude until ready`, 'ok');
+      } else {
+        onToast('Config saved', 'ok');
+      }
       onClose();
     } catch (err) {
       onToast(`Save failed: ${(err as Error).message}`, 'error');
@@ -255,6 +262,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
               {(models?.mlxModels ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label} · {m.sizeGB} GB
+                  {m.installed ? ' · downloaded' : ' · ⬇ download'}
                   {m.id === models?.recommendedMlxModel ? ' · recommended' : ''}
                   {models && m.minRamGB > models.machine.ramGB ? ` (needs ≥${m.minRamGB} GB)` : ''}
                 </option>

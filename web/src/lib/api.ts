@@ -260,6 +260,8 @@ export interface MlxModelInfo {
   label: string;
   sizeGB: number;
   minRamGB: number;
+  /** Already present in the local HuggingFace cache (no download needed). */
+  installed?: boolean;
 }
 export interface ClaudeModelInfo {
   id: string;
