@@ -1,7 +1,7 @@
 ---
 title: claude-control — Architecture & Evolution
 project: claude-control
-version: 0.1.20
+version: 0.1.21
 span: 2026-06-14 → 2026-06-17
 ---
 
@@ -9,7 +9,7 @@ span: 2026-06-14 → 2026-06-17
 
 A product-evolution narrative: how `@idl3/claude-control` grew from a
 read-only transcript viewer into a full phone-friendly cockpit for driving
-Claude Code tmux sessions — 124 commits across four days, v0.1.0 → v0.1.20.
+Claude Code tmux sessions — 124 commits across four days, v0.1.0 → v0.1.21.
 
 ## The premise
 
@@ -154,6 +154,6 @@ iOS/Safari. **Decision:** record in the browser, transcribe on the server.
 
 ## What's next
 
-- npm publish cadence (currently v0.1.20).
+- npm publish cadence (currently v0.1.21).
 - Server-side STT model options + accuracy tuning.
 - Broader artifact rendering and richer sub-agent tracing.

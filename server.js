@@ -25,8 +25,16 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
-import { optimizePrompt } from './lib/optimize.js';
+import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import { complete as claudeCliComplete } from './lib/claude-cli.js';
+import * as mlx from './lib/mlx.js';
+import {
+  MLX_MODELS,
+  CLAUDE_MODELS,
+  detectMachine,
+  recommendMlxModel,
+  recommendClaudeModel,
+} from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
 import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
@@ -255,6 +263,19 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleOptimize(req, res);
   }
+  if (u.pathname === '/api/models') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const machine = detectMachine();
+    return endJson(res, 200, {
+      machine,
+      // Mark which MLX models are already in the local HF cache so the UI can
+      // show downloaded vs. will-download (avoids a surprise multi-GB fetch).
+      mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
+      claudeModels: CLAUDE_MODELS,
+      recommendedMlxModel: recommendMlxModel(machine.ramGB),
+      recommendedClaudeModel: recommendClaudeModel(),
+    });
+  }
   if (u.pathname === '/api/transcribe') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -474,6 +495,13 @@ async function handleConfigSave(req, res) {
   }
   try {
     const saved = writeConfig(body);
+    // If the MLX backend is active, (re)warm the selected model now — this
+    // restarts the local server with the new model and starts any needed
+    // download in the background, so the user doesn't hit a cold stall (or a
+    // wrong-model hang) on their next ✨ enhance.
+    if (saved.optimizeBackend === 'mlx' && mlx.resolveMlxPython()) {
+      mlx.warm();
+    }
     return endJson(res, 200, saved);
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
@@ -495,11 +523,35 @@ async function handleOptimize(req, res) {
   if (text.length > 8000) return endJson(res, 400, { error: 'text exceeds 8000 character limit' });
   const intent = typeof body.intent === 'string' ? body.intent : undefined;
   try {
-    const result = await optimizePrompt(text, { complete: claudeCliComplete, intent });
+    const result = await runOptimize(text, intent);
     return endJson(res, 200, result);
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
+}
+
+// Run the enhancer through the configured backend chain, recording WHICH backend
+// actually produced the result so the UI can label it accurately:
+//  - 'mlx'    → try local MLX, then claude -p, then rules.
+//  - 'claude' → try claude -p, then rules.
+//  - 'rules'  → deterministic rules optimiser only.
+// optimizePrompt returns mode:'rules' when its injected complete() fails, so a
+// non-'llm' mode means that backend fell through → try the next.
+async function runOptimize(text, intent) {
+  const cfg = readConfig();
+  const backend = cfg.optimizeBackend;
+  if (backend === 'rules') {
+    return { ...rulesOptimize(text), backend: 'rules' };
+  }
+  const order = backend === 'claude' ? ['claude'] : ['mlx', 'claude'];
+  for (const b of order) {
+    const complete = b === 'mlx' ? (p) => mlx.complete(p) : claudeCliComplete;
+    const r = await optimizePrompt(text, { complete, intent });
+    if (r.mode === 'llm') {
+      return { ...r, backend: b, model: b === 'mlx' ? cfg.mlxModel : cfg.optimizeModel };
+    }
+  }
+  return { ...rulesOptimize(text), backend: 'rules' };
 }
 
 // POST /api/transcribe — local speech-to-text. Accepts a raw audio body (the
@@ -1453,6 +1505,16 @@ async function main() {
       console.log(`   (access token: ${CONFIG.token} — enter it at the login prompt)`);
     } else {
       console.log('   (no COCKPIT_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
+    }
+    // Pre-warm the local MLX enhancer so the first ✨ enhance is fast (best-effort;
+    // only when that backend is selected and an mlx python is available).
+    try {
+      if (readConfig().optimizeBackend === 'mlx' && mlx.resolveMlxPython()) {
+        mlx.warm();
+        console.log('   (pre-warming local MLX enhancer model…)');
+      }
+    } catch {
+      /* best-effort */
     }
   });
 }

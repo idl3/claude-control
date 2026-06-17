@@ -20,6 +20,16 @@ npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 
 **Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). Optional: **ttyd** for the in-browser raw terminal (`brew install ttyd` · `sudo apt install ttyd`) — set `CLAUDE_CONTROL_TTYD` to override its path. The web UI ships prebuilt — no build step on install.
 
+**Optional local AI (no API key):**
+
+- **Voice → text** — `brew install ffmpeg whisper-cpp` and drop a model at `~/.claude-control/models/ggml-base.en.bin`. The mic in the composer records audio and transcribes it locally.
+- **Prompt enhancer (✨)** — defaults to a **local MLX model** on Apple Silicon. One-time setup:
+  ```bash
+  python3 -m venv ~/.claude-control/mlx-venv
+  ~/.claude-control/mlx-venv/bin/pip install mlx-lm
+  ```
+  claude-control lazily starts `mlx_lm.server` on first use, keeps it warm, and shuts it down when idle. The model (default `mlx-community/Llama-3.2-3B-Instruct-4bit`, ~1.8 GB) auto-downloads on first run. Pick the backend + model in **Settings** (`mlx` → `claude -p` → rules fallback). Without the venv (or on non-Apple hardware) the enhancer falls back to `claude -p`, then a deterministic rules optimiser. Env overrides: `CLAUDE_CONTROL_MLX_PYTHON`, `CLAUDE_CONTROL_MLX_PORT`.
+
 ```bash
 claude-control                    # start the server (prints the URL)
 claude-control --help             # config + subcommands
