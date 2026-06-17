@@ -5,6 +5,7 @@ import {
   getVersion,
   uploadIcon,
   resetIcon,
+  type OptimizeBackend,
 } from '../lib/api';
 
 interface ConfigModalProps {
@@ -22,6 +23,8 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const [defaultCwd, setDefaultCwd] = useState('');
   const [optimizeModel, setOptimizeModel] = useState('');
   const [claudeBin, setClaudeBin] = useState('');
+  const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
+  const [mlxModel, setMlxModel] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState<{
@@ -54,6 +57,8 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
         setDefaultCwd(c.defaultCwd);
         setOptimizeModel(c.optimizeModel ?? '');
         setClaudeBin(c.claudeBin ?? '');
+        setOptimizeBackend(c.optimizeBackend ?? 'mlx');
+        setMlxModel(c.mlxModel ?? '');
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -109,11 +114,20 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveConfig({ launchCommand, defaultCwd, optimizeModel, claudeBin });
+      const saved = await saveConfig({
+        launchCommand,
+        defaultCwd,
+        optimizeModel,
+        claudeBin,
+        optimizeBackend,
+        mlxModel,
+      });
       setLaunchCommand(saved.launchCommand);
       setDefaultCwd(saved.defaultCwd);
       setOptimizeModel(saved.optimizeModel ?? '');
       setClaudeBin(saved.claudeBin ?? '');
+      setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
+      setMlxModel(saved.mlxModel ?? '');
       onToast('Config saved', 'ok');
       onClose();
     } catch (err) {
@@ -186,7 +200,45 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
         </label>
 
         <label className="config-field">
-          <span className="config-label">Optimize model</span>
+          <span className="config-label">Enhancer backend</span>
+          <select
+            className="config-input"
+            value={optimizeBackend}
+            disabled={loading}
+            onChange={(e) => setOptimizeBackend(e.target.value as OptimizeBackend)}
+          >
+            <option value="mlx">Local MLX model (→ claude → rules)</option>
+            <option value="claude">claude -p (→ rules)</option>
+            <option value="rules">Rules only (offline, deterministic)</option>
+          </select>
+          <span className="config-hint">
+            Powers the ✨ prompt enhancer. <code>mlx</code> runs a small local
+            model on-device (no key); it falls back to <code>claude -p</code> then
+            the rules optimiser.
+          </span>
+        </label>
+
+        <label className="config-field">
+          <span className="config-label">MLX model</span>
+          <input
+            className="config-input"
+            type="text"
+            placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit"
+            value={mlxModel}
+            disabled={loading || optimizeBackend !== 'mlx'}
+            onChange={(e) => setMlxModel(e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <span className="config-hint">
+            HuggingFace MLX model id (used when backend is <code>mlx</code>).
+            Auto-downloaded on first use; a 3–4B 4-bit instruct model is ideal.
+          </span>
+        </label>
+
+        <label className="config-field">
+          <span className="config-label">Claude model</span>
           <input
             className="config-input"
             type="text"
@@ -199,7 +251,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
             spellCheck={false}
           />
           <span className="config-hint">
-            Model used by the prompt enhancer (<code>claude -p</code>). Default{' '}
+            Model used by the <code>claude -p</code> backend/fallback. Default{' '}
             <code>claude-haiku-4-5</code>.
           </span>
         </label>

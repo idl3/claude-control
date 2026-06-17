@@ -27,6 +27,7 @@ import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { optimizePrompt } from './lib/optimize.js';
 import { complete as claudeCliComplete } from './lib/claude-cli.js';
+import * as mlx from './lib/mlx.js';
 import { transcribe } from './lib/transcribe.js';
 import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
@@ -495,11 +496,32 @@ async function handleOptimize(req, res) {
   if (text.length > 8000) return endJson(res, 400, { error: 'text exceeds 8000 character limit' });
   const intent = typeof body.intent === 'string' ? body.intent : undefined;
   try {
-    const result = await optimizePrompt(text, { complete: claudeCliComplete, intent });
+    const complete = pickOptimizeComplete();
+    const result = await optimizePrompt(text, { complete, intent });
     return endJson(res, 200, result);
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
+}
+
+// Resolve the LLM `complete` fn for the prompt enhancer from config:
+//  - 'mlx'    → local MLX server, falling back to claude -p on failure
+//               (optimizePrompt then falls back to rules if claude also fails).
+//  - 'claude' → claude -p only (→ rules on failure).
+//  - 'rules'  → undefined: optimizePrompt uses the deterministic rules optimiser.
+function pickOptimizeComplete() {
+  const backend = readConfig().optimizeBackend;
+  if (backend === 'rules') return undefined;
+  if (backend === 'claude') return claudeCliComplete;
+  // 'mlx' (default): try local model first, then the claude CLI. If both throw,
+  // optimizePrompt catches and falls back to rules.
+  return async (prompt) => {
+    try {
+      return await mlx.complete(prompt);
+    } catch {
+      return claudeCliComplete(prompt);
+    }
+  };
 }
 
 // POST /api/transcribe — local speech-to-text. Accepts a raw audio body (the
