@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Voice → Text in claude-control</title>
+<style>
+  :root {
+    --bg:        oklch(16% 0.012 260);
+    --bg-1:      oklch(20% 0.014 260);
+    --bg-2:      oklch(24% 0.016 260);
+    --line:      oklch(32% 0.018 260);
+    --text:      oklch(95% 0.005 260);
+    --dim:       oklch(72% 0.012 260);
+    --faint:     oklch(55% 0.012 260);
+    --accent:    oklch(74% 0.15 215);
+    --accent-2:  oklch(72% 0.17 300);
+    --good:      oklch(78% 0.16 150);
+    --bad:       oklch(70% 0.18 25);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(120% 90% at 88% 8%, oklch(26% 0.04 215 / 0.55), transparent 60%),
+      radial-gradient(90% 80% at 8% 96%, oklch(24% 0.05 300 / 0.5), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .deck { position: fixed; inset: 0; }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: clamp(28px, 6vw, 96px);
+    opacity: 0; visibility: hidden; transform: translateY(14px);
+    transition: opacity .45s ease, transform .45s ease, visibility 0s linear .45s;
+    gap: clamp(14px, 2.2vh, 26px);
+    max-width: 1280px; margin: 0 auto; width: 100%;
+  }
+  .slide.active {
+    opacity: 1; visibility: visible; transform: none;
+    transition: opacity .5s ease, transform .5s ease;
+  }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent); border-radius: 2px; }
+
+  h1 { font-size: clamp(2.6rem, 6.5vw, 5.2rem); line-height: 1.02; letter-spacing: -.025em; font-weight: 800; }
+  h2 { font-size: clamp(1.7rem, 3.6vw, 2.9rem); line-height: 1.08; letter-spacing: -.02em; font-weight: 750; }
+  .lede { font-size: clamp(1.05rem, 1.9vw, 1.5rem); color: var(--dim); max-width: 60ch; line-height: 1.45; }
+  .grad { background: linear-gradient(96deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  ul { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  li { position: relative; padding-left: 28px; font-size: clamp(1rem, 1.7vw, 1.3rem); line-height: 1.4; color: var(--text); max-width: 70ch; }
+  li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); transform: rotate(45deg); }
+  li b { color: var(--text); }
+  li .why { color: var(--faint); }
+
+  .ol { counter-reset: step; }
+  .ol li { padding-left: 46px; }
+  .ol li::before { counter-increment: step; content: counter(step); top: 0; left: 0; width: 30px; height: 30px; border-radius: 9px; background: var(--bg-2); border: 1px solid var(--line); color: var(--accent); font-family: var(--mono); font-size: 14px; font-weight: 700; display: grid; place-items: center; transform: none; }
+
+  pre {
+    background: var(--bg-1); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 12px; padding: 18px 20px; overflow: auto;
+    font-family: var(--mono); font-size: clamp(.72rem, 1.15vw, .95rem);
+    line-height: 1.6; color: var(--text); max-width: 100%;
+  }
+  pre .k { color: var(--accent-2); }
+  pre .s { color: var(--good); }
+  pre .c { color: var(--faint); font-style: italic; }
+  code { font-family: var(--mono); background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: .88em; }
+
+  table { border-collapse: collapse; font-size: clamp(.92rem, 1.5vw, 1.2rem); }
+  th, td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+  thead th { color: var(--faint); font-weight: 600; font-size: .82em; letter-spacing: .04em; text-transform: uppercase; }
+  tbody tr.pick td { background: oklch(74% 0.15 215 / 0.08); }
+  tbody tr.pick td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .yes { color: var(--good); } .no { color: var(--bad); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+  .card .lbl { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
+  .card .big { font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 800; letter-spacing: -.02em; }
+  .card .sub { color: var(--faint); font-size: .92rem; }
+
+  /* pipeline diagram */
+  .pipe { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .stage { flex: 1 1 150px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .stage + .stage { margin-left: 26px; }
+  .stage + .stage::before { content: "▸"; position: absolute; left: -20px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 16px; }
+  .stage .t { font-weight: 700; font-size: 1rem; }
+  .stage .d { color: var(--faint); font-size: .82rem; font-family: var(--mono); line-height: 1.4; }
+  .stage.client { border-color: oklch(74% 0.15 215 / .5); }
+  .stage.server { border-color: oklch(72% 0.17 300 / .5); }
+  .return { margin-top: 14px; font-family: var(--mono); font-size: .85rem; color: var(--dim); display: flex; align-items: center; gap: 10px; }
+  .return::before { content: "↩"; color: var(--good); font-size: 1.2rem; }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+  @media (max-width: 820px) { .two { grid-template-columns: 1fr; } .stage + .stage { margin-left: 0; margin-top: 22px; } .stage + .stage::before { left: 50%; top: -18px; transform: translateX(-50%) rotate(90deg); } }
+
+  /* chrome */
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0; transition: width .4s ease; z-index: 10; }
+  .hud { position: fixed; bottom: 18px; right: 22px; font-family: var(--mono); font-size: 12px; color: var(--faint); z-index: 10; letter-spacing: .05em; }
+  .hud b { color: var(--text); }
+  .brand { position: fixed; bottom: 18px; left: 22px; font-family: var(--mono); font-size: 12px; color: var(--faint); z-index: 10; display: flex; align-items: center; gap: 8px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 0 oklch(70% 0.18 25 / .5); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px oklch(70% 0.18 25 / 0); } }
+  .hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--faint); z-index: 10; opacity: .8; }
+  @media (prefers-reduced-motion: reduce) { .slide, .progress { transition: none; } .brand .dot { animation: none; } }
+  .meta { display: flex; gap: 22px; flex-wrap: wrap; color: var(--faint); font-family: var(--mono); font-size: .85rem; margin-top: 8px; }
+  .meta span b { color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<main class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide">
+    <div class="eyebrow">claude-control · feature build</div>
+    <h1>Voice → Text,<br><span class="grad">done right.</span></h1>
+    <p class="lede">Speak your prompt into the composer. It transcribes on-device — no API key, no cloud, works on the iPad too.</p>
+    <div class="meta">
+      <span><b>Stack:</b> MediaRecorder · ffmpeg · whisper.cpp</span>
+      <span><b>Tests:</b> 178/178</span>
+      <span><b>Keys:</b> 0</span>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <div class="eyebrow">The ask</div>
+    <h2>“I want to speak my prompt<br>into the composer.”</h2>
+    <p class="lede">A mic button and recording dialog already existed. But on the iPad it <b>did nothing</b>, and on desktop the transcription was unreliable.</p>
+    <p class="lede"><b>Goal:</b> tap mic → speak → text lands in the composer. <span class="grad">Everywhere.</span></p>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <div class="eyebrow">Diagnosis</div>
+    <h2>Two bugs, not one</h2>
+    <ul class="ol">
+      <li><b>“Nothing happens” on tap</b> — the live page was a <b>stale cached SPA bundle</b>. Deployed JS was newer than what the browser had loaded. <span class="why">(Exactly why pull-to-refresh exists.)</span></li>
+      <li><b>Silent transcription</b> — the dialog used the <b>Web Speech API</b>, which is <b>unsupported on iOS Safari</b> and flaky on desktop Safari.</li>
+    </ul>
+    <p class="lede">Lurking trap: <code>getUserMedia</code> needs a <b>secure context</b> (HTTPS/localhost). Over plain <code>http://</code> Tailscale the mic is blocked entirely — we're on HTTPS, so fine.</p>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <div class="eyebrow">The decision</div>
+    <h2>Record in the browser,<br>transcribe on the server</h2>
+    <table>
+      <thead><tr><th>Approach</th><th>iOS Safari</th><th>No API key</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Web Speech API <span class="why">(old)</span></td><td class="no">✕</td><td class="yes">✓</td><td>Fragile — silent failures</td></tr>
+        <tr class="pick"><td><b>Local whisper.cpp</b></td><td class="yes">✓</td><td class="yes">✓</td><td><b>Chosen</b> — one path, private</td></tr>
+        <tr><td>Hosted Whisper</td><td class="yes">✓</td><td class="no">✕ needs key</td><td>Against no-key design</td></tr>
+      </tbody>
+    </table>
+    <p class="lede">Pick the one that works <b>everywhere with a mic</b> and keeps the project's no-key design.</p>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <div class="eyebrow">Architecture</div>
+    <h2>The pipeline</h2>
+    <div class="pipe">
+      <div class="stage client"><span class="t">🎙 Browser</span><span class="d">MediaRecorder<br>+ waveform<br>Cancel/Pause/Stop</span></div>
+      <div class="stage server"><span class="t">POST /api/transcribe</span><span class="d">token-gated<br>byte-capped<br>→ temp file</span></div>
+      <div class="stage server"><span class="t">ffmpeg</span><span class="d">→ 16kHz mono<br>PCM WAV</span></div>
+      <div class="stage server"><span class="t">whisper.cpp</span><span class="d">ggml-base.en<br>→ cleanTranscript()</span></div>
+    </div>
+    <div class="return"><code>{ ok, text }</code> &nbsp;→&nbsp; inserted into composer (review-then-send)</div>
+    <p class="lede">The waveform runs on a Web Audio <code>AnalyserNode</code> — independent of transcription, so it animates on any browser.</p>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <div class="eyebrow">Server · lib/transcribe.js</div>
+    <h2>ffmpeg → whisper.cpp</h2>
+<pre><span class="k">export async function</span> transcribe(inputPath, { lang = <span class="s">'en'</span> } = {}) {
+  <span class="k">const</span> ffmpeg  = resolveFfmpeg();
+  <span class="k">const</span> whisper = resolveWhisperBin();
+  <span class="k">const</span> model   = resolveWhisperModel();  <span class="c">// ~/.claude-control/models/ggml-base.en.bin</span>
+  <span class="c">// ...guard each (clear error if a binary/model is missing)...</span>
+  <span class="k">await</span> run(ffmpeg,  [<span class="s">'-i'</span>, inputPath, <span class="s">'-ar'</span>,<span class="s">'16000'</span>,<span class="s">'-ac'</span>,<span class="s">'1'</span>,
+                     <span class="s">'-c:a'</span>,<span class="s">'pcm_s16le'</span>,<span class="s">'-f'</span>,<span class="s">'wav'</span>, wav]);
+  <span class="k">const</span> { stdout } = <span class="k">await</span> run(whisper, [<span class="s">'-m'</span>,model,<span class="s">'-f'</span>,wav,<span class="s">'-np'</span>,<span class="s">'-nt'</span>,<span class="s">'-l'</span>,lang]);
+  <span class="k">return</span> cleanTranscript(stdout);  <span class="c">// strip [BLANK_AUDIO], timestamps, blanks</span>
+}</pre>
+    <p class="lede">The route mirrors the existing upload handler: byte-cap, temp file, token-gated. Binaries + model are env-overridable.</p>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <div class="eyebrow">Client · VoiceDialog.tsx</div>
+    <h2>Web Speech out, MediaRecorder in</h2>
+<pre>rec.ondataavailable = (e) => { <span class="k">if</span> (e.data.size) chunks.push(e.data); };
+rec.start();                              <span class="c">// one blob, flushed on stop()</span>
+
+rec.onstop = <span class="k">async</span> () => {
+  <span class="k">const</span> blob = <span class="k">new</span> Blob(chunks, { type: mime });
+  <span class="k">const</span> text = <span class="k">await</span> transcribeAudio(blob, ext);  <span class="c">// POST → server STT</span>
+  onCommit(text);                          <span class="c">// → composer (review-then-send)</span>
+};</pre>
+    <p class="lede">Kept the waveform + Cancel/Pause/Stop. <code>pickMime()</code> selects <code>webm/opus</code> (Chrome) or <code>mp4</code> (Safari) so iOS works too.</p>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <div class="eyebrow">Why it works everywhere</div>
+    <h2>One path, every device</h2>
+    <ul>
+      <li><b>Secure context:</b> HTTPS over Tailscale → <code>getUserMedia</code> allowed.</li>
+      <li><b>Capture:</b> MediaRecorder runs on Chrome, desktop Safari, <b>and iOS Safari</b>.</li>
+      <li><b>Transcription:</b> on the Mac, not the browser — uniform across devices.</li>
+      <li><b>Privacy + cost:</b> fully local whisper.cpp — no key, no audio leaves the host.</li>
+      <li><b>Always exitable:</b> Cancel / Pause / Stop + full teardown — no stuck mic.</li>
+    </ul>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <div class="eyebrow">Verification</div>
+    <h2>Proven end-to-end</h2>
+    <div class="cards">
+      <div class="card"><span class="lbl">Build</span><span class="big">clean</span><span class="sub">tsc + vite, no errors</span></div>
+      <div class="card"><span class="lbl">Tests</span><span class="big">178 / 178</span><span class="sub">+5 cleanTranscript units</span></div>
+      <div class="card"><span class="lbl">Latency</span><span class="big">local</span><span class="sub">on-device, Apple Silicon</span></div>
+    </div>
+<pre><span class="c"># real round-trip through the HTTP route</span>
+say <span class="s">"the quick brown fox…"</span> → webm → POST /api/transcribe
+→ { <span class="s">"ok"</span>: <span class="k">true</span>, <span class="s">"text"</span>: <span class="s">"The quick brown fox jumps over the lazy dog."</span> }</pre>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <div class="eyebrow">What changed</div>
+    <h2>The diff, in one view</h2>
+    <div class="two">
+      <ul>
+        <li><b>New</b> &nbsp;<code>lib/transcribe.js</code></li>
+        <li><b>New</b> &nbsp;<code>test/transcribe.test.js</code></li>
+        <li><b>Edit</b> &nbsp;<code>server.js</code> — route + handler</li>
+        <li><b>Edit</b> &nbsp;<code>web/src/lib/api.ts</code> — <code>transcribeAudio()</code></li>
+        <li><b>Edit</b> &nbsp;<code>VoiceDialog.tsx</code> — MediaRecorder</li>
+      </ul>
+      <ul>
+        <li><b>Host:</b> <code>brew install whisper-cpp</code></li>
+        <li><b>Model:</b> <code>ggml-base.en.bin</code> <span class="why">(~141 MB)</span></li>
+        <li><b>Deploy:</b> commit → <code>launchctl kickstart</code></li>
+        <li><b>Health:</b> <code>/api/health</code> <span class="yes">✓</span></li>
+        <li><b>You:</b> pull-to-refresh to load the new bundle</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide">
+    <div class="eyebrow">Takeaways</div>
+    <h2>What this teaches</h2>
+    <ul class="ol">
+      <li>“Nothing happens” is often a <b>caching</b> problem, not a code problem.</li>
+      <li><b>Web Speech API ≠ cross-browser.</b> For real coverage: record + server-STT.</li>
+      <li>The <b>secure-context</b> rule silently kills mic/camera over plain HTTP.</li>
+      <li>Keeping the waveform on <b>Web Audio</b> decoupled the UI from the STT engine.</li>
+    </ul>
+    <p class="lede"><span class="grad">Speak anywhere, transcribe locally, no key.</span> &nbsp;🎙️ → 📝</p>
+  </section>
+
+</main>
+
+<div class="brand"><span class="dot"></span> claude-control</div>
+<div class="hud"><b id="cur">1</b> / <span id="total">11</span></div>
+<div class="hint">← → or Space to navigate · F fullscreen</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const progress = document.getElementById('progress');
+  const cur = document.getElementById('cur');
+  document.getElementById('total').textContent = slides.length;
+  let i = Math.max(0, Math.min(slides.length - 1, (location.hash.match(/\d+/) || [1])[0] - 1));
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    progress.style.width = ((i + 1) / slides.length * 100) + '%';
+    cur.textContent = i + 1;
+    history.replaceState(null, '', '#' + (i + 1));
+  }
+  function next() { show(i + 1); }
+  function prev() { show(i - 1); }
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key.toLowerCase() === 'f') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    }
+  });
+  // Tap/click: right half → next, left half → prev.
+  addEventListener('click', (e) => { (e.clientX > innerWidth / 2 ? next : prev)(); });
+  // Touch swipe.
+  let x0 = null;
+  addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 45) (dx < 0 ? next : prev)();
+    x0 = null;
+  }, { passive: true });
+
+  show(i);
+</script>
+</body>
+</html>
