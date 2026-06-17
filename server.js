@@ -14,6 +14,7 @@ import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
+import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher } from './lib/subagents.js';
 import { parsePanePrompt } from './lib/prompt.js';
@@ -1410,6 +1411,20 @@ async function handleClientMessage(ws, msg) {
       const sub = subscriptions.get(msg.id);
       if (sub) sub._lastPrompt = '__force__';
       return send(ws, { type: 'ack', op: 'promptkey', ok: true });
+    }
+    // Composer terminal mode (>_): run shell lines in a dedicated tmux pane and
+    // stream its capture back. Token-gated by the WS handshake like every op.
+    case 'shell-input': {
+      await shell.shellInput(String(msg.line ?? ''), msg.cwd);
+      return send(ws, { type: 'ack', op: 'shell-input', ok: true });
+    }
+    case 'shell-key': {
+      await shell.shellKey(String(msg.key ?? ''), msg.cwd);
+      return send(ws, { type: 'ack', op: 'shell-key', ok: true });
+    }
+    case 'shell-capture': {
+      const text = await shell.shellCapture(msg.lines, msg.cwd);
+      return send(ws, { type: 'shell-output', text });
     }
     default:
       return;

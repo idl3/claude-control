@@ -135,6 +135,8 @@ export type ServerMessage =
   | { type: 'prompt'; id: string; prompt: PanePrompt | null }
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
+  // Composer terminal mode (>_): live capture of the dedicated shell pane.
+  | { type: 'shell-output'; text: string }
   | { type: 'ack'; op: string; ok: boolean; error?: string };
 
 // Client -> server WebSocket frames.
@@ -144,4 +146,8 @@ export type ClientMessage =
   | { type: 'reply'; id: string; text: string }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number }
-  | { type: 'promptkey'; id: string; key: string };
+  | { type: 'promptkey'; id: string; key: string }
+  // Composer terminal mode: run a line, send a control key, poll the shell pane.
+  | { type: 'shell-input'; line: string; cwd?: string }
+  | { type: 'shell-key'; key: string; cwd?: string }
+  | { type: 'shell-capture'; lines?: number; cwd?: string };
