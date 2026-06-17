@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { parseAnsi, splitUrls } from '../lib/ansi';
 
 interface TerminalViewProps {
   /** Latest capture of the shell pane, or null before the first poll. */
@@ -44,6 +45,34 @@ export function TerminalView({ output, requestCapture, clearOutput, sendKey }: T
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
   };
 
+  // Parse ANSI colors → styled segments, and linkify URLs inside each segment.
+  const rendered = useMemo(() => {
+    if (output == null) return null;
+    return parseAnsi(output).map((seg, i) => {
+      const style: React.CSSProperties = {
+        color: seg.fg,
+        background: seg.bg,
+        fontWeight: seg.bold ? 700 : undefined,
+        fontStyle: seg.italic ? 'italic' : undefined,
+        textDecoration: seg.underline ? 'underline' : undefined,
+        opacity: seg.dim ? 0.7 : undefined,
+      };
+      return (
+        <span key={i} style={style}>
+          {splitUrls(seg.text).map((p, j) =>
+            p.href ? (
+              <a key={j} href={p.href} target="_blank" rel="noopener noreferrer">
+                {p.text}
+              </a>
+            ) : (
+              p.text
+            ),
+          )}
+        </span>
+      );
+    });
+  }, [output]);
+
   return (
     <div className="terminal-view">
       <div className="terminal-view-head">
@@ -58,7 +87,7 @@ export function TerminalView({ output, requestCapture, clearOutput, sendKey }: T
         </button>
       </div>
       <pre className="terminal-view-body" ref={preRef} onScroll={onScroll}>
-        {output ?? 'starting shell…'}
+        {rendered ?? 'starting shell…'}
       </pre>
     </div>
   );
