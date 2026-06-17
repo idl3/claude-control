@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession } from './lib/api';
@@ -464,13 +465,32 @@ function AppInner() {
       ? (fullConverted[fullConverted.length - 1].id ?? null)
       : null;
 
+  // Pull-to-refresh (mobile): pull down at the top of the thread/rail to hard-
+  // reload and pick up a freshly-deployed bundle.
+  const appRef = useRef<HTMLDivElement>(null);
+  const { pull, refreshing } = usePullToRefresh(appRef);
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
     <ArtifactPanelProvider>
       <div
+        ref={appRef}
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
       >
+        {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
+            release-to-refresh. */}
+        {pull > 0 || refreshing ? (
+          <div
+            className="ptr-indicator"
+            style={{ transform: `translate(-50%, ${Math.round(pull)}px)` }}
+            data-ready={!refreshing && pull >= PTR_THRESHOLD ? 'true' : undefined}
+            data-refreshing={refreshing ? 'true' : undefined}
+            aria-hidden="true"
+          >
+            <span className="ptr-spinner" />
+          </div>
+        ) : null}
         {/* Fixed top scrim: on mobile, focusing the composer makes iOS scroll the
             whole app up to clear the keyboard, pushing the nav bars off and
             sliding message text under the status bar. This dissolves that text
