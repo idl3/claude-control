@@ -25,9 +25,16 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
-import { optimizePrompt } from './lib/optimize.js';
+import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import { complete as claudeCliComplete } from './lib/claude-cli.js';
 import * as mlx from './lib/mlx.js';
+import {
+  MLX_MODELS,
+  CLAUDE_MODELS,
+  detectMachine,
+  recommendMlxModel,
+  recommendClaudeModel,
+} from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
 import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
@@ -255,6 +262,17 @@ const server = http.createServer((req, res) => {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleOptimize(req, res);
+  }
+  if (u.pathname === '/api/models') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const machine = detectMachine();
+    return endJson(res, 200, {
+      machine,
+      mlxModels: MLX_MODELS,
+      claudeModels: CLAUDE_MODELS,
+      recommendedMlxModel: recommendMlxModel(machine.ramGB),
+      recommendedClaudeModel: recommendClaudeModel(),
+    });
   }
   if (u.pathname === '/api/transcribe') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
@@ -496,32 +514,35 @@ async function handleOptimize(req, res) {
   if (text.length > 8000) return endJson(res, 400, { error: 'text exceeds 8000 character limit' });
   const intent = typeof body.intent === 'string' ? body.intent : undefined;
   try {
-    const complete = pickOptimizeComplete();
-    const result = await optimizePrompt(text, { complete, intent });
+    const result = await runOptimize(text, intent);
     return endJson(res, 200, result);
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
 }
 
-// Resolve the LLM `complete` fn for the prompt enhancer from config:
-//  - 'mlx'    → local MLX server, falling back to claude -p on failure
-//               (optimizePrompt then falls back to rules if claude also fails).
-//  - 'claude' → claude -p only (→ rules on failure).
-//  - 'rules'  → undefined: optimizePrompt uses the deterministic rules optimiser.
-function pickOptimizeComplete() {
-  const backend = readConfig().optimizeBackend;
-  if (backend === 'rules') return undefined;
-  if (backend === 'claude') return claudeCliComplete;
-  // 'mlx' (default): try local model first, then the claude CLI. If both throw,
-  // optimizePrompt catches and falls back to rules.
-  return async (prompt) => {
-    try {
-      return await mlx.complete(prompt);
-    } catch {
-      return claudeCliComplete(prompt);
+// Run the enhancer through the configured backend chain, recording WHICH backend
+// actually produced the result so the UI can label it accurately:
+//  - 'mlx'    → try local MLX, then claude -p, then rules.
+//  - 'claude' → try claude -p, then rules.
+//  - 'rules'  → deterministic rules optimiser only.
+// optimizePrompt returns mode:'rules' when its injected complete() fails, so a
+// non-'llm' mode means that backend fell through → try the next.
+async function runOptimize(text, intent) {
+  const cfg = readConfig();
+  const backend = cfg.optimizeBackend;
+  if (backend === 'rules') {
+    return { ...rulesOptimize(text), backend: 'rules' };
+  }
+  const order = backend === 'claude' ? ['claude'] : ['mlx', 'claude'];
+  for (const b of order) {
+    const complete = b === 'mlx' ? (p) => mlx.complete(p) : claudeCliComplete;
+    const r = await optimizePrompt(text, { complete, intent });
+    if (r.mode === 'llm') {
+      return { ...r, backend: b, model: b === 'mlx' ? cfg.mlxModel : cfg.optimizeModel };
     }
-  };
+  }
+  return { ...rulesOptimize(text), backend: 'rules' };
 }
 
 // POST /api/transcribe — local speech-to-text. Accepts a raw audio body (the

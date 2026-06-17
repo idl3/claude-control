@@ -3,9 +3,11 @@ import {
   getConfig,
   saveConfig,
   getVersion,
+  getModels,
   uploadIcon,
   resetIcon,
   type OptimizeBackend,
+  type ModelsInfo,
 } from '../lib/api';
 
 interface ConfigModalProps {
@@ -25,6 +27,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const [claudeBin, setClaudeBin] = useState('');
   const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
   const [mlxModel, setMlxModel] = useState('');
+  const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState<{
@@ -42,6 +45,9 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
     let alive = true;
     getVersion()
       .then((v) => alive && v && setVersion(v))
+      .catch(() => {});
+    getModels()
+      .then((m) => alive && setModels(m))
       .catch(() => {});
     return () => {
       alive = false;
@@ -214,17 +220,22 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
 
           <label className="config-field">
             <span className="config-label">Claude model</span>
-            <input
+            <select
               className="config-input"
-              type="text"
-              placeholder="claude-haiku-4-5"
               value={optimizeModel}
               disabled={loading}
               onChange={(e) => setOptimizeModel(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
+            >
+              {optimizeModel && !models?.claudeModels.some((m) => m.id === optimizeModel) ? (
+                <option value={optimizeModel}>{optimizeModel}{models ? ' (custom)' : ''}</option>
+              ) : null}
+              {(models?.claudeModels ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                  {m.id === models?.recommendedClaudeModel ? ' · recommended' : ''}
+                </option>
+              ))}
+            </select>
             <span className="config-hint">
               For the <code>claude -p</code> backend/fallback.
             </span>
@@ -232,19 +243,30 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
 
           <label className="config-field config-field--wide">
             <span className="config-label">MLX model</span>
-            <input
+            <select
               className="config-input"
-              type="text"
-              placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit"
               value={mlxModel}
               disabled={loading || optimizeBackend !== 'mlx'}
               onChange={(e) => setMlxModel(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
+            >
+              {mlxModel && !models?.mlxModels.some((m) => m.id === mlxModel) ? (
+                <option value={mlxModel}>{mlxModel}{models ? ' (custom)' : ''}</option>
+              ) : null}
+              {(models?.mlxModels ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} · {m.sizeGB} GB
+                  {m.id === models?.recommendedMlxModel ? ' · recommended' : ''}
+                  {models && m.minRamGB > models.machine.ramGB ? ` (needs ≥${m.minRamGB} GB)` : ''}
+                </option>
+              ))}
+            </select>
             <span className="config-hint">
-              HuggingFace MLX id (when backend is <code>mlx</code>). Auto-downloads on first use.
+              {models
+                ? `Your ${models.machine.appleSilicon ? 'Apple Silicon ' : ''}Mac has ${models.machine.ramGB} GB — recommended: ${
+                    models.mlxModels.find((m) => m.id === models.recommendedMlxModel)?.label ??
+                    models.recommendedMlxModel
+                  }. Auto-downloads on first use.`
+                : 'On-device model for the ✨ enhancer. Auto-downloads on first use.'}
             </span>
           </label>
 
