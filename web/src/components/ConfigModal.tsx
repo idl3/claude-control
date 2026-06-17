@@ -163,160 +163,152 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
           </button>
         </div>
 
-        <label className="config-field">
-          <span className="config-label">Launch command</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="claude"
-            value={launchCommand}
-            disabled={loading}
-            onChange={(e) => setLaunchCommand(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Run in each new session's pane (e.g. <code>yolo</code> or{' '}
-            <code>claude --flags</code>).
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Default cwd</span>
-          <input
-            className="config-input"
-            type="text"
-            value={defaultCwd}
-            disabled={loading}
-            onChange={(e) => setDefaultCwd(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Must be an existing directory. New sessions start here.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Enhancer backend</span>
-          <select
-            className="config-input"
-            value={optimizeBackend}
-            disabled={loading}
-            onChange={(e) => setOptimizeBackend(e.target.value as OptimizeBackend)}
-          >
-            <option value="mlx">Local MLX model (→ claude → rules)</option>
-            <option value="claude">claude -p (→ rules)</option>
-            <option value="rules">Rules only (offline, deterministic)</option>
-          </select>
-          <span className="config-hint">
-            Powers the ✨ prompt enhancer. <code>mlx</code> runs a small local
-            model on-device (no key); it falls back to <code>claude -p</code> then
-            the rules optimiser.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">MLX model</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit"
-            value={mlxModel}
-            disabled={loading || optimizeBackend !== 'mlx'}
-            onChange={(e) => setMlxModel(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            HuggingFace MLX model id (used when backend is <code>mlx</code>).
-            Auto-downloaded on first use; a 3–4B 4-bit instruct model is ideal.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Claude model</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="claude-haiku-4-5"
-            value={optimizeModel}
-            disabled={loading}
-            onChange={(e) => setOptimizeModel(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Model used by the <code>claude -p</code> backend/fallback. Default{' '}
-            <code>claude-haiku-4-5</code>.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Claude CLI path (optional)</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="auto-detected"
-            value={claudeBin}
-            disabled={loading}
-            onChange={(e) => setClaudeBin(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Absolute path to the <code>claude</code> binary. Leave blank to auto-detect.
-          </span>
-        </label>
-
-        <div className="config-field">
-          <span className="config-label">App icon</span>
-          <div className="config-icon-row">
-            <img
-              className="config-icon-preview"
-              src={`/api/icon?size=192&t=${iconBust}`}
-              alt="Current home-screen icon"
-              width={48}
-              height={48}
-            />
-            <div className="config-icon-actions">
-              <button
-                type="button"
-                className="config-cancel"
-                disabled={iconBusy}
-                onClick={() => iconInputRef.current?.click()}
-              >
-                {iconBusy ? 'Working…' : 'Upload PNG'}
-              </button>
-              <button
-                type="button"
-                className="config-cancel"
-                disabled={iconBusy}
-                onClick={onResetIcon}
-              >
-                Reset
-              </button>
-            </div>
+        <div className="config-body">
+          <label className="config-field">
+            <span className="config-label">Launch command</span>
             <input
-              ref={iconInputRef}
-              type="file"
-              accept="image/png"
-              hidden
-              onChange={onPickIcon}
+              className="config-input"
+              type="text"
+              placeholder="claude"
+              value={launchCommand}
+              disabled={loading}
+              onChange={(e) => setLaunchCommand(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
+            <span className="config-hint">Run in each new session's pane.</span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Default cwd</span>
+            <input
+              className="config-input"
+              type="text"
+              value={defaultCwd}
+              disabled={loading}
+              onChange={(e) => setDefaultCwd(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">Existing dir new sessions start in.</span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Enhancer backend</span>
+            <select
+              className="config-input"
+              value={optimizeBackend}
+              disabled={loading}
+              onChange={(e) => setOptimizeBackend(e.target.value as OptimizeBackend)}
+            >
+              <option value="mlx">Local MLX (→ claude → rules)</option>
+              <option value="claude">claude -p (→ rules)</option>
+              <option value="rules">Rules only (offline)</option>
+            </select>
+            <span className="config-hint">
+              Powers ✨. <code>mlx</code> = on-device, no key.
+            </span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Claude model</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="claude-haiku-4-5"
+              value={optimizeModel}
+              disabled={loading}
+              onChange={(e) => setOptimizeModel(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              For the <code>claude -p</code> backend/fallback.
+            </span>
+          </label>
+
+          <label className="config-field config-field--wide">
+            <span className="config-label">MLX model</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit"
+              value={mlxModel}
+              disabled={loading || optimizeBackend !== 'mlx'}
+              onChange={(e) => setMlxModel(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              HuggingFace MLX id (when backend is <code>mlx</code>). Auto-downloads on first use.
+            </span>
+          </label>
+
+          <label className="config-field config-field--wide">
+            <span className="config-label">Claude CLI path (optional)</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="auto-detected"
+              value={claudeBin}
+              disabled={loading}
+              onChange={(e) => setClaudeBin(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              Path to the <code>claude</code> binary. Blank = auto-detect.
+            </span>
+          </label>
+
+          <div className="config-field config-field--wide">
+            <span className="config-label">App icon</span>
+            <div className="config-icon-row">
+              <img
+                className="config-icon-preview"
+                src={`/api/icon?size=192&t=${iconBust}`}
+                alt="Current home-screen icon"
+                width={44}
+                height={44}
+              />
+              <div className="config-icon-actions">
+                <button
+                  type="button"
+                  className="config-cancel"
+                  disabled={iconBusy}
+                  onClick={() => iconInputRef.current?.click()}
+                >
+                  {iconBusy ? 'Working…' : 'Upload PNG'}
+                </button>
+                <button
+                  type="button"
+                  className="config-cancel"
+                  disabled={iconBusy}
+                  onClick={onResetIcon}
+                >
+                  Reset
+                </button>
+              </div>
+              <input
+                ref={iconInputRef}
+                type="file"
+                accept="image/png"
+                hidden
+                onChange={onPickIcon}
+              />
+            </div>
+            <span className="config-hint">
+              Defaults to the Claude Control logo. Re-add to Home Screen after changing.
+            </span>
           </div>
-          <span className="config-hint">
-            Home-screen icon for this app. Defaults to the Claude Control logo.
-            After changing it, re-add the app to your Home Screen to update the
-            installed icon.
-          </span>
         </div>
 
+        <div className="config-foot">
         <div className="config-version">
           {version ? (
             <>
@@ -347,6 +339,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
+        </div>
         </div>
       </div>
     </div>
