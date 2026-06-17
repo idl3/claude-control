@@ -1455,6 +1455,59 @@ details.block-tool[open] > summary .tool-arrow,
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
   background: transparent;
   flex: 0 0 auto;
+  position: relative; /* anchor for the floating skill autocomplete */
+}
+
+/* Inline skill autocomplete — floats just above the composer (keyboard is
+   below on mobile). Aligned to the centered card width. */
+.skill-ac {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  right: 12px;
+  margin-inline: auto;
+  max-width: 880px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  z-index: 30;
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+.skill-ac-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+}
+.skill-ac-item[data-on='true'] {
+  background: var(--bg-hover);
+}
+.skill-ac-item .tool-head {
+  cursor: pointer;
+}
+
+/* Active-skill chip above the composer input (the textarea still holds the
+   literal `/<skill> …` text; this is read-only visual feedback). Reuses the
+   transcript `.skill-chip` look so both surfaces match. */
+.composer-skill-chip-row {
+  display: flex;
+  margin-bottom: 6px;
+}
+.composer-skill-chip {
+  cursor: default;
 }
 /* Claude.ai-style card: textarea on top, attachments, then a toolbar. Centered
    and a touch wider than the 800px transcript column so it reads as the primary

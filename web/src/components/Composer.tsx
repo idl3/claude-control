@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -6,9 +6,44 @@ import {
   type Attachment,
 } from '@assistant-ui/react';
 import { Kbd } from './Kbd';
-import { optimizePrompt, type OptimizeResult } from '../lib/api';
+import {
+  optimizePrompt,
+  listSkills,
+  type OptimizeResult,
+  type SkillEntry,
+} from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
+
+// Module-level cache so the skill list (live, session-discovered via GET
+// /api/skills → lib/skills.js) is fetched once and shared across composer
+// mounts — the autocomplete must reflect the CURRENT session's installed
+// skills, never a hardcoded list.
+let _skillsCache: SkillEntry[] | null = null;
+let _skillsPromise: Promise<SkillEntry[]> | null = null;
+function loadSkills(): Promise<SkillEntry[]> {
+  if (_skillsCache) return Promise.resolve(_skillsCache);
+  if (!_skillsPromise) {
+    _skillsPromise = listSkills()
+      .then((s) => {
+        _skillsCache = s;
+        return s;
+      })
+      .catch(() => {
+        _skillsPromise = null; // allow a retry on next open
+        return [];
+      });
+  }
+  return _skillsPromise;
+}
+
+// A leading slash-command still being typed (no space yet): `/`, then the
+// partial name. The capture group is the query that narrows the suggestions.
+const SLASH_TYPING_RE = /^\/([A-Za-z0-9:_-]*)$/;
+// A completed leading slash-command (name followed by a space or end) — used to
+// derive the active-skill chip.
+const SLASH_DONE_RE = /^\/([A-Za-z0-9:_-]+)(?:\s|$)/;
+const AC_MAX = 4;
 
 interface ComposerProps {
   disabled: boolean;
@@ -115,8 +150,67 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     setEnhanceBySession((m) => ({ ...m, [sid]: { ...(m[sid] ?? EMPTY_ENHANCE), ...patch } }));
   }, []);
 
-  useEffect(
-    () => composer.subscribe(() => setEmpty(!(composer.getState().text ?? '').trim())),
+  // ── Inline skill autocomplete ──────────────────────────────────────────────
+  const [skills, setSkills] = useState<SkillEntry[]>(() => _skillsCache ?? []);
+  const [text, setTextMirror] = useState('');     // mirror of composer text
+  const [acIndex, setAcIndex] = useState(0);       // highlighted suggestion
+  const [acDismissed, setAcDismissed] = useState(false); // Esc / just-selected
+
+  useEffect(() => {
+    if (!_skillsCache) loadSkills().then(setSkills);
+  }, []);
+
+  // Track composer text → drives both the empty flag and the slash detection.
+  useEffect(() => {
+    const sync = () => {
+      const t = composer.getState().text ?? '';
+      setTextMirror(t);
+      setEmpty(!t.trim());
+    };
+    sync();
+    return composer.subscribe(sync);
+  }, [composer]);
+
+  const acQuery = useMemo(() => {
+    const m = SLASH_TYPING_RE.exec(text);
+    return m ? m[1] : null;
+  }, [text]);
+
+  // Reset highlight + un-dismiss whenever the query changes (new keystroke).
+  useEffect(() => {
+    setAcIndex(0);
+    setAcDismissed(false);
+  }, [acQuery]);
+
+  const acItems = useMemo(() => {
+    if (acQuery == null || acDismissed) return [];
+    const q = acQuery.toLowerCase();
+    return skills
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        // Prefix matches first, then alphabetical.
+        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return ap !== bp ? ap - bp : a.name.localeCompare(b.name);
+      })
+      .slice(0, AC_MAX);
+  }, [acQuery, acDismissed, skills]);
+  const acOpen = acItems.length > 0;
+
+  // Active-skill chip: the leading `/<skill>` once it's a known, completed name.
+  const activeSkill = useMemo(() => {
+    const m = SLASH_DONE_RE.exec(text);
+    return m && skills.some((s) => s.name === m[1]) ? m[1] : null;
+  }, [text, skills]);
+
+  const selectSkill = useCallback(
+    (name: string) => {
+      composer.setText(`/${name} `);
+      setAcDismissed(true);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('.composer-input')?.focus();
+      });
+    },
     [composer],
   );
 
@@ -156,9 +250,50 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
 
   return (
     <ComposerPrimitive.Root className="composer">
+      {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
+          keyboard is below). Populated from the live session skill list. */}
+      {acOpen ? (
+        <div className="skill-ac" role="listbox" aria-label="Skill suggestions">
+          {acItems.map((s, i) => (
+            <button
+              type="button"
+              key={s.name}
+              role="option"
+              aria-selected={i === acIndex}
+              data-on={i === acIndex ? 'true' : undefined}
+              className="skill-ac-item"
+              // Use onMouseDown (not onClick) so the textarea doesn't blur first.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                selectSkill(s.name);
+              }}
+              onMouseEnter={() => setAcIndex(i)}
+            >
+              <span className="tool-head">
+                <span className="tool-arrow" aria-hidden="true">▸</span>
+                <span className="tool-name skill-card-name">{s.name}</span>
+                {s.description ? (
+                  <>
+                    <span className="tool-sep">—</span>
+                    <span className="tool-input skill-card-desc">{s.description}</span>
+                  </>
+                ) : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
           then a toolbar with attach on the left and send on the right. */}
       <div className="composer-card">
+        {activeSkill ? (
+          <div className="composer-skill-chip-row">
+            <span className="skill-chip composer-skill-chip" title={`Invoking /${activeSkill}`}>
+              <span className="skill-chip-icon" aria-hidden="true">⌁</span>
+              <span className="skill-chip-name">/{activeSkill}</span>
+            </span>
+          </div>
+        ) : null}
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
             working + invisible) and overlay a hint shown only while empty. */}
@@ -168,6 +303,34 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             placeholder={disabled ? 'Select a session…' : ' '}
             submitOnEnter={false}
             onKeyDown={(e) => {
+              // Skill autocomplete nav takes precedence while the dropdown is open.
+              if (acOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setAcIndex((i) => (i + 1) % acItems.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setAcIndex((i) => (i - 1 + acItems.length) % acItems.length);
+                  return;
+                }
+                if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  selectSkill(acItems[acIndex].name);
+                  return;
+                }
+                if (e.key === 'Tab') {
+                  e.preventDefault();
+                  selectSkill(acItems[acIndex].name);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setAcDismissed(true);
+                  return;
+                }
+              }
               // Enter inserts a newline; ⌘/Ctrl+Enter sends.
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
