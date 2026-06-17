@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serverBase, buildChatBody, parseChatContent, DEFAULT_MODEL } from '../lib/mlx.js';
+import {
+  serverBase,
+  buildChatBody,
+  parseChatContent,
+  isModelCached,
+  DEFAULT_MODEL,
+} from '../lib/mlx.js';
 
 test('serverBase builds a localhost URL for the given port', () => {
   assert.equal(serverBase(8080), 'http://127.0.0.1:8080');
@@ -18,6 +24,10 @@ test('buildChatBody produces an OpenAI chat-completions payload', () => {
 test('parseChatContent extracts the assistant message text', () => {
   const json = { choices: [{ message: { role: 'assistant', content: '{"optimized":"x"}' } }] };
   assert.equal(parseChatContent(json), '{"optimized":"x"}');
+});
+
+test('isModelCached is false for a non-existent model', () => {
+  assert.equal(isModelCached('mlx-community/Definitely-Not-A-Real-Model-xyz-4bit'), false);
 });
 
 test('parseChatContent throws on missing/empty content', () => {
