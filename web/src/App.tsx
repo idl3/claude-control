@@ -19,6 +19,7 @@ import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { LivePane } from './components/LivePane';
 import { Composer } from './components/Composer';
+import { ShellContext } from './components/ShellContext';
 import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
@@ -117,6 +118,26 @@ function AppInner() {
   const attachmentAdapter = useMemo(
     () => createCockpitAttachmentAdapter(showToast),
     [showToast],
+  );
+
+  // Shell ops for the composer's terminal mode (>_), provided via context so the
+  // Composer (inside Thread, and standalone in the live-pane branch) can reach
+  // the server-owned shell pane without prop-drilling.
+  const shellApi = useMemo(
+    () => ({
+      output: cockpit.shellOutput,
+      run: cockpit.sendShellInput,
+      key: cockpit.sendShellKey,
+      poll: cockpit.requestShellCapture,
+      clear: cockpit.clearShellOutput,
+    }),
+    [
+      cockpit.shellOutput,
+      cockpit.sendShellInput,
+      cockpit.sendShellKey,
+      cockpit.requestShellCapture,
+      cockpit.clearShellOutput,
+    ],
   );
 
   // Composer send -> tmux reply. We do NOT optimistically append; Claude's
@@ -618,6 +639,7 @@ function AppInner() {
               </div>
             </header>
 
+            <ShellContext.Provider value={shellApi}>
             {selectedSession && !selectedSession.transcriptPath ? (
               // Transcript-less live session (e.g. a worktree cwd Claude records
               // under a different path): the assistant-ui thread would render an
@@ -647,6 +669,7 @@ function AppInner() {
                 <ArtifactPanel />
               </div>
             )}
+            </ShellContext.Provider>
           </main>
         </div>
 

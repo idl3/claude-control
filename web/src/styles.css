@@ -388,6 +388,59 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Composer terminal (>_) mode — live shell-pane view, floats above the composer. */
+.terminal-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  margin-bottom: 8px;
+  max-height: 48dvh;
+  min-height: 160px;
+  border: 1px solid var(--red);
+  border-radius: 12px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.terminal-view-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-meta);
+  color: var(--red);
+  background: var(--red-bg);
+}
+.terminal-view-btn {
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.terminal-view-btn:hover {
+  background: var(--red-bg);
+}
+.terminal-view-body {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-transcript);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ── Thread ───────────────────────────────────────────────────── */
 .thread-root {
   display: flex;
@@ -1691,6 +1744,27 @@ details.block-tool[open] > summary .tool-arrow,
 .composer-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* Terminal (>_) mode — dark-red affordances: card outline, toggle, run button. */
+.composer-card[data-terminal] {
+  border-color: var(--red);
+}
+.composer-card[data-terminal]:focus-within {
+  border-color: var(--red);
+  box-shadow: 0 0 0 1px var(--red);
+}
+.composer-term-toggle[data-on] {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+.composer-send[data-terminal] {
+  background: var(--red);
+  color: oklch(98% 0.01 25);
+  border-color: transparent;
+}
+.composer-send[data-terminal]:hover {
+  filter: brightness(1.08);
 }
 .composer-input {
   width: 100%;
