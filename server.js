@@ -27,6 +27,7 @@ import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { optimizePrompt } from './lib/optimize.js';
 import { complete as claudeCliComplete } from './lib/claude-cli.js';
+import { transcribe } from './lib/transcribe.js';
 import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
@@ -253,6 +254,11 @@ const server = http.createServer((req, res) => {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleOptimize(req, res);
+  }
+  if (u.pathname === '/api/transcribe') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleTranscribe(req, res, u);
   }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
@@ -494,6 +500,51 @@ async function handleOptimize(req, res) {
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
+}
+
+// POST /api/transcribe — local speech-to-text. Accepts a raw audio body (the
+// MediaRecorder blob from the voice dialog; ?ext=webm|mp4|wav names the format),
+// caps the size, writes it to a temp file, and runs ffmpeg→whisper.cpp via
+// lib/transcribe. Returns { ok, text }. No key, no cloud — fully local.
+function handleTranscribe(req, res, u) {
+  const maxBytes = CONFIG.maxUploadMB * 1024 * 1024;
+  const ext =
+    (u.searchParams.get('ext') || 'webm').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) ||
+    'webm';
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+
+  req.on('data', (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > maxBytes) {
+      aborted = true;
+      endJson(res, 413, { error: `audio exceeds ${CONFIG.maxUploadMB} MB limit` });
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+
+  req.on('end', async () => {
+    if (aborted) return;
+    if (size === 0) return endJson(res, 400, { error: 'empty audio' });
+    const tmp = path.join(os.tmpdir(), `cc-stt-in-${Date.now()}-${process.pid}.${ext}`);
+    try {
+      await fs.promises.writeFile(tmp, Buffer.concat(chunks), { mode: 0o600 });
+      const text = await transcribe(tmp);
+      endJson(res, 200, { ok: true, text });
+    } catch (err) {
+      endJson(res, 500, { error: String(err?.message || err) });
+    } finally {
+      fs.promises.unlink(tmp).catch(() => {});
+    }
+  });
+
+  req.on('error', () => {
+    if (!aborted) endJson(res, 400, { error: 'audio stream error' });
+  });
 }
 
 // POST /api/session/new — create a new tmux window in the configured (or

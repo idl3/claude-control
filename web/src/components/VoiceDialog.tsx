@@ -1,82 +1,66 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { transcribeAudio } from '../lib/api';
 
-// Minimal Web Speech API typings (absent from TS DOM lib).
-interface SpeechAlternative {
-  transcript: string;
-}
-interface SpeechResultLike {
-  readonly isFinal: boolean;
-  readonly 0: SpeechAlternative;
-}
-interface SpeechResultEvent {
-  resultIndex: number;
-  results: ArrayLike<SpeechResultLike>;
-}
-interface SpeechErrorEvent {
-  error?: string;
-}
-interface SpeechRecognitionLike {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((e: SpeechResultEvent) => void) | null;
-  onerror: ((e: SpeechErrorEvent) => void) | null;
-  onend: (() => void) | null;
-}
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-function getSpeechCtor(): SpeechRecognitionCtor | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
 function getAudioCtx(): typeof AudioContext | null {
   if (typeof window === 'undefined') return null;
-  const w = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+  const w = window as unknown as {
+    AudioContext?: typeof AudioContext;
+    webkitAudioContext?: typeof AudioContext;
+  };
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
 
-type Status = 'starting' | 'recording' | 'paused' | 'error';
+// Pick a MediaRecorder mime the browser actually supports. Chrome → webm/opus,
+// Safari/iOS → mp4. The returned `ext` is sent to the server so ffmpeg names
+// the temp file correctly. '' lets the browser choose its default.
+function pickMime(): { mime: string; ext: string } {
+  const MR = typeof window !== 'undefined' ? window.MediaRecorder : undefined;
+  const candidates: { mime: string; ext: string }[] = [
+    { mime: 'audio/webm;codecs=opus', ext: 'webm' },
+    { mime: 'audio/webm', ext: 'webm' },
+    { mime: 'audio/mp4', ext: 'mp4' },
+    { mime: 'audio/aac', ext: 'aac' },
+    { mime: 'audio/ogg;codecs=opus', ext: 'ogg' },
+  ];
+  if (MR && typeof MR.isTypeSupported === 'function') {
+    for (const c of candidates) if (MR.isTypeSupported(c.mime)) return c;
+  }
+  return { mime: '', ext: 'webm' };
+}
+
+type Status = 'starting' | 'recording' | 'paused' | 'transcribing' | 'error';
 
 interface VoiceDialogProps {
-  /** Called on Stop with the (possibly empty) accumulated transcript. */
+  /** Called with the transcribed text (empty if nothing was said). */
   onCommit: (text: string) => void;
   /** Called on Cancel / Esc / backdrop — discard, nothing committed. */
   onClose: () => void;
 }
 
 /**
- * Recording dialog: live mic waveform (Web Audio AnalyserNode) + Web Speech
- * transcription, with explicit Cancel / Pause-Resume / Stop controls and full
- * teardown — so recording can ALWAYS be stopped/exited (fixes the "stuck after
- * permission, no way out" bug). Stop commits the transcript into the composer;
- * Cancel discards. Transcription is best-effort (some browsers lack the Web
- * Speech API — the waveform + Stop/Cancel still work).
+ * Recording dialog: live mic waveform (Web Audio AnalyserNode) + MediaRecorder
+ * capture, with explicit Cancel / Pause-Resume / Stop controls and full
+ * teardown — so recording can ALWAYS be stopped/exited. On Stop the recorded
+ * audio is uploaded to the server for local speech-to-text (ffmpeg →
+ * whisper.cpp), and the transcript is inserted into the composer. This works in
+ * any browser that can record audio, including iOS Safari (the Web Speech API
+ * does not).
  */
 export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
   const [status, setStatus] = useState<Status>('starting');
-  const [errorKind, setErrorKind] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState('');
-  const [interim, setInterim] = useState('');
-  const srSupported = getSpeechCtor() !== null;
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const recSupported = typeof window !== 'undefined' && 'MediaRecorder' in window;
 
-  const finalRef = useRef('');
   const streamRef = useRef<MediaStream | null>(null);
   const acRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const recRef = useRef<SpeechRecognitionLike | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const mimeRef = useRef<{ mime: string; ext: string }>({ mime: '', ext: 'webm' });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const drawingRef = useRef(false);
   const committedRef = useRef(false);
-  const interimRef = useRef('');
-  interimRef.current = interim;
 
   const stopDraw = useCallback(() => {
     drawingRef.current = false;
@@ -118,52 +102,10 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
     rafRef.current = requestAnimationFrame(render);
   }, []);
 
-  const startRecognition = useCallback(() => {
-    const Ctor = getSpeechCtor();
-    if (!Ctor) return;
-    const rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
-    rec.onresult = (e) => {
-      let f = '';
-      let it = '';
-      for (let i = e.resultIndex; i < e.results.length; i += 1) {
-        const r = e.results[i];
-        if (r.isFinal) f += r[0].transcript;
-        else it += r[0].transcript;
-      }
-      if (f.trim()) {
-        finalRef.current = (finalRef.current + ' ' + f).trim();
-        setTranscript(finalRef.current);
-      }
-      setInterim(it);
-    };
-    rec.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        setErrorKind('not-allowed');
-        setStatus('error');
-      }
-    };
-    rec.onend = () => {
-      /* ends on stop()/pause; resume creates a fresh instance */
-    };
-    recRef.current = rec;
-    try {
-      rec.start();
-    } catch {
-      /* already started / transient */
-    }
-  }, []);
-
-  const teardown = useCallback(() => {
+  // Stop the mic stream + audio graph + waveform. Leaves the recorder alone
+  // (callers decide whether its data is used or discarded).
+  const teardownAudio = useCallback(() => {
     stopDraw();
-    try {
-      recRef.current?.abort();
-    } catch {
-      /* ignore */
-    }
-    recRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     acRef.current?.close().catch(() => {});
@@ -171,7 +113,7 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
     analyserRef.current = null;
   }, [stopDraw]);
 
-  // Mount → request mic, wire analyser + recognition.
+  // Mount → request mic, wire analyser + recorder.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -194,102 +136,174 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
           src.connect(analyser);
           analyserRef.current = analyser;
         }
+        if (!('MediaRecorder' in window)) throw new Error('no-mediarecorder');
+        const picked = pickMime();
+        mimeRef.current = picked;
+        const rec = picked.mime
+          ? new MediaRecorder(stream, { mimeType: picked.mime })
+          : new MediaRecorder(stream);
+        rec.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        recorderRef.current = rec;
+        rec.start(); // one blob flushed on stop()
         setStatus('recording');
         draw();
-        startRecognition();
-      } catch {
-        setErrorKind('not-allowed');
+      } catch (err) {
+        const kind = err instanceof Error ? err.message : '';
+        setErrorMsg(
+          kind === 'no-mediarecorder'
+            ? 'Audio recording isn’t supported in this browser.'
+            : 'Microphone permission denied or unavailable.',
+        );
         setStatus('error');
       }
     })();
     return () => {
       cancelled = true;
-      teardown();
+      stopDraw();
+      try {
+        recorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+      recorderRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      acRef.current?.close().catch(() => {});
+      acRef.current = null;
+      analyserRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pause = useCallback(() => {
     try {
-      recRef.current?.stop();
+      recorderRef.current?.pause();
     } catch {
       /* ignore */
     }
-    recRef.current = null;
     stopDraw();
     setStatus('paused');
   }, [stopDraw]);
 
   const resume = useCallback(() => {
+    try {
+      recorderRef.current?.resume();
+    } catch {
+      /* ignore */
+    }
     setStatus('recording');
     draw();
-    startRecognition();
-  }, [draw, startRecognition]);
+  }, [draw]);
 
   const stop = useCallback(() => {
     if (committedRef.current) return;
     committedRef.current = true;
-    const text = (finalRef.current + ' ' + interimRef.current).trim();
-    teardown();
-    onCommit(text);
-  }, [teardown, onCommit]);
+    const rec = recorderRef.current;
+    if (!rec) {
+      teardownAudio();
+      onCommit('');
+      return;
+    }
+    setStatus('transcribing');
+    rec.onstop = async () => {
+      const { mime, ext } = mimeRef.current;
+      const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' });
+      teardownAudio();
+      if (blob.size === 0) {
+        onCommit('');
+        return;
+      }
+      try {
+        const text = await transcribeAudio(blob, ext);
+        onCommit(text);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : 'Transcription failed.');
+        setStatus('error');
+      }
+    };
+    try {
+      rec.stop(); // flushes a final dataavailable, then fires onstop
+    } catch {
+      teardownAudio();
+      onCommit('');
+    }
+  }, [teardownAudio, onCommit]);
 
   const cancel = useCallback(() => {
-    teardown();
+    committedRef.current = true; // suppress any in-flight onstop commit
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    recorderRef.current = null;
+    teardownAudio();
     onClose();
-  }, [teardown, onClose]);
+  }, [teardownAudio, onClose]);
 
-  // Esc cancels.
+  // Esc cancels (but not mid-transcribe — that's a network call in flight).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && status !== 'transcribing') {
         e.preventDefault();
         cancel();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cancel]);
+  }, [cancel, status]);
 
-  const live = transcript + (interim ? (transcript ? ' ' : '') + interim : '');
+  const statusLabel =
+    status === 'error'
+      ? 'Microphone unavailable'
+      : status === 'transcribing'
+        ? 'Transcribing…'
+        : status === 'paused'
+          ? 'Paused'
+          : status === 'starting'
+            ? 'Starting…'
+            : 'Listening…';
 
   return (
     <div
       className="modal-backdrop"
       onClick={(e) => {
-        if (e.target === e.currentTarget) cancel();
+        if (e.target === e.currentTarget && status !== 'transcribing') cancel();
       }}
     >
       <div className="modal voice-dialog" role="dialog" aria-modal="true" aria-label="Voice input">
         <div className="voice-status">
           <span className="voice-dot" data-on={status === 'recording' ? 'true' : undefined} />
-          {status === 'error'
-            ? 'Microphone unavailable'
-            : status === 'paused'
-              ? 'Paused'
-              : status === 'starting'
-                ? 'Starting…'
-                : 'Listening…'}
+          {statusLabel}
         </div>
 
-        <canvas ref={canvasRef} className="voice-wave" height={72} data-paused={status !== 'recording' ? 'true' : undefined} />
+        <canvas
+          ref={canvasRef}
+          className="voice-wave"
+          height={72}
+          data-paused={status !== 'recording' ? 'true' : undefined}
+        />
 
         <div className="voice-transcript">
-          {live ? live : <span className="voice-placeholder">Speak now — your words appear here.</span>}
+          {status === 'transcribing' ? (
+            <span className="voice-placeholder">Converting speech to text…</span>
+          ) : (
+            <span className="voice-placeholder">
+              Speak, then tap “Stop &amp; insert” to transcribe.
+            </span>
+          )}
         </div>
 
         {status === 'error' ? (
-          <div className="voice-error">
-            {errorKind === 'not-allowed'
-              ? 'Microphone permission denied or unavailable on this browser.'
-              : 'Could not start recording.'}
-          </div>
-        ) : !srSupported ? (
-          <div className="voice-note">Live transcription isn’t supported in this browser — recording works, but no text will be captured.</div>
+          <div className="voice-error">{errorMsg || 'Could not start recording.'}</div>
+        ) : !recSupported ? (
+          <div className="voice-note">Audio recording isn’t supported in this browser.</div>
         ) : null}
 
         <div className="voice-actions">
-          <button type="button" className="btn-secondary" onClick={cancel}>
+          <button type="button" className="btn-secondary" onClick={cancel} disabled={status === 'transcribing'}>
             Cancel
           </button>
           <span className="voice-actions-spacer" />
@@ -302,8 +316,13 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
               Resume
             </button>
           ) : null}
-          <button type="button" className="btn-primary" onClick={stop} disabled={status === 'error'}>
-            Stop &amp; insert
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={stop}
+            disabled={status === 'error' || status === 'transcribing' || status === 'starting'}
+          >
+            {status === 'transcribing' ? 'Transcribing…' : 'Stop & insert'}
           </button>
         </div>
       </div>
