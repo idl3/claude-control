@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession } from './lib/api';
@@ -14,6 +15,8 @@ import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { LiveThinkingContext } from './components/ThinkingContext';
+import { ArtifactPanelProvider } from './components/ArtifactContext';
+import { ArtifactPanel } from './components/ArtifactPanel';
 import { LivePane } from './components/LivePane';
 import { Composer } from './components/Composer';
 import { AskModal } from './components/AskModal';
@@ -38,7 +41,12 @@ function msgText(msg: Msg): string {
 }
 
 // How long a queued send waits for its transcript echo before we stop showing it.
-const PENDING_SEND_TTL_MS = 120_000;
+// Keep an unconfirmed optimistic send visible for a long time: the user must
+// ALWAYS see what they sent. The real transcript echo normally reconciles it
+// away within seconds, but on a busy session the echo can lag minutes — the
+// bubble must bridge that gap rather than vanish. This is only a last-resort
+// cleanup for sends whose echo never arrives at all.
+const PENDING_SEND_TTL_MS = 1_800_000;
 
 // Per-session composer drafts (staged prompt text), persisted across reloads.
 const DRAFTS_KEY = 'cc_drafts';
@@ -457,12 +465,37 @@ function AppInner() {
       ? (fullConverted[fullConverted.length - 1].id ?? null)
       : null;
 
+  // Pull-to-refresh (mobile): pull down at the top of the thread/rail to hard-
+  // reload and pick up a freshly-deployed bundle.
+  const appRef = useRef<HTMLDivElement>(null);
+  const { pull, refreshing } = usePullToRefresh(appRef);
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+    <ArtifactPanelProvider>
       <div
+        ref={appRef}
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
       >
+        {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
+            release-to-refresh. */}
+        {pull > 0 || refreshing ? (
+          <div
+            className="ptr-indicator"
+            style={{ transform: `translate(-50%, ${Math.round(pull)}px)` }}
+            data-ready={!refreshing && pull >= PTR_THRESHOLD ? 'true' : undefined}
+            data-refreshing={refreshing ? 'true' : undefined}
+            aria-hidden="true"
+          >
+            <span className="ptr-spinner" />
+          </div>
+        ) : null}
+        {/* Fixed top scrim: on mobile, focusing the composer makes iOS scroll the
+            whole app up to clear the keyboard, pushing the nav bars off and
+            sliding message text under the status bar. This dissolves that text
+            into the background at the very top of the screen while typing. */}
+        <div className="app-top-fade" aria-hidden="true" />
         <ResourceHud
           resources={cockpit.resources}
           conn={cockpit.conn}
@@ -592,22 +625,27 @@ function AppInner() {
               // composer still works — replies go via tmux send-keys regardless
               // of whether a transcript was matched.
               <div className="thread-root">
+                <div className="thread-fade" aria-hidden="true" />
                 <LivePane
                   sessionId={selectedSession.id}
                   capture={cockpit.capture}
                   requestCapture={cockpit.requestCapture}
                   clearCapture={cockpit.clearCapture}
                 />
-                <Composer disabled={false} />
+                <Composer disabled={false} sessionId={cockpit.selectedId} />
               </div>
             ) : (
-              <LiveThinkingContext.Provider value={liveThinkingId}>
-                <Thread
-                  hasSelection={!!cockpit.selectedId}
-                  hiddenCount={hiddenCount}
-                  onLoadEarlier={loadEarlier}
-                />
-              </LiveThinkingContext.Provider>
+              <div className="detail-split">
+                <LiveThinkingContext.Provider value={liveThinkingId}>
+                  <Thread
+                    hasSelection={!!cockpit.selectedId}
+                    sessionId={cockpit.selectedId}
+                    hiddenCount={hiddenCount}
+                    onLoadEarlier={loadEarlier}
+                  />
+                </LiveThinkingContext.Provider>
+                <ArtifactPanel />
+              </div>
             )}
           </main>
         </div>
@@ -687,6 +725,7 @@ function AppInner() {
 
         <ToastView toast={toast} />
       </div>
+    </ArtifactPanelProvider>
     </AssistantRuntimeProvider>
   );
 }

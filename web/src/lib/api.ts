@@ -234,6 +234,52 @@ export async function resetIcon(): Promise<void> {
 export interface ControlConfig {
   launchCommand: string;
   defaultCwd: string;
+  optimizeModel: string;
+  claudeBin: string;
+}
+
+export interface OptimizeResult {
+  optimized: string;
+  rationale: string[];
+  changes: string[];
+  mode: 'llm' | 'rules';
+}
+
+export async function optimizePrompt(text: string, intent?: string): Promise<OptimizeResult> {
+  const res = await authFetch('/api/optimize', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, ...(intent ? { intent } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Partial<OptimizeResult> & { error?: string };
+  if (!res.ok || typeof json.optimized !== 'string') {
+    throw new Error(json.error || `HTTP ${res.status}`);
+  }
+  return {
+    optimized: json.optimized,
+    rationale: json.rationale ?? [],
+    changes: json.changes ?? [],
+    mode: json.mode === 'rules' ? 'rules' : 'llm',
+  };
+}
+
+/**
+ * Send a recorded audio blob to the server for local speech-to-text
+ * (ffmpeg → whisper.cpp). `ext` names the container so the server writes the
+ * temp file with a format ffmpeg recognises. Returns the transcript text.
+ */
+export async function transcribeAudio(blob: Blob, ext = 'webm'): Promise<string> {
+  const res = await authFetch(`/api/transcribe?ext=${encodeURIComponent(ext)}`, {
+    method: 'POST',
+    body: blob,
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    text?: string;
+    error?: string;
+  };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json.text ?? '';
 }
 
 /** Fetch the persisted launch config. */
@@ -324,6 +370,19 @@ export async function renameSession(id: string, name: string): Promise<void> {
  */
 export function uploadServeUrl(basename: string): string {
   return `/api/uploads/${encodeURIComponent(basename)}`;
+}
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: 'user' | 'plugin';
+}
+
+/** Fetch the list of available slash-command skills from the server. */
+export async function listSkills(): Promise<SkillEntry[]> {
+  const res = await authFetch('/api/skills');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { skills?: SkillEntry[] }).skills ?? [];
 }
 
 /**

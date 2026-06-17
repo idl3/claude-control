@@ -44,43 +44,68 @@ function MessageActions() {
   );
 }
 
-type PartLike = { readonly type: string };
+type PartLike = { readonly type: string; readonly toolName?: string };
 type Group = { groupKey: string | undefined; indices: number[] };
+
+/** Interactive tool-calls that must surface inline (never buried in a CoT group). */
+const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
 /**
  * Turn-level work grouping (position-aware, so it needs the whole parts array —
  * hence Unstable_PartsGrouped rather than the adjacent-only GroupedParts).
  *
- * A turn = one merged assistant message (see convert.mergeAssistantTurns). Its
- * trailing run of text parts is the ANSWER (always shown). Everything before is
- * WORK (thinking + tool calls + intermediate narration). Rubric:
- *   - ≥2 work parts → one "chain of thought" group (collapsible).
- *   - 0–1 work part → shown inline (a chain of one isn't a chain; a lone tool
- *     or thought just shows).
- *   - answer text → always inline.
+ * A turn = one merged assistant message (see convert.mergeAssistantTurns).
+ * Parts are scanned left→right. A part is a BOUNDARY — always rendered inline —
+ * when it is:
+ *   - a `text` part (each assistant answer ends a group), OR
+ *   - a `tool-call` whose toolName is in INTERACTIVE_TOOLS (AskUserQuestion,
+ *     ExitPlanMode must remain visible, not buried).
+ *
+ * Non-boundary parts (reasoning blocks, ordinary tool-calls) accumulate in a
+ * `work` buffer. When a boundary (or end-of-parts) is reached the buffer is
+ * flushed first:
+ *   - ≥2 actions (reasoning or tool-call parts) in the buffer → one collapsible
+ *     "chain of thought" group.
+ *   - 0–1 actions → each buffered index becomes its own inline group.
+ *
+ * The boundary itself is always pushed inline: `{ groupKey: undefined, indices: [i] }`.
+ *
+ * Every input index appears in exactly one output group; order is preserved.
  */
 function groupTurn(parts: readonly PartLike[]): Group[] {
-  const n = parts.length;
-  let answerStart = n;
-  while (answerStart > 0 && parts[answerStart - 1].type === 'text') answerStart -= 1;
-
-  const work: number[] = [];
-  for (let i = 0; i < answerStart; i += 1) work.push(i);
-
-  // Only group when the turn did ≥2 real ACTIONS (thinking blocks + tool calls).
-  // A lone tool — even with a "let me…" text preamble — just shows inline (a
-  // chain of one isn't a chain).
-  const actions = work.filter(
-    (i) => parts[i].type === 'reasoning' || parts[i].type === 'tool-call',
-  ).length;
-
   const groups: Group[] = [];
-  if (actions >= 2) {
-    groups.push({ groupKey: 'group-thought', indices: work });
-  } else {
-    for (const i of work) groups.push({ groupKey: undefined, indices: [i] });
+  const work: number[] = [];
+
+  function flushWork() {
+    if (work.length === 0) return;
+    const actions = work.filter(
+      (i) => parts[i].type === 'reasoning' || parts[i].type === 'tool-call',
+    ).length;
+    if (actions >= 2) {
+      groups.push({ groupKey: 'group-thought', indices: [...work] });
+    } else {
+      for (const i of work) groups.push({ groupKey: undefined, indices: [i] });
+    }
+    work.length = 0;
   }
-  for (let i = answerStart; i < n; i += 1) groups.push({ groupKey: undefined, indices: [i] });
+
+  for (let i = 0; i < parts.length; i += 1) {
+    const p = parts[i];
+    const isBoundary =
+      p.type === 'text' ||
+      (p.type === 'tool-call' && p.toolName !== undefined && INTERACTIVE_TOOLS.has(p.toolName));
+
+    if (isBoundary) {
+      flushWork();
+      groups.push({ groupKey: undefined, indices: [i] });
+    } else {
+      work.push(i);
+    }
+  }
+
+  // Flush any trailing non-boundary parts (e.g. a turn that ends mid-reasoning).
+  flushWork();
+
   return groups;
 }
 
@@ -187,7 +212,6 @@ function GroupedBody() {
 export function UserMessage() {
   return (
     <MessagePrimitive.Root className="msg-row" data-role="user">
-      <div className="msg-role">user</div>
       <div className="msg-body">
         <MessagePrimitive.Parts components={partComponents} />
       </div>
@@ -201,14 +225,14 @@ export function AssistantMessage() {
   const cockpitRole =
     (useMessage((m) => m.metadata?.custom?.cockpitRole) as string | undefined) ??
     'assistant';
+  const working = useMessage((m) => m.metadata?.custom?.working) as boolean | undefined;
 
   return (
     <MessagePrimitive.Root className="msg-row" data-role={cockpitRole}>
-      <div className="msg-role">{cockpitRole}</div>
       <div className="msg-body">
         <GroupedBody />
       </div>
-      <MessageActions />
+      {!working && <MessageActions />}
     </MessagePrimitive.Root>
   );
 }
