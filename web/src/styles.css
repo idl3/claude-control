@@ -2418,20 +2418,37 @@ details.block-tool[open] > summary .tool-arrow,
 }
 .config-modal {
   width: 100%;
-  max-width: 420px;
+  max-width: 600px;
+  max-height: 90dvh;
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  overflow: hidden;
   box-shadow: 0 12px 40px oklch(0% 0 0 / 0.4);
 }
 .config-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+/* Scrollable body: a 2-column field grid on desktop, single column on mobile. */
+.config-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+  align-content: start;
+}
+/* Fields that hold long values (paths, model ids) span the full width. */
+.config-field--wide {
+  grid-column: 1 / -1;
 }
 .config-title {
   font-size: 15px;
@@ -2453,7 +2470,8 @@ details.block-tool[open] > summary .tool-arrow,
 .config-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0; /* let inputs shrink inside the grid instead of overflowing */
 }
 .config-label {
   font-size: 12px;
@@ -2461,13 +2479,28 @@ details.block-tool[open] > summary .tool-arrow,
   color: var(--text-dim);
 }
 .config-input {
+  width: 100%;
+  box-sizing: border-box;
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px 10px;
-  font-size: var(--txt-composer);
+  padding: 7px 9px;
+  font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+select.config-input {
+  appearance: none;
+  cursor: pointer;
+  /* caret */
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 2px),
+    calc(100% - 11px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
 }
 .config-input:focus {
   outline: none;
@@ -2478,6 +2511,7 @@ details.block-tool[open] > summary .tool-arrow,
 }
 .config-hint {
   font-size: 11px;
+  line-height: 1.35;
   color: var(--text-faint);
 }
 .config-hint code {
@@ -2501,15 +2535,23 @@ details.block-tool[open] > summary .tool-arrow,
   display: flex;
   gap: 8px;
 }
+/* Pinned footer: version on the left, actions on the right. */
+.config-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+}
 .config-version {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   font-size: 11px;
   color: var(--text-faint);
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
-  margin-top: 2px;
 }
 .config-version-update {
   color: var(--accent, #3b82f6);
@@ -2518,7 +2560,7 @@ details.block-tool[open] > summary .tool-arrow,
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 2px;
+  margin-left: auto;
 }
 .config-cancel,
 .config-save {
@@ -2548,6 +2590,21 @@ details.block-tool[open] > summary .tool-arrow,
 .config-cancel:disabled {
   opacity: 0.6;
   cursor: default;
+}
+/* Mobile: single-column fields, full-height sheet anchored to the bottom. */
+@media (max-width: 560px) {
+  .config-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .config-modal {
+    max-width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .config-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Raw-terminal escape hatch -------------------------------------------------*/
