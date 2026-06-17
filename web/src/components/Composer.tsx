@@ -14,6 +14,7 @@ import {
 } from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
+import { useDictation } from '../hooks/useDictation';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -214,10 +215,21 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     [composer],
   );
 
-  // Close the (session-agnostic) skill browser on a session switch.
+  // ── Voice dictation (Web Speech API) ──────────────────────────────────────
+  // Each finalised segment is appended into the composer text (review-then-send,
+  // never auto-send), caret-agnostic (appends at the end with spacing).
+  const { supported: micSupported, recording, error: micError, toggle: toggleMic, stop: stopMic } =
+    useDictation((finalText) => {
+      const cur = composer.getState().text ?? '';
+      const sep = cur && !/\s$/.test(cur) ? ' ' : '';
+      composer.setText(cur + sep + finalText.trim() + ' ');
+    });
+
+  // Close the (session-agnostic) skill browser + stop dictation on a session switch.
   useEffect(() => {
     setSkillBrowserOpen(false);
-  }, [sessionId]);
+    stopMic();
+  }, [sessionId, stopMic]);
 
   const pickSkill = useCallback(
     (name: string) => {
@@ -385,6 +397,26 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           >
             <SlashIcon />
           </button>
+          {micSupported ? (
+            <button
+              type="button"
+              className="composer-mic"
+              data-recording={recording ? 'true' : undefined}
+              aria-pressed={recording}
+              aria-label={recording ? 'Stop dictation' : 'Dictate (voice input)'}
+              title={
+                micError === 'not-allowed' || micError === 'service-not-allowed'
+                  ? 'Microphone permission denied'
+                  : recording
+                    ? 'Stop dictation'
+                    : 'Dictate (voice input)'
+              }
+              disabled={disabled}
+              onClick={() => toggleMic()}
+            >
+              <MicIcon />
+            </button>
+          ) : null}
           <span className="composer-toolbar-spacer" />
           <button
             type="button"
@@ -459,6 +491,20 @@ function SlashIcon() {
         d="M7 20L17 4"
         stroke="currentColor"
         strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
+      <path
+        d="M6 11a6 6 0 0 0 12 0M12 17v3"
+        stroke="currentColor"
+        strokeWidth="2"
         strokeLinecap="round"
       />
     </svg>

@@ -3456,7 +3456,8 @@ details.block-tool[open] > summary .tool-arrow,
 }
 
 /* ── Skill browser toolbar trigger ──────────────────────────── */
-.composer-skills-btn {
+.composer-skills-btn,
+.composer-mic {
   flex: 0 0 auto;
   height: 34px;
   min-width: 34px;
@@ -3475,6 +3476,27 @@ details.block-tool[open] > summary .tool-arrow,
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+.composer-mic:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+/* Recording: red, with a soft pulse so it's obvious dictation is live. */
+.composer-mic[data-recording='true'] {
+  color: var(--red);
+  border-color: var(--red);
+  animation: mic-pulse 1.3s var(--ease) infinite;
+}
+@keyframes mic-pulse {
+  50% {
+    box-shadow: 0 0 0 3px var(--red-bg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-mic[data-recording='true'] {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--red-bg);
+  }
 }
 .composer-skills-btn:hover:not(:disabled) {
   background: var(--bg-hover);
