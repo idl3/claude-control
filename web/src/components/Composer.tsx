@@ -14,7 +14,7 @@ import {
 } from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
-import { useDictation } from '../hooks/useDictation';
+import { VoiceDialog } from './VoiceDialog';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -215,21 +215,28 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     [composer],
   );
 
-  // ── Voice dictation (Web Speech API) ──────────────────────────────────────
-  // Each finalised segment is appended into the composer text (review-then-send,
-  // never auto-send), caret-agnostic (appends at the end with spacing).
-  const { supported: micSupported, recording, error: micError, toggle: toggleMic, stop: stopMic } =
-    useDictation((finalText) => {
+  // ── Voice dictation ───────────────────────────────────────────────────────
+  // The mic opens a recording dialog (waveform + Cancel/Pause/Stop) so recording
+  // can always be stopped/exited. On Stop, the transcript is inserted into the
+  // composer (review-then-send, never auto-send).
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const commitVoice = useCallback(
+    (text: string) => {
+      setVoiceOpen(false);
+      const t = text.trim();
+      if (!t) return;
       const cur = composer.getState().text ?? '';
       const sep = cur && !/\s$/.test(cur) ? ' ' : '';
-      composer.setText(cur + sep + finalText.trim() + ' ');
-    });
+      composer.setText(cur + sep + t + ' ');
+    },
+    [composer],
+  );
 
-  // Close the (session-agnostic) skill browser + stop dictation on a session switch.
+  // Close the (session-agnostic) skill browser + voice dialog on a session switch.
   useEffect(() => {
     setSkillBrowserOpen(false);
-    stopMic();
-  }, [sessionId, stopMic]);
+    setVoiceOpen(false);
+  }, [sessionId]);
 
   const pickSkill = useCallback(
     (name: string) => {
@@ -397,26 +404,16 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           >
             <SlashIcon />
           </button>
-          {micSupported ? (
-            <button
-              type="button"
-              className="composer-mic"
-              data-recording={recording ? 'true' : undefined}
-              aria-pressed={recording}
-              aria-label={recording ? 'Stop dictation' : 'Dictate (voice input)'}
-              title={
-                micError === 'not-allowed' || micError === 'service-not-allowed'
-                  ? 'Microphone permission denied'
-                  : recording
-                    ? 'Stop dictation'
-                    : 'Dictate (voice input)'
-              }
-              disabled={disabled}
-              onClick={() => toggleMic()}
-            >
-              <MicIcon />
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="composer-mic"
+            aria-label="Voice input"
+            title="Voice input"
+            disabled={disabled}
+            onClick={() => setVoiceOpen(true)}
+          >
+            <MicIcon />
+          </button>
           <span className="composer-toolbar-spacer" />
           <button
             type="button"
@@ -457,6 +454,9 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           onPick={pickSkill}
           onClose={() => setSkillBrowserOpen(false)}
         />
+      ) : null}
+      {voiceOpen ? (
+        <VoiceDialog onCommit={commitVoice} onClose={() => setVoiceOpen(false)} />
       ) : null}
     </ComposerPrimitive.Root>
   );
