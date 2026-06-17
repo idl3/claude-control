@@ -249,6 +249,35 @@ export interface OptimizeResult {
   rationale: string[];
   changes: string[];
   mode: 'llm' | 'rules';
+  /** Which backend actually produced the result. */
+  backend?: 'mlx' | 'claude' | 'rules';
+  /** Model id used (for mlx/claude backends). */
+  model?: string;
+}
+
+export interface MlxModelInfo {
+  id: string;
+  label: string;
+  sizeGB: number;
+  minRamGB: number;
+}
+export interface ClaudeModelInfo {
+  id: string;
+  label: string;
+}
+export interface ModelsInfo {
+  machine: { ramGB: number; arch: string; platform: string; appleSilicon: boolean };
+  mlxModels: MlxModelInfo[];
+  claudeModels: ClaudeModelInfo[];
+  recommendedMlxModel: string;
+  recommendedClaudeModel: string;
+}
+
+/** Fetch the curated model catalogs + machine specs + recommendations. */
+export async function getModels(): Promise<ModelsInfo> {
+  const res = await authFetch('/api/models');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as ModelsInfo;
 }
 
 export async function optimizePrompt(text: string, intent?: string): Promise<OptimizeResult> {
