@@ -231,11 +231,17 @@ export async function resetIcon(): Promise<void> {
   if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 }
 
+export type OptimizeBackend = 'mlx' | 'claude' | 'rules';
+
 export interface ControlConfig {
   launchCommand: string;
   defaultCwd: string;
   optimizeModel: string;
   claudeBin: string;
+  /** Prompt-enhancer backend: local MLX model, claude -p, or deterministic rules. */
+  optimizeBackend: OptimizeBackend;
+  /** HuggingFace/MLX model id used when optimizeBackend === 'mlx'. */
+  mlxModel: string;
 }
 
 export interface OptimizeResult {
