@@ -1509,6 +1509,48 @@ details.block-tool[open] > summary .tool-arrow,
 .composer-skill-chip {
   cursor: default;
 }
+
+/* Pull-to-refresh indicator (mobile). Inline transform sets translate(-50%, Y);
+   Y tracks the pull distance. */
+.ptr-indicator {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--hud-h) - 30px);
+  left: 50%;
+  z-index: 45;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.ptr-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+}
+.ptr-indicator[data-ready='true'] .ptr-spinner {
+  border-top-color: var(--green);
+}
+.ptr-indicator[data-refreshing='true'] .ptr-spinner {
+  animation: ptr-spin 0.7s linear infinite;
+}
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator[data-refreshing='true'] .ptr-spinner {
+    animation-duration: 1.4s;
+  }
+}
 /* Claude.ai-style card: textarea on top, attachments, then a toolbar. Centered
    and a touch wider than the 800px transcript column so it reads as the primary
    surface. The card itself is the only thing with a fill + border. */
