@@ -430,15 +430,25 @@ body {
 .terminal-view-body {
   flex: 1 1 auto;
   margin: 0;
-  padding: 10px;
-  background: var(--bg);
-  color: var(--text);
+  padding: 10px 12px;
+  /* True terminal surface — near-black so the ANSI palette reads correctly. */
+  background: #0b0d10;
+  color: #c0caf5;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: var(--txt-transcript);
+  line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+}
+.terminal-view-body a {
+  color: #7dcfff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.terminal-view-body a:hover {
+  color: #a4daff;
 }
 
 /* ── Thread ───────────────────────────────────────────────────── */
