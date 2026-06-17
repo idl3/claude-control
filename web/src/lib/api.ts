@@ -263,6 +263,25 @@ export async function optimizePrompt(text: string, intent?: string): Promise<Opt
   };
 }
 
+/**
+ * Send a recorded audio blob to the server for local speech-to-text
+ * (ffmpeg → whisper.cpp). `ext` names the container so the server writes the
+ * temp file with a format ffmpeg recognises. Returns the transcript text.
+ */
+export async function transcribeAudio(blob: Blob, ext = 'webm'): Promise<string> {
+  const res = await authFetch(`/api/transcribe?ext=${encodeURIComponent(ext)}`, {
+    method: 'POST',
+    body: blob,
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    text?: string;
+    error?: string;
+  };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json.text ?? '';
+}
+
 /** Fetch the persisted launch config. */
 export async function getConfig(): Promise<ControlConfig> {
   const res = await authFetch('/api/config');
