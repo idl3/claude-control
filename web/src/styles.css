@@ -16,9 +16,9 @@
   --red: oklch(64% 0.2 25);
   --red-bg: oklch(30% 0.09 25);
   --green: oklch(72% 0.16 150);
-  --user: oklch(34% 0.06 250);
+  --user: oklch(0.24 0.03 249.98);
 
-  --txt-transcript: 12.5px;
+  --txt-transcript: 13.5px;
   --txt-meta: 11px;
   --txt-composer: 16px; /* >=16px: stops iOS Safari auto-zoom on focus */
 
@@ -29,15 +29,14 @@
   color-scheme: dark;
 }
 
-/* Desktop has the room — bump the type scale one step up from the mobile-first
-   defaults. Everything reads off these tokens, so this lifts transcript, meta,
-   and composer text together. Composer stays >=16px regardless (iOS zoom guard
-   is moot on desktop, but the bump keeps it consistent). */
+/* Desktop has the room — bump transcript + meta one step up from the
+   mobile-first defaults. Composer stays at 16px (one notch below the body bump)
+   for a calmer input on desktop; iOS zoom guard is moot here anyway. */
 @media (min-width: 760px) {
   :root {
-    --txt-transcript: 13.5px;
+    --txt-transcript: 14.5px;
     --txt-meta: 12px;
-    --txt-composer: 17px;
+    --txt-composer: 16px;
   }
 }
 
@@ -395,6 +394,58 @@ body {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
+}
+/* Top scrim over the message area. Hidden by default; fades in while the
+   composer (a descendant) is focused so messages scrolling up under the header
+   dissolve smoothly, and fades out when the input is dismissed. */
+.thread-fade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  /* Match the thread's own background (--bg) so messages scrolling up dissolve
+     INTO it rather than getting a faint mismatched tint. Solid cap then fade. */
+  background: linear-gradient(to bottom, var(--bg) 38%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease, ease);
+  z-index: 5;
+}
+.thread-root:focus-within .thread-fade {
+  opacity: 1;
+}
+/* Fixed scrim pinned to the very top of the viewport, covering the status-bar
+   safe area. Mobile only: when the composer is focused iOS scrolls the app up
+   (nav bars leave, content reaches the status bar), so this fades that content
+   into the background. Hidden on desktop where there's no keyboard scroll. */
+.app-top-fade {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top) + 52px);
+  background: linear-gradient(to bottom, var(--bg) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease, ease);
+  z-index: 40;
+}
+@media (max-width: 760px) {
+  .app:focus-within .app-top-fade {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-top-fade {
+    transition: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-fade {
+    transition: none;
+  }
 }
 .thread-viewport {
   flex: 1 1 auto;
@@ -457,35 +508,40 @@ body {
   align-self: flex-end;
   align-items: flex-end;
 }
-.msg-role {
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
-  padding: 0 2px;
-}
 .msg-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--bg-1);
-  border: 1px solid var(--line);
+  /* Default (assistant): no bubble — role is implied by left alignment. Only the
+     user message keeps a tinted bubble. */
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 8px 10px;
   font-size: var(--txt-transcript);
   /* Bound the bubble to the row and allow its flex children to shrink so a wide
      code block / table scrolls inside instead of widening the bubble. */
   min-width: 0;
   max-width: 100%;
 }
+/* Assistant: flush plain text, no inner padding (no bubble to inset from). */
+.msg-row[data-role='assistant'] .msg-body {
+  padding: 0;
+}
 .msg-row[data-role='user'] .msg-body {
   background: var(--user);
-  border-color: transparent;
+  /* Accent stripe on the leading edge so an interjection ALWAYS reads as the
+     operator's turn and clearly splits the assistant's tool-call chain — even a
+     long one that spans most of the width (where alignment alone isn't enough,
+     now that the role label is gone). */
+  border: 1px solid transparent;
+  border-left: 2px solid var(--accent);
+  padding: 8px 10px;
 }
 .msg-row[data-role='system'] .msg-body {
   background: transparent;
-  border-style: dashed;
+  border: 1px dashed var(--line);
   color: var(--text-dim);
+  padding: 8px 10px;
 }
 /* Queued send: not yet echoed by the transcript — dimmed + dashed until confirmed. */
 .msg-row[data-queued='true'] {
@@ -494,9 +550,6 @@ body {
 .msg-row[data-queued='true'] .msg-body {
   border: 1px dashed var(--line);
   background: transparent;
-}
-.msg-row[data-queued='true'] .msg-role {
-  color: var(--accent, var(--text-dim));
 }
 
 /* Copy action bar — always visible at the end of each message (not a hover
@@ -1332,7 +1385,8 @@ details.block-tool > summary.block-tool-use {
   flex: 0 0 auto;
   transition: transform var(--ease) 0.15s;
 }
-details.block-tool[open] > summary .tool-arrow {
+details.block-tool[open] > summary .tool-arrow,
+.tool-arrow[data-peek='true'] {
   transform: rotate(90deg);
 }
 .tool-name {
@@ -1401,6 +1455,101 @@ details.block-tool[open] > summary .tool-arrow {
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
   background: transparent;
   flex: 0 0 auto;
+  position: relative; /* anchor for the floating skill autocomplete */
+}
+
+/* Inline skill autocomplete — floats just above the composer (keyboard is
+   below on mobile). Aligned to the centered card width. */
+.skill-ac {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  right: 12px;
+  margin-inline: auto;
+  max-width: 880px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  z-index: 30;
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+.skill-ac-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+}
+.skill-ac-item[data-on='true'] {
+  background: var(--bg-hover);
+}
+.skill-ac-item .tool-head {
+  cursor: pointer;
+}
+
+/* Active-skill chip above the composer input (the textarea still holds the
+   literal `/<skill> …` text; this is read-only visual feedback). Reuses the
+   transcript `.skill-chip` look so both surfaces match. */
+.composer-skill-chip-row {
+  display: flex;
+  margin-bottom: 6px;
+}
+.composer-skill-chip {
+  cursor: default;
+}
+
+/* Pull-to-refresh indicator (mobile). Inline transform sets translate(-50%, Y);
+   Y tracks the pull distance. */
+.ptr-indicator {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--hud-h) - 30px);
+  left: 50%;
+  z-index: 45;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.ptr-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+}
+.ptr-indicator[data-ready='true'] .ptr-spinner {
+  border-top-color: var(--green);
+}
+.ptr-indicator[data-refreshing='true'] .ptr-spinner {
+  animation: ptr-spin 0.7s linear infinite;
+}
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator[data-refreshing='true'] .ptr-spinner {
+    animation-duration: 1.4s;
+  }
 }
 /* Claude.ai-style card: textarea on top, attachments, then a toolbar. Centered
    and a touch wider than the 800px transcript column so it reads as the primary
@@ -1562,6 +1711,55 @@ details.block-tool[open] > summary .tool-arrow {
 .composer-input::placeholder {
   color: var(--text-faint);
 }
+/* Overlay placeholder: lets the hint use the <Kbd> component (a native
+   placeholder is text-only). Sits exactly over the input's text box, click-
+   through, and is revealed only while the input shows its (blank) placeholder. */
+.composer-input-wrap {
+  position: relative;
+  display: flex;
+}
+.composer-input-wrap .composer-input {
+  flex: 1 1 auto;
+}
+.composer-hint {
+  position: absolute;
+  inset: 0;
+  padding: 2px; /* match .composer-input padding */
+  display: none;
+  align-items: center;
+  gap: 8px;
+  /* One size for the whole hint (lead + connectors) so it reads as a single
+     consistent line; the Kbd caps below are sized to sit on the same baseline. */
+  font-size: var(--txt-meta);
+  line-height: 1.45;
+  color: var(--text-faint);
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.composer-input:placeholder-shown + .composer-hint {
+  display: flex;
+}
+.composer-hint-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Match the cap height/text to the hint's font size so nothing looks oversized. */
+.composer-hint .kbd {
+  height: calc(var(--txt-meta) + 5px);
+  min-width: calc(var(--txt-meta) + 5px);
+  font-size: calc(var(--txt-meta) - 1px);
+}
+.composer-hint-dot {
+  opacity: 0.6;
+}
+/* Mobile: no hardware modifier keys, send is a button — show just "Reply…". */
+@media (max-width: 760px) {
+  .composer-hint-keys {
+    display: none;
+  }
+}
 
 /* ── Ask modal ────────────────────────────────────────────────── */
 .modal-backdrop {
@@ -1642,9 +1840,6 @@ details.block-tool[open] > summary .tool-arrow {
   max-width: 100%;
   align-self: stretch;
   align-items: stretch;
-}
-.plan-review .msg-role {
-  display: none; /* read as a plan doc, not a chat bubble */
 }
 .question {
   display: flex;
@@ -1815,7 +2010,9 @@ details.block-tool[open] > summary .tool-arrow {
 .toast {
   position: fixed;
   left: 50%;
-  top: calc(56px + env(safe-area-inset-top));
+  /* Desktop: a normal small offset just below the HUD. Mobile overrides this to
+     clear the stacked top bars (see the max-width rule below). */
+  top: calc(env(safe-area-inset-top) + var(--hud-h) + 14px);
   transform: translate(-50%, -12px);
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -1831,6 +2028,12 @@ details.block-tool[open] > summary .tool-arrow {
   z-index: 60;
   max-width: 90vw;
   text-align: center;
+}
+/* Mobile stacks the HUD + detail header, so push the toast clear of both. */
+@media (max-width: 760px) {
+  .toast {
+    top: calc(env(safe-area-inset-top) + var(--hud-h) + 56px);
+  }
 }
 .toast.show {
   opacity: 1;
@@ -2562,4 +2765,978 @@ details.block-tool[open] > summary .tool-arrow {
   display: inline-block;
   background: var(--bg-2);
   border: 1px solid var(--line);
+}
+
+/* ── Skill invocation chip ────────────────────────────────────────
+   Replaces the raw SKILL.md dump with a compact inline chip. Clicking
+   opens a large modal showing the parsed skill definition. */
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background var(--ease) 0.15s,
+    border-color var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+  /* Sit inline within the message flow without stretching to block width. */
+  vertical-align: middle;
+}
+.skill-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.skill-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.skill-chip:active {
+  background: var(--line);
+}
+.skill-chip-icon {
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+.skill-chip-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.skill-chip-tag {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ── Skill modal ──────────────────────────────────────────────────
+   Large, flex-column modal that holds parsed front-matter + rich
+   markdown body. Uses the existing .modal-backdrop / .modal pattern. */
+.modal-skill {
+  max-width: min(900px, 92vw);
+  max-height: 85dvh;
+  width: 100%;
+  /* Override the default .modal max-width: 560px. */
+}
+.modal-title-skill {
+  /* Accent colour matching other modal titles but cooler than amber. */
+  color: var(--accent);
+}
+/* The modal body for skill detail: flex column, scrollable. */
+.skill-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Remove the default .modal-body bottom padding so the body content touches
+     the scroll edge cleanly; the outer overflow handles the rest. */
+  padding: 14px;
+}
+
+/* ── Front-matter definition list ────────────────────────────────
+   Key/value grid for YAML front-matter parsed from the skill header. */
+.skill-fm {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.skill-fm-row {
+  display: contents;
+}
+.skill-fm-key {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  align-self: start;
+  padding: 1px 0;
+}
+.skill-fm-val {
+  color: var(--text-dim);
+  /* Long front-matter values wrap rather than overflow. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  align-self: start;
+  padding: 1px 0;
+  margin: 0;
+}
+
+/* ── Skill body markdown ──────────────────────────────────────────
+   The rich markdown renderer is wrapped in .skill-body-wrap so it can
+   be given scrollable overflow and the .msg-row max-width is removed. */
+.skill-body-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: visible; /* parent .skill-modal-body handles the scroll */
+}
+/* Expand message rows to full modal width (mirrors .plan-review in PromptModal). */
+.skill-body-thread {
+  width: 100%;
+}
+.skill-body-viewport {
+  display: flex;
+  flex-direction: column;
+}
+.skill-body-thread .msg-row {
+  max-width: 100%;
+  align-self: stretch;
+  align-items: stretch;
+}
+
+/* ── Tool part: controlled caret button ───────────────────────────
+   Replaces the native <details>/<summary> open/close with a controlled
+   button so the name can also independently open the artifact panel. */
+.tool-arrow-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.tool-name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent-2);
+  font-weight: 600;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--ease) 0.15s;
+}
+.tool-name-btn:hover {
+  text-decoration-color: var(--accent-2);
+}
+
+/* ── Code block header with open-in-panel button ──────────────────
+   The header row is flex; the language tag takes remaining space;
+   the open button appears to the right. */
+.aui-md-code-lang {
+  display: flex;
+  align-items: center;
+}
+.aui-md-code-lang-name {
+  flex: 1 1 auto;
+}
+.aui-md-code-open-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 1;
+  transition: color var(--ease) 0.15s;
+  border-radius: 4px;
+}
+.aui-md-code-open-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+.aui-md-code-open-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── detail-split: chat + artifact panel side by side ─────────────
+   On narrow screens the panel floats as a fixed bottom sheet, so no
+   split layout is needed. */
+.detail-split {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/* The thread fills available width by default. */
+.detail-split > .thread-root {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Desktop split: when the panel is present both sides share 50:50. */
+@media (min-width: 760px) {
+  .detail-split > .thread-root {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .detail-split > .artifact-panel {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* ── Artifact panel ───────────────────────────────────────────────
+   Desktop: flex column inside .detail-split.
+   Mobile: fixed bottom sheet anchored to bottom edge. */
+.artifact-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+}
+/* Mobile sheet */
+.artifact-panel[data-mode='sheet'] {
+  position: fixed;
+  inset: auto 0 0 0;
+  border-left: none;
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  overscroll-behavior: contain;
+  transition: height 0.28s var(--ease);
+}
+.artifact-panel[data-mode='sheet'][data-dragging='true'] {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .artifact-panel[data-mode='sheet'] {
+    transition: none;
+  }
+}
+
+/* Drag handle (mobile only) */
+.artifact-drag-handle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.artifact-drag-pip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+/* Panel header: tab strip + close button */
+.artifact-panel-head {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  min-height: 38px;
+}
+.artifact-tablist {
+  display: flex;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  gap: 0;
+}
+.artifact-tab-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  border-right: 1px solid var(--line);
+  flex: 0 0 auto;
+  max-width: 200px;
+  min-width: 0;
+}
+.artifact-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 6px 8px 6px 10px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.artifact-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.artifact-tab[aria-selected='true'] {
+  color: var(--text);
+  background: var(--bg);
+  border-bottom: 2px solid var(--accent);
+}
+.artifact-tab-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 4px;
+  margin: auto 4px auto 0;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.artifact-tab-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.artifact-close-all {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--line);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 18px;
+  line-height: 1;
+  transition: color var(--ease) 0.15s;
+}
+.artifact-close-all:hover {
+  color: var(--text);
+}
+
+/* Panel body: scrollable code area */
+.artifact-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.artifact-body-wrap {
+  min-height: 100%;
+}
+.artifact-pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.artifact-pre code {
+  display: block;
+}
+.artifact-large-note {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: var(--txt-meta);
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ── Agent chip: name + model tag ──────────────────────────────────
+   Used in sub-agent rows, the detail panel header, and nested lists.
+   Sits inline-flex so it integrates naturally inside flex rows. */
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.agent-chip-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  font-size: inherit;
+}
+.agent-chip-model {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-transform: lowercase;
+  flex: 0 0 auto;
+}
+
+/* ── Agent definition block ────────────────────────────────────────
+   Sits between the panel header and the transcript viewport in the
+   detail view. Shows parsed front-matter: description, tools, model,
+   plus any extra keys. */
+.agent-def {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-size: var(--txt-meta);
+  overflow: hidden;
+}
+.agent-def-no-def {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.agent-def-desc {
+  color: var(--text-dim);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.agent-def-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-def-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-width: 40px;
+}
+.agent-def-val {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Tools value: rendered inline; JSON array brackets are kept as-is. */
+.agent-def-tools {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--accent-2);
+}
+
+/* ── Nested sub-agents list ────────────────────────────────────────
+   One-level listing of child agents below the def block. Each nested
+   agent shows as an agent-chip. Hidden when empty. */
+.agent-nested {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-size: var(--txt-meta);
+}
+.agent-nested-label {
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  padding-top: 2px;
+}
+.agent-nested-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Prompt Enhancer ─────────────────────────────────────────── */
+
+/* Enhance button in the composer toolbar — secondary action, sits after Send */
+.composer-enhance {
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+}
+.composer-enhance:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer-enhance:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.composer-enhance:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Spinner shown while the optimize request is in-flight */
+.composer-enhance-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cockpit-spin 0.7s linear infinite;
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-enhance-spinner {
+    animation-duration: 1.6s;
+  }
+}
+
+/* ── OptimizeReview modal ────────────────────────────────────── */
+
+/* Wider than the standard modal to accommodate the diff + suggestion */
+.modal-optimize {
+  max-width: 680px;
+}
+
+/* Header group: title + badge side by side */
+.modal-head-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Override default amber title for the optimize modal — use accent-2 (teal) */
+.modal-title-optimize {
+  color: var(--accent-2);
+}
+
+/* Mode badge: small pill showing "claude -p" or "rules" */
+.optimize-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--line);
+}
+.optimize-mode-badge[data-mode='llm'] {
+  border-color: oklch(55% 0.1 250 / 0.5);
+  color: var(--accent);
+}
+
+/* Section wrapper with label */
+.optimize-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.optimize-section-label {
+  font-size: var(--txt-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* Editable suggestion textarea */
+.optimize-suggestion {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color var(--ease) 0.15s;
+}
+.optimize-suggestion:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Diff view */
+.optimize-diff {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.diff-same {
+  color: var(--text-dim);
+}
+.diff-add {
+  color: oklch(72% 0.14 150);
+  background: oklch(72% 0.14 150 / 0.07);
+  display: block;
+  margin-inline: -12px;
+  padding-inline: 12px;
+}
+.diff-del {
+  color: oklch(64% 0.16 25);
+  background: oklch(64% 0.16 25 / 0.07);
+  text-decoration: line-through;
+  text-decoration-color: oklch(64% 0.16 25 / 0.5);
+  display: block;
+  margin-inline: -12px;
+  padding-inline: 12px;
+}
+
+/* Rationale / changes lists */
+.optimize-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.optimize-list li {
+  padding-left: 2px;
+}
+
+/* ── Skill browser toolbar trigger ──────────────────────────── */
+.composer-skills-btn,
+.composer-mic {
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.composer-mic:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* ── Voice recording dialog ────────────────────────────────────── */
+.voice-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: min(520px, 94vw);
+}
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.voice-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: 0 0 auto;
+}
+.voice-dot[data-on='true'] {
+  background: var(--red);
+  animation: mic-pulse 1.3s var(--ease) infinite;
+}
+@keyframes mic-pulse {
+  50% {
+    box-shadow: 0 0 0 4px var(--red-bg);
+  }
+}
+.voice-wave {
+  width: 100%;
+  height: 72px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  display: block;
+}
+.voice-wave[data-paused='true'] {
+  opacity: 0.5;
+}
+.voice-transcript {
+  min-height: 48px;
+  max-height: 28dvh;
+  overflow-y: auto;
+  font-size: var(--txt-transcript);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+.voice-placeholder {
+  color: var(--text-faint);
+}
+.voice-error {
+  font-size: 12px;
+  color: var(--red);
+}
+.voice-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.voice-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-actions-spacer {
+  flex: 1 1 auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-dot[data-on='true'] {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--red-bg);
+  }
+}
+.composer-skills-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer-skills-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.composer-skills-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Skill browser (sheet on mobile, modal on desktop) ───────── */
+
+/* Mobile: fixed bottom sheet — sits above the composer */
+.skill-browser-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.skill-browser-sheet-wrap > .skill-browser {
+  pointer-events: auto;
+}
+
+/* The browser panel itself */
+.skill-browser {
+  width: 100%;
+  max-height: 70dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+}
+
+/* Desktop modal: .modal-backdrop wraps .skill-browser and centers it */
+@media (min-width: 760px) {
+  .skill-browser {
+    width: 100%;
+    max-width: 560px;
+    max-height: 80dvh;
+    border-radius: 14px;
+  }
+}
+
+/* Header row */
+.skill-browser-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.skill-browser-title {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
+/* Search input row */
+.skill-browser-search {
+  padding: 10px 12px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+.skill-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13.5px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color var(--ease) 0.15s;
+}
+.skill-search-input:focus {
+  border-color: var(--accent);
+}
+.skill-search-input::placeholder {
+  color: var(--text-faint);
+}
+/* Remove the native search clear button */
+.skill-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+/* Scrollable list */
+.skill-browser-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skill-browser-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* Individual skill card: mirrors .block-tool-use visual from MessageParts */
+.skill-card {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 7px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  transition: background var(--ease) 0.12s;
+  /* Prevent horizontal overflow from long descriptions */
+  min-width: 0;
+}
+.skill-card:hover {
+  background: var(--bg-hover);
+}
+.skill-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+/* tool-head inside a card: no pointer-events interference needed */
+.skill-card .tool-head {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Keep tool-input from wrapping awkwardly on narrow screens */
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  row-gap: 2px;
+}
+.skill-card-name {
+  /* Override the tool-name button styling — this is a plain span in a card */
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.skill-card-desc {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  /* Truncate at one line so cards stay compact */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.skill-source-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: auto;
 }

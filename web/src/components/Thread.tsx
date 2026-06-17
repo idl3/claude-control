@@ -4,6 +4,9 @@ import { Composer } from './Composer';
 
 interface ThreadProps {
   hasSelection: boolean;
+  /** Active session id — passed to the Composer so enhance/review state is
+   *  scoped per session. */
+  sessionId?: string | null;
   /** Messages older than the render cap that are currently hidden. */
   hiddenCount: number;
   /** Reveal an older chunk of messages. */
@@ -18,9 +21,13 @@ const messageComponents = {
   SystemMessage: AssistantMessage,
 } as const;
 
-export function Thread({ hasSelection, hiddenCount, onLoadEarlier }: ThreadProps) {
+export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
+      {/* Top scrim: fades messages under the header while the composer is
+          focused (CSS :focus-within), so text scrolling up behind the nav bar
+          dissolves instead of hard-cutting. Fades out on blur. */}
+      <div className="thread-fade" aria-hidden="true" />
       <ThreadPrimitive.Viewport className="thread-viewport" autoScroll>
         {!hasSelection ? (
           <div className="thread-empty">select a session</div>
@@ -40,7 +47,7 @@ export function Thread({ hasSelection, hiddenCount, onLoadEarlier }: ThreadProps
         ) : null}
         <ThreadPrimitive.Messages components={messageComponents} />
       </ThreadPrimitive.Viewport>
-      <Composer disabled={!hasSelection} />
+      <Composer disabled={!hasSelection} sessionId={sessionId} />
     </ThreadPrimitive.Root>
   );
 }

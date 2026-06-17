@@ -20,11 +20,15 @@ import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { ResourceMonitor } from './lib/resources.js';
-import { buildAnswerProgram } from './lib/answer.js';
+import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+import { optimizePrompt } from './lib/optimize.js';
+import { complete as claudeCliComplete } from './lib/claude-cli.js';
+import { transcribe } from './lib/transcribe.js';
+import { listSkills } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -67,11 +71,10 @@ const CONFIG = {
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
   rssLimitMB: Number(env('RSS_LIMIT_MB')) || 768,
   token: env('TOKEN') || readPersistedToken() || null,
-  // 1500: raised from 500 so that, within lib/transcript's enlarged byte tail,
-  // the message-count cap governs how much history a fresh subscribe serves —
-  // recent user turns no longer fall outside the window on reload. Shares the
-  // CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript's default.
-  maxBuffer: Number(env('MAX_BUFFER')) || 1500,
+  // 4000: within lib/transcript's 8 MB byte tail, the message-count cap governs
+  // how much history a fresh subscribe serves. Raised 1500 → 4000 for deeper
+  // scrollback. Shares the CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript.
+  maxBuffer: Number(env('MAX_BUFFER')) || 4000,
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
@@ -173,6 +176,10 @@ const server = http.createServer((req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
   }
+  if (u.pathname === '/api/skills') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return endJson(res, 200, { skills: listSkills() });
+  }
   if (u.pathname === '/api/health') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { ok: true, snapshot: resources.snapshot() });
@@ -242,6 +249,16 @@ const server = http.createServer((req, res) => {
     if (req.method === 'GET') return endJson(res, 200, readConfig());
     if (req.method === 'POST') return handleConfigSave(req, res);
     return endJson(res, 405, { error: 'method not allowed' });
+  }
+  if (u.pathname === '/api/optimize') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleOptimize(req, res);
+  }
+  if (u.pathname === '/api/transcribe') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleTranscribe(req, res, u);
   }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
@@ -461,6 +478,73 @@ async function handleConfigSave(req, res) {
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }
+}
+
+// POST /api/optimize — token-gated prompt optimiser. Accepts { text, intent }
+// and returns { optimized, rationale, changes, mode } from optimizePrompt.
+// Falls back to rules-based optimization when the Claude CLI is unavailable.
+async function handleOptimize(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: 'invalid JSON body' });
+  }
+  const text = typeof body.text === 'string' ? body.text : '';
+  if (!text.trim()) return endJson(res, 400, { error: 'text required' });
+  if (text.length > 8000) return endJson(res, 400, { error: 'text exceeds 8000 character limit' });
+  const intent = typeof body.intent === 'string' ? body.intent : undefined;
+  try {
+    const result = await optimizePrompt(text, { complete: claudeCliComplete, intent });
+    return endJson(res, 200, result);
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/transcribe — local speech-to-text. Accepts a raw audio body (the
+// MediaRecorder blob from the voice dialog; ?ext=webm|mp4|wav names the format),
+// caps the size, writes it to a temp file, and runs ffmpeg→whisper.cpp via
+// lib/transcribe. Returns { ok, text }. No key, no cloud — fully local.
+function handleTranscribe(req, res, u) {
+  const maxBytes = CONFIG.maxUploadMB * 1024 * 1024;
+  const ext =
+    (u.searchParams.get('ext') || 'webm').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) ||
+    'webm';
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+
+  req.on('data', (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > maxBytes) {
+      aborted = true;
+      endJson(res, 413, { error: `audio exceeds ${CONFIG.maxUploadMB} MB limit` });
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+
+  req.on('end', async () => {
+    if (aborted) return;
+    if (size === 0) return endJson(res, 400, { error: 'empty audio' });
+    const tmp = path.join(os.tmpdir(), `cc-stt-in-${Date.now()}-${process.pid}.${ext}`);
+    try {
+      await fs.promises.writeFile(tmp, Buffer.concat(chunks), { mode: 0o600 });
+      const text = await transcribe(tmp);
+      endJson(res, 200, { ok: true, text });
+    } catch (err) {
+      endJson(res, 500, { error: String(err?.message || err) });
+    } finally {
+      fs.promises.unlink(tmp).catch(() => {});
+    }
+  });
+
+  req.on('error', () => {
+    if (!aborted) endJson(res, 400, { error: 'audio stream error' });
+  });
 }
 
 // POST /api/session/new — create a new tmux window in the configured (or
@@ -1045,25 +1129,212 @@ async function handleClientMessage(ws, msg) {
       if (msg.toolUseId !== pending.toolUseId) {
         throw new Error('stale question (already answered or changed)');
       }
-      const keys = buildAnswerProgram(pending, msg.selections || []);
-      // Log the resolved key program so a failure to drive the picker is
-      // diagnosable from ~/.claude-control/logs/out.log (no logging existed before).
-      console.log(
-        `[answer] toolUseId=${msg.toolUseId} target=${session.target} keys=${JSON.stringify(keys)}`,
-      );
+
+      // ── Capture-driven path ──────────────────────────────────────────────
+      // Attempt to navigate by parsing the live picker render. Falls back to
+      // the static buildAnswerProgram on ANY parse failure, unknown label, or
+      // post-send verification mismatch — so it can NEVER regress the working path.
+      //
+      // Constants:
+      const SETTLE_MS = 300;   // ms to wait after sending keys before re-capture
+      const MAX_RETRIES = 1;   // retry attempts per question on verification failure
+
+      let usedDynamic = false;
+      // Tracks whether the dynamic path has injected ANY keystroke. Once true,
+      // the picker is in a partial/unknown state and the from-scratch static
+      // fallback would corrupt it — so a later failure must fail loud, not retry.
+      let sentAny = false;
       try {
-        // Sequenced (with delays) so the picker's re-render settles between keys.
-        await tmux.sendRawKeysSequenced(session.target, keys);
-      } catch (err) {
-        // Surface the failure to the log and re-throw so the outer handler nacks
-        // (ok:false) — never let an "answer sent" ack imply success when the keys
-        // never landed in the pane.
-        console.error(
-          `[answer] FAILED toolUseId=${msg.toolUseId} target=${session.target}: ${String(err?.message || err)}`,
-        );
-        throw err;
+        const questions = pending?.questions || [];
+        const selections = msg.selections || [];
+
+        if (questions.length > 0) {
+          let dynamicOk = true; // will be set false to fall back
+
+          for (let qi = 0; qi < questions.length && dynamicOk; qi += 1) {
+            const question = questions[qi];
+            const selectedLabels = selections[qi] || [];
+
+            let attempt = 0;
+            let stepOk = false;
+
+            while (attempt <= MAX_RETRIES && !stepOk) {
+              // 1. Capture current picker state.
+              let capture;
+              try {
+                capture = await tmux.capturePane(session.target);
+              } catch (captureErr) {
+                console.log(`[answer/dynamic] capture failed q${qi}: ${captureErr?.message}`);
+                dynamicOk = false;
+                break;
+              }
+
+              // 2. Parse.
+              const parsed = parsePicker(capture);
+              if (parsed.confidence !== 'ok') {
+                console.log(`[answer/dynamic] low confidence on q${qi} — falling back`);
+                dynamicOk = false;
+                break;
+              }
+
+              // 3. Handle the review screen (multi-question final step).
+              if (parsed.isReview) {
+                // We expect to be here only after the last question's action Enter.
+                // Send Enter to confirm "Submit answers".
+                console.log(`[answer/dynamic] review screen — sending Enter`);
+                sentAny = true;
+                await tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS);
+                await new Promise((r) => setTimeout(r, SETTLE_MS));
+                // Verify: the review screen should be gone.
+                const afterReview = await tmux.capturePane(session.target);
+                const reparse = parsePicker(afterReview);
+                if (reparse.isReview) {
+                  console.log(`[answer/dynamic] review screen still up after Enter — falling back`);
+                  dynamicOk = false;
+                }
+                // Whether verified or not, we break out of the question loop —
+                // we've processed all questions.
+                break;
+              }
+
+              // 4. Plan keystrokes for this question.
+              const keys = planStep(parsed, question, selectedLabels);
+              if (!keys) {
+                console.log(`[answer/dynamic] planStep null on q${qi} — falling back`);
+                dynamicOk = false;
+                break;
+              }
+
+              console.log(
+                `[answer/dynamic] q${qi} attempt=${attempt} keys=${JSON.stringify(keys)}`,
+              );
+
+              // 5. Send keys.
+              sentAny = true;
+              await tmux.sendRawKeysSequenced(session.target, keys, SETTLE_MS);
+
+              // 6. Settle then verify.
+              await new Promise((r) => setTimeout(r, SETTLE_MS));
+              let afterCapture;
+              try {
+                afterCapture = await tmux.capturePane(session.target);
+              } catch (captureErr) {
+                console.log(`[answer/dynamic] post-send capture failed q${qi}: ${captureErr?.message}`);
+                dynamicOk = false;
+                break;
+              }
+
+              const afterParsed = parsePicker(afterCapture);
+
+              if (question.multiSelect) {
+                // Verify: all intended labels are now checked in the re-parsed picker.
+                // If we advanced (Next/Submit pressed), the screen changes — that's
+                // also acceptable (confidence goes low = we moved on).
+                if (afterParsed.confidence === 'ok' && !afterParsed.isReview) {
+                  const uncheckedTargets = selectedLabels.filter((label) =>
+                    afterParsed.rows.some(
+                      (r) => r.kind === 'option' && r.label === label && !r.checked,
+                    ),
+                  );
+                  if (uncheckedTargets.length > 0) {
+                    console.log(
+                      `[answer/dynamic] verify failed q${qi}: still unchecked=${JSON.stringify(uncheckedTargets)} attempt=${attempt}`,
+                    );
+                    attempt += 1;
+                    continue; // retry
+                  }
+                }
+                // Either confidence is low (screen advanced) or all checked — either
+                // way, treat the step as done and move to the next question.
+                stepOk = true;
+              } else {
+                // Single-select: after Enter, picker should advance (screen changes).
+                // If the exact same option is still shown as selected (cursor on it),
+                // something went wrong. Accept any screen change as advancement.
+                if (
+                  afterParsed.confidence === 'ok' &&
+                  !afterParsed.isReview &&
+                  afterParsed.rows.some(
+                    (r) => r.cursor && r.kind === 'option' && r.label === selectedLabels[0],
+                  )
+                ) {
+                  console.log(`[answer/dynamic] single-select stuck on q${qi} attempt=${attempt}`);
+                  attempt += 1;
+                  continue;
+                }
+                stepOk = true;
+              }
+            }
+
+            if (!stepOk && attempt > MAX_RETRIES) {
+              console.log(`[answer/dynamic] max retries exceeded on q${qi} — falling back`);
+              dynamicOk = false;
+            }
+          }
+
+          // After processing all questions via dynamic path, check if we need to
+          // handle the review screen (multi-question pickers).
+          if (dynamicOk && questions.length > 1) {
+            // Capture and check: we may already be on the review screen (handled
+            // in the loop above) or may need to check.
+            try {
+              const finalCapture = await tmux.capturePane(session.target);
+              const finalParsed = parsePicker(finalCapture);
+              if (finalParsed.isReview && finalParsed.confidence === 'ok') {
+                // Submit the review screen.
+                console.log(`[answer/dynamic] post-loop review screen — sending Enter`);
+                sentAny = true;
+                await tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS);
+              }
+            } catch (captureErr) {
+              // Non-fatal: we already sent the question answers; review Enter is best-effort.
+              console.log(`[answer/dynamic] final review capture failed: ${captureErr?.message}`);
+            }
+          }
+
+          if (dynamicOk) {
+            usedDynamic = true;
+          }
+        }
+      } catch (dynamicErr) {
+        // Any unexpected error in the dynamic path — log and fall back.
+        console.log(`[answer/dynamic] unexpected error: ${dynamicErr?.message} — falling back`);
       }
-      console.log(`[answer] sent toolUseId=${msg.toolUseId} (${keys.length} keys)`);
+
+      // ── Static fallback ──────────────────────────────────────────────────
+      // Only safe when the dynamic path sent NOTHING (picker still pristine). If
+      // dynamic already injected keys then failed, the picker is in a partial
+      // state — replaying the from-scratch static program would mis-navigate a
+      // dirty picker and corrupt the answer. Fail loud so the user can retry.
+      if (!usedDynamic && sentAny) {
+        console.error(
+          `[answer] dynamic path failed AFTER sending keys; NOT running static fallback (picker dirty) toolUseId=${msg.toolUseId}`,
+        );
+        return send(ws, {
+          type: 'ack',
+          op: 'answer',
+          ok: false,
+          error: 'answer injection failed mid-picker — please retry',
+        });
+      }
+      if (!usedDynamic) {
+        const keys = buildAnswerProgram(pending, msg.selections || []);
+        console.log(
+          `[answer] toolUseId=${msg.toolUseId} target=${session.target} keys=${JSON.stringify(keys)} (static fallback)`,
+        );
+        try {
+          await tmux.sendRawKeysSequenced(session.target, keys);
+        } catch (err) {
+          console.error(
+            `[answer] FAILED toolUseId=${msg.toolUseId} target=${session.target}: ${String(err?.message || err)}`,
+          );
+          throw err;
+        }
+        console.log(`[answer] sent toolUseId=${msg.toolUseId} (${keys.length} keys)`);
+      } else {
+        console.log(`[answer] sent toolUseId=${msg.toolUseId} via dynamic path`);
+      }
+
       return send(ws, { type: 'ack', op: 'answer', ok: true });
     }
     case 'capture': {

@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>claude-control — Architecture & Evolution</title>
+<style>
+  :root {
+    --bg:       oklch(16% 0.012 260);
+    --bg-1:     oklch(20% 0.014 260);
+    --bg-2:     oklch(24% 0.016 260);
+    --line:     oklch(32% 0.018 260);
+    --text:     oklch(95% 0.005 260);
+    --dim:      oklch(72% 0.012 260);
+    --faint:    oklch(55% 0.012 260);
+    --accent:   oklch(74% 0.15 215);
+    --accent-2: oklch(72% 0.17 300);
+    --good:     oklch(78% 0.16 150);
+    --amber:    oklch(80% 0.14 85);
+    --bad:      oklch(70% 0.18 25);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(120% 90% at 88% 8%, oklch(26% 0.04 215 / 0.55), transparent 60%),
+      radial-gradient(90% 80% at 8% 96%, oklch(24% 0.05 300 / 0.5), transparent 55%),
+      var(--bg);
+    color: var(--text); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .deck { position: fixed; inset: 0; }
+  .slide {
+    position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center;
+    padding: clamp(26px, 5.2vw, 84px); gap: clamp(12px, 2vh, 22px);
+    max-width: 1300px; margin: 0 auto; width: 100%;
+    opacity: 0; visibility: hidden; transform: translateY(14px);
+    transition: opacity .45s ease, transform .45s ease, visibility 0s linear .45s;
+    overflow-y: auto;
+  }
+  .slide.active { opacity: 1; visibility: visible; transform: none; transition: opacity .5s ease, transform .5s ease; }
+
+  .eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 10px; }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent); border-radius: 2px; }
+  h1 { font-size: clamp(2.4rem, 6vw, 4.6rem); line-height: 1.03; letter-spacing: -.025em; font-weight: 800; }
+  h2 { font-size: clamp(1.6rem, 3.4vw, 2.7rem); line-height: 1.08; letter-spacing: -.02em; font-weight: 750; }
+  .lede { font-size: clamp(1rem, 1.8vw, 1.4rem); color: var(--dim); max-width: 64ch; line-height: 1.45; }
+  .grad { background: linear-gradient(96deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .meta { display: flex; gap: 20px; flex-wrap: wrap; color: var(--faint); font-family: var(--mono); font-size: .85rem; margin-top: 6px; }
+  .meta b { color: var(--dim); }
+  code { font-family: var(--mono); background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: .86em; }
+
+  ul.bare { list-style: none; display: flex; flex-direction: column; gap: 11px; }
+  ul.bare li { position: relative; padding-left: 26px; font-size: clamp(.98rem, 1.6vw, 1.25rem); line-height: 1.4; max-width: 72ch; }
+  ul.bare li::before { content: ""; position: absolute; left: 4px; top: .6em; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); transform: rotate(45deg); }
+  .why { color: var(--faint); }
+
+  /* cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+  .card .lbl { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .07em; text-transform: uppercase; }
+  .card h3 { font-size: 1.1rem; font-weight: 700; }
+  .card p { color: var(--dim); font-size: .96rem; line-height: 1.45; }
+  .card.alt .lbl { color: var(--accent-2); }
+
+  /* two-card */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+
+  /* rows */
+  .rows { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 9rem 1fr; gap: 18px; padding: 14px 18px; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .row:last-child { border-bottom: 0; }
+  .row .key { font-family: var(--mono); font-size: .9rem; color: var(--accent); }
+  .row .val { font-size: clamp(.95rem, 1.5vw, 1.15rem); color: var(--text); line-height: 1.4; }
+  .row .val code { font-size: .92em; }
+
+  /* tags */
+  .tags { display: flex; flex-direction: column; gap: 12px; }
+  .tagrow { display: flex; align-items: flex-start; gap: 14px; font-size: clamp(.98rem, 1.5vw, 1.2rem); line-height: 1.4; }
+  .tag { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1px solid; margin-top: 2px; }
+  .tag.held { color: var(--good); border-color: oklch(78% 0.16 150 / .5); background: oklch(78% 0.16 150 / .1); }
+  .tagrow .body { color: var(--dim); }
+  .tagrow .body b { color: var(--text); }
+
+  /* journey map (interactive) */
+  .jm-rail { display: flex; gap: 0; flex-wrap: wrap; }
+  .jm-stage { flex: 1 1 130px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px; cursor: pointer; text-align: left; color: var(--text); font: inherit; position: relative; transition: border-color .2s, background .2s; }
+  .jm-stage + .jm-stage { margin-left: 24px; }
+  .jm-stage + .jm-stage::before { content: "▸"; position: absolute; left: -18px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+  .jm-stage .n { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .jm-stage .t { display: block; font-weight: 700; font-size: .98rem; margin-top: 3px; }
+  .jm-stage[aria-selected="true"] { border-color: var(--accent); background: oklch(74% 0.15 215 / .1); }
+  .jm-stage[aria-selected="true"] .n { color: var(--accent); }
+  .jm-panel { margin-top: 6px; background: var(--bg-1); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 18px 20px; min-height: 120px; }
+  .jm-panel h3 { font-size: 1.25rem; margin-bottom: 8px; }
+  .jm-panel p { color: var(--dim); font-size: 1rem; line-height: 1.5; }
+  .jm-panel .date { font-family: var(--mono); font-size: 12px; color: var(--accent-2); }
+  @media (max-width: 820px) { .jm-stage + .jm-stage { margin-left: 0; margin-top: 14px; } .jm-stage + .jm-stage::before { display: none; } }
+
+  /* journey stage progress rail */
+  .prail { display: flex; align-items: center; gap: 0; margin-bottom: 4px; flex-wrap: wrap; }
+  .pnode { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .pnode .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--line); background: var(--bg); }
+  .pnode.done .dot { background: var(--faint); border-color: var(--faint); }
+  .pnode.now .dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px oklch(74% 0.15 215 / .2); }
+  .pnode.now { color: var(--accent); font-weight: 700; }
+  .pseg { width: 26px; height: 2px; background: var(--line); margin: 0 8px; }
+  .pseg.done { background: var(--faint); }
+  @media (max-width: 720px) { .pnode .lab { display: none; } .pseg { width: 14px; } }
+
+  /* links-end */
+  .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .link { display: flex; flex-direction: column; gap: 4px; background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; text-decoration: none; color: var(--text); transition: border-color .2s; }
+  .link:hover { border-color: var(--accent); }
+  .link .lk { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .link .lp { color: var(--faint); font-size: .85rem; word-break: break-all; }
+
+  /* chrome */
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0; transition: width .4s ease; z-index: 10; }
+  .hud { position: fixed; bottom: 16px; right: 20px; font-family: var(--mono); font-size: 12px; color: var(--faint); z-index: 10; letter-spacing: .05em; }
+  .hud b { color: var(--text); }
+  .brand { position: fixed; bottom: 16px; left: 20px; font-family: var(--mono); font-size: 12px; color: var(--faint); z-index: 10; display: flex; align-items: center; gap: 8px; }
+  .brand .d { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .hint { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--faint); z-index: 10; opacity: .8; }
+  @media (prefers-reduced-motion: reduce) { .slide, .progress { transition: none; } }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<main class="deck" id="deck">
+
+  <!-- 01 title -->
+  <section class="slide">
+    <div class="eyebrow">claude-control · product evolution</div>
+    <h1>Architecture<br>&amp; <span class="grad">Evolution</span></h1>
+    <p class="lede">How <code>@idl3/claude-control</code> grew from a read-only transcript viewer into a phone-friendly cockpit for driving Claude Code — without a database or an API key.</p>
+    <div class="meta">
+      <span><b>Version:</b> 0.1.20</span>
+      <span><b>Commits:</b> 124</span>
+      <span><b>Span:</b> Jun 14 → 17, 2026</span>
+      <span><b>Stack:</b> Node · WS · React · tmux</span>
+    </div>
+  </section>
+
+  <!-- 02 lede -->
+  <section class="slide">
+    <div class="eyebrow">The question</div>
+    <h2>How does a log-tail become<br>a cockpit you drive from your phone?</h2>
+    <div class="two">
+      <div class="card"><span class="lbl">Day 1</span><h3>Read-only viewer</h3><p>Discover tmux sessions, match each to its transcript, stream it to a browser. Watch only.</p></div>
+      <div class="card alt"><span class="lbl">Day 4</span><h3>Full cockpit</h3><p>Reply, answer prompts, attach files, enhance drafts, invoke skills, speak — from any device on your tailnet.</p></div>
+    </div>
+    <p class="lede">Four days, 124 commits, six iterations — each one earning the next feature's trust.</p>
+  </section>
+
+  <!-- 03 architecture card-grid -->
+  <section class="slide">
+    <div class="eyebrow">Architecture</div>
+    <h2>The spine that never changed</h2>
+    <div class="cards">
+      <div class="card"><span class="lbl">server.js</span><h3>HTTP + WebSocket</h3><p>Route table, prebuilt SPA, optional token gate. One process — no daemon to babysit.</p></div>
+      <div class="card"><span class="lbl">lib/</span><h3>The engine</h3><p><code>tmux</code> pane I/O · <code>sessions</code> matching · <code>answer</code> keystrokes · <code>push</code> · <code>optimize</code>/<code>claude-cli</code> · <code>transcribe</code>.</p></div>
+      <div class="card alt"><span class="lbl">web/</span><h3>React SPA</h3><p>Built on <code>@assistant-ui/react</code>: Composer, Thread, MessageParts, SubAgentPanel, ArtifactPanel.</p></div>
+      <div class="card alt"><span class="lbl">auth + state</span><h3>Files, not a DB</h3><p>Transcripts + tmux are the source of truth. Optional bearer token via header + WS subprotocol — never in the URL.</p></div>
+    </div>
+  </section>
+
+  <!-- 04 journey-map -->
+  <section class="slide">
+    <div class="eyebrow">The arc</div>
+    <h2>The evolution, in six moves</h2>
+    <div class="jm-rail" id="jmRail">
+      <button class="jm-stage" data-i="0" aria-selected="true"><span class="n">v0.1.0</span><span class="t">Foundation</span></button>
+      <button class="jm-stage" data-i="1"><span class="n">Iter 1</span><span class="t">Reach</span></button>
+      <button class="jm-stage" data-i="2"><span class="n">Iter 2</span><span class="t">Identity</span></button>
+      <button class="jm-stage" data-i="3"><span class="n">Iter 3</span><span class="t">Reliability</span></button>
+      <button class="jm-stage" data-i="4"><span class="n">Iter 4</span><span class="t">Chat surface</span></button>
+      <button class="jm-stage" data-i="5"><span class="n">Iter 5–6</span><span class="t">Intelligence + Voice</span></button>
+    </div>
+    <div class="jm-panel" id="jmPanel"></div>
+    <p class="lede">Tap a stage to read its decision. The next six slides walk it in order.</p>
+  </section>
+
+  <!-- 05 stage 1 -->
+  <section class="slide" data-stage="0">
+    <div class="prail" data-stage="0"></div>
+    <div class="eyebrow">Stage 1 · Foundation · v0.1.0</div>
+    <h2>Read-only first</h2>
+    <p class="lede"><b>Decision:</b> no write path until the read path is trustworthy. Watch tmux, tail transcripts, render them.</p>
+    <ul class="bare">
+      <li>Discover Claude sessions running in <b>tmux</b>; match each to its JSONL transcript.</li>
+      <li>Stream updates over a <b>WebSocket</b>; render in an assistant-ui thread.</li>
+      <li>One process, <b>localhost-only</b>, no build step on install. <span class="why">No daemon, no DB.</span></li>
+    </ul>
+  </section>
+
+  <!-- 06 stage 2 -->
+  <section class="slide" data-stage="1">
+    <div class="prail" data-stage="1"></div>
+    <div class="eyebrow">Stage 2 · Reach &amp; resilience</div>
+    <h2>Usable from the couch, survives restarts</h2>
+    <ul class="bare">
+      <li><b>Phone push</b> (Web Push + VAPID) — a session needing input pings your phone.</li>
+      <li><b>Durable launchd service</b> — auto-start on login, restart on crash.</li>
+      <li><b>Raw-terminal escape hatch</b> — token-gated <code>ttyd</code> reverse proxy.</li>
+      <li><b>Reply + answer</b> — Cmd/Ctrl+Enter to send; working indicator after AskUserQuestion.</li>
+      <li><b>Robustness</b> — frontend tests, syntax highlighting, render cap, security review.</li>
+    </ul>
+  </section>
+
+  <!-- 07 stage 3 (P0) -->
+  <section class="slide" data-stage="2">
+    <div class="prail" data-stage="2"></div>
+    <div class="eyebrow">Stage 3 · Correct session identity · the P0 fix</div>
+    <h2>Identity = the exact pane, not the directory</h2>
+    <p class="lede">Two Claude panes in one directory matched the <b>same</b> transcript — a reply could echo under the wrong session. The whole cockpit rested on fixing this.</p>
+    <ul class="bare">
+      <li><b>Pane-scoped identity</b> — enumerate panes (<code>session:window.pane</code>), not windows.</li>
+      <li><b>Layered 1:1 matching</b> — title → process-start-time → recency.</li>
+      <li><b>URL routing</b> — deep-linkable <code>/&lt;session&gt;/&lt;window&gt;/&lt;pane&gt;</code>.</li>
+      <li><b>Queued messages</b> — a FIFO reconciled against each real echo.</li>
+    </ul>
+  </section>
+
+  <!-- 08 stage 4 -->
+  <section class="slide" data-stage="3">
+    <div class="prail" data-stage="3"></div>
+    <div class="eyebrow">Stage 4 · Reliability &amp; trust</div>
+    <h2>Earn the write path's trust</h2>
+    <ul class="bare">
+      <li><b>Token login gate</b> — header/subprotocol auth; tokens never in the URL; tokenless mode optional.</li>
+      <li><b>Manual transcript pins</b> — escape hatch for sessions the matcher can't resolve.</li>
+      <li><b>Live TUI prompt handling</b> — read prompts from the pane when the transcript lags.</li>
+      <li><b>Composer drafts</b> persist per session; double-send guard; in-app version + update hint.</li>
+    </ul>
+  </section>
+
+  <!-- 09 stage 5 -->
+  <section class="slide" data-stage="4">
+    <div class="prail" data-stage="4"></div>
+    <div class="eyebrow">Stage 5 · A real chat surface</div>
+    <h2>Stop looking like a log tail</h2>
+    <ul class="bare">
+      <li><b>Claude.ai-style composer card</b>, 800px reading column, hover copy action bar.</li>
+      <li><b>Thinking signal</b> from TUI capture — live flash, rolling "last updated", shimmer.</li>
+      <li><b>Chain-of-thought grouping</b> — reasoning + tool calls fold into one collapsible turn.</li>
+      <li><b>Artifact side panel</b> (tabbed; 50:50 desktop / bottom-sheet mobile) + agent chips with nested sub-agents.</li>
+    </ul>
+  </section>
+
+  <!-- 10 stage 6 -->
+  <section class="slide" data-stage="5">
+    <div class="prail" data-stage="5"></div>
+    <div class="eyebrow">Stage 6 · Intelligence + voice</div>
+    <h2>Smarts with no API key</h2>
+    <p class="lede"><b>Decision:</b> reuse the operator's own <code>claude</code> CLI (<code>-p --model haiku</code>) for LLM features; keep speech local.</p>
+    <ul class="bare">
+      <li><b>Prompt enhancer</b> — ✨ rewrites your draft; diff-review then Accept/Edit/Discard, never auto-send.</li>
+      <li><b>Capture-driven answerer</b> — arrow-walk → space-select → submit, verified against the live pane.</li>
+      <li><b>Skill browser + inline <code>/</code> autocomplete</b> from the session's live skill list.</li>
+      <li><b>Local voice→text</b> — MediaRecorder → <code>ffmpeg</code> → <code>whisper.cpp</code>. Works on iPad, no key.</li>
+    </ul>
+  </section>
+
+  <!-- 11 setup row-list -->
+  <section class="slide">
+    <div class="eyebrow">Setup</div>
+    <h2>From zero to running</h2>
+    <div class="rows">
+      <div class="row"><span class="key">install</span><span class="val"><code>npm install -g @idl3/claude-control</code> — ships prebuilt, no build step.</span></div>
+      <div class="row"><span class="key">prereqs</span><span class="val">Node ≥20 · <code>tmux</code>. Optional: <code>ttyd</code> (raw terminal), <code>ffmpeg</code> + <code>whisper-cpp</code> (voice).</span></div>
+      <div class="row"><span class="key">run</span><span class="val"><code>claude-control</code> prints the URL · <code>install-service</code> adds launchd auto-start.</span></div>
+      <div class="row"><span class="key">auth</span><span class="val">Token via <code>CLAUDE_CONTROL_TOKEN</code> or <code>~/.claude-control/token</code> — entered in-app, never in the URL.</span></div>
+      <div class="row"><span class="key">reach</span><span class="val"><code>127.0.0.1</code> locally, or your Tailscale tailnet (HTTPS — required for voice).</span></div>
+    </div>
+  </section>
+
+  <!-- 12 usage card-stack -->
+  <section class="slide">
+    <div class="eyebrow">Usage</div>
+    <h2>The daily loop</h2>
+    <div class="cards">
+      <div class="card"><span class="lbl">pick</span><p>Open the URL, enter the token if prompted, choose a session from the rail.</p></div>
+      <div class="card"><span class="lbl">watch</span><p>Live transcript with thinking signal, grouped chain-of-thought, and sub-agent panel.</p></div>
+      <div class="card"><span class="lbl">reply</span><p>Type and Cmd/Ctrl+Enter; attach screenshots; ✨ enhance a draft before sending.</p></div>
+      <div class="card alt"><span class="lbl">answer</span><p>Resolve <code>AskUserQuestion</code> prompts inline; the answerer drives the keystrokes.</p></div>
+      <div class="card alt"><span class="lbl">speak</span><p>Tap the mic, speak, transcribe locally — review then send.</p></div>
+      <div class="card alt"><span class="lbl">escape</span><p>Pop the raw terminal, pin an unmatched transcript, or deep-link a pane by URL.</p></div>
+    </div>
+  </section>
+
+  <!-- 13 decisions tag-list -->
+  <section class="slide">
+    <div class="eyebrow">Principles</div>
+    <h2>Decisions that held</h2>
+    <div class="tags">
+      <div class="tagrow"><span class="tag held">no DB</span><span class="body"><b>Files are the source of truth</b> — transcripts on disk + tmux state. Nothing to migrate or corrupt.</span></div>
+      <div class="tagrow"><span class="tag held">localhost-first</span><span class="body"><b>Binds 127.0.0.1 by default</b>, token optional, secrets never in the URL.</span></div>
+      <div class="tagrow"><span class="tag held">no API key</span><span class="body"><b>LLM features reuse the operator's <code>claude</code> CLI</b>; speech-to-text runs locally.</span></div>
+      <div class="tagrow"><span class="tag held">pane identity</span><span class="body"><b>Identity is the exact pane</b> — the P0 fix that made every later feature reliable.</span></div>
+      <div class="tagrow"><span class="tag held">disposable UI</span><span class="body"><b>The React layer changes weekly; <code>lib/</code> is stable.</b> Churn at the edge, calm at the core.</span></div>
+    </div>
+  </section>
+
+  <!-- 14 links-end -->
+  <section class="slide">
+    <div class="eyebrow">Artifacts</div>
+    <h2>Where to go next</h2>
+    <div class="links">
+      <a class="link" href="https://github.com/idl3/claude-control"><span class="lk">repository</span><span class="lp">github.com/idl3/claude-control</span></a>
+      <a class="link" href="https://www.npmjs.com/package/@idl3/claude-control"><span class="lk">npm</span><span class="lp">@idl3/claude-control · v0.1.20</span></a>
+      <a class="link" href="../architecture-evolution.md"><span class="lk">source doc</span><span class="lp">docs/architecture-evolution.md</span></a>
+      <a class="link" href="./voice-stt.html"><span class="lk">deep-dive deck</span><span class="lp">docs/presentations/voice-stt.html</span></a>
+    </div>
+    <p class="lede"><span class="grad">No database. Localhost-first. No API key.</span> Watch, drive, and speak to Claude Code from anywhere.</p>
+  </section>
+
+</main>
+
+<div class="brand"><span class="d"></span> claude-control · v0.1.20</div>
+<div class="hud"><b id="cur">1</b> / <span id="total">14</span></div>
+<div class="hint">← → or Space · tap stages on the arc · F fullscreen</div>
+
+<script>
+  // Journey stage data (shared by the journey-map panel + stage rails).
+  const STAGES = [
+    { n: 'v0.1.0', t: 'Foundation',  date: 'Jun 14', d: 'Read-only first: discover tmux sessions, match each to its JSONL transcript, stream it over a WebSocket. No write path until the read path is trustworthy.' },
+    { n: 'Iter 1', t: 'Reach',       date: 'Jun 14', d: 'Phone push (VAPID), durable launchd service, token-gated ttyd raw terminal, frontend tests + render cap, and the first reply/answer path.' },
+    { n: 'Iter 2', t: 'Identity',    date: 'Jun 14', d: 'The P0 fix: identity becomes the exact session:window.pane (not the directory), with layered 1:1 transcript matching, URL routing, and queued messages.' },
+    { n: 'Iter 3', t: 'Reliability', date: 'Jun 15', d: 'Token login gate, manual transcript pins, live TUI prompt handling, per-session composer drafts, double-send guard, in-app version hint.' },
+    { n: 'Iter 4', t: 'Chat surface',date: 'Jun 16', d: 'Claude.ai-style composer, 800px column, thinking signal from TUI capture, chain-of-thought grouping, artifact side panel, agent chips + nested sub-agents.' },
+    { n: 'Iter 5–6', t: 'Intelligence + Voice', date: 'Jun 16–17', d: 'No-key prompt enhancer + capture-driven answerer, skill browser with inline / autocomplete, pull-to-refresh, and local voice→text via ffmpeg + whisper.cpp.' },
+  ];
+
+  // --- journey-map panel ---
+  const rail = document.getElementById('jmRail');
+  const panel = document.getElementById('jmPanel');
+  function showStage(i) {
+    const s = STAGES[i];
+    panel.innerHTML = '<span class="date">' + s.n + ' · ' + s.date + '</span><h3>' + s.t + '</h3><p>' + s.d + '</p>';
+    [...rail.children].forEach((b, k) => b.setAttribute('aria-selected', k === i ? 'true' : 'false'));
+  }
+  rail.querySelectorAll('.jm-stage').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); showStage(+b.dataset.i); });
+  });
+  showStage(0);
+
+  // --- per-stage progress rails ---
+  document.querySelectorAll('.prail').forEach((el) => {
+    const cur = +el.dataset.stage;
+    let html = '';
+    STAGES.forEach((s, k) => {
+      const state = k < cur ? 'done' : k === cur ? 'now' : 'todo';
+      html += '<span class="pnode ' + state + '"><span class="dot"></span><span class="lab">' + s.t + '</span></span>';
+      if (k < STAGES.length - 1) html += '<span class="pseg ' + (k < cur ? 'done' : '') + '"></span>';
+    });
+    el.innerHTML = html;
+  });
+
+  // --- deck nav ---
+  const slides = [...document.querySelectorAll('.slide')];
+  const progress = document.getElementById('progress');
+  const cur = document.getElementById('cur');
+  document.getElementById('total').textContent = slides.length;
+  let i = Math.max(0, Math.min(slides.length - 1, (location.hash.match(/\d+/) || [1])[0] - 1));
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    progress.style.width = ((i + 1) / slides.length * 100) + '%';
+    cur.textContent = i + 1;
+    history.replaceState(null, '', '#' + (i + 1));
+  }
+  const next = () => show(i + 1), prev = () => show(i - 1);
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key.toLowerCase() === 'f') { document.fullscreenElement ? document.exitFullscreen?.() : document.documentElement.requestFullscreen?.(); }
+  });
+  // Click to advance — but not when interacting with stages, links, or buttons.
+  addEventListener('click', (e) => {
+    if (e.target.closest('a, button, .jm-rail, .jm-panel')) return;
+    (e.clientX > innerWidth / 2 ? next : prev)();
+  });
+  // Touch swipe.
+  let x0 = null;
+  addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 45) (dx < 0 ? next : prev)();
+    x0 = null;
+  }, { passive: true });
+  show(i);
+</script>
+</body>
+</html>

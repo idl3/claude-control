@@ -87,6 +87,40 @@ export function usePushNotifications(): PushController {
     }
 
     let sub = await reg.pushManager.getSubscription();
+
+    // If an existing subscription was created with a different VAPID key,
+    // the server will reject sends with 403. Detect this by comparing the
+    // stored applicationServerKey bytes against the current VAPID public key.
+    if (sub) {
+      try {
+        const currentKeyBuf = urlBase64ToBuffer(key);
+        const existingKeyBuf = sub.options?.applicationServerKey;
+        let keyMismatch = false;
+        if (existingKeyBuf instanceof ArrayBuffer) {
+          const existing = new Uint8Array(existingKeyBuf);
+          const current = new Uint8Array(currentKeyBuf);
+          if (existing.length !== current.length) {
+            keyMismatch = true;
+          } else {
+            for (let i = 0; i < existing.length; i++) {
+              if (existing[i] !== current[i]) { keyMismatch = true; break; }
+            }
+          }
+        }
+        if (keyMismatch) {
+          // Old sub uses a different VAPID key — unsubscribe so we re-subscribe
+          // below with the current key. The server will prune the old endpoint
+          // on its next send attempt (403 → prune), but unsubscribing now avoids
+          // one failed push cycle.
+          await sub.unsubscribe();
+          sub = null;
+        }
+      } catch {
+        // Key comparison failed (browser quirk) — proceed with existing sub;
+        // worst case the server prunes it on the next 403 send failure.
+      }
+    }
+
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,

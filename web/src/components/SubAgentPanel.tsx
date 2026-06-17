@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { convertMessages } from '../lib/convert';
 import { AssistantMessage, UserMessage } from './Messages';
-import type { SubAgent } from '../lib/types';
+import type { SubAgent, AgentDef, NestedSubAgent } from '../lib/types';
 
 interface SubAgentPanelProps {
   subagents: SubAgent[];
@@ -60,11 +60,93 @@ const TAB_LABELS: Record<Tab, string> = {
   all: 'All',
 };
 
+/** Resolve the effective model: transcript wins, then def front-matter. */
+function resolveModel(agent: SubAgent): string | null {
+  if (agent.model) return agent.model;
+  if (agent.def?.model) return agent.def.model;
+  return null;
+}
+
+/**
+ * Inline chip: `agentType · model`. Clicking this component is handled by the
+ * parent row button, so the chip itself is purely presentational.
+ */
+function AgentChip({ agentType, model }: { agentType: string | null; model: string | null }) {
+  return (
+    <span className="agent-chip">
+      <span className="agent-chip-name">{agentType || 'sub-agent'}</span>
+      {model ? <span className="agent-chip-model">{model}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * Definition block: renders parsed front-matter fields from the agent `.md`
+ * file. Shows description, tools, model and any extra keys.
+ */
+function AgentDefBlock({ def, agentType }: { def: AgentDef | null | undefined; agentType: string | null }) {
+  if (!def) {
+    // No def found — just show the name as a faint note.
+    return (
+      <div className="agent-def">
+        <span className="agent-def-no-def">{agentType || 'sub-agent'}</span>
+      </div>
+    );
+  }
+
+  // Render description first, then tools chips, then remaining keys (excluding
+  // `name` since it's already shown in the chip header).
+  const knownKeys = new Set(['name', 'description', 'tools', 'model']);
+  const extraKeys = Object.keys(def).filter((k) => !knownKeys.has(k));
+
+  return (
+    <div className="agent-def">
+      {def.description ? (
+        <div className="agent-def-row agent-def-desc">{def.description}</div>
+      ) : null}
+      {def.tools ? (
+        <div className="agent-def-row">
+          <span className="agent-def-label">tools</span>
+          <span className="agent-def-val agent-def-tools">{def.tools}</span>
+        </div>
+      ) : null}
+      {def.model ? (
+        <div className="agent-def-row">
+          <span className="agent-def-label">model</span>
+          <span className="agent-def-val">{def.model}</span>
+        </div>
+      ) : null}
+      {extraKeys.map((k) => (
+        <div key={k} className="agent-def-row">
+          <span className="agent-def-label">{k}</span>
+          <span className="agent-def-val">{def[k]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One-level nested sub-agent list. */
+function NestedAgentList({ nested }: { nested: NestedSubAgent[] | undefined }) {
+  if (!nested || nested.length === 0) return null;
+  return (
+    <div className="agent-nested">
+      <span className="agent-nested-label">nested ({nested.length})</span>
+      <div className="agent-nested-list">
+        {nested.map((n) => (
+          <AgentChip key={n.agentId} agentType={n.agentType} model={n.model} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AgentBadge({ agent }: { agent: SubAgent }) {
+  const model = resolveModel(agent);
   return (
     <>
       <span className="sa-dot" data-status={agent.status} aria-hidden="true" />
-      <span className="sa-type">{agent.agentType || 'sub-agent'}</span>
+      <AgentChip agentType={agent.agentType} model={model} />
       {agent.description ? <span className="sa-desc">{agent.description}</span> : null}
       <span className="sa-status">
         {agent.status === 'running' ? '· running' : '· done'}
@@ -107,6 +189,7 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
 
   // Detail: the selected agent's transcript as a nested chat.
   if (selected) {
+    const selectedModel = resolveModel(selected);
     return (
       <div className="sa-panel" role="complementary" aria-label="Sub-agent transcript">
         <header className="sa-panel-head">
@@ -119,7 +202,11 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
             ‹
           </button>
           <span className="sa-panel-title sa-detail-title">
-            <AgentBadge agent={selected} />
+            <span className="sa-dot" data-status={selected.status} aria-hidden="true" />
+            <AgentChip agentType={selected.agentType} model={selectedModel} />
+            <span className="sa-status">
+              {selected.status === 'running' ? '· running' : '· done'}
+            </span>
           </span>
           <button
             type="button"
@@ -130,6 +217,8 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
             ×
           </button>
         </header>
+        <AgentDefBlock def={selected.def} agentType={selected.agentType} />
+        <NestedAgentList nested={selected.nested} />
         <SubAgentThread messages={selected.messages} />
       </div>
     );

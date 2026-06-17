@@ -67,6 +67,22 @@ export interface Pending {
   questions: PendingQuestion[];
 }
 
+/** Parsed YAML front-matter from an agent definition `.md` file. */
+export interface AgentDef {
+  name?: string;
+  description?: string;
+  tools?: string;
+  model?: string;
+  [k: string]: string | undefined;
+}
+
+/** Lightweight summary of a nested sub-agent (one level deep, no messages). */
+export interface NestedSubAgent {
+  agentId: string;
+  agentType: string | null;
+  model: string | null;
+}
+
 // A sub-agent (Task/Agent) running under a session, with its own transcript.
 export interface SubAgent {
   agentId: string;
@@ -76,6 +92,12 @@ export interface SubAgent {
   status: 'running' | 'done';
   messages: Msg[];
   createdAt?: number | null;
+  /** Model string extracted from the agent's own transcript records. */
+  model?: string | null;
+  /** Parsed front-matter from the agent definition file, or null if not found. */
+  def?: AgentDef | null;
+  /** Nested sub-agents spawned by this agent (one level, best-effort). */
+  nested?: NestedSubAgent[];
 }
 
 // A live TUI selection prompt (permission / trust / numbered menu) detected from
