@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { parseAnsi, splitUrls } from './ansi';
+import { parseAnsi, splitUrls, trimTrailingBlankLines } from './ansi';
+
+describe('trimTrailingBlankLines', () => {
+  it('drops trailing empty + whitespace-only lines', () => {
+    expect(trimTrailingBlankLines('a\nb\n\n   \n')).toBe('a\nb');
+  });
+  it('ignores ANSI when testing blankness', () => {
+    expect(trimTrailingBlankLines('out\n\x1b[0m   \x1b[0m\n')).toBe('out');
+  });
+  it('keeps interior blank lines', () => {
+    expect(trimTrailingBlankLines('a\n\nb')).toBe('a\n\nb');
+  });
+});
 
 describe('parseAnsi', () => {
   it('returns one plain segment for text with no codes', () => {

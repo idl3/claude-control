@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { parseAnsi, splitUrls } from '../lib/ansi';
+import { parseAnsi, splitUrls, trimTrailingBlankLines } from '../lib/ansi';
 
 interface TerminalViewProps {
   /** Latest capture of the shell pane, or null before the first poll. */
@@ -48,7 +48,7 @@ export function TerminalView({ output, requestCapture, clearOutput, sendKey }: T
   // Parse ANSI colors → styled segments, and linkify URLs inside each segment.
   const rendered = useMemo(() => {
     if (output == null) return null;
-    return parseAnsi(output).map((seg, i) => {
+    return parseAnsi(trimTrailingBlankLines(output)).map((seg, i) => {
       const style: React.CSSProperties = {
         color: seg.fg,
         background: seg.bg,

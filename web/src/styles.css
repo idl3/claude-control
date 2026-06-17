@@ -396,8 +396,9 @@ body {
   max-width: 880px;
   margin-inline: auto;
   margin-bottom: 8px;
+  /* Hug content (so the latest line sits flush above the composer), capped so a
+     long scrollback never pushes the input off-screen. */
   max-height: 48dvh;
-  min-height: 160px;
   border: 1px solid var(--red);
   border-radius: 12px;
   background: var(--bg);
@@ -429,6 +430,7 @@ body {
 }
 .terminal-view-body {
   flex: 1 1 auto;
+  min-height: 0; /* allow the flex child to shrink so it scrolls when capped */
   margin: 0;
   padding: 10px 12px;
   /* True terminal surface — near-black so the ANSI palette reads correctly. */

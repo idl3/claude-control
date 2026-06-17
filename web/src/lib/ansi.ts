@@ -83,6 +83,21 @@ const SGR = /\x1b\[([0-9;]*)m/g;
 // Drop non-SGR escape sequences (cursor moves, OSC, charset) so they don't show.
 const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const OTHER_ESC = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+// Any escape sequence — used to test whether a line is blank ignoring colors.
+const ANY_ESC = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+
+/**
+ * Drop trailing blank lines (whitespace-only, ignoring ANSI) from a capture.
+ * tmux `capture-pane` pads the pane to its full height, so the latest real
+ * output otherwise floats above empty rows. Pure.
+ */
+export function trimTrailingBlankLines(s: string): string {
+  const lines = String(s).split('\n');
+  while (lines.length && lines[lines.length - 1].replace(ANY_ESC, '').trim() === '') {
+    lines.pop();
+  }
+  return lines.join('\n');
+}
 
 function clean(text: string): string {
   return text.replace(OTHER_ESC, '');
