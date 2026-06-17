@@ -15,6 +15,21 @@ interface DiffLine {
   text: string;
 }
 
+// Human label for the badge: the backend that actually produced the result.
+// mlx → short model name; claude → "claude -p"; rules → "rules".
+function backendLabel(result: OptimizeResult): string {
+  if (result.backend === 'mlx') {
+    const short = (result.model || '')
+      .replace(/^mlx-community\//, '')
+      .replace(/-Instruct-4bit$/i, '')
+      .replace(/-4bit$/i, '');
+    return short ? `MLX · ${short}` : 'MLX';
+  }
+  if (result.backend === 'claude') return 'claude -p';
+  if (result.backend === 'rules') return 'rules';
+  return result.mode === 'llm' ? 'llm' : 'rules';
+}
+
 function lineDiff(original: string, suggested: string): DiffLine[] {
   const aLines = original.split('\n');
   const bLines = suggested.split('\n');
@@ -105,7 +120,7 @@ export function OptimizeReview({ original, result, onAccept, onClose }: Optimize
           <div className="modal-head-group">
             <span className="modal-title modal-title-optimize">Enhanced prompt</span>
             <span className="optimize-mode-badge" data-mode={result.mode}>
-              {result.mode === 'llm' ? 'claude -p' : 'rules'}
+              {backendLabel(result)}
             </span>
           </div>
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>

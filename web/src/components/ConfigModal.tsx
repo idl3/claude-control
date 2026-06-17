@@ -3,8 +3,11 @@ import {
   getConfig,
   saveConfig,
   getVersion,
+  getModels,
   uploadIcon,
   resetIcon,
+  type OptimizeBackend,
+  type ModelsInfo,
 } from '../lib/api';
 
 interface ConfigModalProps {
@@ -22,6 +25,9 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const [defaultCwd, setDefaultCwd] = useState('');
   const [optimizeModel, setOptimizeModel] = useState('');
   const [claudeBin, setClaudeBin] = useState('');
+  const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
+  const [mlxModel, setMlxModel] = useState('');
+  const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState<{
@@ -40,6 +46,9 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
     getVersion()
       .then((v) => alive && v && setVersion(v))
       .catch(() => {});
+    getModels()
+      .then((m) => alive && setModels(m))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -54,6 +63,8 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
         setDefaultCwd(c.defaultCwd);
         setOptimizeModel(c.optimizeModel ?? '');
         setClaudeBin(c.claudeBin ?? '');
+        setOptimizeBackend(c.optimizeBackend ?? 'mlx');
+        setMlxModel(c.mlxModel ?? '');
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -109,12 +120,28 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveConfig({ launchCommand, defaultCwd, optimizeModel, claudeBin });
+      const saved = await saveConfig({
+        launchCommand,
+        defaultCwd,
+        optimizeModel,
+        claudeBin,
+        optimizeBackend,
+        mlxModel,
+      });
       setLaunchCommand(saved.launchCommand);
       setDefaultCwd(saved.defaultCwd);
       setOptimizeModel(saved.optimizeModel ?? '');
       setClaudeBin(saved.claudeBin ?? '');
-      onToast('Config saved', 'ok');
+      setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
+      setMlxModel(saved.mlxModel ?? '');
+      // If the MLX model isn't downloaded yet, the server fetches it in the
+      // background — tell the user the enhancer falls back to claude meanwhile.
+      const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
+      if (saved.optimizeBackend === 'mlx' && chosen && chosen.installed === false) {
+        onToast(`Downloading ${chosen.label} (${chosen.sizeGB} GB)… enhancer uses claude until ready`, 'ok');
+      } else {
+        onToast('Config saved', 'ok');
+      }
       onClose();
     } catch (err) {
       onToast(`Save failed: ${(err as Error).message}`, 'error');
@@ -149,122 +176,169 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
           </button>
         </div>
 
-        <label className="config-field">
-          <span className="config-label">Launch command</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="claude"
-            value={launchCommand}
-            disabled={loading}
-            onChange={(e) => setLaunchCommand(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Run in each new session's pane (e.g. <code>yolo</code> or{' '}
-            <code>claude --flags</code>).
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Default cwd</span>
-          <input
-            className="config-input"
-            type="text"
-            value={defaultCwd}
-            disabled={loading}
-            onChange={(e) => setDefaultCwd(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Must be an existing directory. New sessions start here.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Optimize model</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="claude-haiku-4-5"
-            value={optimizeModel}
-            disabled={loading}
-            onChange={(e) => setOptimizeModel(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Model used by the prompt enhancer (<code>claude -p</code>). Default{' '}
-            <code>claude-haiku-4-5</code>.
-          </span>
-        </label>
-
-        <label className="config-field">
-          <span className="config-label">Claude CLI path (optional)</span>
-          <input
-            className="config-input"
-            type="text"
-            placeholder="auto-detected"
-            value={claudeBin}
-            disabled={loading}
-            onChange={(e) => setClaudeBin(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="config-hint">
-            Absolute path to the <code>claude</code> binary. Leave blank to auto-detect.
-          </span>
-        </label>
-
-        <div className="config-field">
-          <span className="config-label">App icon</span>
-          <div className="config-icon-row">
-            <img
-              className="config-icon-preview"
-              src={`/api/icon?size=192&t=${iconBust}`}
-              alt="Current home-screen icon"
-              width={48}
-              height={48}
-            />
-            <div className="config-icon-actions">
-              <button
-                type="button"
-                className="config-cancel"
-                disabled={iconBusy}
-                onClick={() => iconInputRef.current?.click()}
-              >
-                {iconBusy ? 'Working…' : 'Upload PNG'}
-              </button>
-              <button
-                type="button"
-                className="config-cancel"
-                disabled={iconBusy}
-                onClick={onResetIcon}
-              >
-                Reset
-              </button>
-            </div>
+        <div className="config-body">
+          <label className="config-field">
+            <span className="config-label">Launch command</span>
             <input
-              ref={iconInputRef}
-              type="file"
-              accept="image/png"
-              hidden
-              onChange={onPickIcon}
+              className="config-input"
+              type="text"
+              placeholder="claude"
+              value={launchCommand}
+              disabled={loading}
+              onChange={(e) => setLaunchCommand(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
+            <span className="config-hint">Run in each new session's pane.</span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Default cwd</span>
+            <input
+              className="config-input"
+              type="text"
+              value={defaultCwd}
+              disabled={loading}
+              onChange={(e) => setDefaultCwd(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">Existing dir new sessions start in.</span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Enhancer backend</span>
+            <select
+              className="config-input"
+              value={optimizeBackend}
+              disabled={loading}
+              onChange={(e) => setOptimizeBackend(e.target.value as OptimizeBackend)}
+            >
+              <option value="mlx">Local MLX (→ claude → rules)</option>
+              <option value="claude">claude -p (→ rules)</option>
+              <option value="rules">Rules only (offline)</option>
+            </select>
+            <span className="config-hint">
+              Powers ✨. <code>mlx</code> = on-device, no key.
+            </span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Claude model</span>
+            <select
+              className="config-input"
+              value={optimizeModel}
+              disabled={loading}
+              onChange={(e) => setOptimizeModel(e.target.value)}
+            >
+              {optimizeModel && !models?.claudeModels.some((m) => m.id === optimizeModel) ? (
+                <option value={optimizeModel}>{optimizeModel}{models ? ' (custom)' : ''}</option>
+              ) : null}
+              {(models?.claudeModels ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                  {m.id === models?.recommendedClaudeModel ? ' · recommended' : ''}
+                </option>
+              ))}
+            </select>
+            <span className="config-hint">
+              For the <code>claude -p</code> backend/fallback.
+            </span>
+          </label>
+
+          <label className="config-field config-field--wide">
+            <span className="config-label">MLX model</span>
+            <select
+              className="config-input"
+              value={mlxModel}
+              disabled={loading || optimizeBackend !== 'mlx'}
+              onChange={(e) => setMlxModel(e.target.value)}
+            >
+              {mlxModel && !models?.mlxModels.some((m) => m.id === mlxModel) ? (
+                <option value={mlxModel}>{mlxModel}{models ? ' (custom)' : ''}</option>
+              ) : null}
+              {(models?.mlxModels ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} · {m.sizeGB} GB
+                  {m.installed ? ' · downloaded' : ' · ⬇ download'}
+                  {m.id === models?.recommendedMlxModel ? ' · recommended' : ''}
+                  {models && m.minRamGB > models.machine.ramGB ? ` (needs ≥${m.minRamGB} GB)` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="config-hint">
+              {models
+                ? `Your ${models.machine.appleSilicon ? 'Apple Silicon ' : ''}Mac has ${models.machine.ramGB} GB — recommended: ${
+                    models.mlxModels.find((m) => m.id === models.recommendedMlxModel)?.label ??
+                    models.recommendedMlxModel
+                  }. Auto-downloads on first use.`
+                : 'On-device model for the ✨ enhancer. Auto-downloads on first use.'}
+            </span>
+          </label>
+
+          <label className="config-field config-field--wide">
+            <span className="config-label">Claude CLI path (optional)</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="auto-detected"
+              value={claudeBin}
+              disabled={loading}
+              onChange={(e) => setClaudeBin(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              Path to the <code>claude</code> binary. Blank = auto-detect.
+            </span>
+          </label>
+
+          <div className="config-field config-field--wide">
+            <span className="config-label">App icon</span>
+            <div className="config-icon-row">
+              <img
+                className="config-icon-preview"
+                src={`/api/icon?size=192&t=${iconBust}`}
+                alt="Current home-screen icon"
+                width={44}
+                height={44}
+              />
+              <div className="config-icon-actions">
+                <button
+                  type="button"
+                  className="config-cancel"
+                  disabled={iconBusy}
+                  onClick={() => iconInputRef.current?.click()}
+                >
+                  {iconBusy ? 'Working…' : 'Upload PNG'}
+                </button>
+                <button
+                  type="button"
+                  className="config-cancel"
+                  disabled={iconBusy}
+                  onClick={onResetIcon}
+                >
+                  Reset
+                </button>
+              </div>
+              <input
+                ref={iconInputRef}
+                type="file"
+                accept="image/png"
+                hidden
+                onChange={onPickIcon}
+              />
+            </div>
+            <span className="config-hint">
+              Defaults to the Claude Control logo. Re-add to Home Screen after changing.
+            </span>
           </div>
-          <span className="config-hint">
-            Home-screen icon for this app. Defaults to the Claude Control logo.
-            After changing it, re-add the app to your Home Screen to update the
-            installed icon.
-          </span>
         </div>
 
+        <div className="config-foot">
         <div className="config-version">
           {version ? (
             <>
@@ -295,6 +369,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
+        </div>
         </div>
       </div>
     </div>

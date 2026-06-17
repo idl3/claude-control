@@ -231,11 +231,17 @@ export async function resetIcon(): Promise<void> {
   if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 }
 
+export type OptimizeBackend = 'mlx' | 'claude' | 'rules';
+
 export interface ControlConfig {
   launchCommand: string;
   defaultCwd: string;
   optimizeModel: string;
   claudeBin: string;
+  /** Prompt-enhancer backend: local MLX model, claude -p, or deterministic rules. */
+  optimizeBackend: OptimizeBackend;
+  /** HuggingFace/MLX model id used when optimizeBackend === 'mlx'. */
+  mlxModel: string;
 }
 
 export interface OptimizeResult {
@@ -243,6 +249,37 @@ export interface OptimizeResult {
   rationale: string[];
   changes: string[];
   mode: 'llm' | 'rules';
+  /** Which backend actually produced the result. */
+  backend?: 'mlx' | 'claude' | 'rules';
+  /** Model id used (for mlx/claude backends). */
+  model?: string;
+}
+
+export interface MlxModelInfo {
+  id: string;
+  label: string;
+  sizeGB: number;
+  minRamGB: number;
+  /** Already present in the local HuggingFace cache (no download needed). */
+  installed?: boolean;
+}
+export interface ClaudeModelInfo {
+  id: string;
+  label: string;
+}
+export interface ModelsInfo {
+  machine: { ramGB: number; arch: string; platform: string; appleSilicon: boolean };
+  mlxModels: MlxModelInfo[];
+  claudeModels: ClaudeModelInfo[];
+  recommendedMlxModel: string;
+  recommendedClaudeModel: string;
+}
+
+/** Fetch the curated model catalogs + machine specs + recommendations. */
+export async function getModels(): Promise<ModelsInfo> {
+  const res = await authFetch('/api/models');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as ModelsInfo;
 }
 
 export async function optimizePrompt(text: string, intent?: string): Promise<OptimizeResult> {
