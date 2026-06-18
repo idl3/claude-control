@@ -4084,3 +4084,46 @@ select.config-input {
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* ── Optimiser auto-send: depleting ring around the Send button ──── */
+/* The remaining time renders as a border ring that empties CLOCKWISE from
+   12 o'clock (top) over the auto-send window, then fires. */
+@property --auto-send-deplete {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes auto-send-deplete {
+  from { --auto-send-deplete: 0deg; }
+  to { --auto-send-deplete: 360deg; }
+}
+.btn-send {
+  position: relative;
+}
+.btn-send-label {
+  position: relative;
+  z-index: 1;
+}
+.btn-send-armed::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  /* full ring = accent; the depleted sweep (from top, clockwise) goes transparent */
+  background: conic-gradient(
+    from 0deg,
+    transparent var(--auto-send-deplete),
+    var(--accent) var(--auto-send-deplete)
+  );
+  padding: 3px;
+  /* show the gradient only in the 3px border ring */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: auto-send-deplete var(--auto-send-secs, 5s) linear forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-send-armed::before { animation: none; }
+}
