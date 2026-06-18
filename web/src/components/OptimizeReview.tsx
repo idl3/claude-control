@@ -234,7 +234,7 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
             onClick={() => onAccept(edited)}
             onMouseEnter={cancelAuto}
           >
-            To composer
+            To Composer
           </button>
           {/* Primary: dispatch the rewrite (auto-fires on the countdown). */}
           <button
