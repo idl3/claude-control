@@ -457,12 +457,15 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                   return;
                 }
               }
-              // Enter inserts a newline; ⌘/Ctrl+Enter sends.
+              // Enter inserts a newline. ⌘/Ctrl+Enter = optimise (default);
+              // ⌘/Ctrl+Shift+Enter = bypass and send the raw composer text.
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                if (!disabled && !optimizing) composer.send();
+                if (disabled || optimizing) return;
+                if (e.shiftKey) composer.send();
+                else void runEnhance();
               }
-              // ⌘/Ctrl+O triggers the enhance button.
+              // ⌘/Ctrl+O also triggers the optimiser (legacy alias).
               if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 void runEnhance();
@@ -548,20 +551,17 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             <TerminalIcon />
           </button>
           <span className="composer-toolbar-spacer" />
+          {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal ? (
             <button
               type="button"
-              className="composer-enhance"
-              aria-label="Enhance prompt"
-              title="Enhance prompt (⌘/Ctrl+O)"
+              className="composer-enhance composer-bypass"
+              aria-label="Send without optimising"
+              title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
               disabled={disabled || optimizing || empty}
-              onClick={() => void runEnhance()}
+              onClick={() => composer.send()}
             >
-              {optimizing ? (
-                <span className="composer-enhance-spinner" aria-hidden="true" />
-              ) : (
-                <SparkleIcon />
-              )}
+              <ArrowUpIcon />
             </button>
           ) : null}
           {terminal ? (
@@ -577,13 +577,21 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               <ArrowUpIcon />
             </button>
           ) : (
-            <ComposerPrimitive.Send
+            // Primary / default: optimise → review → auto-send.
+            <button
+              type="button"
               className="composer-send"
-              aria-label="Send reply"
-              disabled={disabled || optimizing}
+              aria-label="Optimise and send"
+              title="Optimise & send (⌘/Ctrl+↵)"
+              disabled={disabled || optimizing || empty}
+              onClick={() => void runEnhance()}
             >
-              <ArrowUpIcon />
-            </ComposerPrimitive.Send>
+              {optimizing ? (
+                <span className="composer-enhance-spinner" aria-hidden="true" />
+              ) : (
+                <SparkleIcon />
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -591,7 +599,16 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
         <OptimizeReview
           original={review.original}
           result={review}
+          onSend={(text) => {
+            // Primary / auto-send: dispatch the rewritten prompt.
+            patchEnhance(key, { review: null });
+            composer.setText(text);
+            requestAnimationFrame(() => {
+              if (!disabled) composer.send();
+            });
+          }}
           onAccept={(text) => {
+            // Secondary: load into the composer, don't dispatch.
             composer.setText(text);
             patchEnhance(key, { review: null });
           }}
