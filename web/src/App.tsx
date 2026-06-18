@@ -589,16 +589,18 @@ function AppInner() {
     };
   }, [cockpit.selectedId]);
 
-  // Typing should STICK to the live transcript: focusing or typing in the
-  // composer re-pins the viewport to the bottom (assistant-ui's autoScroll then
-  // keeps tailing), so you never have to scroll down to follow new replies.
+  // Typing keeps the transcript tailing — but only while you're ALREADY at the
+  // bottom. If you've scrolled up to read (detached), typing must NOT yank you
+  // back down; you re-attach by scrolling to the bottom (or the ↓ button), which
+  // assistant-ui's autoScroll then resumes tailing from.
   useEffect(() => {
     const pin = (e: Event) => {
       const t = e.target as HTMLElement | null;
       if (!t?.closest?.('.composer')) return; // only the composer, not the rail/etc.
       if (!t.closest('.composer-input')) return;
       document.querySelectorAll<HTMLElement>('.thread-viewport').forEach((vp) => {
-        vp.scrollTop = vp.scrollHeight;
+        const atBottom = vp.scrollHeight - vp.scrollTop - vp.clientHeight < 64;
+        if (atBottom) vp.scrollTop = vp.scrollHeight; // reinforce stick; respect detach
       });
     };
     document.addEventListener('focusin', pin);
