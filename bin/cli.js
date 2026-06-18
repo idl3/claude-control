@@ -33,6 +33,7 @@ Local web UI to watch and drive Claude Code tmux sessions.
 
 Usage:
   claude-control [start]        Start the server (default)
+  claude-control setup              Install local deps (ffmpeg + whisper.cpp + model) for voice input
   claude-control install-service    Install the launchd service (macOS): auto-start + restart
   claude-control uninstall-service  Remove the launchd service
   claude-control --version
@@ -46,6 +47,10 @@ Config (env vars, all optional):
   CLAUDE_CONTROL_PROJECTS (default ~/.claude/projects)
 
 Requires: Node >=20 and tmux on PATH.`);
+    break;
+
+  case 'setup':
+    runScript('setup.sh');
     break;
 
   case 'install-service':

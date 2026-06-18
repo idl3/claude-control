@@ -159,6 +159,15 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     setEnhanceBySession((m) => ({ ...m, [sid]: { ...(m[sid] ?? EMPTY_ENHANCE), ...patch } }));
   }, []);
 
+  // Keep the cursor in the composer after a send (incl. after the optimise modal
+  // closes) so the user can immediately type the next message and follow the
+  // streaming response without re-clicking.
+  const refocusComposer = useCallback(() => {
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
+    });
+  }, []);
+
   // ── Inline skill autocomplete ──────────────────────────────────────────────
   const [skills, setSkills] = useState<SkillEntry[]>(() => _skillsCache ?? []);
   const [text, setTextMirror] = useState('');     // mirror of composer text
@@ -463,8 +472,12 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 if (disabled || optimizing) return;
-                if (e.shiftKey) composer.send();
-                else void runEnhance();
+                if (e.shiftKey) {
+                  composer.send();
+                  refocusComposer();
+                } else {
+                  void runEnhance();
+                }
               }
               // ⌘/Ctrl+O also triggers the optimiser (legacy alias).
               if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey)) {
@@ -562,7 +575,10 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               aria-label="Send without optimising"
               title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
               disabled={disabled || optimizing || empty}
-              onClick={() => composer.send()}
+              onClick={() => {
+                composer.send();
+                refocusComposer();
+              }}
             >
               <ArrowUpIcon />
             </button>
@@ -608,14 +624,19 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             composer.setText(text);
             requestAnimationFrame(() => {
               if (!disabled) composer.send();
+              refocusComposer(); // keep the cursor in the composer to follow up
             });
           }}
           onAccept={(text) => {
             // Secondary: load into the composer, don't dispatch.
             composer.setText(text);
             patchEnhance(key, { review: null });
+            refocusComposer();
           }}
-          onClose={() => patchEnhance(key, { review: null })}
+          onClose={() => {
+            patchEnhance(key, { review: null });
+            refocusComposer();
+          }}
         />
       ) : null}
       {skillBrowserOpen ? (
