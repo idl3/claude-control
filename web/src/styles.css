@@ -4167,3 +4167,76 @@ select.config-input {
   background: var(--bg-2);
   color: var(--text, inherit);
 }
+
+/* ── Focus mode: collapsible desktop sidebar + content transition ── */
+.detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Focus-mode toggle lives in the detail header; desktop-only (mirror of back-btn). */
+.focus-toggle {
+  display: none;
+}
+@media (min-width: 760px) {
+  .focus-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 2px 8px;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: color var(--ease) 0.15s;
+  }
+  .focus-toggle:hover {
+    color: var(--accent);
+  }
+  /* When collapsed, drop the rail's divider so the 0-width rail leaves no seam. */
+  .app[data-rail-collapsed='true'] .rail {
+    border-right: none;
+    overflow: hidden;
+  }
+}
+
+/* ── Sidebar attention: thinking dot + pending row accent ───────── */
+.thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+  animation: pulse 1.2s var(--ease) infinite;
+}
+.session-item[data-pending='true'] {
+  border-color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot { animation: none; }
+}
+
+/* ── Terminal loading (before first capture) ────────────────────── */
+.terminal-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+.terminal-loading-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: cockpit-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-loading-spinner { animation: none; }
+}

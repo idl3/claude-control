@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Session } from '../lib/types';
+import gsap, { prefersReducedMotion } from '../lib/anim';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -69,8 +70,25 @@ function PaneRow({
       ? `shell · ${s.cmd || 'sh'}`
       : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
+
+  // One-shot attention nudge: flash an accent ring when this pane STARTS needing
+  // a reply (pending false→true). The steady ASK-badge pulse is CSS.
+  const rowRef = useRef<HTMLLIElement>(null);
+  const prevPending = useRef(s.pending);
+  useEffect(() => {
+    if (s.pending && !prevPending.current && rowRef.current && !prefersReducedMotion()) {
+      gsap.fromTo(
+        rowRef.current,
+        { boxShadow: '0 0 0 2px var(--accent)' },
+        { boxShadow: '0 0 0 0 rgba(0,0,0,0)', duration: 1.1, ease: 'power2.out' },
+      );
+    }
+    prevPending.current = s.pending;
+  }, [s.pending]);
+
   return (
     <li
+      ref={rowRef}
       role="option"
       aria-selected={selected}
       tabIndex={0}
@@ -78,6 +96,7 @@ function PaneRow({
       data-active={s.active ? 'true' : 'false'}
       data-selected={selected ? 'true' : 'false'}
       data-kind={s.kind ?? 'claude'}
+      data-pending={s.pending ? 'true' : undefined}
       onClick={() => onSelect(s.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -92,6 +111,9 @@ function PaneRow({
           {isTerminal ? '>_' : '✳'}
         </span>
         <span className="session-name">{label}</span>
+        {s.thinking && !s.pending ? (
+          <span className="thinking-dot" aria-label="working" title="Working…" />
+        ) : null}
         {s.pending ? (
           <span className="ask-badge" aria-label="pending question">
             ASK

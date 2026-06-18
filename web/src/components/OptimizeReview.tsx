@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OptimizeResult } from '../lib/api';
 import { Kbd } from './Kbd';
+import { useModalTransition } from '../lib/anim';
 
 interface OptimizeReviewProps {
   original: string;
@@ -85,7 +86,8 @@ function lineDiff(original: string, suggested: string): DiffLine[] {
   return result;
 }
 
-export function OptimizeReview({ original, result, onSend, onAccept, onClose }: OptimizeReviewProps) {
+export function OptimizeReview({ original, result, onSend, onAccept, onClose: rawClose }: OptimizeReviewProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [edited, setEdited] = useState(result.optimized);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Auto-send countdown: dispatch the rewrite after AUTO_SEND_SECS unless the
@@ -134,6 +136,7 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
   return (
     <div
       className="modal-backdrop"
+      ref={rootRef}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
