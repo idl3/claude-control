@@ -17,7 +17,7 @@ import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
-import { relayDiff, controlToken, interceptToken, isLetter, type Mods } from '../lib/terminalKeys';
+import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -413,10 +413,24 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
             submitOnEnter={false}
             onKeyDown={(e) => {
+              // ⌘/Ctrl+S → open voice (speaking) mode, in any composer state.
+              if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+                e.preventDefault();
+                setVoiceOpen(true);
+                return;
+              }
               // Terminal mode: most keys edit the visible buffer (relayed via the
               // diff). Intercept only the keys that must go straight to the shell.
               if (terminal) {
                 if (e.metaKey) return; // ⌘ combos belong to the browser/OS
+                // Esc leaves terminal mode → back to composer. (Send a literal
+                // Escape to the shell via the on-screen key bar's Esc button.)
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setTerminal(false);
+                  refocusComposer();
+                  return;
+                }
                 const s = sticky;
                 const ctrl = e.ctrlKey || s.ctrl;
                 const alt = e.altKey || s.alt;
@@ -426,6 +440,32 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                   const tok = controlToken({ ctrl, alt }, e.key);
                   if (tok) shell.key(tok);
                   if (s.ctrl || s.alt) setSticky({ ctrl: false, alt: false });
+                  return;
+                }
+                // Arrows / nav with hardware modifiers (Magic Keyboard): Opt/Ctrl/
+                // Shift + arrow → word-jump / selection escape sequences.
+                const nav = navToken(e.key, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
+                if (nav) {
+                  e.preventDefault();
+                  shell.key(nav);
+                  return;
+                }
+                // Backspace/Del must reach the shell EVEN when the buffer is empty
+                // (the shell line may hold echoed/completed text the buffer doesn't).
+                if (e.key === 'Backspace') {
+                  e.preventDefault();
+                  shell.key('BSpace');
+                  const cur = composer.getState().text ?? '';
+                  if (cur) {
+                    const next = cur.slice(0, -1);
+                    composer.setText(next);
+                    termPrevRef.current = next;
+                  }
+                  return;
+                }
+                if (e.key === 'Delete') {
+                  e.preventDefault();
+                  shell.key('DC');
                   return;
                 }
                 const tok = interceptToken(e.key, e.shiftKey);
@@ -438,6 +478,13 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                   }
                 }
                 return; // everything else edits the buffer; the relay handles it
+              }
+              // Leading "!" on an empty composer drops into terminal mode (shell
+              // bang); the "!" is consumed, not typed.
+              if (empty && e.key === '!') {
+                e.preventDefault();
+                setTerminal(true);
+                return;
               }
               // Skill autocomplete nav takes precedence while the dropdown is open.
               if (acOpen) {
@@ -488,6 +535,11 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             rows={1}
             disabled={disabled && !terminal}
             autoComplete="off"
+            // Terminal mode is a raw keystroke relay — kill iOS autocorrect /
+            // autocapitalisation / spellcheck so they don't mangle commands.
+            autoCorrect={terminal ? 'off' : undefined}
+            autoCapitalize={terminal ? 'none' : undefined}
+            spellCheck={terminal ? false : undefined}
           />
           {terminal ? (
             <div className="composer-hint" aria-hidden="true">

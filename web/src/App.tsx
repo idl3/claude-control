@@ -515,6 +515,17 @@ function AppInner() {
             <span className="ptr-spinner" />
           </div>
         ) : null}
+        {/* Hard-reload the app (bottom-left). Assets are hashed + served fresh,
+            so a plain reload fetches the latest bundle. */}
+        <button
+          type="button"
+          className="reload-btn"
+          aria-label="Reload app"
+          title="Reload app"
+          onClick={() => window.location.reload()}
+        >
+          ↻
+        </button>
         {/* Fixed top scrim: on mobile, focusing the composer makes iOS scroll the
             whole app up to clear the keyboard, pushing the nav bars off and
             sliding message text under the status bar. This dissolves that text

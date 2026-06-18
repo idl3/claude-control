@@ -69,3 +69,29 @@ export function interceptToken(key: string, shift = false): string | null {
   if (key === 'Tab') return shift ? 'BTab' : 'Tab';
   return KEYDOWN_INTERCEPT[key] ?? null;
 }
+
+// Navigation keys → tmux base token. Modifier prefixes are added by navToken.
+const NAV: Record<string, string> = {
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PPage',
+  PageDown: 'NPage',
+};
+
+/**
+ * Map an arrow / nav key + hardware modifiers to a tmux token, prefixing
+ * C- (Ctrl), M- (Opt/Meta), S- (Shift) in that order — e.g. Opt+Shift+Left →
+ * "M-S-Left". These must be present in the backend SHELL_KEYS allow-list. ⌘
+ * (Cmd) is deliberately NOT a prefix: the browser/OS reserves it and it isn't a
+ * terminal modifier. Returns null for non-nav keys.
+ */
+export function navToken(key: string, mods: { ctrl?: boolean; alt?: boolean; shift?: boolean }): string | null {
+  const base = NAV[key];
+  if (!base) return null;
+  const prefix = `${mods.ctrl ? 'C-' : ''}${mods.alt ? 'M-' : ''}${mods.shift ? 'S-' : ''}`;
+  return prefix + base;
+}
