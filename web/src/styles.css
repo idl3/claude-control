@@ -4048,3 +4048,39 @@ select.config-input {
   padding: 1px 5px;
   margin-left: auto;
 }
+
+/* ── Reload button (bottom-left, fixed) ─────────────────────────── */
+.reload-btn {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 60;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg-1, var(--bg));
+  color: var(--text-dim, var(--text));
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: opacity var(--ease) 0.15s, background var(--ease) 0.15s, transform var(--ease) 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.reload-btn:hover {
+  opacity: 1;
+  background: var(--bg-hover, var(--bg-2));
+}
+.reload-btn:active {
+  transform: rotate(180deg);
+}
+.reload-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
+}
