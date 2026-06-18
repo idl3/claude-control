@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { listTranscripts, setPin, type TranscriptInfo } from '../lib/api';
 import type { Session } from '../lib/types';
+import { useModalTransition } from '../lib/anim';
 
 interface PinModalProps {
   session: Session;
@@ -25,7 +26,8 @@ function fmtWhen(iso: string | null): string {
  * Manually bind this session to a transcript file (escape hatch for sessions the
  * auto-matcher can't resolve: path drift, window-name ≠ session-title, etc).
  */
-export function PinModal({ session, onClose, onToast, onPinned }: PinModalProps) {
+export function PinModal({ session, onClose: rawClose, onToast, onPinned }: PinModalProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [items, setItems] = useState<TranscriptInfo[] | null>(null);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
@@ -70,7 +72,7 @@ export function PinModal({ session, onClose, onToast, onPinned }: PinModalProps)
   };
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="modal-backdrop" ref={rootRef} role="dialog" aria-modal="true" onClick={onClose}>
       <div className="modal pin-modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <span className="modal-title">Pin transcript — {session.name || session.id}</span>
