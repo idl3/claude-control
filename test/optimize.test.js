@@ -82,7 +82,7 @@ test('rulesOptimize does not mutate the input string', () => {
 
 test('optimizePrompt with valid JSON mock → mode:llm, parsed fields', async () => {
   const envelope = JSON.stringify({
-    optimized: 'Rewritten prompt text.',
+    optimized: 'Fix the broken stuff in the build.',
     rationale: ['clarity improved'],
     changes: ['added specificity'],
   });
@@ -90,7 +90,7 @@ test('optimizePrompt with valid JSON mock → mode:llm, parsed fields', async ()
 
   const result = await optimizePrompt('fix my stuff', { complete: mockComplete });
   assert.equal(result.mode, 'llm');
-  assert.equal(result.optimized, 'Rewritten prompt text.');
+  assert.equal(result.optimized, 'Fix the broken stuff in the build.');
   assert.deepEqual(result.rationale, ['clarity improved']);
   assert.deepEqual(result.changes, ['added specificity']);
 });

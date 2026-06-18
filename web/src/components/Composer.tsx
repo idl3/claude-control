@@ -423,6 +423,14 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               // diff). Intercept only the keys that must go straight to the shell.
               if (terminal) {
                 if (e.metaKey) return; // ⌘ combos belong to the browser/OS
+                // Esc leaves terminal mode → back to composer. (Send a literal
+                // Escape to the shell via the on-screen key bar's Esc button.)
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setTerminal(false);
+                  refocusComposer();
+                  return;
+                }
                 const s = sticky;
                 const ctrl = e.ctrlKey || s.ctrl;
                 const alt = e.altKey || s.alt;
