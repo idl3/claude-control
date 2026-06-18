@@ -117,6 +117,13 @@ export interface PanePrompt {
   options: PanePromptOption[];
 }
 
+export interface PowerStatus {
+  hasBattery: boolean;
+  percent?: number | null;
+  charging?: boolean;
+  low?: boolean;
+}
+
 export interface ResourceSnapshot {
   self?: { cpuPct?: number; rssMB?: number; heapMB?: number };
   system?: {
@@ -126,7 +133,18 @@ export interface ResourceSnapshot {
     freeMB?: number;
     memUsedPct?: number;
   };
+  /** Battery/power status (darwin only); null/absent when unavailable. */
+  power?: PowerStatus | null;
   overLimit?: boolean;
+}
+
+export interface ProcessInfo {
+  pid: number;
+  ppid: number;
+  cpu: number;
+  mem: number;
+  rssMB: number;
+  command: string;
 }
 
 // Server -> client WebSocket frames.

@@ -3,7 +3,6 @@ import { createSession } from '../lib/api';
 
 interface NewSessionFormProps {
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
-  onOpenSettings: () => void;
 }
 
 /** Client-side mirror of the server's `session-<short-ts>` default name. */
@@ -18,7 +17,7 @@ function defaultName(now: number = Date.now()): string {
  * which names the tmux window and launches Claude with `--name <name>`. The new
  * window appears in the rail on the next registry refresh.
  */
-export function NewSessionForm({ onToast, onOpenSettings }: NewSessionFormProps) {
+export function NewSessionForm({ onToast }: NewSessionFormProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -64,15 +63,6 @@ export function NewSessionForm({ onToast, onOpenSettings }: NewSessionFormProps)
           onClick={() => setOpen(true)}
         >
           + New session
-        </button>
-        <button
-          type="button"
-          className="rail-gear"
-          aria-label="Settings"
-          title="Settings"
-          onClick={onOpenSettings}
-        >
-          ⚙
         </button>
       </div>
     );

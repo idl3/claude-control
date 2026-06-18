@@ -6,6 +6,8 @@ import { useModalTransition } from '../lib/anim';
 interface SkillBrowserProps {
   onPick: (name: string) => void;
   onClose: () => void;
+  /** Pass the current session id to include project-local skills. */
+  sessionId?: string | null;
 }
 
 /**
@@ -22,7 +24,7 @@ interface SkillBrowserProps {
  * Invocation: tapping a card calls onPick(name) — the composer prefills
  * `/<name> ` and the browser closes. NEVER auto-sends.
  */
-export function SkillBrowser({ onPick, onClose: rawClose }: SkillBrowserProps) {
+export function SkillBrowser({ onPick, onClose: rawClose, sessionId }: SkillBrowserProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const narrow = useIsNarrow();
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -30,11 +32,11 @@ export function SkillBrowser({ onPick, onClose: rawClose }: SkillBrowserProps) {
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Load skills on mount.
+  // Load skills on mount (pass sessionId for project-aware listing).
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    listSkills()
+    listSkills(sessionId)
       .then((s) => {
         if (alive) {
           setSkills(s);
@@ -141,8 +143,8 @@ export function SkillBrowser({ onPick, onClose: rawClose }: SkillBrowserProps) {
                   </>
                 ) : null}
               </span>
-              {skill.source === 'plugin' ? (
-                <span className="skill-source-tag">plugin</span>
+              {skill.source === 'project' ? (
+                <span className="skill-source-tag">project</span>
               ) : null}
             </button>
           ))

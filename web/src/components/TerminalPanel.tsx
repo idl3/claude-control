@@ -7,6 +7,8 @@ interface TerminalPanelProps {
   sessionId: string;
   /** Display label for the panel header. */
   label: string;
+  /** When false the panel is mounted but hidden (warm/preloaded). */
+  visible: boolean;
   onClose: () => void;
 }
 
@@ -17,39 +19,88 @@ interface TerminalPanelProps {
  * mobile keyboards). The iframe loads `/term/<id>?token=…`, served by
  * claude-control's token-gated reverse proxy in front of a loopback ttyd.
  */
-export function TerminalPanel({ sessionId, label, onClose }: TerminalPanelProps) {
+export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPanelProps) {
   const url = terminalUrl(sessionId);
   const frameRef = useRef<HTMLIFrameElement>(null);
 
-  // Esc closes. We deliberately do NOT focus the close button on open: if it
-  // held focus, a stray Enter/Space (meant for the terminal) would activate it
-  // and close the panel. Only Escape closes (see shouldCloseOnKey); Enter/Space
-  // are left for the terminal. The close button stays Tab-reachable.
+  // Esc closes — only while visible (the panel stays mounted but hidden when
+  // warm/preloaded, and a hidden panel must not swallow Escape).
   useEffect(() => {
+    if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
       if (shouldCloseOnKey(e.key)) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, visible]);
 
-  // Move focus into the terminal iframe (initialFocusTarget === 'frame'), never
-  // the close button, so typing goes straight to ttyd. Focusing the <iframe>
-  // element (same-origin proxy) hands keyboard input to the embedded document.
-  // We focus on the iframe's load event and also eagerly on mount, in case the
-  // frame is already loaded when the effect runs (cached / instant load).
+  // Move focus into the terminal iframe (never the close button) when the panel
+  // becomes visible, so typing goes straight to ttyd. The iframe keeps its src
+  // loaded while hidden, so this is instant on a warm panel.
   const focusFrame = () => {
-    if (initialFocusTarget === 'frame') frameRef.current?.focus();
+    if (visible && initialFocusTarget === 'frame') frameRef.current?.focus();
+  };
+  // When hiding, pull focus OUT of the (now hidden) iframe back into the parent
+  // document — otherwise focus stays trapped in the ttyd frame and window-level
+  // hotkeys (⌘J to reopen, etc.) don't fire until the user clicks the page.
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    if (visible) {
+      focusFrame();
+    } else if (wasVisible.current) {
+      try {
+        frameRef.current?.blur();
+      } catch {
+        /* ignore */
+      }
+      const el = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+      el.setAttribute('tabindex', '-1');
+      el.focus({ preventScroll: true });
+    }
+    wasVisible.current = visible;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  // ⌘/Ctrl+J closes — but while the iframe has focus, tmux/xterm swallow the
+  // keystroke, so the parent window never sees it. The ttyd surface is served
+  // same-origin (via our /term proxy), so we can attach a capture-phase keydown
+  // listener INSIDE the iframe document to catch the close shortcut there too.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // One stable handler so re-attaching across loads never stacks duplicates.
+  const frameKeyHandler = useRef((e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'j' || e.key === 'J')) {
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseRef.current();
+    }
+  });
+  const attachFrameKeys = () => {
+    const win = frameRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      win.removeEventListener('keydown', frameKeyHandler.current, true);
+      win.addEventListener('keydown', frameKeyHandler.current, true);
+    } catch {
+      /* cross-origin or detached frame — ignore */
+    }
+  };
+  const onFrameLoad = () => {
+    focusFrame();
+    attachFrameKeys();
   };
   useEffect(() => {
-    focusFrame();
+    attachFrameKeys();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div
       className="term-overlay"
+      data-visible={visible ? 'true' : 'false'}
       role="dialog"
       aria-modal="true"
+      aria-hidden={visible ? undefined : 'true'}
       aria-label={`Raw terminal — ${label}`}
     >
       <header className="term-head">
@@ -81,7 +132,7 @@ export function TerminalPanel({ sessionId, label, onClose }: TerminalPanelProps)
         className="term-frame"
         src={url}
         title={`Raw terminal for ${label}`}
-        onLoad={focusFrame}
+        onLoad={onFrameLoad}
       />
     </div>
   );

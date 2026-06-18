@@ -140,8 +140,17 @@ body {
 }
 .rail {
   width: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
+}
+/* Scrollable middle: session list grows; header + foot bar stay pinned. */
+.rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 .detail {
@@ -171,7 +180,7 @@ body {
   }
   .app[data-detail='open'] .rail,
   .app[data-detail='closed'] .rail {
-    display: block;
+    display: flex;
   }
   .back-btn {
     display: none !important;
@@ -236,23 +245,43 @@ body {
   flex-direction: column;
   gap: 4px;
 }
-.pane-glyph {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
-  opacity: 0.7;
-  margin-right: 2px;
+/* Single leading icon per row (Claude / terminal). Opacity carries the active-
+   pane signal that the old green/grey orb used to. */
+.pane-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.4;
+  transition: opacity var(--ease) 0.15s;
 }
+.pane-icon[data-active='true'] {
+  opacity: 1;
+}
+.pane-icon[data-kind='terminal'] {
+  color: var(--accent-2);
+}
+/* Shell/terminal rows are a single lean line: dashed card, tighter padding, and
+   the cwd sits inline on the name row (right-aligned + dim) — no second line. */
 .session-item[data-kind='terminal'] {
   background: transparent;
   border-style: dashed;
   border-color: var(--line);
-}
-.session-item[data-kind='terminal'] .pane-glyph {
-  color: var(--red, #e5534b);
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 .meta-cwd {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   opacity: 0.7;
+}
+.meta-cwd-inline {
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+  font-size: var(--txt-meta);
 }
 /* Full-pane terminal (a selected terminal pane, not the composer >_ overlay):
    the view FILLS the main area like the transcript, with the input pinned below.
@@ -317,17 +346,6 @@ body {
   align-items: center;
   gap: 7px;
 }
-.active-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: var(--text-faint);
-}
-.active-dot[data-on='true'] {
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
-}
 .session-name {
   font-size: 13px;
   font-weight: 600;
@@ -362,10 +380,6 @@ body {
   color: var(--text-dim);
   align-items: center;
 }
-.meta-prov {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
-}
 .meta-model {
   color: var(--accent-2);
   overflow: hidden;
@@ -379,6 +393,7 @@ body {
   border-radius: 5px;
   background: var(--bg-2);
   color: var(--text-dim);
+  margin-left: auto; /* right-align ctx within the meta row */
 }
 .session-empty {
   list-style: none;
@@ -393,6 +408,8 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
+  min-height: 48px;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
@@ -409,19 +426,74 @@ body {
 }
 .detail-title {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+/* Right-aligned action cluster: uniform small icon buttons. */
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.detail-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s, border-color var(--ease) 0.15s;
+}
+.detail-action:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.detail-action[data-on='true'] {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+.detail-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.detail-action-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .detail-name {
   font-weight: 700;
   font-size: 13px;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* cwd rendered as a chip/tag beside the name. */
 .detail-cwd {
-  font-size: var(--txt-meta);
-  color: var(--text-faint);
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: 45%;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1010,6 +1082,23 @@ body {
   color: #fff;
   font-size: 11px;
   text-align: center;
+}
+/* Blurred scrim behind the sub-agent drawer (matches .modal-backdrop). */
+.sa-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 899;
+  background: oklch(8% 0.01 260 / 0.6);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: sa-backdrop-in 0.2s ease both;
+}
+@keyframes sa-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sa-backdrop { animation: none; }
 }
 .sa-panel {
   position: fixed;
@@ -2017,6 +2106,7 @@ details.block-tool[open] > summary .tool-arrow,
   position: fixed;
   inset: 0;
   background: oklch(8% 0.01 260 / 0.6);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-end;
@@ -2238,7 +2328,7 @@ details.block-tool[open] > summary .tool-arrow,
   justify-content: center;
   height: 18px;
   min-width: 18px;
-  padding: 0 5px;
+  padding: 0 7px;
   border-radius: 5px;
   border: 1px solid var(--line);
   background: var(--bg-1);
@@ -2246,6 +2336,7 @@ details.block-tool[open] > summary .tool-arrow,
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.08em; /* breathing room so ⌘/Ctrl+↵ isn't cramped */
   line-height: 1;
   color: var(--text-dim);
   pointer-events: none;
@@ -2450,13 +2541,15 @@ details.block-tool[open] > summary .tool-arrow,
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 8px 10px;
+  min-height: 48px;
+  box-sizing: border-box;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 .rail-new {
   flex: 1;
-  height: var(--hud-h);
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2665,7 +2758,10 @@ details.block-tool[open] > summary .tool-arrow,
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: oklch(0% 0 0 / 0.55);
+  /* Standardised with .modal-backdrop so every overlay reads the same. */
+  background: oklch(8% 0.01 260 / 0.6);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 .config-modal {
   width: 100%;
@@ -2873,6 +2969,27 @@ select.config-input {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  /* Mounted-but-hidden by default (warm/preloaded): the ttyd iframe loads in the
+     background, and we fade + zoom it in/out so opening never flashes. */
+  opacity: 0;
+  transform: scale(0.97);
+  transform-origin: center 42%;
+  pointer-events: none;
+  transition: opacity 0.24s var(--ease, ease), transform 0.24s var(--ease, ease);
+}
+.term-overlay[data-visible='true'] {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .term-overlay {
+    transition: opacity 0.12s linear;
+    transform: none;
+  }
+  .term-overlay[data-visible='true'] {
+    transform: none;
+  }
 }
 .term-head {
   display: flex;
@@ -3129,6 +3246,58 @@ select.config-input {
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-faint);
+}
+
+/* ── Skill legend (side-panel artifact renderer) ──────────────────
+   Renders when kind === 'skill' in the artifact panel. Shows the
+   front-matter as a compact key/value legend and the markdown body. */
+.skill-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.skill-legend-source-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.skill-legend-source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text-faint);
+}
+.skill-legend-source-badge[data-source='project'] {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--line));
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg));
+}
+/* Chip-list front-matter values (e.g. comma-separated tools). */
+.skill-fm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skill-fm-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 /* ── Skill modal ──────────────────────────────────────────────────
@@ -3455,12 +3624,16 @@ select.config-input {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
-  white-space: pre;
-  overflow-x: auto;
+  /* Wrap long lines instead of forcing a horizontal scroll — tool output is
+     often prose/JSON that should reflow to the panel width. Code keeps its
+     indentation (pre-wrap), but never blows out the panel. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
   color: var(--text);
   background: var(--bg);
   min-height: 100%;
-  -webkit-overflow-scrolling: touch;
 }
 .artifact-pre code {
   display: block;
@@ -4049,40 +4222,13 @@ select.config-input {
   margin-left: auto;
 }
 
-/* ── Reload button (bottom-left, fixed) ─────────────────────────── */
-.reload-btn {
-  position: fixed;
-  left: max(12px, env(safe-area-inset-left));
-  bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 60;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--bg-1, var(--bg));
-  color: var(--text-dim, var(--text));
+/* ── Reload button (lives in the rail foot, beside Settings) ─────── */
+.reload-foot {
   font-size: 18px;
   line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  transition: opacity var(--ease) 0.15s, background var(--ease) 0.15s, transform var(--ease) 0.15s;
-  -webkit-tap-highlight-color: transparent;
 }
-.reload-btn:hover {
-  opacity: 1;
-  background: var(--bg-hover, var(--bg-2));
-}
-.reload-btn:active {
+.reload-foot:active {
   transform: rotate(180deg);
-}
-.reload-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  opacity: 1;
 }
 
 /* ── Optimiser auto-send: depleting ring around the Send button ──── */
@@ -4239,4 +4385,422 @@ select.config-input {
 }
 @media (prefers-reduced-motion: reduce) {
   .terminal-loading-spinner { animation: none; }
+}
+
+/* ── Kept-warm terminal wrapper (composer >_) ───────────────────── */
+/* Mounted + polling while hidden so re-opening is flash-free; GSAP fades+zooms
+   it in/out. Starts hidden (opacity 0) to avoid a first-paint flash before the
+   show tween runs. */
+.term-warm {
+  width: 100%;
+  opacity: 0;
+}
+
+/* ── Rail foot bar: settings + process monitor, pinned at sidebar bottom ── */
+.rail-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.rail-foot-btn {
+  height: var(--hud-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+}
+.rail-foot-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.rail-foot-btn.rail-foot-icon {
+  flex: 0 0 auto;
+  width: var(--hud-h);
+  padding: 0;
+}
+.rail-foot-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── HUD battery chip ──────────────────────────────────────────── */
+.hud-battery {
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+.hud-battery[data-charging='true'] {
+  color: var(--green);
+}
+.hud-battery[data-low='true'] {
+  color: var(--red);
+}
+
+/* ── Process monitor modal ─────────────────────────────────────── */
+.modal-process {
+  max-width: 720px;
+  width: 92vw;
+}
+.proc-power {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--txt-meta);
+  color: var(--text-dim);
+}
+.proc-power[data-low='true'] {
+  color: var(--red);
+}
+.proc-body {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  max-height: min(60vh, 540px);
+  overflow-y: auto;
+  padding: 0;
+}
+.proc-row {
+  display: grid;
+  grid-template-columns: 56px 44px 52px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.proc-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-1);
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.proc-pid { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.proc-cpu { font-variant-numeric: tabular-nums; text-align: right; }
+.proc-cpu[data-hot='true'] { color: var(--amber); font-weight: 700; }
+.proc-mem { font-variant-numeric: tabular-nums; text-align: right; color: var(--text-dim); }
+.proc-cmd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.proc-act { display: flex; justify-content: flex-end; }
+.proc-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-faint);
+}
+.proc-kill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.proc-kill:hover {
+  color: var(--red);
+  background: color-mix(in oklch, var(--red) 14%, transparent);
+}
+.proc-confirm {
+  display: inline-flex;
+  gap: 4px;
+}
+.proc-kill-yes,
+.proc-kill-no {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 3px 7px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+.proc-kill-yes {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+.proc-kill-yes:disabled { opacity: 0.6; cursor: default; }
+.proc-kill-no {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+/* ── Optimiser: more vertical room on desktop for larger prompts ── */
+@media (min-width: 760px) {
+  .modal-optimize .modal-body {
+    max-height: min(74vh, 760px);
+  }
+  .modal-optimize .optimize-suggestion {
+    min-height: 220px;
+    max-height: 48vh;
+  }
+}
+
+/* ─── Hotkey hint badges (HotkeyHints overlay) ──────────────────────────────
+   Floats a keycap-style badge above controls while the Cmd/Ctrl modifier is
+   held. Positioned inline (top/left/transform) by the component; this class
+   handles appearance only. z-index 200 sits above modals (50–100). */
+.hotkey-hint {
+  z-index: 200;
+  background: oklch(96% 0.045 95); /* mild, pale yellow */
+  color: #2a2510;
+  border: 1px solid oklch(88% 0.06 92);
+  border-radius: 6px;
+  padding: 3px 7px 3px 9px; /* +left to balance trailing letter-spacing */
+  font-family: ui-monospace, 'SFMono-Regular', 'Cascadia Code', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em; /* breathing room between the keys */
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow:
+    0 1px 0 oklch(82% 0.06 90),
+    0 2px 6px rgba(0, 0, 0, 0.22);
+  transform: translateX(-50%); /* horizontal centre over the target */
+  animation: hotkey-hint-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Slide in TOWARD the target: badges above ease up, badges below ease down. */
+.hotkey-hint[data-above='true'] {
+  transform-origin: center bottom;
+  --hk-from: 4px;
+}
+.hotkey-hint[data-above='false'] {
+  transform-origin: center top;
+  --hk-from: -4px;
+}
+
+@keyframes hotkey-hint-in {
+  from {
+    opacity: 0;
+    scale: 0.82;
+    translate: 0 var(--hk-from, 4px);
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hotkey-hint {
+    animation: none;
+  }
+}
+
+/* ── Scroll-to-bottom: tail new replies ─────────────────────────── */
+/* Lives inside the viewport, stuck to its bottom-right edge (above the
+   composer) so it never overlaps composer text. align-self pins it to the
+   right gutter — the centered transcript column on desktop, the 12px gutter on
+   mobile. The primitive disables itself at the bottom → CSS fades it out. */
+.scroll-to-bottom {
+  position: sticky;
+  bottom: 4px;
+  align-self: flex-end;
+  margin-top: -38px; /* overlay the last row's gutter, don't add height */
+  margin-right: 2px;
+  z-index: 5;
+  /* Fixed circle: flex:0 0 auto stops the column flex from shrinking its height
+     (which squished it into an oval). */
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg-1, var(--bg));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 1;
+  transition: opacity var(--ease) 0.18s, transform var(--ease) 0.18s, background var(--ease) 0.15s;
+}
+.scroll-to-bottom:hover {
+  background: var(--bg-hover, var(--bg-2));
+}
+.scroll-to-bottom:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* At the bottom the primitive sets [disabled] — fade + drop out of the way. */
+.scroll-to-bottom:disabled {
+  opacity: 0;
+  transform: translateY(10px) scale(0.9);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-to-bottom {
+    transition: opacity 0.12s linear;
+  }
+}
+
+/* ── Process monitor: full-screen on mobile ─────────────────────── */
+@media (max-width: 759px) {
+  .modal-process {
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  /* Clear the notch/status bar. */
+  .modal-process .modal-head {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  /* Process list fills the remaining height instead of a fixed cap. */
+  .modal-process .proc-body {
+    max-height: none;
+    flex: 1 1 auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ── Queued sends in transcript-less (LivePane) sessions ────────── */
+/* No transcript thread here, so show what was sent + that it's in flight. */
+.live-pending {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.live-pending-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0.9;
+}
+.live-pending-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+  animation: pulse 1.2s var(--ease) infinite;
+}
+
+/* ── Optimiser: wider on desktop to use horizontal space + scroll less ── */
+@media (min-width: 760px) {
+  .modal-optimize {
+    max-width: min(1040px, 94vw);
+  }
+}
+
+/* ── Icon delight: foot bar + composer ─────────────────────────── */
+@keyframes foot-pulse {
+  50% {
+    transform: scale(1.14);
+  }
+}
+/* Refresh: larger on desktop, rotates on hover, full spin on click. */
+@media (min-width: 760px) {
+  .reload-foot {
+    font-size: 22px;
+  }
+}
+.reload-foot {
+  transition: transform 0.45s var(--ease), color 0.15s var(--ease),
+    border-color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.reload-foot:hover {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+.reload-foot:active {
+  transform: rotate(360deg);
+}
+/* Processes: pulse in the accent on hover. */
+.rail-foot-icon:not(.reload-foot):hover {
+  color: var(--accent);
+  animation: foot-pulse 0.9s var(--ease) infinite;
+}
+/* Settings cog: rotates on hover. */
+.rail-foot-btn:not(.rail-foot-icon) svg {
+  transition: transform 0.5s var(--ease);
+}
+.rail-foot-btn:not(.rail-foot-icon):hover svg {
+  transform: rotate(120deg);
+}
+/* Composer toolbar icons: subtle lift / press; mic pulses; send leans in. */
+.composer-attach,
+.composer-skills-btn,
+.composer-mic,
+.composer-send,
+.composer-enhance {
+  transition: transform 0.15s var(--ease), color 0.15s var(--ease),
+    background 0.15s var(--ease), filter 0.15s var(--ease);
+}
+.composer-attach:hover,
+.composer-skills-btn:hover {
+  color: var(--accent);
+  transform: translateY(-1px) scale(1.08);
+}
+.composer-attach:active,
+.composer-skills-btn:active,
+.composer-mic:active,
+.composer-send:active {
+  transform: scale(0.92);
+}
+.composer-mic:hover {
+  color: var(--accent);
+  animation: foot-pulse 1s var(--ease) infinite;
+}
+.composer-send:hover {
+  transform: translateY(-1px) scale(1.06);
+  filter: brightness(1.08);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reload-foot,
+  .reload-foot:hover,
+  .reload-foot:active,
+  .rail-foot-icon:not(.reload-foot):hover,
+  .rail-foot-btn:not(.rail-foot-icon):hover svg,
+  .composer-attach,
+  .composer-skills-btn,
+  .composer-mic,
+  .composer-mic:hover,
+  .composer-send,
+  .composer-send:hover {
+    animation: none !important;
+    transform: none !important;
+  }
 }

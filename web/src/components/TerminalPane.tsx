@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { TerminalView } from './TerminalView';
 import { useTerminalRelay } from '../hooks/useTerminalRelay';
+import gsap, { prefersReducedMotion } from '../lib/anim';
 
 interface TerminalPaneProps {
   /** Selected pane id (tmux target) — re-arms capture on change. */
@@ -40,8 +41,20 @@ export function TerminalPane({
   );
   const relay = useTerminalRelay(ops);
 
+  // Fade + zoom in when the pane mounts (selecting a terminal session).
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || prefersReducedMotion()) return;
+    gsap.fromTo(
+      el,
+      { opacity: 0, scale: 0.97 },
+      { opacity: 1, scale: 1, duration: 0.24, ease: 'power3.out', transformOrigin: 'center top' },
+    );
+  }, []);
+
   return (
-    <div className="thread-root terminal-pane-root">
+    <div className="thread-root terminal-pane-root" ref={rootRef}>
       <div className="thread-fade" aria-hidden="true" />
       <TerminalView
         key={sessionId}

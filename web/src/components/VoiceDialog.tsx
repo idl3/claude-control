@@ -246,16 +246,25 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
   }, [teardownAudio, onClose]);
 
   // Esc cancels (but not mid-transcribe — that's a network call in flight).
+  // ⌘/Ctrl+Enter = Stop & Insert, so you never have to reach for the button:
+  // it ends recording and kicks off transcription in one keystroke.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && status !== 'transcribing') {
         e.preventDefault();
         cancel();
+      } else if (
+        e.key === 'Enter' &&
+        (e.metaKey || e.ctrlKey) &&
+        (status === 'recording' || status === 'paused')
+      ) {
+        e.preventDefault();
+        stop();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cancel, status]);
+  }, [cancel, stop, status]);
 
   const statusLabel =
     status === 'error'
@@ -294,7 +303,7 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
             <span className="voice-placeholder">Converting speech to text…</span>
           ) : (
             <span className="voice-placeholder">
-              Speak, then tap “Stop &amp; insert” to transcribe.
+              Speak, then “Stop &amp; Insert” (or ⌘/Ctrl+↵) to transcribe.
             </span>
           )}
         </div>

@@ -10,7 +10,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession } from './lib/api';
+import { renameSession, createSession } from './lib/api';
 import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -28,9 +28,19 @@ import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
-import { PinModal } from './components/PinModal';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
+import { ProcessPanel } from './components/ProcessPanel';
+import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
+import { HotkeyHints } from './components/HotkeyHints';
+import {
+  PencilIcon,
+  TerminalSquareIcon,
+  BotIcon,
+  PanelLeftIcon,
+  SettingsIcon,
+  ActivityIcon,
+} from './components/icons';
 import type { Msg, ServerMessage } from './lib/types';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import gsap, { prefersReducedMotion } from './lib/anim';
@@ -217,13 +227,28 @@ function AppInner() {
         if (t) echoes.push(t);
       }
       if (echoes.length) {
+        // Whitespace-insensitive matching. The transcript echo can differ from
+        // the exact sent string (collapsed whitespace, attachment paths stored
+        // as separate blocks so the typed text is a prefix, an optimiser rewrite,
+        // etc.). Try precise/prefix matches first; if none, fall back to clearing
+        // the OLDEST pending for the session (FIFO) so a stray-format echo can't
+        // strand a duplicate bubble forever.
+        const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
         setPendingSends((q) => {
           const next = [...q];
-          for (const t of echoes) {
-            const idx = next.findIndex(
-              (e) => e.sessionId === sid && e.text.trim() === t,
-            );
-            if (idx >= 0) next.splice(idx, 1);
+          for (const raw of echoes) {
+            const t = norm(raw);
+            const sescit = next
+              .map((e, i) => ({ e, i }))
+              .filter(({ e }) => e.sessionId === sid);
+            if (sescit.length === 0) continue;
+            const match =
+              sescit.find(({ e }) => {
+                const text = norm(e.text);
+                const label = norm(e.label);
+                return text === t || label === t || t.startsWith(label) || text.startsWith(t);
+              }) ?? sescit[0]; // fallback: oldest pending for this session
+            next.splice(match.i, 1);
           }
           return next;
         });
@@ -299,14 +324,27 @@ function AppInner() {
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
-    // Each still-unmatched queued send shows as a user bubble (oldest first).
+    // Each still-unmatched queued send shows as a user bubble, INTERLEAVED by its
+    // send time — inserted before the first transcript message that's newer — so
+    // a message sent while the agent was mid-reply lands chronologically (even if
+    // that splits the agent's turn) rather than all piling at the bottom.
     for (const e of selectedPending) {
-      base.push({
+      const bubble = {
         role: 'user',
         id: `queued-${e.key}`,
+        createdAt: new Date(e.at),
         content: [{ type: 'text', text: e.label }],
         metadata: { custom: { cockpitRole: 'user', optimistic: true } },
-      } as ThreadMessageLike);
+      } as ThreadMessageLike;
+      let idx = base.length;
+      for (let i = 0; i < base.length; i++) {
+        const c = base[i].createdAt;
+        if (c instanceof Date && c.getTime() > e.at) {
+          idx = i;
+          break;
+        }
+      }
+      base.splice(idx, 0, bubble);
     }
     const working =
       selectedPending.length > 0 ||
@@ -374,20 +412,68 @@ function AppInner() {
   // toolUseId) arrives, without needing the server to clear pending first.
   const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
 
-  // Settings modal.
+  // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
-  // Raw-terminal escape hatch: the session id whose ttyd panel is open, or null.
-  const [terminalId, setTerminalId] = useState<string | null>(null);
+  // Raw-terminal escape hatch with an LRU of warm ttyd panels. The server caps
+  // ttyd at 4 live (and self-evicts its oldest), so we keep at most the 4 most-
+  // recently-used terminals mounted in the background — reopening a recent one
+  // is instant; older ones unmount (the server reaps them). `terminalShown`
+  // toggles the CURRENT session's panel; switching sessions hides it.
+  const TERM_WARM_MAX = 4;
+  const [warmTerms, setWarmTerms] = useState<string[]>([]);
+  const [terminalShown, setTerminalShown] = useState(false);
 
-  // Pin-transcript modal, sub-agent side panel, and locally-hidden pane prompt
-  // (keyed by JSON signature so it re-shows when the prompt changes). Reset when
-  // the active session changes.
-  const [pinOpen, setPinOpen] = useState(false);
+  // Bump `id` to most-recently-used; cap the warm set at 4 (drop the oldest).
+  const touchWarm = useCallback((id: string) => {
+    setWarmTerms((w) => {
+      const next = [...w.filter((x) => x !== id), id];
+      return next.length > TERM_WARM_MAX ? next.slice(next.length - TERM_WARM_MAX) : next;
+    });
+  }, []);
+
+  // Preload the selected session's terminal in the background WHEN there's room
+  // (≤4 live), debounced so fast switching doesn't thrash ttyd. Once 4 are warm,
+  // browsing further doesn't preload — opening one then evicts the oldest.
+  useEffect(() => {
+    setTerminalShown(false);
+    const id = cockpit.selectedId;
+    if (!id) return;
+    const t = setTimeout(() => {
+      setWarmTerms((w) => {
+        if (w.includes(id)) return [...w.filter((x) => x !== id), id]; // refresh recency
+        if (w.length < TERM_WARM_MAX) return [...w, id];
+        return w; // full → leave it; openTerminal will evict-and-load on demand
+      });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [cockpit.selectedId]);
+
+  // Open: ensure the current session's panel is warm + visible. Toggle: same key
+  // (⌘J) flips it back out. Close keeps it warm for an instant reopen.
+  const openTerminal = useCallback(() => {
+    const id = cockpit.selectedId;
+    if (!id) return;
+    touchWarm(id);
+    setTerminalShown(true);
+  }, [cockpit.selectedId, touchWarm]);
+  const toggleTerminal = useCallback(() => {
+    const id = cockpit.selectedId;
+    if (!id) return;
+    setTerminalShown((v) => {
+      if (!v) touchWarm(id);
+      return !v;
+    });
+  }, [cockpit.selectedId, touchWarm]);
+
+  // Sub-agent side panel, process monitor, and locally-hidden pane prompt
+  // (keyed by JSON signature so it re-shows when the prompt changes). Reset the
+  // sub-agent panel when the active session changes.
   const [panelOpen, setPanelOpen] = useState(false);
+  const [processOpen, setProcessOpen] = useState(false);
   const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
   useEffect(() => {
-    setPinOpen(false);
     setPanelOpen(false);
   }, [cockpit.selectedId]);
 
@@ -411,6 +497,9 @@ function AppInner() {
     const name = (renaming ?? '').trim();
     setRenaming(null);
     if (!id || !name) return;
+    // No-op if the name didn't actually change — don't POST or toast.
+    const current = cockpit.sessions.find((s) => s.id === id)?.name;
+    if (name === current) return;
     try {
       await renameSession(id, name);
       showToast('Renamed →', 'ok');
@@ -420,7 +509,7 @@ function AppInner() {
         'error',
       );
     }
-  }, [cockpit.selectedId, renaming, showToast]);
+  }, [cockpit.selectedId, cockpit.sessions, renaming, showToast]);
 
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
@@ -480,6 +569,25 @@ function AppInner() {
       { opacity: 1, y: 0, duration: 0.22, ease: 'power3.out' },
     );
   }, [cockpit.selectedId]);
+
+  // Entering a session always jumps to the latest message — never inherit the
+  // previous session's scroll position. (assistant-ui's autoScroll then tails
+  // new replies from there.) Double-rAF so the new transcript has laid out.
+  useEffect(() => {
+    if (!cockpit.selectedId) return;
+    let r2 = 0;
+    const r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        document.querySelectorAll<HTMLElement>('.thread-viewport').forEach((vp) => {
+          vp.scrollTop = vp.scrollHeight;
+        });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+    };
+  }, [cockpit.selectedId]);
   const select = useCallback(
     (id: string) => {
       cockpit.select(id);
@@ -538,6 +646,169 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
+  // ⌘K / Ctrl-K toggles the command palette (swap sessions/terminals, jump to
+  // the raw tmux window, run global actions) from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Detail-head shortcuts (these mirror the header icon buttons + their reveal
+  // badges): ⌘E rename · ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'b') {
+        e.preventDefault();
+        toggleRail();
+      } else if (k === 'e' && selectedSession) {
+        e.preventDefault();
+        setRenaming(selectedSession.name ?? selectedSession.id);
+      } else if (k === 'j' && selectedSession) {
+        e.preventDefault();
+        toggleTerminal();
+      } else if (k === 'u' && cockpit.subagents.length > 0) {
+        e.preventDefault();
+        setPanelOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedSession, cockpit.subagents.length, toggleRail, toggleTerminal]);
+
+  // ⌘/Ctrl+1‑9 jumps to the Nth session/pane in the rail's order (session name →
+  // window → pane). Skipped while the command palette is open — it uses ⌘N for
+  // its own quick-select.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (paletteOpen) return;
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (!/^[1-9]$/.test(e.key)) return;
+      const ordered = cockpit.sessions
+        .filter((s) => s.kind !== 'terminal') // Claude Code sessions only
+        .sort(
+          (a, b) =>
+            (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
+            (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
+            (a.paneIndex ?? 0) - (b.paneIndex ?? 0),
+        );
+      const target = ordered[Number(e.key) - 1];
+      if (target) {
+        e.preventDefault();
+        select(target.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cockpit.sessions, paletteOpen, select]);
+
+  // ⌘/Ctrl+Enter from anywhere jumps focus back INTO the composer — but only when
+  // focus isn't already in a text field (where ⌘Enter means send/optimise) and no
+  // modal is open (whose own ⌘Enter handler should win).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.shiftKey) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable)) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog owns ⌘Enter
+      const composer = document.querySelector<HTMLTextAreaElement>('.composer .composer-input');
+      if (composer) {
+        e.preventDefault();
+        composer.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Palette command list: one switch entry per pane, then global actions
+  // (including "View raw tmux window" for the current session).
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const base = (cwd?: string) => (cwd ? cwd.replace(/\/$/, '').split('/').pop() || cwd : '');
+    const cmds: PaletteCommand[] = [];
+    // Sessions BEFORE Terminals; within each, mirror the rail's natural tmux
+    // order (session name → window → pane) so positions feel stable.
+    const ordered = [...cockpit.sessions].sort((a, b) => {
+      const at = a.kind === 'terminal' ? 1 : 0;
+      const bt = b.kind === 'terminal' ? 1 : 0;
+      if (at !== bt) return at - bt;
+      return (
+        (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
+        (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
+        (a.paneIndex ?? 0) - (b.paneIndex ?? 0)
+      );
+    });
+    for (const s of ordered) {
+      const term = s.kind === 'terminal';
+      cmds.push({
+        id: `switch:${s.id}`,
+        label: s.name || s.title || s.tmuxName || s.id,
+        hint: [term ? 'terminal' : base(s.cwd), s.pending ? 'ASK' : ''].filter(Boolean).join(' · '),
+        keywords: `${s.sessionName ?? ''} ${s.cwd ?? ''} ${s.id}`,
+        group: term ? 'Terminals' : 'Sessions',
+        run: () => select(s.id),
+      });
+    }
+    cmds.push(
+      {
+        id: 'act:tmux-window',
+        label: 'View raw tmux window',
+        hint: selectedSession ? selectedSession.name || selectedSession.id : 'select a session first',
+        group: 'Actions',
+        keywords: 'terminal ttyd pane window',
+        run: () => openTerminal(),
+      },
+      {
+        id: 'act:new-session',
+        label: 'New session',
+        group: 'Actions',
+        keywords: 'create start claude',
+        run: () => {
+          showToast('Creating session…');
+          createSession({})
+            .then((r) => showToast(`Session created → ${r.name}`, 'ok'))
+            .catch((err) => showToast(`New session failed: ${(err as Error).message}`, 'error'));
+        },
+      },
+      {
+        id: 'act:processes',
+        label: 'Processes & system',
+        group: 'Actions',
+        keywords: 'ps aux kill cpu memory battery power',
+        run: () => setProcessOpen(true),
+      },
+      {
+        id: 'act:settings',
+        label: 'Settings',
+        group: 'Actions',
+        keywords: 'config preferences model mlx',
+        run: () => setConfigOpen(true),
+      },
+      {
+        id: 'act:toggle-sidebar',
+        label: railCollapsed ? 'Show sidebar' : 'Hide sidebar (focus mode)',
+        group: 'Actions',
+        keywords: 'rail collapse focus',
+        run: () => toggleRail(),
+      },
+      {
+        id: 'act:reload',
+        label: 'Reload app',
+        group: 'Actions',
+        keywords: 'refresh',
+        run: () => window.location.reload(),
+      },
+    );
+    return cmds;
+  }, [cockpit.sessions, cockpit.selectedId, selectedSession, railCollapsed, select, toggleRail, showToast, openTerminal]);
+
   // The live "thinking" block is the trailing reasoning of the last real
   // transcript message, but only while the server says this session is actively
   // generating (`thinking`). Its message id is handed to the reasoning renderer
@@ -574,17 +845,6 @@ function AppInner() {
             <span className="ptr-spinner" />
           </div>
         ) : null}
-        {/* Hard-reload the app (bottom-left). Assets are hashed + served fresh,
-            so a plain reload fetches the latest bundle. */}
-        <button
-          type="button"
-          className="reload-btn"
-          aria-label="Reload app"
-          title="Reload app"
-          onClick={() => window.location.reload()}
-        >
-          ↻
-        </button>
         {/* Fixed top scrim: on mobile, focusing the composer makes iOS scroll the
             whole app up to clear the keyboard, pushing the nav bars off and
             sliding message text under the status bar. This dissolves that text
@@ -605,15 +865,46 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <NewSessionForm
-              onToast={showToast}
-              onOpenSettings={() => setConfigOpen(true)}
-            />
-            <SessionRail
-              sessions={cockpit.sessions}
-              selectedId={cockpit.selectedId}
-              onSelect={select}
-            />
+            <NewSessionForm onToast={showToast} />
+            <div className="rail-scroll">
+              <SessionRail
+                sessions={cockpit.sessions}
+                selectedId={cockpit.selectedId}
+                onSelect={select}
+              />
+            </div>
+            {/* Bottom bar: reload + settings + process monitor, all on one level
+                at the sidebar foot. */}
+            <div className="rail-foot">
+              <button
+                type="button"
+                className="rail-foot-btn rail-foot-icon reload-foot"
+                aria-label="Reload app"
+                title="Reload app"
+                onClick={() => window.location.reload()}
+              >
+                ↻
+              </button>
+              <button
+                type="button"
+                className="rail-foot-btn"
+                aria-label="Settings"
+                title="Settings"
+                onClick={() => setConfigOpen(true)}
+              >
+                <SettingsIcon size={16} />
+                <span>Settings</span>
+              </button>
+              <button
+                type="button"
+                className="rail-foot-btn rail-foot-icon"
+                aria-label="Processes & system"
+                title="Processes & system"
+                onClick={() => setProcessOpen(true)}
+              >
+                <ActivityIcon size={16} />
+              </button>
+            </div>
           </aside>
 
           <main className="detail">
@@ -625,16 +916,6 @@ function AppInner() {
                 onClick={() => setRailOpenMobile(true)}
               >
                 ‹
-              </button>
-              <button
-                type="button"
-                className="focus-toggle"
-                aria-pressed={railCollapsed}
-                aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-                title={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-                onClick={toggleRail}
-              >
-                {railCollapsed ? '⇥' : '⇤'}
               </button>
               <div className="detail-title">
                 {renaming !== null ? (
@@ -657,68 +938,74 @@ function AppInner() {
                     onBlur={() => void submitRename()}
                   />
                 ) : (
-                  <span className="detail-name-row">
+                  <>
                     <span className="detail-name">
-                      {selectedSession?.name ||
-                        cockpit.selectedId ||
-                        'claude control'}
+                      {selectedSession?.name || cockpit.selectedId || 'claude control'}
                     </span>
-                    {selectedSession ? (
-                      <>
-                        <button
-                          type="button"
-                          className="rename-btn"
-                          aria-label="Rename session"
-                          title="Rename session"
-                          onClick={() =>
-                            setRenaming(
-                              selectedSession.name ?? selectedSession.id,
-                            )
-                          }
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          className="rename-btn term-btn"
-                          aria-label="Open raw terminal"
-                          title="Raw terminal"
-                          onClick={() => setTerminalId(selectedSession.id)}
-                        >
-                          ⛶
-                        </button>
-                        <button
-                          type="button"
-                          className="rename-btn pin-btn"
-                          aria-pressed={!!selectedSession.pinned}
-                          aria-label={
-                            selectedSession.pinned ? 'Transcript pinned' : 'Pin a transcript'
-                          }
-                          title={
-                            selectedSession.pinned ? 'Transcript pinned' : 'Pin a transcript'
-                          }
-                          onClick={() => setPinOpen(true)}
-                        >
-                          {selectedSession.pinned ? '📌' : '📍'}
-                        </button>
-                        {cockpit.subagents.length > 0 ? (
-                          <button
-                            type="button"
-                            className="rename-btn agents-btn"
-                            aria-pressed={panelOpen}
-                            title="Sub-agents"
-                            onClick={() => setPanelOpen((v) => !v)}
-                          >
-                            🤖 {cockpit.subagents.length}
-                          </button>
-                        ) : null}
-                      </>
+                    {selectedSession?.cwd ? (
+                      <span className="detail-cwd" title={selectedSession.cwd}>
+                        {selectedSession.cwd.replace(/\/$/, '').split('/').pop() || selectedSession.cwd}
+                      </span>
                     ) : null}
-                  </span>
+                  </>
                 )}
-                {selectedSession?.cwd ? (
-                  <span className="detail-cwd">{selectedSession.cwd}</span>
+              </div>
+              {/* All actions live on the RIGHT, as uniform small icon buttons. */}
+              <div className="detail-actions">
+                {selectedSession && renaming === null ? (
+                  <>
+                    <button
+                      type="button"
+                      className="detail-action"
+                      aria-label="Rename session"
+                      title="Rename session (⌘E)"
+                      data-hotkey="⌘E"
+                      data-hotkey-dir="down"
+                      onClick={() => setRenaming(selectedSession.name ?? selectedSession.id)}
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-action"
+                      aria-label="Open raw terminal"
+                      title="Raw terminal (⌘J)"
+                      data-hotkey="⌘J"
+                      data-hotkey-dir="down"
+                      onClick={openTerminal}
+                    >
+                      <TerminalSquareIcon />
+                    </button>
+                    {cockpit.subagents.length > 0 ? (
+                      <button
+                        type="button"
+                        className="detail-action detail-action--count"
+                        aria-pressed={panelOpen}
+                        data-on={panelOpen ? 'true' : undefined}
+                        aria-label="Sub-agents"
+                        title="Sub-agents (⌘U)"
+                        data-hotkey="⌘U"
+                        data-hotkey-dir="down"
+                        onClick={() => setPanelOpen((v) => !v)}
+                      >
+                        <BotIcon />
+                        <span className="detail-action-count">{cockpit.subagents.length}</span>
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
+                <button
+                  type="button"
+                  className="detail-action focus-toggle"
+                  aria-pressed={railCollapsed}
+                  aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                  title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
+                  data-hotkey="⌘B"
+                  data-hotkey-dir="down"
+                  onClick={toggleRail}
+                >
+                  <PanelLeftIcon />
+                </button>
               </div>
             </header>
 
@@ -748,6 +1035,20 @@ function AppInner() {
                   requestCapture={cockpit.requestCapture}
                   clearCapture={cockpit.clearCapture}
                 />
+                {/* No transcript thread here, so queued sends would otherwise be
+                    invisible (they only echo in the raw pane). Surface them as a
+                    compact strip so you can still see what you sent + that it's
+                    in flight. They clear via the same reconcile path. */}
+                {selectedPending.length > 0 ? (
+                  <div className="live-pending" aria-label="Queued sends">
+                    {selectedPending.map((e) => (
+                      <div key={e.key} className="live-pending-bubble">
+                        <span className="live-pending-dot" aria-hidden="true" />
+                        {e.label}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <Composer disabled={false} sessionId={cockpit.selectedId} />
               </div>
             ) : (
@@ -803,17 +1104,18 @@ function AppInner() {
           />
         ) : null}
 
-        {terminalId ? (
+        {/* Up to 4 warm ttyd panels stay mounted (LRU); only the current
+            session's, when shown, is visible — `visible` fades+zooms it in/out
+            so opening never waits on a fresh ttyd load. */}
+        {warmTerms.map((id) => (
           <TerminalPanel
-            key={terminalId}
-            sessionId={terminalId}
-            label={
-              cockpit.sessions.find((s) => s.id === terminalId)?.name ??
-              terminalId
-            }
-            onClose={() => setTerminalId(null)}
+            key={id}
+            sessionId={id}
+            visible={id === cockpit.selectedId && terminalShown}
+            label={cockpit.sessions.find((s) => s.id === id)?.name ?? id}
+            onClose={() => setTerminalShown(false)}
           />
-        ) : null}
+        ))}
 
         <SubAgentPanel
           subagents={cockpit.subagents}
@@ -821,13 +1123,16 @@ function AppInner() {
           onClose={() => setPanelOpen(false)}
         />
 
-        {pinOpen && selectedSession ? (
-          <PinModal
-            session={selectedSession}
-            onClose={() => setPinOpen(false)}
+        {processOpen ? (
+          <ProcessPanel
+            power={cockpit.resources.snapshot?.power ?? null}
+            onClose={() => setProcessOpen(false)}
             onToast={showToast}
-            onPinned={() => cockpit.resubscribe()}
           />
+        ) : null}
+
+        {paletteOpen ? (
+          <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
         ) : null}
 
         {cockpit.prompt &&
@@ -841,6 +1146,7 @@ function AppInner() {
           />
         ) : null}
 
+        <HotkeyHints />
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>

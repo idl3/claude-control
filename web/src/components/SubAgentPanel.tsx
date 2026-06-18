@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { convertMessages } from '../lib/convert';
 import { AssistantMessage, UserMessage } from './Messages';
+import gsap, { prefersReducedMotion } from '../lib/anim';
 import type { SubAgent, AgentDef, NestedSubAgent } from '../lib/types';
 
 interface SubAgentPanelProps {
@@ -185,13 +186,26 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
     [subagents, tab],
   );
 
+  // Slide + fade the drawer in on open (and on switching list↔detail).
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open || !panelRef.current || prefersReducedMotion()) return;
+    gsap.fromTo(
+      panelRef.current,
+      { x: 28, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.28, ease: 'power3.out' },
+    );
+  }, [open, !!selected]);
+
   if (!open) return null;
 
   // Detail: the selected agent's transcript as a nested chat.
   if (selected) {
     const selectedModel = resolveModel(selected);
     return (
-      <div className="sa-panel" role="complementary" aria-label="Sub-agent transcript">
+      <>
+        <div className="sa-backdrop" aria-hidden="true" onClick={onClose} />
+        <div className="sa-panel" ref={panelRef} role="complementary" aria-label="Sub-agent transcript">
         <header className="sa-panel-head">
           <button
             type="button"
@@ -220,13 +234,16 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
         <AgentDefBlock def={selected.def} agentType={selected.agentType} />
         <NestedAgentList nested={selected.nested} />
         <SubAgentThread messages={selected.messages} />
-      </div>
+        </div>
+      </>
     );
   }
 
   // List with tabs.
   return (
-    <div className="sa-panel" role="complementary" aria-label="Sub-agents">
+    <>
+      <div className="sa-backdrop" aria-hidden="true" onClick={onClose} />
+      <div className="sa-panel" ref={panelRef} role="complementary" aria-label="Sub-agents">
       <header className="sa-panel-head">
         <span className="sa-panel-title">
           Sub-agents <span className="sa-count">{subagents.length}</span>
@@ -280,6 +297,7 @@ export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) 
           ))
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

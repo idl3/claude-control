@@ -409,17 +409,56 @@ export function uploadServeUrl(basename: string): string {
   return `/api/uploads/${encodeURIComponent(basename)}`;
 }
 
+import type { ProcessInfo } from './types';
+
+/** Top processes by CPU (token-gated). Empty list on error. */
+export async function listProcesses(): Promise<ProcessInfo[]> {
+  const res = await authFetch('/api/ps');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { processes?: ProcessInfo[] }).processes ?? [];
+}
+
+/** Send a signal to a pid (SIGTERM default, SIGKILL optional). Throws on rejection. */
+export async function killProcess(pid: number, signal?: 'SIGTERM' | 'SIGKILL'): Promise<void> {
+  const res = await authFetch('/api/kill', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ pid, ...(signal ? { signal } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+}
+
 export interface SkillEntry {
   name: string;
   description: string;
-  source: 'user' | 'plugin';
+  source: 'user' | 'project';
 }
 
-/** Fetch the list of available slash-command skills from the server. */
-export async function listSkills(): Promise<SkillEntry[]> {
-  const res = await authFetch('/api/skills');
+export interface SkillDetail {
+  name: string;
+  source: 'user' | 'project';
+  frontMatter: Record<string, string>;
+  body: string;
+}
+
+/** Fetch the list of available slash-command skills from the server.
+ *  Pass the current session id so project skills are merged in for that session's cwd.
+ */
+export async function listSkills(id?: string | null): Promise<SkillEntry[]> {
+  const url = id ? `/api/skills?id=${encodeURIComponent(id)}` : '/api/skills';
+  const res = await authFetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return ((await res.json()) as { skills?: SkillEntry[] }).skills ?? [];
+}
+
+/** Fetch a single skill's front-matter + markdown body for the given session. */
+export async function fetchSkill(name: string, id?: string | null): Promise<SkillDetail> {
+  const params = new URLSearchParams({ name });
+  if (id) params.set('id', id);
+  const res = await authFetch(`/api/skill?${params.toString()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as SkillDetail;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { ThreadPrimitive } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
+import { ArrowDownIcon } from './icons';
 
 interface ThreadProps {
   hasSelection: boolean;
@@ -46,6 +47,20 @@ export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: 
           </button>
         ) : null}
         <ThreadPrimitive.Messages components={messageComponents} />
+        {/* Tail-to-bottom: lives INSIDE the viewport, stuck to its bottom-right
+            edge (just above the composer) so it never overlaps composer text.
+            Auto-scroll keeps the thread pinned when at the bottom; the primitive
+            disables itself there and CSS fades it out. */}
+        <ThreadPrimitive.ScrollToBottom asChild>
+          <button
+            type="button"
+            className="scroll-to-bottom"
+            aria-label="Scroll to latest"
+            title="Scroll to latest"
+          >
+            <ArrowDownIcon size={18} />
+          </button>
+        </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.Viewport>
       <Composer disabled={!hasSelection} sessionId={sessionId} />
     </ThreadPrimitive.Root>

@@ -91,7 +91,23 @@ export function useCockpit(): CockpitStore {
     const offMsg = socket.onMessage((msg) => {
       switch (msg.type) {
         case 'sessions':
-          setSessions(msg.sessions ?? []);
+          // Carry forward the last-known model / ctxPct when a refresh omits
+          // them: the pane/transcript parse intermittently returns null mid-
+          // generation, which would drop the meta row and make the card's height
+          // flicker ("wonky"). Sticky values keep the row stable; they update as
+          // soon as a refresh carries a real value again.
+          setSessions((prev) => {
+            const byId = new Map(prev.map((s) => [s.id, s]));
+            return (msg.sessions ?? []).map((s) => {
+              const old = byId.get(s.id);
+              if (!old) return s;
+              return {
+                ...s,
+                model: s.model ?? old.model,
+                ctxPct: s.ctxPct ?? old.ctxPct,
+              };
+            });
+          });
           break;
         case 'messages':
           // MERGE, don't replace: the server re-sends a snapshot of its bounded

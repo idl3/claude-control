@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
+import { ClaudeRobotIcon } from './ClaudeRobotIcon';
+import { TerminalSquareIcon } from './icons';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -59,10 +61,14 @@ function PaneRow({
   s,
   selected,
   onSelect,
+  hotkey,
 }: {
   s: Session;
   selected: boolean;
   onSelect: (id: string) => void;
+  /** "⌘N" for the first 9 Claude sessions (matches the ⌘1-9 jump) — drives the
+   *  Command-hold hint badge. Undefined for terminals + rows past 9. */
+  hotkey?: string;
 }) {
   const isTerminal = s.kind === 'terminal';
   const label = isTerminal
@@ -97,6 +103,8 @@ function PaneRow({
       data-selected={selected ? 'true' : 'false'}
       data-kind={s.kind ?? 'claude'}
       data-pending={s.pending ? 'true' : undefined}
+      data-hotkey={hotkey}
+      data-hotkey-dir={hotkey ? 'right' : undefined}
       onClick={() => onSelect(s.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -106,9 +114,16 @@ function PaneRow({
       }}
     >
       <div className="session-top">
-        <span className="active-dot" data-on={s.active ? 'true' : 'false'} aria-hidden="true" />
-        <span className="pane-glyph" aria-hidden="true">
-          {isTerminal ? '>_' : '✳'}
+        {/* One icon per row: Claude vs terminal. Active tmux pane = full
+            opacity; inactive panes dim (this replaces the old green/grey orb). */}
+        <span
+          className="pane-icon"
+          data-kind={isTerminal ? 'terminal' : 'claude'}
+          data-active={s.active ? 'true' : 'false'}
+          aria-label={isTerminal ? 'terminal pane' : 'Claude pane'}
+          title={s.active ? 'active pane' : 'inactive pane'}
+        >
+          {isTerminal ? <TerminalSquareIcon size={15} /> : <ClaudeRobotIcon size={14} />}
         </span>
         <span className="session-name">{label}</span>
         {s.thinking && !s.pending ? (
@@ -119,26 +134,44 @@ function PaneRow({
             ASK
           </span>
         ) : null}
+        {/* Terminals are a single lean line: cwd sits right-aligned beside the
+            name, no second meta row. */}
+        {isTerminal && s.cwd ? (
+          <span className="meta-cwd meta-cwd-inline">{basename(s.cwd)}</span>
+        ) : null}
       </div>
-      <div className="session-meta">
-        <span className="meta-prov">p{s.paneIndex ?? 0}</span>
-        {isTerminal ? (
-          s.cwd ? <span className="meta-cwd">{basename(s.cwd)}</span> : null
-        ) : (
-          <>
-            {s.model ? <span className="meta-model">{s.model}</span> : null}
-            {s.ctxPct != null ? (
-              <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
-            ) : null}
-          </>
-        )}
-      </div>
+      {!isTerminal && (s.model || s.ctxPct != null) ? (
+        <div className="session-meta">
+          {s.model ? <span className="meta-model">{s.model}</span> : null}
+          {s.ctxPct != null ? (
+            <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
 }
 
 export function SessionRail({ sessions, selectedId, onSelect }: SessionRailProps) {
   const groups = useMemo(() => groupByTmux(sessions), [sessions]);
+
+  // ⌘1-9 maps to the first 9 CLAUDE sessions in the SAME order App.tsx jumps
+  // (kind !== terminal, sorted sessionName → windowIndex → paneIndex). Keep the
+  // two in lockstep so the badge a row shows is the key that actually selects it.
+  const hotkeyById = useMemo(() => {
+    const m = new Map<string, string>();
+    sessions
+      .filter((s) => s.kind !== 'terminal')
+      .sort(
+        (a, b) =>
+          (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
+          (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
+          (a.paneIndex ?? 0) - (b.paneIndex ?? 0),
+      )
+      .slice(0, 9)
+      .forEach((s, i) => m.set(s.id, `⌘${i + 1}`));
+    return m;
+  }, [sessions]);
 
   if (groups.length === 0) {
     return (
@@ -161,7 +194,13 @@ export function SessionRail({ sessions, selectedId, onSelect }: SessionRailProps
               </div>
               <ul className="session-pane-list">
                 {w.panes.map((s) => (
-                  <PaneRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+                  <PaneRow
+                    key={s.id}
+                    s={s}
+                    selected={s.id === selectedId}
+                    onSelect={onSelect}
+                    hotkey={hotkeyById.get(s.id)}
+                  />
                 ))}
               </ul>
             </div>
