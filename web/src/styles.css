@@ -4086,9 +4086,16 @@ select.config-input {
 }
 
 /* ── Optimiser auto-send: depleting ring around the Send button ──── */
-/* The remaining time renders as a border ring that empties CLOCKWISE from
-   12 o'clock (top) over the auto-send window, then fires. */
+/* A shiny rainbow border ring that empties CLOCKWISE from 12 o'clock over the
+   auto-send window, then fires. Two stacked layers: ::before is the full rainbow
+   ring whose hues spin (dynamic/shiny); ::after is an "eraser" the colour of the
+   surface that grows clockwise to consume the ring (the depletion). */
 @property --auto-send-deplete {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --auto-send-spin {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
@@ -4097,6 +4104,9 @@ select.config-input {
   from { --auto-send-deplete: 0deg; }
   to { --auto-send-deplete: 360deg; }
 }
+@keyframes auto-send-spin {
+  to { --auto-send-spin: 360deg; }
+}
 .btn-send {
   position: relative;
 }
@@ -4104,26 +4114,56 @@ select.config-input {
   position: relative;
   z-index: 1;
 }
-.btn-send-armed::before {
+/* shared ring geometry + clip to a 3px border */
+.btn-send-armed::before,
+.btn-send-armed::after {
   content: '';
   position: absolute;
   inset: -3px;
   border-radius: inherit;
-  /* full ring = accent; the depleted sweep (from top, clockwise) goes transparent */
-  background: conic-gradient(
-    from 0deg,
-    transparent var(--auto-send-deplete),
-    var(--accent) var(--auto-send-deplete)
-  );
   padding: 3px;
-  /* show the gradient only in the 3px border ring */
+  pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
-  pointer-events: none;
+}
+/* layer 1: full rainbow ring, hues rotating */
+.btn-send-armed::before {
+  background: conic-gradient(
+    from var(--auto-send-spin),
+    #ff2d55, #ff9500, #ffd60a, #34c759, #00c7be, #0a84ff, #5e5ce6, #bf5af2, #ff2d55
+  );
+  filter: saturate(1.2) brightness(1.1);
+  animation: auto-send-spin 3s linear infinite;
+}
+/* layer 2: surface-coloured eraser growing clockwise from 12 o'clock */
+.btn-send-armed::after {
+  background: conic-gradient(
+    from 0deg,
+    var(--bg-1) 0 var(--auto-send-deplete),
+    transparent var(--auto-send-deplete)
+  );
   animation: auto-send-deplete var(--auto-send-secs, 5s) linear forwards;
 }
 @media (prefers-reduced-motion: reduce) {
-  .btn-send-armed::before { animation: none; }
+  .btn-send-armed::before,
+  .btn-send-armed::after { animation: none; }
+}
+
+/* token-gate hint: where to find the access token */
+.gate-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim, #8a8f98);
+  text-align: center;
+}
+.gate-hint code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--text, inherit);
 }
