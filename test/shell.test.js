@@ -16,6 +16,7 @@ test('SHELL_KEYS allow-list contains the safe control keys', () => {
 });
 
 test('shellKey rejects a non-allow-listed key before touching tmux', async () => {
-  await assert.rejects(() => shellKey('rm -rf /'), /key not allowed/);
-  await assert.rejects(() => shellKey('x'), /key not allowed/);
+  // Signature: shellKey(sessionTarget, cwd, key) — the key is validated first.
+  await assert.rejects(() => shellKey('0:1.1', '/tmp', 'rm -rf /'), /key not allowed/);
+  await assert.rejects(() => shellKey('0:1.1', '/tmp', 'x'), /key not allowed/);
 });

@@ -129,8 +129,9 @@ export function useCockpit(): CockpitStore {
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
           break;
         case 'shell-output':
-          // Global shell pane (not per-session) — just track the latest capture.
-          setShellOutput(msg.text ?? '');
+          // Per-session sister shell — ignore output for a session we've since
+          // switched away from (a stale in-flight poll).
+          if (!msg.id || msg.id === selectedRef.current) setShellOutput(msg.text ?? '');
           break;
         case 'prompt':
           setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
@@ -230,28 +231,36 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
-  // Terminal mode: the shell pane is server-owned (one global pane). We pass the
-  // selected session's cwd so a freshly-created pane starts in the right repo;
-  // the server ignores it once the pane exists.
-  const selectedCwd = useCallback((): string | undefined => {
-    const id = selectedRef.current;
-    return sessionsRef.current.find((s) => s.id === id)?.cwd;
-  }, []);
+  // Composer terminal mode (>_): each Claude session has its OWN sister shell
+  // pane in its window. All shell ops carry the selected session id; the server
+  // resolves that session's window + cwd and lazily creates/reuses the sister.
   const sendShellInput = useCallback(
-    (line: string): boolean => socket.send({ type: 'shell-input', line, cwd: selectedCwd() }),
-    [socket, selectedCwd],
+    (line: string): boolean => {
+      const id = selectedRef.current;
+      return id ? socket.send({ type: 'shell-input', id, line }) : false;
+    },
+    [socket],
   );
   const sendShellText = useCallback(
-    (text: string): boolean => socket.send({ type: 'shell-text', text, cwd: selectedCwd() }),
-    [socket, selectedCwd],
+    (text: string): boolean => {
+      const id = selectedRef.current;
+      return id ? socket.send({ type: 'shell-text', id, text }) : false;
+    },
+    [socket],
   );
   const sendShellKey = useCallback(
-    (key: string): boolean => socket.send({ type: 'shell-key', key, cwd: selectedCwd() }),
-    [socket, selectedCwd],
+    (key: string): boolean => {
+      const id = selectedRef.current;
+      return id ? socket.send({ type: 'shell-key', id, key }) : false;
+    },
+    [socket],
   );
   const requestShellCapture = useCallback(
-    (lines?: number): boolean => socket.send({ type: 'shell-capture', lines, cwd: selectedCwd() }),
-    [socket, selectedCwd],
+    (lines?: number): boolean => {
+      const id = selectedRef.current;
+      return id ? socket.send({ type: 'shell-capture', id, lines }) : false;
+    },
+    [socket],
   );
   const clearShellOutput = useCallback(() => setShellOutput(null), []);
 
