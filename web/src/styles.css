@@ -432,6 +432,18 @@ body {
   min-width: 0;
   flex: 1 1 auto;
 }
+/* Mobile: stack name over the cwd chip so neither is hard-truncated next to the
+   other (one cramped row of two ellipsised fields isn't meaningful). */
+@media (max-width: 759px) {
+  .detail-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .detail-title .detail-cwd {
+    max-width: 100%;
+  }
+}
 /* Right-aligned action cluster: uniform small icon buttons. */
 .detail-actions {
   display: flex;
