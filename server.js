@@ -27,7 +27,6 @@ import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
-import { complete as claudeCliComplete } from './lib/claude-cli.js';
 import * as mlx from './lib/mlx.js';
 import {
   MLX_MODELS,
@@ -531,26 +530,20 @@ async function handleOptimize(req, res) {
   }
 }
 
-// Run the enhancer through the configured backend chain, recording WHICH backend
-// actually produced the result so the UI can label it accurately:
-//  - 'mlx'    → try local MLX, then claude -p, then rules.
-//  - 'claude' → try claude -p, then rules.
-//  - 'rules'  → deterministic rules optimiser only.
-// optimizePrompt returns mode:'rules' when its injected complete() fails, so a
-// non-'llm' mode means that backend fell through → try the next.
+// Run the enhancer. The `claude -p` backend is DISABLED: a one-shot `claude -p`
+// runs in the server's cwd and writes an ephemeral transcript into the projects
+// dir, which the session matcher then mis-binds (transcript drift). So the
+// enhancer is MLX-only with a deterministic rules fallback — no claude subprocess
+// is ever spawned. ('claude'/'mlx' config both resolve to MLX→rules; 'rules'
+// stays rules-only.) optimizePrompt returns mode:'rules' when MLX fails.
 async function runOptimize(text, intent) {
   const cfg = readConfig();
-  const backend = cfg.optimizeBackend;
-  if (backend === 'rules') {
+  if (cfg.optimizeBackend === 'rules') {
     return { ...rulesOptimize(text), backend: 'rules' };
   }
-  const order = backend === 'claude' ? ['claude'] : ['mlx', 'claude'];
-  for (const b of order) {
-    const complete = b === 'mlx' ? (p) => mlx.complete(p) : claudeCliComplete;
-    const r = await optimizePrompt(text, { complete, intent });
-    if (r.mode === 'llm') {
-      return { ...r, backend: b, model: b === 'mlx' ? cfg.mlxModel : cfg.optimizeModel };
-    }
+  const r = await optimizePrompt(text, { complete: (p) => mlx.complete(p), intent });
+  if (r.mode === 'llm') {
+    return { ...r, backend: 'mlx', model: cfg.mlxModel };
   }
   return { ...rulesOptimize(text), backend: 'rules' };
 }
