@@ -141,6 +141,11 @@ export function TokenGate({ children }: TokenGateProps) {
         >
           {state === 'submitting' ? 'Connecting…' : 'Connect'}
         </button>
+        <p className="gate-hint">
+          Find your token in <code>~/.claude-control/token</code> on the server,
+          or wherever <code>CLAUDE_CONTROL_TOKEN</code> is set. It's also printed
+          when the server starts.
+        </p>
       </form>
     </div>
   );
