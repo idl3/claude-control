@@ -13,6 +13,12 @@ test('SHELL_KEYS allows the key-bar vocabulary', () => {
   }
 });
 
+test('SHELL_KEYS allows modified nav keys (hardware modifier + arrow combos)', () => {
+  for (const k of ['M-Left', 'C-Right', 'S-Up', 'C-M-S-Up', 'M-S-Left', 'C-Home', 'M-PPage']) {
+    assert.ok(SHELL_KEYS.has(k), `expected SHELL_KEYS to allow ${k}`);
+  }
+});
+
 test('SHELL_KEYS rejects arbitrary / injected strings', () => {
   assert.ok(!SHELL_KEYS.has('rm -rf /'));
   assert.ok(!SHELL_KEYS.has('Enter; echo pwned'));

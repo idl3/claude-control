@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { relayDiff, controlToken, interceptToken, isLetter, type Mods } from '../lib/terminalKeys';
+import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 
 export interface TerminalOps {
   /** Forward literal keystroke text (no Enter). */
@@ -80,6 +80,27 @@ export function useTerminalRelay(ops: TerminalOps) {
       const tok = controlToken({ ctrl, alt }, e.key);
       if (tok) o.sendKey(tok);
       if (s.ctrl || s.alt) setSticky({ ctrl: false, alt: false });
+      return;
+    }
+    // Arrows / nav with hardware modifiers (Magic Keyboard).
+    const nav = navToken(e.key, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
+    if (nav) {
+      e.preventDefault();
+      o.sendKey(nav);
+      return;
+    }
+    // Backspace/Del must fire even when the buffer is empty.
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      o.sendKey('BSpace');
+      const next = prevRef.current.slice(0, -1);
+      prevRef.current = next;
+      setValue(next);
+      return;
+    }
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      o.sendKey('DC');
       return;
     }
     const tok = interceptToken(e.key, e.shiftKey);
