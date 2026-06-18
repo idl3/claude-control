@@ -18,6 +18,7 @@ import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
+import gsap, { prefersReducedMotion } from '../lib/anim';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -167,6 +168,27 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
       document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
     });
   }, []);
+
+  // Pulse the primary send button while a prompt is being optimised (in flight).
+  const sendBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = sendBtnRef.current;
+    if (!el) return;
+    if (optimizing && !prefersReducedMotion()) {
+      const tween = gsap.to(el, {
+        scale: 1.08,
+        duration: 0.5,
+        ease: 'sine.inOut',
+        repeat: -1,
+        yoyo: true,
+      });
+      return () => {
+        tween.kill();
+        gsap.set(el, { scale: 1 });
+      };
+    }
+    gsap.set(el, { scale: 1 });
+  }, [optimizing]);
 
   // ── Inline skill autocomplete ──────────────────────────────────────────────
   const [skills, setSkills] = useState<SkillEntry[]>(() => _skillsCache ?? []);
@@ -651,6 +673,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             // Primary / default: optimise → review → auto-send.
             <button
               type="button"
+              ref={sendBtnRef}
               className="composer-send"
               aria-label="Optimise and send"
               title="Optimise & send (⌘/Ctrl+↵)"

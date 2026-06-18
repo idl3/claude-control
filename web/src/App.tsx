@@ -32,6 +32,8 @@ import { PinModal } from './components/PinModal';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import type { Msg, ServerMessage } from './lib/types';
+import { useIsNarrow } from './hooks/useIsNarrow';
+import gsap, { prefersReducedMotion } from './lib/anim';
 
 // Concatenate a transcript message's text blocks (to match a real user echo
 // against a queued send).
@@ -422,6 +424,62 @@ function AppInner() {
 
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
+
+  // Desktop focus mode: collapse the sidebar (persisted). On mobile the rail is
+  // the master pane (handled by data-detail), so focus mode is desktop-only.
+  const narrow = useIsNarrow();
+  const railRef = useRef<HTMLElement>(null);
+  const detailBodyRef = useRef<HTMLDivElement>(null);
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cc:railCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('cc:railCollapsed', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  // Animate the desktop rail collapse/expand (width + opacity). On mobile, clear
+  // inline styles so the responsive CSS controls the rail.
+  const railAnimatedRef = useRef(false);
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    if (narrow) {
+      gsap.set(rail, { clearProps: 'width,flexBasis,opacity' });
+      return;
+    }
+    const target = railCollapsed
+      ? { width: 0, flexBasis: 0, opacity: 0 }
+      : { width: 300, flexBasis: 300, opacity: 1 };
+    if (prefersReducedMotion() || !railAnimatedRef.current) {
+      gsap.set(rail, target); // instant on first paint / reduced motion
+      railAnimatedRef.current = true;
+      return;
+    }
+    gsap.to(rail, { ...target, duration: 0.3, ease: 'power3.out' });
+  }, [railCollapsed, narrow]);
+
+  // Subtle content transition when switching sessions (desktop + mobile).
+  useEffect(() => {
+    const el = detailBodyRef.current;
+    if (!el || !cockpit.selectedId || prefersReducedMotion()) return;
+    gsap.fromTo(
+      el,
+      { opacity: 0.35, y: 6 },
+      { opacity: 1, y: 0, duration: 0.22, ease: 'power3.out' },
+    );
+  }, [cockpit.selectedId]);
   const select = useCallback(
     (id: string) => {
       cockpit.select(id);
@@ -501,6 +559,7 @@ function AppInner() {
         ref={appRef}
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
+        data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
       >
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
@@ -545,7 +604,7 @@ function AppInner() {
         ) : null}
 
         <div className="app-body">
-          <aside className="rail">
+          <aside className="rail" ref={railRef}>
             <NewSessionForm
               onToast={showToast}
               onOpenSettings={() => setConfigOpen(true)}
@@ -566,6 +625,16 @@ function AppInner() {
                 onClick={() => setRailOpenMobile(true)}
               >
                 ‹
+              </button>
+              <button
+                type="button"
+                className="focus-toggle"
+                aria-pressed={railCollapsed}
+                aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                title={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                onClick={toggleRail}
+              >
+                {railCollapsed ? '⇥' : '⇤'}
               </button>
               <div className="detail-title">
                 {renaming !== null ? (
@@ -653,6 +722,7 @@ function AppInner() {
               </div>
             </header>
 
+            <div className="detail-body" ref={detailBodyRef}>
             <ShellContext.Provider value={shellApi}>
             {selectedSession && selectedSession.kind === 'terminal' ? (
               // Plain (non-Claude) pane: a fully interactive live terminal —
@@ -694,6 +764,7 @@ function AppInner() {
               </div>
             )}
             </ShellContext.Provider>
+            </div>
           </main>
         </div>
 

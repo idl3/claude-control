@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { transcribeAudio } from '../lib/api';
+import { useModalTransition } from '../lib/anim';
 
 function getAudioCtx(): typeof AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -46,7 +47,8 @@ interface VoiceDialogProps {
  * any browser that can record audio, including iOS Safari (the Web Speech API
  * does not).
  */
-export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
+export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [status, setStatus] = useState<Status>('starting');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const recSupported = typeof window !== 'undefined' && 'MediaRecorder' in window;
@@ -269,6 +271,7 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
   return (
     <div
       className="modal-backdrop"
+      ref={rootRef}
       onClick={(e) => {
         if (e.target === e.currentTarget && status !== 'transcribing') cancel();
       }}

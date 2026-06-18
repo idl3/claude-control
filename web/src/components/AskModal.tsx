@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Pending } from '../lib/types';
+import { useModalTransition } from '../lib/anim';
 
 interface AskModalProps {
   pending: Pending;
@@ -26,8 +27,9 @@ export function AskModal({
   capture,
   onAnswer,
   onCapture,
-  onClose,
+  onClose: rawClose,
 }: AskModalProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [selections, setSelections] = useState<Selections>(() =>
     initSelections(pending),
   );
@@ -103,6 +105,7 @@ export function AskModal({
   return (
     <div
       className="modal-backdrop"
+      ref={rootRef}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
