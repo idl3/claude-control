@@ -217,3 +217,20 @@ test('worktree: a parent-dir pane does not steal a child worktree transcript', (
   assert.equal(out.get('0:3.1').transcriptPath, '/x/repo.jsonl');      // its OWN, not the more-active greptile
   assert.equal(out.get('0:4.1').transcriptPath, '/x/greptile.jsonl');  // recovered
 });
+
+// ── resume regression: recency beats a coincidental start-time match ─────────
+
+test('resumed session: most-active transcript wins over a freshly-born sibling', () => {
+  // The reported bug: this pane RESUMED at ~T (proc start T); its real transcript
+  // was born long before T but is active NOW. A different short session was born
+  // at ~T (birth coincides with the resume) and died immediately. Recency must
+  // bind the active transcript, not the stale birth-coincident one.
+  const T = 1_000_000_000;
+  const panes = [{ target: '0:1.1', windowName: 'testing-session', cwd, procStartMs: T }];
+  const candidates = [
+    cand({ transcriptPath: '/p/resumed.jsonl', birthtimeMs: 1, lastActivityMs: T + 60 * 60_000 }), // old birth, LIVE
+    cand({ transcriptPath: '/p/coincident.jsonl', birthtimeMs: T, lastActivityMs: T + 1000 }),       // born at resume, dead
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:1.1').transcriptPath, '/p/resumed.jsonl');
+});
