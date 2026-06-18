@@ -12,6 +12,7 @@
   "dependencies": {
     "@assistant-ui/react": "0.14.14",
     "@assistant-ui/react-markdown": "^0.14.1",
+    "gsap": "^3.15.0",
     "highlight.js": "^11.11.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

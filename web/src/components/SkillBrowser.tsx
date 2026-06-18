@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { listSkills, type SkillEntry } from '../lib/api';
 import { useIsNarrow } from '../hooks/useIsNarrow';
+import { useModalTransition } from '../lib/anim';
 
 interface SkillBrowserProps {
   onPick: (name: string) => void;
@@ -21,7 +22,8 @@ interface SkillBrowserProps {
  * Invocation: tapping a card calls onPick(name) — the composer prefills
  * `/<name> ` and the browser closes. NEVER auto-sends.
  */
-export function SkillBrowser({ onPick, onClose }: SkillBrowserProps) {
+export function SkillBrowser({ onPick, onClose: rawClose }: SkillBrowserProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const narrow = useIsNarrow();
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,6 +160,7 @@ export function SkillBrowser({ onPick, onClose }: SkillBrowserProps) {
   return (
     <div
       className="modal-backdrop"
+      ref={rootRef}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

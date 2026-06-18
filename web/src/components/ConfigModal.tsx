@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useModalTransition } from '../lib/anim';
 import {
   getConfig,
   saveConfig,
@@ -20,7 +21,8 @@ interface ConfigModalProps {
  * the default cwd. Loads current config on open; Save validates server-side and
  * toasts the result. Small, keyboard-dismissable, matches the app's dark tokens.
  */
-export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
+export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [launchCommand, setLaunchCommand] = useState('');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [optimizeModel, setOptimizeModel] = useState('');
@@ -153,6 +155,7 @@ export function ConfigModal({ onClose, onToast }: ConfigModalProps) {
   return (
     <div
       className="config-overlay"
+      ref={rootRef}
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();

@@ -8,6 +8,7 @@ import {
 import { AssistantMessage, UserMessage } from './Messages';
 import { Kbd } from './Kbd';
 import type { PanePrompt } from '../lib/types';
+import { useModalTransition } from '../lib/anim';
 
 interface PromptModalProps {
   prompt: PanePrompt;
@@ -67,7 +68,8 @@ function PlanReview({ markdown }: { markdown: string }) {
  * plan as markdown (scrollable) and put the approval options at the very bottom,
  * so the plan can be reviewed before deciding.
  */
-export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModalProps) {
+export function PromptModal({ prompt, onKey, onClose: rawClose, planMarkdown }: PromptModalProps) {
+  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   // The TUI's own highlighted option is the initial selection; first option as
   // a fallback so Confirm always has a target.
   const defaultKey = useMemo(() => {
@@ -122,6 +124,7 @@ export function PromptModal({ prompt, onKey, onClose, planMarkdown }: PromptModa
   return (
     <div
       className="modal-backdrop"
+      ref={rootRef}
       onClick={(e) => {
         if (e.target === e.currentTarget && !sending) onClose();
       }}
