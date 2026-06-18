@@ -90,8 +90,8 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Auto-send countdown: dispatch the rewrite after AUTO_SEND_SECS unless the
   // user intervenes (scrolls the review, edits the text, or hovers a button).
-  // `armed=false` cancels it; the primary CTA shows the remaining seconds.
-  const [secs, setSecs] = useState(AUTO_SEND_SECS);
+  // `armed=false` cancels it. The remaining time is shown as a depleting ring
+  // around the Send button (CSS), not a number.
   const [armed, setArmed] = useState(true);
   const editedRef = useRef(edited);
   editedRef.current = edited;
@@ -105,16 +105,12 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
     textareaRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // Tick the countdown once per second; fire onSend at zero.
+  // Single timer matched to the ring animation: fire onSend when it depletes.
   useEffect(() => {
     if (!armed) return;
-    if (secs <= 0) {
-      onSendRef.current(editedRef.current);
-      return;
-    }
-    const t = setTimeout(() => setSecs((s) => s - 1), 1000);
+    const t = setTimeout(() => onSendRef.current(editedRef.current), AUTO_SEND_SECS * 1000);
     return () => clearTimeout(t);
-  }, [armed, secs]);
+  }, [armed]);
 
   // Esc closes the modal; ⌘/Ctrl+Enter sends immediately (short-circuit the
   // 5 s auto-send countdown).
@@ -244,10 +240,17 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
           {/* Primary: dispatch the rewrite (auto-fires on the countdown). */}
           <button
             type="button"
-            className="btn-primary"
+            className={`btn-primary btn-send${armed ? ' btn-send-armed' : ''}`}
+            style={
+              armed
+                ? ({ '--auto-send-secs': `${AUTO_SEND_SECS}s` } as React.CSSProperties)
+                : undefined
+            }
             onClick={() => onSend(edited)}
           >
-            {armed ? `Send ${secs}` : 'Send'} <Kbd>⌘/Ctrl+↵</Kbd>
+            <span className="btn-send-label">
+              Send <Kbd>⌘/Ctrl+↵</Kbd>
+            </span>
           </button>
         </div>
       </div>
