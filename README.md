@@ -22,7 +22,7 @@ npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 
 **Optional local AI (no API key):**
 
-- **Voice → text** — `brew install ffmpeg whisper-cpp` and drop a model at `~/.claude-control/models/ggml-base.en.bin`. The mic in the composer records audio and transcribes it locally.
+- **Voice → text** — run `claude-control setup` once: it installs `ffmpeg` + `whisper.cpp` (Homebrew) and downloads a ggml model to `~/.claude-control/models/`. The mic in the composer then records audio and transcribes it locally (no API key). *(Manual equivalent: `brew install ffmpeg whisper-cpp` and drop a model at `~/.claude-control/models/ggml-base.en.bin`.)*
 - **Prompt enhancer (✨)** — defaults to a **local MLX model** on Apple Silicon. One-time setup:
   ```bash
   python3 -m venv ~/.claude-control/mlx-venv
@@ -96,16 +96,59 @@ matching transcript under `~/.claude/projects/`.
 
 ---
 
-## Updating
+## Updating & restarting
 
-claude-control compares your checkout against its git upstream (`origin`) and
-shows an **update banner** when new commits are available. Click **Update now**
-— the server pulls, reinstalls, rebuilds the web bundle, and restarts itself in
-place; the page reconnects automatically. (Equivalent manual update: `git pull
-&& npm install && npm run build`, then restart.)
+How you update depends on **how you installed** — pick your row. Check your
+current version any time with `claude-control --version`.
 
-Version numbers follow npm semver (bump `package.json` per release); this is
-**v0.1.0**.
+> **`npm install` does NOT pull the git repo.** The npm package ships the app
+> *prebuilt* (the `web/dist` bundle is included), so there's no source tree to
+> `git pull` and nothing to build. Update by reinstalling the package.
+
+### Installed globally (`npm install -g`)
+
+```bash
+npm install -g @idl3/claude-control@latest   # fetch the new version
+# then restart the server (see "Restarting" below)
+```
+
+The in-app **update banner / “Update now”** button is for **source checkouts
+only** (it runs `git pull`); on an npm install it has no repo to update, so use
+the command above instead.
+
+### Run via `npx` (no install)
+
+```bash
+npx @idl3/claude-control@latest               # always fetches the latest
+```
+
+`npx` re-resolves the package each run, so you're already on the newest version
+every time you start it — just restart the process.
+
+### From source (git checkout)
+
+```bash
+git pull && npm install && npm run build       # then restart
+```
+
+…or click **Update now** in the app: the server pulls from `origin`, reinstalls,
+rebuilds `web/dist`, and restarts itself in place; the page reconnects
+automatically.
+
+### Restarting the server
+
+- **Foreground** (you ran `claude-control` / `npm start` in a terminal): press
+  `Ctrl-C`, then run it again. The web UI reconnects on its own.
+- **launchd service** (you ran `claude-control install-service`):
+  ```bash
+  launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control
+  ```
+  or `claude-control uninstall-service && claude-control install-service`.
+
+Restarting is safe — sessions live in tmux, so nothing is lost; each browser
+re-prompts for the token once (if one is set).
+
+Version numbers follow npm semver (`claude-control --version`).
 
 ---
 
