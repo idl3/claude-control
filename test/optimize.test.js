@@ -142,3 +142,36 @@ test('optimizePrompt with non-function complete → mode:rules', async () => {
   const result = await optimizePrompt('some draft', { complete: 'not a function' });
   assert.equal(result.mode, 'rules');
 });
+
+// ── isRunawayRewrite — guard against weak-model over-expansion ───────────────
+
+test('isRunawayRewrite: flags a short prompt inflated into a spec of questions', async () => {
+  const { isRunawayRewrite } = await import('../lib/optimize.js');
+  const draft = 'update the placeholder with the new hotkeys';
+  const runaway =
+    'Specify: 1) Which file contains the placeholder? 2) What are the new values? ' +
+    '3) Is this a doc or code change? 4) What format should they display in?';
+  assert.equal(isRunawayRewrite(draft, runaway), true);
+});
+
+test('isRunawayRewrite: allows a clear, lightly-edited rewrite', async () => {
+  const { isRunawayRewrite } = await import('../lib/optimize.js');
+  assert.equal(
+    isRunawayRewrite('fix the typo in the readme', 'Fix the typo in the README.'),
+    false,
+  );
+});
+
+test('optimizePrompt: falls back to rules when the LLM over-expands', async () => {
+  const draft = 'update the placeholder with the new hotkeys';
+  const complete = async () =>
+    JSON.stringify({
+      optimized:
+        'Specify: 1) Which file? 2) What values? 3) Doc or code? 4) What display format? ' +
+        'Please provide each of these so the task can proceed correctly and completely.',
+      rationale: ['x'],
+      changes: ['y'],
+    });
+  const result = await optimizePrompt(draft, { complete });
+  assert.equal(result.mode, 'rules'); // runaway rejected → conservative fallback
+});
