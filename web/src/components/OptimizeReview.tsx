@@ -115,12 +115,16 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
     return () => clearTimeout(t);
   }, [armed, secs]);
 
-  // Esc closes the modal (and cancels auto-send).
+  // Esc closes the modal; ⌘/Ctrl+Enter sends immediately (short-circuit the
+  // 5 s auto-send countdown).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        onSendRef.current(editedRef.current);
       }
     };
     window.addEventListener('keydown', onKeyDown);
