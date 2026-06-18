@@ -219,12 +219,12 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
               disabled={loading}
               onChange={(e) => setOptimizeBackend(e.target.value as OptimizeBackend)}
             >
-              <option value="mlx">Local MLX (→ claude → rules)</option>
-              <option value="claude">claude -p (→ rules)</option>
+              <option value="mlx">Local MLX (→ rules)</option>
               <option value="rules">Rules only (offline)</option>
             </select>
             <span className="config-hint">
-              Powers ✨. <code>mlx</code> = on-device, no key.
+              Powers ✨. <code>mlx</code> = on-device, no key. (<code>claude -p</code>
+              is disabled — it spawned transcripts that corrupted session matching.)
             </span>
           </label>
 
