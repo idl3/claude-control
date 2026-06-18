@@ -432,12 +432,12 @@ export async function killProcess(pid: number, signal?: 'SIGTERM' | 'SIGKILL'): 
 export interface SkillEntry {
   name: string;
   description: string;
-  source: 'user' | 'project';
+  source: 'user' | 'project' | 'plugin';
 }
 
 export interface SkillDetail {
   name: string;
-  source: 'user' | 'project';
+  source: 'user' | 'project' | 'plugin';
   frontMatter: Record<string, string>;
   body: string;
 }

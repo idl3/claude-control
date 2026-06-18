@@ -143,8 +143,8 @@ export function SkillBrowser({ onPick, onClose: rawClose, sessionId }: SkillBrow
                   </>
                 ) : null}
               </span>
-              {skill.source === 'project' ? (
-                <span className="skill-source-tag">project</span>
+              {skill.source !== 'user' ? (
+                <span className="skill-source-tag">{skill.source}</span>
               ) : null}
             </button>
           ))

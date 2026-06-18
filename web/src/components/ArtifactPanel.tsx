@@ -108,9 +108,15 @@ function SkillLegend({ artifact }: SkillLegendProps) {
           <span
             className="skill-legend-source-badge"
             data-source={artifact.skillSource}
-            title={artifact.skillSource === 'project' ? 'Project-local skill' : 'User skill'}
+            title={
+              artifact.skillSource === 'project'
+                ? 'Project-local skill'
+                : artifact.skillSource === 'plugin'
+                  ? 'Plugin skill'
+                  : 'User skill'
+            }
           >
-            {artifact.skillSource === 'project' ? 'project' : 'user'}
+            {artifact.skillSource}
           </span>
         </div>
       ) : null}

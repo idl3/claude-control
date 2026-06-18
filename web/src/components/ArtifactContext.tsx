@@ -18,7 +18,7 @@ export interface Artifact {
   /** Only present when kind === 'skill'. */
   skillFrontMatter?: Record<string, string>;
   /** Only present when kind === 'skill'. */
-  skillSource?: 'user' | 'project';
+  skillSource?: 'user' | 'project' | 'plugin';
 }
 
 /**
