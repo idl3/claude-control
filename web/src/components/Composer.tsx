@@ -9,9 +9,11 @@ import { Kbd } from './Kbd';
 import {
   optimizePrompt,
   listSkills,
+  fetchSkill,
   type OptimizeResult,
   type SkillEntry,
 } from '../lib/api';
+import { useArtifactPanel } from './ArtifactContext';
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
@@ -20,26 +22,31 @@ import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 
-// Module-level cache so the skill list (live, session-discovered via GET
-// /api/skills → lib/skills.js) is fetched once and shared across composer
-// mounts — the autocomplete must reflect the CURRENT session's installed
-// skills, never a hardcoded list.
-let _skillsCache: SkillEntry[] | null = null;
-let _skillsPromise: Promise<SkillEntry[]> | null = null;
-function loadSkills(): Promise<SkillEntry[]> {
-  if (_skillsCache) return Promise.resolve(_skillsCache);
-  if (!_skillsPromise) {
-    _skillsPromise = listSkills()
-      .then((s) => {
-        _skillsCache = s;
-        return s;
-      })
-      .catch(() => {
-        _skillsPromise = null; // allow a retry on next open
-        return [];
-      });
-  }
-  return _skillsPromise;
+// Module-level per-session cache so the skill list (live, session-discovered
+// via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
+// session and shared across Composer mounts. Project skills are scoped to the
+// session's cwd; different sessions can have different project-skill sets.
+const _skillsCache = new Map<string, SkillEntry[]>();
+const _skillsPromise = new Map<string, Promise<SkillEntry[]>>();
+
+function loadSkills(id?: string | null): Promise<SkillEntry[]> {
+  const key = id ?? '';
+  const hit = _skillsCache.get(key);
+  if (hit) return Promise.resolve(hit);
+  const inflight = _skillsPromise.get(key);
+  if (inflight) return inflight;
+  const p = listSkills(id)
+    .then((s) => {
+      _skillsCache.set(key, s);
+      _skillsPromise.delete(key);
+      return s;
+    })
+    .catch(() => {
+      _skillsPromise.delete(key); // allow retry on next open
+      return [] as SkillEntry[];
+    });
+  _skillsPromise.set(key, p);
+  return p;
 }
 
 // A leading slash-command still being typed (no space yet): `/`, then the
@@ -142,11 +149,60 @@ const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
 export function Composer({ disabled, sessionId }: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
+  const { open: openArtifact, close: closeArtifact } = useArtifactPanel();
   const [empty, setEmpty] = useState(true);
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
   // Terminal (>_) mode: the composer runs shell command lines in a dedicated
-  // server-side pane instead of replying to Claude. Global (not per-session).
+  // server-side pane instead of replying to Claude. `terminal` = currently SHOWN;
+  // `termWarm` = TerminalView is mounted+polling (kept warm so re-opens don't
+  // flash a loader). Opening the first time warms it; closing only hides it; the
+  // real unload happens on session change (the effect below resets both).
   const [terminal, setTerminal] = useState(false);
+  const [termWarm, setTermWarm] = useState(false);
+  const termWrapRef = useRef<HTMLDivElement>(null);
+  const openTerminal = useCallback(() => {
+    setTermWarm(true);
+    setTerminal(true);
+  }, []);
+
+  // Real unload on session change: drop the warm terminal and hide it.
+  useEffect(() => {
+    setTerminal(false);
+    setTermWarm(false);
+  }, [sessionId]);
+
+  // Cosmetic show/hide of the kept-warm terminal (fade + zoom). The element stays
+  // mounted + polling while hidden, so re-opening is instant (no loader flash).
+  useEffect(() => {
+    const el = termWrapRef.current;
+    if (!el) return;
+    if (terminal) {
+      el.style.display = '';
+      if (prefersReducedMotion()) {
+        gsap.set(el, { opacity: 1, scale: 1, y: 0 });
+        return;
+      }
+      gsap.fromTo(
+        el,
+        { opacity: 0, scale: 0.95, y: 8 },
+        { opacity: 1, scale: 1, y: 0, duration: 0.26, ease: 'power3.out', transformOrigin: 'bottom center' },
+      );
+    } else if (prefersReducedMotion()) {
+      el.style.display = 'none';
+    } else {
+      gsap.to(el, {
+        opacity: 0,
+        scale: 0.95,
+        y: 8,
+        duration: 0.18,
+        ease: 'power2.in',
+        transformOrigin: 'bottom center',
+        onComplete: () => {
+          el.style.display = 'none';
+        },
+      });
+    }
+  }, [terminal, termWarm]);
   // Enhance state BOUND PER SESSION (keyed by session id), like the per-session
   // AskUserQuestion pending state. The Composer stays mounted across session
   // switches, so this map persists: switching away preserves an in-progress or
@@ -191,14 +247,27 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
   }, [optimizing]);
 
   // ── Inline skill autocomplete ──────────────────────────────────────────────
-  const [skills, setSkills] = useState<SkillEntry[]>(() => _skillsCache ?? []);
+  const [skills, setSkills] = useState<SkillEntry[]>(
+    () => _skillsCache.get(sessionId ?? '') ?? [],
+  );
   const [text, setTextMirror] = useState('');     // mirror of composer text
   const [acIndex, setAcIndex] = useState(0);       // highlighted suggestion
   const [acDismissed, setAcDismissed] = useState(false); // Esc / just-selected
 
+  // Re-fetch skills whenever the session changes (different sessions may have
+  // different project skills). The cache prevents redundant network calls.
   useEffect(() => {
-    if (!_skillsCache) loadSkills().then(setSkills);
-  }, []);
+    let alive = true;
+    const cached = _skillsCache.get(sessionId ?? '');
+    if (cached) {
+      setSkills(cached);
+    } else {
+      loadSkills(sessionId).then((s) => {
+        if (alive) setSkills(s);
+      });
+    }
+    return () => { alive = false; };
+  }, [sessionId]);
 
   // Track composer text → drives both the empty flag and the slash detection.
   useEffect(() => {
@@ -242,6 +311,42 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     const m = SLASH_DONE_RE.exec(text);
     return m && skills.some((s) => s.name === m[1]) ? m[1] : null;
   }, [text, skills]);
+
+  // Stable artifact id for the active skill (so tab dedup works correctly).
+  const skillArtifactId = activeSkill ? `skill-${activeSkill}` : null;
+
+  // Track the artifact id we opened so we can close it when the skill clears.
+  const openedSkillArtifactIdRef = useRef<string | null>(null);
+
+  // When a skill becomes active: fetch its detail and open the side panel.
+  // When the skill clears: close the panel for the previously-opened skill.
+  useEffect(() => {
+    if (!activeSkill || !skillArtifactId) {
+      // Close the skill artifact that was previously opened (if any).
+      if (openedSkillArtifactIdRef.current) {
+        closeArtifact(openedSkillArtifactIdRef.current);
+        openedSkillArtifactIdRef.current = null;
+      }
+      return;
+    }
+    let alive = true;
+    fetchSkill(activeSkill, sessionId)
+      .then((detail) => {
+        if (!alive) return;
+        openArtifact({
+          id: skillArtifactId,
+          kind: 'skill',
+          title: `/${detail.name}`,
+          content: detail.body,
+          skillFrontMatter: detail.frontMatter,
+          skillSource: detail.source,
+        });
+        openedSkillArtifactIdRef.current = skillArtifactId;
+      })
+      .catch(() => { /* skill not found or network error — silent */ });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSkill, sessionId]);
 
   const selectSkill = useCallback(
     (name: string) => {
@@ -404,16 +509,20 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           ))}
         </div>
       ) : null}
-      {/* Terminal mode: live view of the shell pane floats above the composer. */}
-      {terminal ? (
-        <TerminalView
-          output={shell.output}
-          requestCapture={shell.poll}
-          clearOutput={shell.clear}
-          sendKey={shell.key}
-          mods={sticky}
-          onToggleMod={toggleMod}
-        />
+      {/* Terminal mode: kept-warm once opened (still polling while hidden) so
+          re-opening just fades+zooms in — no loader flash. Unloads on session
+          change (the effect above resets termWarm). */}
+      {termWarm ? (
+        <div ref={termWrapRef} className="term-warm">
+          <TerminalView
+            output={shell.output}
+            requestCapture={shell.poll}
+            clearOutput={shell.clear}
+            sendKey={shell.key}
+            mods={sticky}
+            onToggleMod={toggleMod}
+          />
+        </div>
       ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
           then a toolbar with attach on the left and send on the right. */}
@@ -505,7 +614,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               // bang); the "!" is consumed, not typed.
               if (empty && e.key === '!') {
                 e.preventDefault();
-                setTerminal(true);
+                openTerminal();
                 return;
               }
               // Skill autocomplete nav takes precedence while the dropdown is open.
@@ -621,6 +730,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                 aria-label="Voice input"
                 title="Voice input"
                 disabled={disabled}
+                data-hotkey="⌘S"
                 onClick={() => setVoiceOpen(true)}
               >
                 <MicIcon />
@@ -636,7 +746,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             title="Terminal mode — run shell commands"
             aria-pressed={terminal}
             data-on={terminal ? 'true' : undefined}
-            onClick={() => setTerminal((v) => !v)}
+            onClick={() => (terminal ? setTerminal(false) : openTerminal())}
           >
             <TerminalIcon />
           </button>
@@ -678,6 +788,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               aria-label="Optimise and send"
               title="Optimise & send (⌘/Ctrl+↵)"
               disabled={disabled || optimizing || empty}
+              data-hotkey="⌘↵"
               onClick={() => void runEnhance()}
             >
               {optimizing ? (
@@ -718,6 +829,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
         <SkillBrowser
           onPick={pickSkill}
           onClose={() => setSkillBrowserOpen(false)}
+          sessionId={sessionId}
         />
       ) : null}
       {voiceOpen ? (

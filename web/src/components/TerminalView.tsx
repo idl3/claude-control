@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { parseAnsi, splitUrls, trimTrailingBlankLines } from '../lib/ansi';
 import type { Mods } from '../lib/terminalKeys';
-import gsap, { prefersReducedMotion } from '../lib/anim';
 
 interface TerminalViewProps {
   /** Latest capture of the shell pane, or null before the first poll. */
@@ -84,20 +83,6 @@ export function TerminalView({
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
   };
 
-  // Smooth entrance when the terminal opens (composer >_ overlay / pane select).
-  const viewRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = viewRef.current;
-    if (!el || prefersReducedMotion()) return;
-    gsap.from(el, {
-      opacity: 0,
-      y: 10,
-      scaleY: 0.96,
-      transformOrigin: 'bottom center',
-      duration: 0.26,
-      ease: 'power3.out',
-    });
-  }, []);
 
   // Parse ANSI colors → styled segments, and linkify URLs inside each segment.
   const rendered = useMemo(() => {
@@ -128,7 +113,7 @@ export function TerminalView({
   }, [output]);
 
   return (
-    <div className="terminal-view" ref={viewRef}>
+    <div className="terminal-view">
       <div className="terminal-view-head">
         <span className="terminal-view-title">terminal · cc-shell</span>
         <button

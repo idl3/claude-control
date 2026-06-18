@@ -10,11 +10,15 @@ import {
 /** An artifact captured at open time for display in the side panel. */
 export interface Artifact {
   id: string;
-  kind: 'tool' | 'code';
+  kind: 'tool' | 'code' | 'skill';
   title: string;
   language?: string;
   content: string;
   filePath?: string;
+  /** Only present when kind === 'skill'. */
+  skillFrontMatter?: Record<string, string>;
+  /** Only present when kind === 'skill'. */
+  skillSource?: 'user' | 'project';
 }
 
 /**

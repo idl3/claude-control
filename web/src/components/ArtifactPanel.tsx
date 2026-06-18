@@ -2,14 +2,22 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { useArtifactPanel } from './ArtifactContext';
+import {
+  AssistantRuntimeProvider,
+  ThreadPrimitive,
+  useExternalStoreRuntime,
+  type ThreadMessageLike,
+} from '@assistant-ui/react';
+import { useArtifactPanel, type Artifact } from './ArtifactContext';
 import { useIsNarrow } from '../hooks/useIsNarrow';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
+import { AssistantMessage, UserMessage } from './Messages';
 
 // ── Size cap for highlighting ────────────────────────────────────────────────
 const HIGHLIGHT_SIZE_CAP = 256 * 1024; // 256 KB
@@ -28,6 +36,105 @@ function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ── SkillLegend: renders skill front-matter + markdown body ──────────────────
+
+const _skillMsgComponents = {
+  UserMessage,
+  AssistantMessage,
+  SystemMessage: AssistantMessage,
+} as const;
+
+function SkillBodyRenderer({ markdown }: { markdown: string }) {
+  const messages = useMemo<ThreadMessageLike[]>(
+    () => [
+      {
+        role: 'assistant',
+        id: 'skill-legend-body',
+        content: [{ type: 'text', text: markdown }],
+        metadata: { custom: { cockpitRole: 'assistant' } },
+      } as ThreadMessageLike,
+    ],
+    [markdown],
+  );
+  const runtime = useExternalStoreRuntime({
+    messages,
+    isDisabled: true,
+    convertMessage: (m: ThreadMessageLike) => m,
+    onNew: async () => {},
+  });
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Root className="skill-body-thread">
+        <ThreadPrimitive.Viewport className="skill-body-viewport">
+          <ThreadPrimitive.Messages components={_skillMsgComponents} />
+        </ThreadPrimitive.Viewport>
+      </ThreadPrimitive.Root>
+    </AssistantRuntimeProvider>
+  );
+}
+
+/** Chip-style value renderer for front-matter entries like tools/model lists. */
+function FmValue({ val }: { val: string }) {
+  // Split comma- or space-separated lists into chips when the value looks like
+  // multiple tokens (e.g. "bash, read, write" or "claude-opus-4").
+  const parts = val.split(/,\s*/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) {
+    return <span className="skill-fm-val">{val}</span>;
+  }
+  return (
+    <span className="skill-fm-val skill-fm-chips">
+      {parts.map((p) => (
+        <span key={p} className="skill-fm-chip">{p}</span>
+      ))}
+    </span>
+  );
+}
+
+interface SkillLegendProps {
+  artifact: Artifact;
+}
+
+function SkillLegend({ artifact }: SkillLegendProps) {
+  const fm = artifact.skillFrontMatter ?? {};
+  const fmEntries = Object.entries(fm);
+
+  return (
+    <div className="skill-legend">
+      {/* Source badge */}
+      {artifact.skillSource ? (
+        <div className="skill-legend-source-row">
+          <span
+            className="skill-legend-source-badge"
+            data-source={artifact.skillSource}
+            title={artifact.skillSource === 'project' ? 'Project-local skill' : 'User skill'}
+          >
+            {artifact.skillSource === 'project' ? 'project' : 'user'}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Front-matter */}
+      {fmEntries.length > 0 && (
+        <dl className="skill-fm">
+          {fmEntries.map(([key, val]) => (
+            <div key={key} className="skill-fm-row">
+              <dt className="skill-fm-key">{key}</dt>
+              <FmValue val={val} />
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {/* Markdown body */}
+      {artifact.content.length > 0 ? (
+        <div className="skill-body-wrap">
+          <SkillBodyRenderer markdown={artifact.content} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 // ── ArtifactBody: highlights content of the active artifact ─────────────────
@@ -289,11 +396,15 @@ export function ArtifactPanel() {
             aria-labelledby={`artifact-tab-${activeArtifact.id}`}
             className="artifact-panel-body"
           >
-            <ArtifactBody
-              language={activeArtifact.language}
-              content={activeArtifact.content}
-              artifactId={activeArtifact.id}
-            />
+            {activeArtifact.kind === 'skill' ? (
+              <SkillLegend artifact={activeArtifact} />
+            ) : (
+              <ArtifactBody
+                language={activeArtifact.language}
+                content={activeArtifact.content}
+                artifactId={activeArtifact.id}
+              />
+            )}
           </div>
         )}
       </div>

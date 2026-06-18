@@ -3,6 +3,7 @@ import type { ResourceState } from '../hooks/useCockpit';
 import type { PushController } from '../hooks/usePushNotifications';
 import { NotifyBell } from './NotifyBell';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
+import { BatteryIcon } from './icons';
 
 interface ResourceHudProps {
   resources: ResourceState;
@@ -21,6 +22,7 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
   const sys = snap?.system ?? {};
   const over = !!snap?.overLimit || !!resources.warning;
   const load0 = sys.loadavg?.[0];
+  const power = snap?.power;
 
   return (
     <div className="hud" data-warn={over ? 'true' : 'false'} role="status">
@@ -47,6 +49,17 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
         <span className="hud-k">mem</span>
         <span className="hud-v">{fmt(sys.memUsedPct, '%')}</span>
       </span>
+      {power && power.hasBattery ? (
+        <span
+          className="hud-group hud-battery"
+          data-low={power.low ? 'true' : undefined}
+          data-charging={power.charging ? 'true' : undefined}
+          title={`battery ${power.percent ?? '—'}%${power.charging ? ' · charging' : ''}${power.low ? ' · low' : ''}`}
+        >
+          <BatteryIcon size={20} level={(power.percent ?? 0) / 100} charging={!!power.charging} />
+          <span className="hud-v">{power.percent != null ? `${power.percent}%` : '—'}</span>
+        </span>
+      ) : null}
       {over ? (
         <span className="hud-warn-text">{resources.warning || 'over limit'}</span>
       ) : null}
