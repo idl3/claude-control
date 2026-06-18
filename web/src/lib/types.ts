@@ -8,6 +8,7 @@ export interface Session {
   title?: string;
   tmuxName?: string;
   target?: string;
+  paneId?: string;                  // stable tmux %N (survives renumber / grouped mirrors)
   sessionName?: string;
   windowIndex?: number;
   paneIndex?: number;
