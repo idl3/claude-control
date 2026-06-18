@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -17,6 +17,7 @@ import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
+import { relayDiff, controlToken, interceptToken, isLetter, type Mods } from '../lib/terminalKeys';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -273,13 +274,68 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     }
   }, [composer, disabled, optimizing, key, patchEnhance]);
 
-  // Terminal mode: run the typed line as a shell command, then clear the input.
-  const runCommand = useCallback(() => {
-    const t = (composer.getState().text ?? '').trim();
-    if (!t) return;
-    shell.run(t);
-    composer.setText('');
-  }, [composer, shell]);
+  // ── Terminal input relay ────────────────────────────────────────────────────
+  // The textarea is a VISIBLE buffer the user types into normally — so the iOS
+  // soft keyboard, autocorrect, and on-screen feedback all work. On every buffer
+  // change we diff old→new and relay just the delta to the shell pane (which
+  // echoes it back). Live relay keeps Tab-complete working: the partial word is
+  // already on the shell line. Sticky Ctrl/Opt are ONE-SHOT modifiers — tap Ctrl,
+  // then a letter, for Ctrl-<letter> "in succession" (the soft keyboard can't
+  // chord). Refs keep the relay reading the latest sticky/shell values.
+  const [sticky, setSticky] = useState<Mods>({ ctrl: false, alt: false });
+  const stickyRef = useRef(sticky);
+  stickyRef.current = sticky;
+  const shellRef = useRef(shell);
+  shellRef.current = shell;
+  const termPrevRef = useRef(''); // last buffer value we relayed
+
+  const toggleMod = useCallback((m: keyof Mods) => {
+    setSticky((s) => ({ ...s, [m]: !s[m] }));
+  }, []);
+
+  // Subscribe to composer text changes; relay the diff while in terminal mode.
+  useEffect(() => {
+    if (!terminal) {
+      termPrevRef.current = '';
+      return;
+    }
+    composer.setText(''); // clean slate — don't relay a leftover reply draft
+    termPrevRef.current = '';
+    setSticky({ ctrl: false, alt: false });
+
+    const relay = () => {
+      const next = composer.getState().text ?? '';
+      const prev = termPrevRef.current;
+      if (next === prev) return;
+      const { removed, added } = relayDiff(prev, next);
+      const s = stickyRef.current;
+
+      // Sticky modifier + a single inserted letter → control key (Ctrl-A etc.);
+      // consume the modifier and DON'T keep the letter in the buffer.
+      if ((s.ctrl || s.alt) && removed === 0 && added.length === 1 && isLetter(added)) {
+        const tok = controlToken(s, added);
+        if (tok) shellRef.current.key(tok);
+        setSticky({ ctrl: false, alt: false });
+        composer.setText(prev); // revert; termPrevRef stays = prev
+        return;
+      }
+      // A newline in the delta == Enter (a soft-keyboard return that slipped past
+      // keydown): run the line and clear the buffer.
+      const nl = added.indexOf('\n');
+      if (nl !== -1) {
+        for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
+        if (added.slice(0, nl)) shellRef.current.text(added.slice(0, nl));
+        shellRef.current.key('Enter');
+        termPrevRef.current = '';
+        composer.setText('');
+        return;
+      }
+      for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
+      if (added) shellRef.current.text(added);
+      termPrevRef.current = next;
+    };
+    return composer.subscribe(relay);
+  }, [terminal, composer]);
 
   return (
     <ComposerPrimitive.Root className="composer">
@@ -323,6 +379,8 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           requestCapture={shell.poll}
           clearOutput={shell.clear}
           sendKey={shell.key}
+          mods={sticky}
+          onToggleMod={toggleMod}
         />
       ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
@@ -345,14 +403,31 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
             submitOnEnter={false}
             onKeyDown={(e) => {
-              // Terminal mode: Enter (or ⌘/Ctrl+Enter) runs the command;
-              // Shift+Enter still inserts a newline for multi-line input.
+              // Terminal mode: most keys edit the visible buffer (relayed via the
+              // diff). Intercept only the keys that must go straight to the shell.
               if (terminal) {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.metaKey) return; // ⌘ combos belong to the browser/OS
+                const s = sticky;
+                const ctrl = e.ctrlKey || s.ctrl;
+                const alt = e.altKey || s.alt;
+                // Ctrl/Opt + letter (hardware keyboards fire keydown for letters).
+                if ((ctrl || alt) && e.key.length === 1 && isLetter(e.key)) {
                   e.preventDefault();
-                  runCommand();
+                  const tok = controlToken({ ctrl, alt }, e.key);
+                  if (tok) shell.key(tok);
+                  if (s.ctrl || s.alt) setSticky({ ctrl: false, alt: false });
+                  return;
                 }
-                return;
+                const tok = interceptToken(e.key, e.shiftKey);
+                if (tok) {
+                  e.preventDefault();
+                  shell.key(tok);
+                  if (tok === 'Enter') {
+                    termPrevRef.current = '';
+                    composer.setText('');
+                  }
+                }
+                return; // everything else edits the buffer; the relay handles it
               }
               // Skill autocomplete nav takes precedence while the dropdown is open.
               if (acOpen) {
@@ -399,11 +474,11 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           />
           {terminal ? (
             <div className="composer-hint" aria-hidden="true">
-              <span className="composer-hint-lead">Run a command…</span>
+              <span className="composer-hint-lead">Keys go to the shell…</span>
               <span className="composer-hint-keys">
-                <Kbd>↵</Kbd> to run
+                <Kbd>Tab</Kbd> completes
                 <span className="composer-hint-dot">·</span>
-                <Kbd>⇧↵</Kbd> newline
+                <Kbd>↑</Kbd> history
               </span>
             </div>
           ) : !disabled ? (
@@ -494,9 +569,10 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               type="button"
               className="composer-send"
               data-terminal="true"
-              aria-label="Run command"
-              title="Run command (↵)"
-              onClick={runCommand}
+              aria-label="Send Enter"
+              title="Enter"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => shell.key('Enter')}
             >
               <ArrowUpIcon />
             </button>

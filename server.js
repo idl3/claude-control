@@ -1395,8 +1395,27 @@ async function handleClientMessage(ws, msg) {
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const lines = Math.max(1, Math.min(10000, Number(msg.lines) || 40));
-      const text = await tmux.capturePane(session.target, lines);
+      // Terminal-pane rows opt into ANSI escapes so colours render; the plain
+      // LivePane omits the flag (escapes would show as garbage there).
+      const text = await tmux.capturePane(session.target, lines, !!msg.escapes);
       return send(ws, { type: 'capture', id: msg.id, text });
+    }
+    // Interactive terminal panes: forward keystrokes to ANY pane by id (the
+    // selected one). Mirrors the cc-shell shell-* ops but target-addressed.
+    case 'pane-text': {
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      await tmux.sendLiteral(session.target, String(msg.text ?? ''));
+      return send(ws, { type: 'ack', op: 'pane-text', ok: true });
+    }
+    case 'pane-key': {
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      if (!shell.SHELL_KEYS.has(String(msg.key ?? ''))) throw new Error('key not allowed');
+      await tmux.sendRawKeys(session.target, [String(msg.key)]);
+      return send(ws, { type: 'ack', op: 'pane-key', ok: true });
     }
     case 'promptkey': {
       // Respond to a live TUI selection prompt (permission/menu). Whitelisted
@@ -1417,6 +1436,10 @@ async function handleClientMessage(ws, msg) {
     case 'shell-input': {
       await shell.shellInput(String(msg.line ?? ''), msg.cwd);
       return send(ws, { type: 'ack', op: 'shell-input', ok: true });
+    }
+    case 'shell-text': {
+      await shell.shellText(String(msg.text ?? ''), msg.cwd);
+      return send(ws, { type: 'ack', op: 'shell-text', ok: true });
     }
     case 'shell-key': {
       await shell.shellKey(String(msg.key ?? ''), msg.cwd);
