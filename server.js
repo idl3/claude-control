@@ -20,7 +20,7 @@ import { SubAgentsWatcher } from './lib/subagents.js';
 import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
-import { ResourceMonitor } from './lib/resources.js';
+import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
 import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
@@ -36,7 +36,7 @@ import {
   recommendClaudeModel,
 } from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
-import { listSkills } from './lib/skills.js';
+import { listSkills, readSkill } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -186,11 +186,42 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/api/skills') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
-    return endJson(res, 200, { skills: listSkills() });
+    // Optional ?id=<sessionId>: resolve the session's cwd from the registry so
+    // project skills are merged in. Never trust a client-supplied path.
+    const skillsId = u.searchParams.get('id');
+    const skillsSession = skillsId ? sessionById(skillsId) : null;
+    const skillsCwd = skillsSession?.cwd ?? null;
+    return endJson(res, 200, { skills: listSkills(skillsCwd) });
+  }
+  if (u.pathname === '/api/skill') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const skillId = u.searchParams.get('id');
+    const skillName = u.searchParams.get('name');
+    if (!skillName) return endJson(res, 400, { error: 'missing name' });
+    const skillSession = skillId ? sessionById(skillId) : null;
+    const skillCwd = skillSession?.cwd ?? null;
+    const skill = readSkill(skillName, skillCwd);
+    if (!skill) return endJson(res, 404, { error: 'skill not found' });
+    return endJson(res, 200, skill);
   }
   if (u.pathname === '/api/health') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { ok: true, snapshot: resources.snapshot() });
+  }
+  // Process monitor: top processes by CPU (GET) + kill a pid (POST {pid}).
+  if (u.pathname === '/api/ps') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return endJson(res, 200, { processes: listProcesses(40) });
+  }
+  if (u.pathname === '/api/kill') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return readJsonBody(req)
+      .then((body) => {
+        const result = killProcess(body?.pid, body?.signal === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM');
+        return endJson(res, result.ok ? 200 : 400, result);
+      })
+      .catch((err) => endJson(res, 400, { ok: false, error: String(err?.message || err) }));
   }
   if (u.pathname === '/api/version') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
