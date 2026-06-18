@@ -40,18 +40,44 @@ function cand(over) {
   };
 }
 
-test('title match: same-cwd panes each bind their own transcript by window name', () => {
+test('start-time match: same-cwd panes each bind their own transcript by birthtime', () => {
+  // Title matching is gone; distinct claude process start times disambiguate
+  // same-cwd siblings deterministically.
   const panes = [
-    { target: '0:1.1', windowName: 'testing-session', cwd, procStartMs: null },
-    { target: '0:2.1', windowName: 'skill-prefix-rules', cwd, procStartMs: null },
+    { target: '0:1.1', windowName: 'testing-session', cwd, procStartMs: 1000 },
+    { target: '0:2.1', windowName: 'skill-prefix-rules', cwd, procStartMs: 5000 },
   ];
   const candidates = [
-    cand({ transcriptPath: '/p/a.jsonl', customTitle: 'skill-prefix-rules' }),
-    cand({ transcriptPath: '/p/b.jsonl', customTitle: 'testing-session' }),
+    cand({ transcriptPath: '/p/a.jsonl', birthtimeMs: 5100, lastActivityMs: 9000 }),
+    cand({ transcriptPath: '/p/b.jsonl', birthtimeMs: 1100, lastActivityMs: 9000 }),
   ];
   const out = assignTranscripts(panes, candidates);
   assert.equal(out.get('0:1.1').transcriptPath, '/p/b.jsonl');
   assert.equal(out.get('0:2.1').transcriptPath, '/p/a.jsonl');
+});
+
+test('title is IGNORED: a stale transcript whose title matches the window does not win', () => {
+  // A window keeping an OLD session's name must not pull in that old transcript.
+  // Even with a matching customTitle present, binding is purely by start-time, so
+  // the live transcript (born at the pane start) wins.
+  const panes = [{ target: '0:2.1', windowName: 'Deploy Plan SPA', cwd, procStartMs: 1_000_000 }];
+  const candidates = [
+    cand({ transcriptPath: '/p/stale.jsonl', customTitle: 'Deploy Plan SPA', birthtimeMs: 1, lastActivityMs: 500 }),
+    cand({ transcriptPath: '/p/live.jsonl', birthtimeMs: 1_000_100, lastActivityMs: 1_005_000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:2.1').transcriptPath, '/p/live.jsonl');
+});
+
+test('resumed session binds by recency (born before resume, active after)', () => {
+  // A resumed transcript is born long before the new proc start, so the start-time
+  // pass rejects it; recency (activity bumped by the resume) recovers it.
+  const panes = [{ target: '0:1.1', windowName: 'my-session', cwd, procStartMs: 1_000_000 }];
+  const candidates = [
+    cand({ transcriptPath: '/p/resumed.jsonl', birthtimeMs: 1, lastActivityMs: 1_002_000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:1.1').transcriptPath, '/p/resumed.jsonl');
 });
 
 test('cross-send case: same cwd, no titles → start-time binds 1:1 (NOT swapped)', () => {

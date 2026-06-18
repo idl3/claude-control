@@ -25,13 +25,27 @@ export interface CockpitStore {
   conn: ConnState;
   resources: ResourceState;
   capture: string | null;
+  /** Live capture of the dedicated shell pane (composer terminal mode). */
+  shellOutput: string | null;
   select: (id: string) => void;
   resubscribe: () => void;
   sendReply: (text: string) => boolean;
   sendPromptKey: (key: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
-  requestCapture: (lines?: number) => boolean;
+  requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
+  /** Interactive terminal panes: relay a literal char / control key to the selected pane. */
+  sendPaneText: (text: string) => boolean;
+  sendPaneKey: (key: string) => boolean;
+  /** Terminal mode: run a command line in the shell pane. */
+  sendShellInput: (line: string) => boolean;
+  /** Terminal mode: forward literal keystroke text (no Enter) — raw passthrough. */
+  sendShellText: (text: string) => boolean;
+  /** Terminal mode: send an allow-listed control key (e.g. C-c). */
+  sendShellKey: (key: string) => boolean;
+  /** Terminal mode: poll the shell pane capture. */
+  requestShellCapture: (lines?: number) => boolean;
+  clearShellOutput: () => void;
 }
 
 /**
@@ -51,6 +65,7 @@ export function useCockpit(): CockpitStore {
     warning: null,
   });
   const [capture, setCapture] = useState<string | null>(null);
+  const [shellOutput, setShellOutput] = useState<string | null>(null);
 
   // Per-session caches. Mutated via setState replacement (immutable updates).
   const [messagesById, setMessagesById] = useState<Record<string, Msg[]>>({});
@@ -67,6 +82,9 @@ export function useCockpit(): CockpitStore {
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
+  // sessions in a ref so shell ops can resolve the selected session's cwd.
+  const sessionsRef = useRef<Session[]>([]);
+  sessionsRef.current = sessions;
 
   useEffect(() => {
     const offState = socket.onState(setConn);
@@ -109,6 +127,10 @@ export function useCockpit(): CockpitStore {
           break;
         case 'capture':
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
+          break;
+        case 'shell-output':
+          // Global shell pane (not per-session) — just track the latest capture.
+          setShellOutput(msg.text ?? '');
           break;
         case 'prompt':
           setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
@@ -180,15 +202,59 @@ export function useCockpit(): CockpitStore {
   );
 
   const requestCapture = useCallback(
-    (lines?: number): boolean => {
+    (lines?: number, escapes?: boolean): boolean => {
       const id = selectedRef.current;
       if (!id) return false;
-      return socket.send({ type: 'capture', id, lines });
+      return socket.send({ type: 'capture', id, lines, escapes });
     },
     [socket],
   );
 
   const clearCapture = useCallback(() => setCapture(null), []);
+
+  // Interactive terminal panes: relay keystrokes to the SELECTED pane by id.
+  const sendPaneText = useCallback(
+    (text: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'pane-text', id, text });
+    },
+    [socket],
+  );
+  const sendPaneKey = useCallback(
+    (key: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'pane-key', id, key });
+    },
+    [socket],
+  );
+
+  // Terminal mode: the shell pane is server-owned (one global pane). We pass the
+  // selected session's cwd so a freshly-created pane starts in the right repo;
+  // the server ignores it once the pane exists.
+  const selectedCwd = useCallback((): string | undefined => {
+    const id = selectedRef.current;
+    return sessionsRef.current.find((s) => s.id === id)?.cwd;
+  }, []);
+  const sendShellInput = useCallback(
+    (line: string): boolean => socket.send({ type: 'shell-input', line, cwd: selectedCwd() }),
+    [socket, selectedCwd],
+  );
+  const sendShellText = useCallback(
+    (text: string): boolean => socket.send({ type: 'shell-text', text, cwd: selectedCwd() }),
+    [socket, selectedCwd],
+  );
+  const sendShellKey = useCallback(
+    (key: string): boolean => socket.send({ type: 'shell-key', key, cwd: selectedCwd() }),
+    [socket, selectedCwd],
+  );
+  const requestShellCapture = useCallback(
+    (lines?: number): boolean => socket.send({ type: 'shell-capture', lines, cwd: selectedCwd() }),
+    [socket, selectedCwd],
+  );
+  const clearShellOutput = useCallback(() => setShellOutput(null), []);
+
   const resubscribe = useCallback(() => socket.resubscribe(), [socket]);
   const sendPromptKey = useCallback(
     (key: string): boolean => {
@@ -230,6 +296,7 @@ export function useCockpit(): CockpitStore {
     conn,
     resources,
     capture,
+    shellOutput,
     select,
     resubscribe,
     sendReply,
@@ -237,5 +304,12 @@ export function useCockpit(): CockpitStore {
     sendAnswer,
     requestCapture,
     clearCapture,
+    sendPaneText,
+    sendPaneKey,
+    sendShellInput,
+    sendShellText,
+    sendShellKey,
+    requestShellCapture,
+    clearShellOutput,
   };
 }

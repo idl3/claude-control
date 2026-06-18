@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -15,6 +15,9 @@ import {
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
+import { TerminalView } from './TerminalView';
+import { useShell } from './ShellContext';
+import { relayDiff, controlToken, interceptToken, isLetter, type Mods } from '../lib/terminalKeys';
 
 // Module-level cache so the skill list (live, session-discovered via GET
 // /api/skills → lib/skills.js) is fetched once and shared across composer
@@ -136,8 +139,12 @@ const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
 
 export function Composer({ disabled, sessionId }: ComposerProps) {
   const composer = useComposerRuntime();
+  const shell = useShell();
   const [empty, setEmpty] = useState(true);
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
+  // Terminal (>_) mode: the composer runs shell command lines in a dedicated
+  // server-side pane instead of replying to Claude. Global (not per-session).
+  const [terminal, setTerminal] = useState(false);
   // Enhance state BOUND PER SESSION (keyed by session id), like the per-session
   // AskUserQuestion pending state. The Composer stays mounted across session
   // switches, so this map persists: switching away preserves an in-progress or
@@ -196,7 +203,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
       })
       .slice(0, AC_MAX);
   }, [acQuery, acDismissed, skills]);
-  const acOpen = acItems.length > 0;
+  const acOpen = !terminal && acItems.length > 0;
 
   // Active-skill chip: the leading `/<skill>` once it's a known, completed name.
   const activeSkill = useMemo(() => {
@@ -267,6 +274,69 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
     }
   }, [composer, disabled, optimizing, key, patchEnhance]);
 
+  // ── Terminal input relay ────────────────────────────────────────────────────
+  // The textarea is a VISIBLE buffer the user types into normally — so the iOS
+  // soft keyboard, autocorrect, and on-screen feedback all work. On every buffer
+  // change we diff old→new and relay just the delta to the shell pane (which
+  // echoes it back). Live relay keeps Tab-complete working: the partial word is
+  // already on the shell line. Sticky Ctrl/Opt are ONE-SHOT modifiers — tap Ctrl,
+  // then a letter, for Ctrl-<letter> "in succession" (the soft keyboard can't
+  // chord). Refs keep the relay reading the latest sticky/shell values.
+  const [sticky, setSticky] = useState<Mods>({ ctrl: false, alt: false });
+  const stickyRef = useRef(sticky);
+  stickyRef.current = sticky;
+  const shellRef = useRef(shell);
+  shellRef.current = shell;
+  const termPrevRef = useRef(''); // last buffer value we relayed
+
+  const toggleMod = useCallback((m: keyof Mods) => {
+    setSticky((s) => ({ ...s, [m]: !s[m] }));
+  }, []);
+
+  // Subscribe to composer text changes; relay the diff while in terminal mode.
+  useEffect(() => {
+    if (!terminal) {
+      termPrevRef.current = '';
+      return;
+    }
+    composer.setText(''); // clean slate — don't relay a leftover reply draft
+    termPrevRef.current = '';
+    setSticky({ ctrl: false, alt: false });
+
+    const relay = () => {
+      const next = composer.getState().text ?? '';
+      const prev = termPrevRef.current;
+      if (next === prev) return;
+      const { removed, added } = relayDiff(prev, next);
+      const s = stickyRef.current;
+
+      // Sticky modifier + a single inserted letter → control key (Ctrl-A etc.);
+      // consume the modifier and DON'T keep the letter in the buffer.
+      if ((s.ctrl || s.alt) && removed === 0 && added.length === 1 && isLetter(added)) {
+        const tok = controlToken(s, added);
+        if (tok) shellRef.current.key(tok);
+        setSticky({ ctrl: false, alt: false });
+        composer.setText(prev); // revert; termPrevRef stays = prev
+        return;
+      }
+      // A newline in the delta == Enter (a soft-keyboard return that slipped past
+      // keydown): run the line and clear the buffer.
+      const nl = added.indexOf('\n');
+      if (nl !== -1) {
+        for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
+        if (added.slice(0, nl)) shellRef.current.text(added.slice(0, nl));
+        shellRef.current.key('Enter');
+        termPrevRef.current = '';
+        composer.setText('');
+        return;
+      }
+      for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
+      if (added) shellRef.current.text(added);
+      termPrevRef.current = next;
+    };
+    return composer.subscribe(relay);
+  }, [terminal, composer]);
+
   return (
     <ComposerPrimitive.Root className="composer">
       {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
@@ -302,9 +372,20 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
           ))}
         </div>
       ) : null}
+      {/* Terminal mode: live view of the shell pane floats above the composer. */}
+      {terminal ? (
+        <TerminalView
+          output={shell.output}
+          requestCapture={shell.poll}
+          clearOutput={shell.clear}
+          sendKey={shell.key}
+          mods={sticky}
+          onToggleMod={toggleMod}
+        />
+      ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
           then a toolbar with attach on the left and send on the right. */}
-      <div className="composer-card">
+      <div className="composer-card" data-terminal={terminal ? 'true' : undefined}>
         {activeSkill ? (
           <div className="composer-skill-chip-row">
             <span className="skill-chip composer-skill-chip" title={`Invoking /${activeSkill}`}>
@@ -319,9 +400,35 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
         <div className="composer-input-wrap">
           <ComposerPrimitive.Input
             className="composer-input"
-            placeholder={disabled ? 'Select a session…' : ' '}
+            placeholder={disabled && !terminal ? 'Select a session…' : ' '}
             submitOnEnter={false}
             onKeyDown={(e) => {
+              // Terminal mode: most keys edit the visible buffer (relayed via the
+              // diff). Intercept only the keys that must go straight to the shell.
+              if (terminal) {
+                if (e.metaKey) return; // ⌘ combos belong to the browser/OS
+                const s = sticky;
+                const ctrl = e.ctrlKey || s.ctrl;
+                const alt = e.altKey || s.alt;
+                // Ctrl/Opt + letter (hardware keyboards fire keydown for letters).
+                if ((ctrl || alt) && e.key.length === 1 && isLetter(e.key)) {
+                  e.preventDefault();
+                  const tok = controlToken({ ctrl, alt }, e.key);
+                  if (tok) shell.key(tok);
+                  if (s.ctrl || s.alt) setSticky({ ctrl: false, alt: false });
+                  return;
+                }
+                const tok = interceptToken(e.key, e.shiftKey);
+                if (tok) {
+                  e.preventDefault();
+                  shell.key(tok);
+                  if (tok === 'Enter') {
+                    termPrevRef.current = '';
+                    composer.setText('');
+                  }
+                }
+                return; // everything else edits the buffer; the relay handles it
+              }
               // Skill autocomplete nav takes precedence while the dropdown is open.
               if (acOpen) {
                 if (e.key === 'ArrowDown') {
@@ -362,10 +469,19 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               }
             }}
             rows={1}
-            disabled={disabled}
+            disabled={disabled && !terminal}
             autoComplete="off"
           />
-          {!disabled ? (
+          {terminal ? (
+            <div className="composer-hint" aria-hidden="true">
+              <span className="composer-hint-lead">Keys go to the shell…</span>
+              <span className="composer-hint-keys">
+                <Kbd>Tab</Kbd> completes
+                <span className="composer-hint-dot">·</span>
+                <Kbd>↑</Kbd> history
+              </span>
+            </div>
+          ) : !disabled ? (
             <div className="composer-hint" aria-hidden="true">
               <span className="composer-hint-lead">Reply…</span>
               <span className="composer-hint-keys">
@@ -385,57 +501,90 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
         </div>
 
         <div className="composer-toolbar">
-          <ComposerPrimitive.AddAttachment
-            className="composer-attach"
-            aria-label="Attach a file"
-            title="Attach a file"
-            multiple
-            disabled={disabled}
-          >
-            <PlusIcon />
-          </ComposerPrimitive.AddAttachment>
+          {!terminal ? (
+            <>
+              <ComposerPrimitive.AddAttachment
+                className="composer-attach"
+                aria-label="Attach a file"
+                title="Attach a file"
+                multiple
+                disabled={disabled}
+              >
+                <PlusIcon />
+              </ComposerPrimitive.AddAttachment>
+              <button
+                type="button"
+                className="composer-skills-btn"
+                aria-label="Browse skills"
+                title="Browse skills"
+                disabled={disabled}
+                onClick={() => setSkillBrowserOpen((v) => !v)}
+              >
+                <SlashIcon />
+              </button>
+              <button
+                type="button"
+                className="composer-mic"
+                aria-label="Voice input"
+                title="Voice input"
+                disabled={disabled}
+                onClick={() => setVoiceOpen(true)}
+              >
+                <MicIcon />
+              </button>
+            </>
+          ) : null}
+          {/* Terminal-mode toggle (>_): turns the composer into a CLI. Always
+              available (the shell pane is independent of the selected session). */}
           <button
             type="button"
-            className="composer-skills-btn"
-            aria-label="Browse skills"
-            title="Browse skills"
-            disabled={disabled}
-            onClick={() => setSkillBrowserOpen((v) => !v)}
+            className="composer-skills-btn composer-term-toggle"
+            aria-label="Terminal mode"
+            title="Terminal mode — run shell commands"
+            aria-pressed={terminal}
+            data-on={terminal ? 'true' : undefined}
+            onClick={() => setTerminal((v) => !v)}
           >
-            <SlashIcon />
-          </button>
-          <button
-            type="button"
-            className="composer-mic"
-            aria-label="Voice input"
-            title="Voice input"
-            disabled={disabled}
-            onClick={() => setVoiceOpen(true)}
-          >
-            <MicIcon />
+            <TerminalIcon />
           </button>
           <span className="composer-toolbar-spacer" />
-          <button
-            type="button"
-            className="composer-enhance"
-            aria-label="Enhance prompt"
-            title="Enhance prompt (⌘/Ctrl+O)"
-            disabled={disabled || optimizing || empty}
-            onClick={() => void runEnhance()}
-          >
-            {optimizing ? (
-              <span className="composer-enhance-spinner" aria-hidden="true" />
-            ) : (
-              <SparkleIcon />
-            )}
-          </button>
-          <ComposerPrimitive.Send
-            className="composer-send"
-            aria-label="Send reply"
-            disabled={disabled || optimizing}
-          >
-            <ArrowUpIcon />
-          </ComposerPrimitive.Send>
+          {!terminal ? (
+            <button
+              type="button"
+              className="composer-enhance"
+              aria-label="Enhance prompt"
+              title="Enhance prompt (⌘/Ctrl+O)"
+              disabled={disabled || optimizing || empty}
+              onClick={() => void runEnhance()}
+            >
+              {optimizing ? (
+                <span className="composer-enhance-spinner" aria-hidden="true" />
+              ) : (
+                <SparkleIcon />
+              )}
+            </button>
+          ) : null}
+          {terminal ? (
+            <button
+              type="button"
+              className="composer-send"
+              data-terminal="true"
+              aria-label="Send Enter"
+              title="Enter"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => shell.key('Enter')}
+            >
+              <ArrowUpIcon />
+            </button>
+          ) : (
+            <ComposerPrimitive.Send
+              className="composer-send"
+              aria-label="Send reply"
+              disabled={disabled || optimizing}
+            >
+              <ArrowUpIcon />
+            </ComposerPrimitive.Send>
+          )}
         </div>
       </div>
       {review ? (
@@ -477,6 +626,20 @@ function ArrowUpIcon() {
         d="M12 19V5M6 11l6-6 6 6"
         stroke="currentColor"
         strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TerminalIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 8l4 4-4 4M12 16h7"
+        stroke="currentColor"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
