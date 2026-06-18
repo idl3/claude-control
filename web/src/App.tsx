@@ -588,6 +588,26 @@ function AppInner() {
       cancelAnimationFrame(r2);
     };
   }, [cockpit.selectedId]);
+
+  // Typing should STICK to the live transcript: focusing or typing in the
+  // composer re-pins the viewport to the bottom (assistant-ui's autoScroll then
+  // keeps tailing), so you never have to scroll down to follow new replies.
+  useEffect(() => {
+    const pin = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest?.('.composer')) return; // only the composer, not the rail/etc.
+      if (!t.closest('.composer-input')) return;
+      document.querySelectorAll<HTMLElement>('.thread-viewport').forEach((vp) => {
+        vp.scrollTop = vp.scrollHeight;
+      });
+    };
+    document.addEventListener('focusin', pin);
+    document.addEventListener('input', pin);
+    return () => {
+      document.removeEventListener('focusin', pin);
+      document.removeEventListener('input', pin);
+    };
+  }, []);
   const select = useCallback(
     (id: string) => {
       cockpit.select(id);
@@ -702,11 +722,20 @@ function AppInner() {
       const target = ordered[Number(e.key) - 1];
       if (target) {
         e.preventDefault();
+        e.stopPropagation();
+        // If focus is inside a ttyd iframe, the NEXT ⌘N would go to the iframe
+        // (and the browser), not our window listener — so chaining ⌘1→⌘2→…
+        // breaks. Pull focus back into the top document after switching.
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && ae.tagName === 'IFRAME') ae.blur();
+        const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+        host.setAttribute('tabindex', '-1');
+        host.focus({ preventScroll: true });
         select(target.id);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [cockpit.sessions, paletteOpen, select]);
 
   // ⌘/Ctrl+Enter from anywhere jumps focus back INTO the composer — but only when
