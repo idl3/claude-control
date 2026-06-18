@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OptimizeResult } from '../lib/api';
+import { Kbd } from './Kbd';
 
 interface OptimizeReviewProps {
   original: string;
@@ -246,7 +247,7 @@ export function OptimizeReview({ original, result, onSend, onAccept, onClose }: 
             className="btn-primary"
             onClick={() => onSend(edited)}
           >
-            {armed ? `Send ${secs}` : 'Send'}
+            {armed ? `Send ${secs}` : 'Send'} <Kbd>⌘/Ctrl+↵</Kbd>
           </button>
         </div>
       </div>
