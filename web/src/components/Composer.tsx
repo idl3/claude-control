@@ -121,7 +121,8 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
 
 /**
  * assistant-ui composer wired to the cockpit:
- * - Enter sends (submitOnEnter), Shift+Enter inserts a newline.
+ * - Plain Enter inserts a newline; ⌘/Ctrl+Enter optimises (default send),
+ *   ⌘/Ctrl+Shift+Enter bypasses the optimiser and sends the raw text.
  * - The reply send + "sent →" toast happen in App's onNew adapter (where the
  *   WS reply is dispatched); this just renders the UI.
  * - Attachments use assistant-ui's native attachment system: the 📎 button is
@@ -488,7 +489,9 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             <div className="composer-hint" aria-hidden="true">
               <span className="composer-hint-lead">Reply…</span>
               <span className="composer-hint-keys">
-                <Kbd>⌘/Ctrl+↵</Kbd> to send
+                <Kbd>⌘/Ctrl+↵</Kbd> optimise
+                <span className="composer-hint-dot">·</span>
+                <Kbd>⌘/Ctrl+⇧+↵</Kbd> send raw
                 <span className="composer-hint-dot">·</span>
                 <Kbd>↵</Kbd> newline
               </span>
