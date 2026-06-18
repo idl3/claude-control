@@ -77,6 +77,10 @@ function PaneRow({
       : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
 
+  // Claude character state: a pending question (?) > actively generating
+  // (working/bob) > idle (sleeping/Zzz). Terminals have no character state.
+  const claudeState = isTerminal ? null : s.pending ? 'ask' : s.thinking ? 'working' : 'sleeping';
+
   // One-shot attention nudge: flash an accent ring when this pane STARTS needing
   // a reply (pending false→true). The steady ASK-badge pulse is CSS.
   const rowRef = useRef<HTMLLIElement>(null);
@@ -120,10 +124,26 @@ function PaneRow({
           className="pane-icon"
           data-kind={isTerminal ? 'terminal' : 'claude'}
           data-active={s.active ? 'true' : 'false'}
+          data-state={claudeState ?? undefined}
           aria-label={isTerminal ? 'terminal pane' : 'Claude pane'}
-          title={s.active ? 'active pane' : 'inactive pane'}
+          title={
+            isTerminal
+              ? s.active
+                ? 'active pane'
+                : 'inactive pane'
+              : claudeState === 'ask'
+                ? 'waiting on a question'
+                : claudeState === 'working'
+                  ? 'working…'
+                  : 'idle'
+          }
         >
           {isTerminal ? <TerminalSquareIcon size={15} /> : <ClaudeRobotIcon size={14} />}
+          {claudeState === 'ask' ? (
+            <span className="pane-icon-badge pane-icon-ask" aria-hidden="true">?</span>
+          ) : claudeState === 'sleeping' ? (
+            <span className="pane-icon-badge pane-icon-zzz" aria-hidden="true">z</span>
+          ) : null}
         </span>
         <span className="session-name">{label}</span>
         {s.thinking && !s.pending ? (
