@@ -260,6 +260,68 @@ body {
 .pane-icon[data-kind='terminal'] {
   color: var(--accent-2);
 }
+
+/* ── Claude character state: working / sleeping / question ─────── */
+.pane-icon[data-kind='claude'] {
+  position: relative;
+  overflow: visible;
+}
+/* A pending question or active work keeps the character fully visible even when
+   the pane isn't the active tmux pane — state matters more than focus here. */
+.pane-icon[data-state='ask'],
+.pane-icon[data-state='working'] {
+  opacity: 1;
+}
+/* Working: the robot bobs. */
+@keyframes pane-icon-bob {
+  50% {
+    transform: translateY(-2px);
+  }
+}
+.pane-icon[data-state='working'] svg {
+  animation: pane-icon-bob 0.9s var(--ease) infinite;
+}
+/* Small overlay badge top-right of the character. */
+.pane-icon-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  pointer-events: none;
+  line-height: 1;
+  font-weight: 900;
+}
+/* Question: a yellow ? bubble. */
+.pane-icon-ask {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--amber);
+  color: #1a1306;
+  font-size: 8.5px;
+  box-shadow: 0 0 0 1.5px var(--bg);
+  animation: pulse 1.6s var(--ease) infinite;
+}
+/* Sleeping: a faint drifting "z". */
+.pane-icon-zzz {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-style: italic;
+  animation: pane-icon-zzz 2.6s var(--ease) infinite;
+}
+@keyframes pane-icon-zzz {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 0.85; transform: translateY(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pane-icon[data-state='working'] svg,
+  .pane-icon-ask,
+  .pane-icon-zzz {
+    animation: none;
+  }
+}
 /* Shell/terminal rows are a single lean line: dashed card, tighter padding, and
    the cwd sits inline on the name row (right-aligned + dim) — no second line. */
 .session-item[data-kind='terminal'] {
@@ -448,9 +510,12 @@ body {
 .detail-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 5px;
   flex: 0 0 auto;
   margin-left: auto;
+  /* Breathing room from the title so the name truncates a touch earlier rather
+     than butting against the icons. */
+  padding-left: 14px;
 }
 .detail-action {
   display: inline-flex;
@@ -1787,6 +1852,11 @@ details.block-tool[open] > summary .tool-arrow,
   background: transparent;
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
+}
+/* Focused (keyboard up): the on-screen keyboard already covers the home
+   indicator, so drop the safe-area inset + trim the gap below the card. */
+.composer:focus-within {
+  padding-bottom: 6px;
 }
 
 /* Inline skill autocomplete — floats just above the composer (keyboard is
@@ -4629,19 +4699,15 @@ select.config-input {
    right gutter — the centered transcript column on desktop, the 12px gutter on
    mobile. The primitive disables itself at the bottom → CSS fades it out. */
 .scroll-to-bottom {
-  position: sticky;
-  bottom: 4px;
-  align-self: flex-end;
-  margin-top: -38px; /* overlay the last row's gutter, don't add height */
-  margin-right: 2px;
+  /* Absolute (NOT a viewport child) so it can't break iOS momentum scrolling.
+     Floats at the bottom-right of the thread, just above the composer. */
+  position: absolute;
+  right: 14px;
+  bottom: 92px;
   z-index: 5;
-  /* Fixed circle: flex:0 0 auto stops the column flex from shrinking its height
-     (which squished it into an oval). */
-  flex: 0 0 auto;
   box-sizing: border-box;
   width: 38px;
   height: 38px;
-  min-width: 38px;
   padding: 0;
   display: inline-flex;
   align-items: center;
