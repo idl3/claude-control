@@ -21,6 +21,8 @@ export interface Session {
   pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
+  /** 'claude' = a Claude Code pane (transcript Thread); 'terminal' = a plain shell pane (live terminal). */
+  kind?: 'claude' | 'terminal';
   model?: string | null;
   ctxPct?: number | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
@@ -135,6 +137,8 @@ export type ServerMessage =
   | { type: 'prompt'; id: string; prompt: PanePrompt | null }
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
+  // Composer terminal mode (>_): live capture of the dedicated shell pane.
+  | { type: 'shell-output'; text: string }
   | { type: 'ack'; op: string; ok: boolean; error?: string };
 
 // Client -> server WebSocket frames.
@@ -143,5 +147,13 @@ export type ClientMessage =
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
-  | { type: 'capture'; id: string; lines?: number }
-  | { type: 'promptkey'; id: string; key: string };
+  | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
+  | { type: 'promptkey'; id: string; key: string }
+  // Interactive terminal panes: forward keystrokes to a pane by id.
+  | { type: 'pane-text'; id: string; text: string }
+  | { type: 'pane-key'; id: string; key: string }
+  // Composer terminal mode: run a line, send a control key, poll the shell pane.
+  | { type: 'shell-input'; line: string; cwd?: string }
+  | { type: 'shell-text'; text: string; cwd?: string }
+  | { type: 'shell-key'; key: string; cwd?: string }
+  | { type: 'shell-capture'; lines?: number; cwd?: string };

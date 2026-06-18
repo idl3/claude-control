@@ -22,6 +22,8 @@
   "files": [
     "server.js",
     "lib/",
+    "hooks/",
+    "scripts/",
     "public/",
     "web/dist/",
     "bin/",
@@ -32,6 +34,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test",
+    "install-hook": "node scripts/install-pane-hook.mjs",
     "build:web": "cd web && npm install && npm run build",
     "build": "npm run build:web",
     "prepack": "npm run build"
