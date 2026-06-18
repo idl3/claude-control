@@ -4,9 +4,14 @@ import type { OptimizeResult } from '../lib/api';
 interface OptimizeReviewProps {
   original: string;
   result: OptimizeResult;
+  /** Primary: dispatch the rewritten prompt (also runs on the auto-send timer). */
+  onSend: (text: string) => void;
+  /** Secondary: drop the rewritten prompt into the composer WITHOUT dispatching. */
   onAccept: (text: string) => void;
   onClose: () => void;
 }
+
+const AUTO_SEND_SECS = 5;
 
 // Compute a simple line-level diff between two strings.
 // Returns an array of {kind: 'add'|'del'|'same', text: string}.
@@ -79,16 +84,38 @@ function lineDiff(original: string, suggested: string): DiffLine[] {
   return result;
 }
 
-export function OptimizeReview({ original, result, onAccept, onClose }: OptimizeReviewProps) {
+export function OptimizeReview({ original, result, onSend, onAccept, onClose }: OptimizeReviewProps) {
   const [edited, setEdited] = useState(result.optimized);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Auto-send countdown: dispatch the rewrite after AUTO_SEND_SECS unless the
+  // user intervenes (scrolls the review, edits the text, or hovers a button).
+  // `armed=false` cancels it; the primary CTA shows the remaining seconds.
+  const [secs, setSecs] = useState(AUTO_SEND_SECS);
+  const [armed, setArmed] = useState(true);
+  const editedRef = useRef(edited);
+  editedRef.current = edited;
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  const cancelAuto = () => setArmed(false);
 
-  // Focus the textarea on mount.
+  // Focus the textarea on mount. We DON'T cancel the countdown on focus —
+  // focusing is implicit; only an actual edit/scroll cancels.
   useEffect(() => {
-    textareaRef.current?.focus();
+    textareaRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // Esc closes the modal.
+  // Tick the countdown once per second; fire onSend at zero.
+  useEffect(() => {
+    if (!armed) return;
+    if (secs <= 0) {
+      onSendRef.current(editedRef.current);
+      return;
+    }
+    const t = setTimeout(() => setSecs((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [armed, secs]);
+
+  // Esc closes the modal (and cancels auto-send).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -128,7 +155,7 @@ export function OptimizeReview({ original, result, onAccept, onClose }: Optimize
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" onScroll={cancelAuto} onWheel={cancelAuto} onTouchMove={cancelAuto}>
           {/* Editable suggestion — always editable before accepting */}
           <div className="optimize-section">
             <span className="optimize-section-label">Suggestion</span>
@@ -136,7 +163,10 @@ export function OptimizeReview({ original, result, onAccept, onClose }: Optimize
               ref={textareaRef}
               className="optimize-suggestion"
               value={edited}
-              onChange={(e) => setEdited(e.target.value)}
+              onChange={(e) => {
+                setEdited(e.target.value);
+                cancelAuto(); // editing means you want to review, not auto-send
+              }}
               rows={6}
               spellCheck={false}
               autoComplete="off"
@@ -197,12 +227,22 @@ export function OptimizeReview({ original, result, onAccept, onClose }: Optimize
             Discard
           </button>
           <span className="modal-foot-spacer" />
+          {/* Secondary: load into the composer, don't dispatch. */}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => onAccept(edited)}
+            onMouseEnter={cancelAuto}
+          >
+            To Composer
+          </button>
+          {/* Primary: dispatch the rewrite (auto-fires on the countdown). */}
           <button
             type="button"
             className="btn-primary"
-            onClick={() => onAccept(edited)}
+            onClick={() => onSend(edited)}
           >
-            Accept
+            {armed ? `Send ${secs}` : 'Send'}
           </button>
         </div>
       </div>

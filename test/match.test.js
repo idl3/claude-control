@@ -198,3 +198,22 @@ test('deterministic regardless of pane input order', () => {
   assert.equal(out1.get('0:1.1').transcriptPath, out2.get('0:1.1').transcriptPath);
   assert.equal(out1.get('0:2.1').transcriptPath, out2.get('0:2.1').transcriptPath);
 });
+
+// ── projectDir scoping: parent pane must NOT steal a child worktree's transcript
+
+test('worktree: a parent-dir pane does not steal a child worktree transcript', () => {
+  // window 3 (olam-doctor-fix) launched in /p/repo; window 4 (greptile) in a
+  // worktree /p/repo/wt/greptile. Recorded cwds make greptile look like a
+  // descendant of repo — but projectDir scoping keeps each to its own slug.
+  const panes = [
+    { target: '0:3.1', windowName: 'olam-doctor-fix', cwd: '/p/repo', projectDir: '-p-repo', procStartMs: 1000 },
+    { target: '0:4.1', windowName: 'greptile', cwd: '/p/repo/wt/greptile', projectDir: '-p-repo-wt-greptile', procStartMs: 1000 },
+  ];
+  const candidates = [
+    cand({ transcriptPath: '/x/repo.jsonl', cwd: '/p/repo', projectDir: '-p-repo', birthtimeMs: 1100, lastActivityMs: 5000 }),
+    cand({ transcriptPath: '/x/greptile.jsonl', cwd: '/p/repo/wt/greptile', projectDir: '-p-repo-wt-greptile', birthtimeMs: 1100, lastActivityMs: 9000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:3.1').transcriptPath, '/x/repo.jsonl');      // its OWN, not the more-active greptile
+  assert.equal(out.get('0:4.1').transcriptPath, '/x/greptile.jsonl');  // recovered
+});

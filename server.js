@@ -1431,23 +1431,32 @@ async function handleClientMessage(ws, msg) {
       if (sub) sub._lastPrompt = '__force__';
       return send(ws, { type: 'ack', op: 'promptkey', ok: true });
     }
-    // Composer terminal mode (>_): run shell lines in a dedicated tmux pane and
-    // stream its capture back. Token-gated by the WS handshake like every op.
+    // Composer terminal mode (>_): each Claude session has its OWN sister shell
+    // pane in its window. Resolve the session by id → its target + cwd, then act
+    // on (or lazily create) that window's sister shell.
     case 'shell-input': {
-      await shell.shellInput(String(msg.line ?? ''), msg.cwd);
+      const s = sessionById(msg.id);
+      if (!s) throw new Error('unknown session');
+      await shell.shellInput(s.target, s.cwd, String(msg.line ?? ''));
       return send(ws, { type: 'ack', op: 'shell-input', ok: true });
     }
     case 'shell-text': {
-      await shell.shellText(String(msg.text ?? ''), msg.cwd);
+      const s = sessionById(msg.id);
+      if (!s) throw new Error('unknown session');
+      await shell.shellText(s.target, s.cwd, String(msg.text ?? ''));
       return send(ws, { type: 'ack', op: 'shell-text', ok: true });
     }
     case 'shell-key': {
-      await shell.shellKey(String(msg.key ?? ''), msg.cwd);
+      const s = sessionById(msg.id);
+      if (!s) throw new Error('unknown session');
+      await shell.shellKey(s.target, s.cwd, String(msg.key ?? ''));
       return send(ws, { type: 'ack', op: 'shell-key', ok: true });
     }
     case 'shell-capture': {
-      const text = await shell.shellCapture(msg.lines, msg.cwd);
-      return send(ws, { type: 'shell-output', text });
+      const s = sessionById(msg.id);
+      if (!s) throw new Error('unknown session');
+      const text = await shell.shellCapture(s.target, s.cwd, msg.lines);
+      return send(ws, { type: 'shell-output', id: msg.id, text });
     }
     default:
       return;
