@@ -8,8 +8,10 @@ import { createContext, useContext } from 'react';
 export interface ShellApi {
   /** Latest capture of the dedicated shell pane. */
   output: string | null;
-  /** Run a command line in the shell pane. */
+  /** Run a command line in the shell pane (literal text + Enter). */
   run: (line: string) => boolean;
+  /** Forward literal keystroke text (no Enter) — raw passthrough typing. */
+  text: (s: string) => boolean;
   /** Send an allow-listed control key (e.g. C-c). */
   key: (k: string) => boolean;
   /** Poll the shell pane capture. */
@@ -21,6 +23,7 @@ export interface ShellApi {
 const NOOP: ShellApi = {
   output: null,
   run: () => false,
+  text: () => false,
   key: () => false,
   poll: () => false,
   clear: () => {},

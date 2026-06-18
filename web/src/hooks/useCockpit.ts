@@ -32,10 +32,15 @@ export interface CockpitStore {
   sendReply: (text: string) => boolean;
   sendPromptKey: (key: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
-  requestCapture: (lines?: number) => boolean;
+  requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
+  /** Interactive terminal panes: relay a literal char / control key to the selected pane. */
+  sendPaneText: (text: string) => boolean;
+  sendPaneKey: (key: string) => boolean;
   /** Terminal mode: run a command line in the shell pane. */
   sendShellInput: (line: string) => boolean;
+  /** Terminal mode: forward literal keystroke text (no Enter) — raw passthrough. */
+  sendShellText: (text: string) => boolean;
   /** Terminal mode: send an allow-listed control key (e.g. C-c). */
   sendShellKey: (key: string) => boolean;
   /** Terminal mode: poll the shell pane capture. */
@@ -197,15 +202,33 @@ export function useCockpit(): CockpitStore {
   );
 
   const requestCapture = useCallback(
-    (lines?: number): boolean => {
+    (lines?: number, escapes?: boolean): boolean => {
       const id = selectedRef.current;
       if (!id) return false;
-      return socket.send({ type: 'capture', id, lines });
+      return socket.send({ type: 'capture', id, lines, escapes });
     },
     [socket],
   );
 
   const clearCapture = useCallback(() => setCapture(null), []);
+
+  // Interactive terminal panes: relay keystrokes to the SELECTED pane by id.
+  const sendPaneText = useCallback(
+    (text: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'pane-text', id, text });
+    },
+    [socket],
+  );
+  const sendPaneKey = useCallback(
+    (key: string): boolean => {
+      const id = selectedRef.current;
+      if (!id) return false;
+      return socket.send({ type: 'pane-key', id, key });
+    },
+    [socket],
+  );
 
   // Terminal mode: the shell pane is server-owned (one global pane). We pass the
   // selected session's cwd so a freshly-created pane starts in the right repo;
@@ -216,6 +239,10 @@ export function useCockpit(): CockpitStore {
   }, []);
   const sendShellInput = useCallback(
     (line: string): boolean => socket.send({ type: 'shell-input', line, cwd: selectedCwd() }),
+    [socket, selectedCwd],
+  );
+  const sendShellText = useCallback(
+    (text: string): boolean => socket.send({ type: 'shell-text', text, cwd: selectedCwd() }),
     [socket, selectedCwd],
   );
   const sendShellKey = useCallback(
@@ -277,7 +304,10 @@ export function useCockpit(): CockpitStore {
     sendAnswer,
     requestCapture,
     clearCapture,
+    sendPaneText,
+    sendPaneKey,
     sendShellInput,
+    sendShellText,
     sendShellKey,
     requestShellCapture,
     clearShellOutput,

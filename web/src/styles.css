@@ -187,6 +187,93 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+/* SESSION → WINDOW → PANE grouping */
+.session-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+.session-group-head {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #8a8f98);
+  padding: 4px 6px 2px;
+}
+.session-window {
+  display: flex;
+  flex-direction: column;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+.session-window-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 6px 2px;
+  font-size: 12px;
+}
+.session-window-head .window-idx {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.session-window-head .window-name {
+  color: var(--text-1, inherit);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-pane-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pane-glyph {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-right: 2px;
+}
+.session-item[data-kind='terminal'] {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--line);
+}
+.session-item[data-kind='terminal'] .pane-glyph {
+  color: var(--red, #e5534b);
+}
+.meta-cwd {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  opacity: 0.7;
+}
+/* Interactive terminal-pane input bar (mirrors the composer input chrome). */
+.terminal-pane-input {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  padding: 8px;
+  border: 1px solid var(--red);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.terminal-pane-input .composer-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-transcript);
+}
 .session-item {
   padding: 9px 11px;
   border-radius: var(--radius);
@@ -382,8 +469,13 @@ body {
   color: var(--text);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: var(--txt-transcript);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  /* Mirror the tmux grid 1:1 — DON'T reflow. The pane is a fixed-width grid
+     (box-drawing, tables, aligned columns); wrapping it to phone width shatters
+     that layout into a disjointed mess. Render as-is and scroll horizontally
+     instead, so it matches the underlying pane exactly.
+     ponytail: still shows only the active pane — a split window's other panes
+     aren't drawn. Reconstruct the split if multi-pane mirroring is ever needed. */
+  white-space: pre;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -451,6 +543,62 @@ body {
 }
 .terminal-view-body a:hover {
   color: #a4daff;
+}
+.terminal-key-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  background: #0b0d10;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.terminal-key-bar::-webkit-scrollbar {
+  display: none;
+}
+.terminal-key {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #161a22;
+  color: #c0caf5;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.terminal-key:hover {
+  background: #232838;
+}
+.terminal-key:active {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red);
+}
+.terminal-key-mod {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+/* Armed sticky modifier — stays lit until it fires on the next key. */
+.terminal-key-mod[data-on='true'] {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+.terminal-key-gap {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin-inline: 4px;
 }
 
 /* ── Thread ───────────────────────────────────────────────────── */

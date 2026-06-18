@@ -18,6 +18,7 @@ import { LiveThinkingContext } from './components/ThinkingContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { LivePane } from './components/LivePane';
+import { TerminalPane } from './components/TerminalPane';
 import { Composer } from './components/Composer';
 import { ShellContext } from './components/ShellContext';
 import { AskModal } from './components/AskModal';
@@ -127,6 +128,7 @@ function AppInner() {
     () => ({
       output: cockpit.shellOutput,
       run: cockpit.sendShellInput,
+      text: cockpit.sendShellText,
       key: cockpit.sendShellKey,
       poll: cockpit.requestShellCapture,
       clear: cockpit.clearShellOutput,
@@ -134,6 +136,7 @@ function AppInner() {
     [
       cockpit.shellOutput,
       cockpit.sendShellInput,
+      cockpit.sendShellText,
       cockpit.sendShellKey,
       cockpit.requestShellCapture,
       cockpit.clearShellOutput,
@@ -640,12 +643,22 @@ function AppInner() {
             </header>
 
             <ShellContext.Provider value={shellApi}>
-            {selectedSession && !selectedSession.transcriptPath ? (
-              // Transcript-less live session (e.g. a worktree cwd Claude records
-              // under a different path): the assistant-ui thread would render an
-              // empty "no messages yet", so show the live tmux pane instead. The
-              // composer still works — replies go via tmux send-keys regardless
-              // of whether a transcript was matched.
+            {selectedSession && selectedSession.kind === 'terminal' ? (
+              // Plain (non-Claude) pane: a fully interactive live terminal —
+              // ANSI view + key bar + keystroke relay. No transcript, by design.
+              <TerminalPane
+                sessionId={selectedSession.id}
+                capture={cockpit.capture}
+                requestCapture={cockpit.requestCapture}
+                clearCapture={cockpit.clearCapture}
+                sendText={cockpit.sendPaneText}
+                sendKey={cockpit.sendPaneKey}
+              />
+            ) : selectedSession && !selectedSession.transcriptPath ? (
+              // Claude pane with no matched transcript (e.g. a worktree cwd Claude
+              // records under a different path): show the live tmux pane so it
+              // isn't an empty "no messages yet". The composer still replies via
+              // tmux send-keys.
               <div className="thread-root">
                 <div className="thread-fade" aria-hidden="true" />
                 <LivePane
