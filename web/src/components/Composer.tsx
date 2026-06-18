@@ -121,7 +121,8 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
 
 /**
  * assistant-ui composer wired to the cockpit:
- * - Enter sends (submitOnEnter), Shift+Enter inserts a newline.
+ * - Plain Enter inserts a newline; ⌘/Ctrl+Enter optimises (default send),
+ *   ⌘/Ctrl+Shift+Enter bypasses the optimiser and sends the raw text.
  * - The reply send + "sent →" toast happen in App's onNew adapter (where the
  *   WS reply is dispatched); this just renders the UI.
  * - Attachments use assistant-ui's native attachment system: the 📎 button is
@@ -156,6 +157,15 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
 
   const patchEnhance = useCallback((sid: string, patch: Partial<EnhanceState>) => {
     setEnhanceBySession((m) => ({ ...m, [sid]: { ...(m[sid] ?? EMPTY_ENHANCE), ...patch } }));
+  }, []);
+
+  // Keep the cursor in the composer after a send (incl. after the optimise modal
+  // closes) so the user can immediately type the next message and follow the
+  // streaming response without re-clicking.
+  const refocusComposer = useCallback(() => {
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
+    });
   }, []);
 
   // ── Inline skill autocomplete ──────────────────────────────────────────────
@@ -457,12 +467,19 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                   return;
                 }
               }
-              // Enter inserts a newline; ⌘/Ctrl+Enter sends.
+              // Enter inserts a newline. ⌘/Ctrl+Enter = optimise (default);
+              // ⌘/Ctrl+Shift+Enter = bypass and send the raw composer text.
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                if (!disabled && !optimizing) composer.send();
+                if (disabled || optimizing) return;
+                if (e.shiftKey) {
+                  composer.send();
+                  refocusComposer();
+                } else {
+                  void runEnhance();
+                }
               }
-              // ⌘/Ctrl+O triggers the enhance button.
+              // ⌘/Ctrl+O also triggers the optimiser (legacy alias).
               if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 void runEnhance();
@@ -485,7 +502,9 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             <div className="composer-hint" aria-hidden="true">
               <span className="composer-hint-lead">Reply…</span>
               <span className="composer-hint-keys">
-                <Kbd>⌘/Ctrl+↵</Kbd> to send
+                <Kbd>⌘/Ctrl+↵</Kbd> optimise
+                <span className="composer-hint-dot">·</span>
+                <Kbd>⌘/Ctrl+⇧+↵</Kbd> send raw
                 <span className="composer-hint-dot">·</span>
                 <Kbd>↵</Kbd> newline
               </span>
@@ -548,20 +567,20 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             <TerminalIcon />
           </button>
           <span className="composer-toolbar-spacer" />
+          {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal ? (
             <button
               type="button"
-              className="composer-enhance"
-              aria-label="Enhance prompt"
-              title="Enhance prompt (⌘/Ctrl+O)"
+              className="composer-enhance composer-bypass"
+              aria-label="Send without optimising"
+              title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
               disabled={disabled || optimizing || empty}
-              onClick={() => void runEnhance()}
+              onClick={() => {
+                composer.send();
+                refocusComposer();
+              }}
             >
-              {optimizing ? (
-                <span className="composer-enhance-spinner" aria-hidden="true" />
-              ) : (
-                <SparkleIcon />
-              )}
+              <ArrowUpIcon />
             </button>
           ) : null}
           {terminal ? (
@@ -577,13 +596,21 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               <ArrowUpIcon />
             </button>
           ) : (
-            <ComposerPrimitive.Send
+            // Primary / default: optimise → review → auto-send.
+            <button
+              type="button"
               className="composer-send"
-              aria-label="Send reply"
-              disabled={disabled || optimizing}
+              aria-label="Optimise and send"
+              title="Optimise & send (⌘/Ctrl+↵)"
+              disabled={disabled || optimizing || empty}
+              onClick={() => void runEnhance()}
             >
-              <ArrowUpIcon />
-            </ComposerPrimitive.Send>
+              {optimizing ? (
+                <span className="composer-enhance-spinner" aria-hidden="true" />
+              ) : (
+                <SparkleIcon />
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -591,11 +618,25 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
         <OptimizeReview
           original={review.original}
           result={review}
+          onSend={(text) => {
+            // Primary / auto-send: dispatch the rewritten prompt.
+            patchEnhance(key, { review: null });
+            composer.setText(text);
+            requestAnimationFrame(() => {
+              if (!disabled) composer.send();
+              refocusComposer(); // keep the cursor in the composer to follow up
+            });
+          }}
           onAccept={(text) => {
+            // Secondary: load into the composer, don't dispatch.
             composer.setText(text);
             patchEnhance(key, { review: null });
+            refocusComposer();
           }}
-          onClose={() => patchEnhance(key, { review: null })}
+          onClose={() => {
+            patchEnhance(key, { review: null });
+            refocusComposer();
+          }}
         />
       ) : null}
       {skillBrowserOpen ? (

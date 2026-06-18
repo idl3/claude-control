@@ -322,7 +322,7 @@ export function VoiceDialog({ onCommit, onClose }: VoiceDialogProps) {
             onClick={stop}
             disabled={status === 'error' || status === 'transcribing' || status === 'starting'}
           >
-            {status === 'transcribing' ? 'Transcribing…' : 'Stop & insert'}
+            {status === 'transcribing' ? 'Transcribing…' : 'Stop & Insert'}
           </button>
         </div>
       </div>

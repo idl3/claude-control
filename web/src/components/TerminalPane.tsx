@@ -41,7 +41,7 @@ export function TerminalPane({
   const relay = useTerminalRelay(ops);
 
   return (
-    <div className="thread-root">
+    <div className="thread-root terminal-pane-root">
       <div className="thread-fade" aria-hidden="true" />
       <TerminalView
         key={sessionId}

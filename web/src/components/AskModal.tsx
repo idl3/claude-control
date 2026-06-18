@@ -166,7 +166,7 @@ export function AskModal({
 
         <div className="modal-foot">
           <button type="button" className="btn-secondary" onClick={onCapture}>
-            show terminal
+            Show Terminal
           </button>
           <span className="modal-foot-spacer" />
           <button type="button" className="btn-secondary" onClick={onClose}>
@@ -178,7 +178,7 @@ export function AskModal({
             disabled={!ready}
             onClick={submit}
           >
-            send answer
+            Send Answer
           </button>
         </div>
       </div>

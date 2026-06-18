@@ -8,6 +8,7 @@ export interface Session {
   title?: string;
   tmuxName?: string;
   target?: string;
+  paneId?: string;                  // stable tmux %N (survives renumber / grouped mirrors)
   sessionName?: string;
   windowIndex?: number;
   paneIndex?: number;
@@ -23,6 +24,8 @@ export interface Session {
   isClaude?: boolean;
   /** 'claude' = a Claude Code pane (transcript Thread); 'terminal' = a plain shell pane (live terminal). */
   kind?: 'claude' | 'terminal';
+  /** true if this terminal pane is a composer >_ sister shell (auto-created). */
+  ccShell?: boolean;
   model?: string | null;
   ctxPct?: number | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
@@ -138,7 +141,7 @@ export type ServerMessage =
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
-  | { type: 'shell-output'; text: string }
+  | { type: 'shell-output'; text: string; id?: string }
   | { type: 'ack'; op: string; ok: boolean; error?: string };
 
 // Client -> server WebSocket frames.
@@ -152,8 +155,8 @@ export type ClientMessage =
   // Interactive terminal panes: forward keystrokes to a pane by id.
   | { type: 'pane-text'; id: string; text: string }
   | { type: 'pane-key'; id: string; key: string }
-  // Composer terminal mode: run a line, send a control key, poll the shell pane.
-  | { type: 'shell-input'; line: string; cwd?: string }
-  | { type: 'shell-text'; text: string; cwd?: string }
-  | { type: 'shell-key'; key: string; cwd?: string }
-  | { type: 'shell-capture'; lines?: number; cwd?: string };
+  // Composer terminal mode: per-session sister shell (id = the Claude session).
+  | { type: 'shell-input'; id: string; line: string }
+  | { type: 'shell-text'; id: string; text: string }
+  | { type: 'shell-key'; id: string; key: string }
+  | { type: 'shell-capture'; id: string; lines?: number };

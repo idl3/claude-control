@@ -65,7 +65,9 @@ function PaneRow({
 }) {
   const isTerminal = s.kind === 'terminal';
   const label = isTerminal
-    ? s.cmd || s.tmuxName || 'shell'
+    ? s.ccShell
+      ? `shell · ${s.cmd || 'sh'}`
+      : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
   return (
     <li
