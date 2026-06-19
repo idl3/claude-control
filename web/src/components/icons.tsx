@@ -110,6 +110,15 @@ export function ArrowDownIcon(p: IconProps) {
   );
 }
 
+export function SearchIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
+    </Svg>
+  );
+}
+
 // Battery with a fill bar (width set inline by the caller) + optional charge bolt.
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
