@@ -1525,6 +1525,7 @@ function AppInner() {
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   <Thread
                     hasSelection={!!cockpit.selectedId}
+                    loading={!cockpit.messagesLoaded}
                     sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}

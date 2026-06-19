@@ -1014,6 +1014,33 @@ body {
   background: var(--bg-2);
   color: var(--accent);
 }
+/* Transcript loading state — shown while the server delivers the messages frame.
+   Centered spinner using the same cockpit-spin keyframe. Fades out once loaded. */
+.thread-loading {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  opacity: 0.5;
+}
+.thread-loading-spinner {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: cockpit-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-loading-spinner {
+    animation: none;
+    border-color: var(--accent);
+    opacity: 0.4;
+  }
+}
 /* "Load earlier messages" — revealed only when the render cap hides older
    messages. Sits at the top of the scrollback, centered, low-emphasis. */
 .load-earlier {

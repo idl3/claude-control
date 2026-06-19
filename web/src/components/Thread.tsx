@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
@@ -9,6 +10,12 @@ import type { SubAgent } from '../lib/types';
 
 interface ThreadProps {
   hasSelection: boolean;
+  /**
+   * While true, the transcript for the selected session is still loading from
+   * the server. Show a tasteful loader instead of the welcome screen.
+   * Once the server delivers the `messages` frame this becomes false.
+   */
+  loading?: boolean;
   /** Active session id — passed to the Composer so enhance/review state is
    *  scoped per session. */
   sessionId?: string | null;
@@ -57,6 +64,32 @@ const WELCOME_CHIPS: WelcomeChip[] = [
   { label: 'Run a shell command (>_)' },
 ];
 
+// Safety fallback: if loading stays true for more than 8s (e.g. WS frame never
+// arrives), flip showLoader off so the welcome renders rather than spinning forever.
+const LOADER_TIMEOUT_MS = 8_000;
+
+/** Spinner shown while the transcript tail is being fetched from the server. */
+function TranscriptLoader({ loading }: { loading: boolean }) {
+  const [showLoader, setShowLoader] = useState(true);
+
+  useEffect(() => {
+    if (!loading) {
+      setShowLoader(true);
+      return;
+    }
+    const id = setTimeout(() => setShowLoader(false), LOADER_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [loading]);
+
+  if (!loading || !showLoader) return null;
+
+  return (
+    <div className="thread-loading" aria-label="Loading transcript" aria-live="polite">
+      <span className="thread-loading-spinner" aria-hidden="true" />
+    </div>
+  );
+}
+
 /** Chip row rendered inside ThreadPrimitive.Empty — has access to composer runtime. */
 function WelcomeChips() {
   const composer = useComposerRuntime();
@@ -89,6 +122,7 @@ function WelcomeChips() {
 
 export function Thread({
   hasSelection,
+  loading = false,
   sessionId,
   hiddenCount,
   onLoadEarlier,
@@ -145,13 +179,17 @@ export function Thread({
               <div className="thread-empty">select a session</div>
             ) : (
               <ThreadPrimitive.Empty>
-                <div className="thread-welcome">
-                  <h1 className="thread-welcome-heading">What are we shipping today?</h1>
-                  <p className="thread-welcome-subtitle">
-                    Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
-                  </p>
-                  <WelcomeChips />
-                </div>
+                {loading ? (
+                  <TranscriptLoader loading={loading} />
+                ) : (
+                  <div className="thread-welcome">
+                    <h1 className="thread-welcome-heading">What are we shipping today?</h1>
+                    <p className="thread-welcome-subtitle">
+                      Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
+                    </p>
+                    <WelcomeChips />
+                  </div>
+                )}
               </ThreadPrimitive.Empty>
             )}
             {hasSelection && hiddenCount > 0 ? (
