@@ -501,6 +501,13 @@ body {
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;
+    /* Cap the title so the name can never run under the action icons — it
+       truncates at 75% of the header, leaving room for the buttons. */
+    flex: 0 0 auto;
+    max-width: 75%;
+  }
+  .detail-name {
+    max-width: 100%;
   }
   .detail-title .detail-cwd {
     max-width: 100%;
@@ -4726,14 +4733,16 @@ select.config-input {
   color: var(--text);
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  opacity: 1;
-  transition: opacity var(--ease) 0.18s, transform var(--ease) 0.18s, background var(--ease) 0.15s;
-}
-/* The primitive disables the button when the thread is already at the bottom. */
-.scroll-to-bottom:disabled {
+  /* Hidden until App sets data-show='true' (detached / scrolled up). */
   opacity: 0;
   transform: translateY(10px) scale(0.9);
   pointer-events: none;
+  transition: opacity var(--ease) 0.18s, transform var(--ease) 0.18s, background var(--ease) 0.15s;
+}
+.scroll-to-bottom[data-show='true'] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 .scroll-to-bottom:hover {
   background: var(--bg-hover, var(--bg-2));

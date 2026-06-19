@@ -42,3 +42,27 @@ That's the whole approach.
 test('parsePanePrompt ignores numbered prose without an interactive signal', () => {
   assert.equal(parsePanePrompt(PROSE), null);
 });
+
+// Long option descriptions push options 1–2 off the top of the capture, so only
+// 3,4,5,6 are visible. Detection must NOT require a "1." anchor — the bottom-most
+// consecutive run + cursor/Esc footer is enough. (Regression: a real question
+// silently failed to surface.)
+const OFFSCREEN_START = `\
+  2. Deploy then re-delegate
+     A long description of option two that wraps onto another line here.
+  3. Merge the converged set
+     Merge the ready PRs to realize the value before opening more work.
+❯ 4. Subscribe GH App events
+     Flip on pull_request_review / issue_comment so convergence runs realtime.
+  5. Type something
+     Submit
+  6. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+test('parsePanePrompt detects a picker whose option 1 scrolled off-screen', () => {
+  const r = parsePanePrompt(OFFSCREEN_START);
+  assert.ok(r, 'expected the picker to be detected without a visible "1."');
+  assert.deepEqual(r.options.map((o) => o.key), ['2', '3', '4', '5', '6']);
+  assert.equal(r.options.find((o) => o.key === '4')?.selected, true);
+});
