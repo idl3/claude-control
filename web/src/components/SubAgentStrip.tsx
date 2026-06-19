@@ -3,19 +3,27 @@ import { latestAgentSummary } from '../lib/agentSummary';
 
 interface SubAgentStripProps {
   subagents: SubAgent[];
-  /** Open a SPECIFIC running agent's transcript (the panel focused on it). */
+  /** Called when the user clicks a pill — set the inline agent view. */
   onOpenAgent: (agentId: string) => void;
+  /** The agentId currently shown inline (marks that pill as active). */
+  viewingAgentId?: string | null;
 }
 
 /**
- * Live "what are my sub-agents doing" strip, stacked directly above the composer.
- * Renders ONLY while ≥1 sub-agent is running: one tappable row per agent (type +
- * latest work line). Tapping a row opens THAT agent's transcript — so with 2-3
- * agents you can toggle between them and read each one's thread.
+ * Horizontal wrapping row of PILLS — one per running sub-agent, directly
+ * above the composer. Each pill shows the agent name + animated dot. The
+ * activity caption for the active/focused agent is shown below the row.
+ * Clicking a pill sets the inline inline agent transcript view.
  */
-export function SubAgentStrip({ subagents, onOpenAgent }: SubAgentStripProps) {
+export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId }: SubAgentStripProps) {
   const running = subagents.filter((a) => a.status === 'running');
   if (running.length === 0) return null;
+
+  const focused = viewingAgentId
+    ? running.find((a) => a.agentId === viewingAgentId) ?? null
+    : null;
+  const captionAgent = focused ?? running[0];
+  const caption = latestAgentSummary(captionAgent);
 
   return (
     <div
@@ -23,29 +31,27 @@ export function SubAgentStrip({ subagents, onOpenAgent }: SubAgentStripProps) {
       role="list"
       aria-label={`${running.length} sub-agent${running.length === 1 ? '' : 's'} running`}
     >
-      {running.map((a) => {
-        const summary = latestAgentSummary(a);
-        return (
+      <div className="subagent-pills">
+        {running.map((a) => (
           <button
             type="button"
             role="listitem"
-            className="subagent-strip-row"
+            className="subagent-pill"
             key={a.agentId}
+            data-active={a.agentId === viewingAgentId ? 'true' : undefined}
             onClick={() => onOpenAgent(a.agentId)}
-            title={`Open ${a.agentType || 'sub-agent'}'s transcript`}
+            title={`View ${a.agentType || 'sub-agent'}'s transcript`}
           >
             <span className="sa-dot" data-status="running" aria-hidden="true" />
-            <span className="subagent-strip-head">
-              <span className="subagent-strip-type">{a.agentType || 'sub-agent'}</span>
-              {summary ? (
-                <span className="subagent-strip-summary">{summary}</span>
-              ) : (
-                <span className="subagent-strip-summary subagent-strip-idle">working…</span>
-              )}
-            </span>
+            <span className="subagent-pill-name">{a.agentType || 'sub-agent'}</span>
           </button>
-        );
-      })}
+        ))}
+      </div>
+      {caption ? (
+        <p className="subagent-strip-caption" aria-live="polite">
+          {caption}
+        </p>
+      ) : null}
     </div>
   );
 }
