@@ -2,6 +2,7 @@ import { ThreadPrimitive } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
 import { ArrowDownIcon } from './icons';
+import type { SubAgentMode } from '../lib/subAgent';
 
 interface ThreadProps {
   hasSelection: boolean;
@@ -12,6 +13,11 @@ interface ThreadProps {
   hiddenCount: number;
   /** Reveal an older chunk of messages. */
   onLoadEarlier: () => void;
+  /** Per-session sub-agent mode for the Composer checkbox. */
+  subAgentMode: SubAgentMode;
+  onSubAgentModeChange: (mode: SubAgentMode) => void;
+  /** Notifies App when the Composer's >_ terminal mode changes. */
+  onTerminalModeChange: (active: boolean) => void;
 }
 
 const messageComponents = {
@@ -22,7 +28,15 @@ const messageComponents = {
   SystemMessage: AssistantMessage,
 } as const;
 
-export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: ThreadProps) {
+export function Thread({
+  hasSelection,
+  sessionId,
+  hiddenCount,
+  onLoadEarlier,
+  subAgentMode,
+  onSubAgentModeChange,
+  onTerminalModeChange,
+}: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
       {/* Top scrim: fades messages under the header while the composer is
@@ -68,7 +82,13 @@ export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: 
       >
         <ArrowDownIcon size={18} />
       </button>
-      <Composer disabled={!hasSelection} sessionId={sessionId} />
+      <Composer
+        disabled={!hasSelection}
+        sessionId={sessionId}
+        subAgentMode={subAgentMode}
+        onSubAgentModeChange={onSubAgentModeChange}
+        onTerminalModeChange={onTerminalModeChange}
+      />
     </ThreadPrimitive.Root>
   );
 }
