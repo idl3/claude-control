@@ -441,6 +441,27 @@ export function Composer({
     }
   }, [composer, disabled, optimizing, key, patchEnhance]);
 
+  // ⌘/Ctrl+Enter (optimise) and ⌘/Ctrl+Shift+Enter (send raw) from ANYWHERE —
+  // window-level + capture phase so it fires even when focus is outside the
+  // textarea. Mirrors the ⌘S pattern. Does nothing in terminal mode (the
+  // textarea's onKeyDown already handles the shell-Enter path).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (disabled || terminal) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog is open
+      e.preventDefault();
+      if (e.shiftKey) {
+        composer.send();
+        refocusComposer();
+      } else {
+        void runEnhance();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [disabled, terminal, composer, runEnhance, refocusComposer]);
+
   // ── Terminal input relay ────────────────────────────────────────────────────
   // The textarea is a VISIBLE buffer the user types into normally — so the iOS
   // soft keyboard, autocorrect, and on-screen feedback all work. On every buffer

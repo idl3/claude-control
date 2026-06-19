@@ -99,7 +99,7 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
       className="term-overlay"
       data-visible={visible ? 'true' : 'false'}
       role="dialog"
-      aria-modal="true"
+      aria-modal={visible ? 'true' : 'false'}
       aria-hidden={visible ? undefined : 'true'}
       aria-label={`Raw terminal — ${label}`}
     >
