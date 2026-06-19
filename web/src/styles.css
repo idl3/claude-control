@@ -2023,12 +2023,16 @@ details.block-tool[open] > summary .tool-arrow,
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
 }
-/* Focused (keyboard up on phones): the on-screen keyboard already covers the
-   home indicator, so drop the safe-area inset + trim the gap below the card.
-   iPad has no soft keyboard pushing the layout up, so skip this there. */
+/* Mobile: drop the extra gap below the composer — keep only the system
+   home-indicator inset (0 in a browser tab), which removes the unnecessary
+   padding without letting the input sit under the home bar. */
 @media (max-width: 760px) {
+  .composer {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Focused (keyboard up): the on-screen keyboard covers the home indicator. */
   .composer:focus-within {
-    padding-bottom: 6px;
+    padding-bottom: 0;
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the
