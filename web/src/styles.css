@@ -950,45 +950,69 @@ body {
   text-align: center;
 }
 /* Fresh-session welcome — shown by <ThreadPrimitive.Empty> when a session has
-   no messages yet. Centered in the viewport, calm, on-brand. */
+   no messages yet. Editorial serif headline + subtitle + chip row. */
 .thread-welcome {
   margin: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 18px;
   text-align: center;
-  max-width: 320px;
-}
-.thread-welcome-icon {
-  font-size: 28px;
-  line-height: 1;
-  margin-bottom: 2px;
-  filter: grayscale(0.15);
+  max-width: 480px;
+  padding: 0 20px;
 }
 .thread-welcome-heading {
   margin: 0;
-  font-size: var(--txt-transcript);
-  font-weight: 600;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  font-weight: 700;
   color: var(--text);
-  letter-spacing: 0.01em;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
-.thread-welcome-hint {
+.thread-welcome-subtitle {
   margin: 0;
-  font-size: var(--txt-meta);
-  color: var(--text-faint);
+  font-size: var(--txt-transcript);
+  color: var(--text-dim);
   line-height: 1.5;
 }
-.thread-welcome-hint kbd {
+/* Chip row — wraps on narrow screens, centered. */
+.thread-welcome-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.thread-welcome-chip {
+  all: unset;
   display: inline-block;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-radius: 20px;
   background: var(--bg-2);
   border: 1px solid var(--line);
-  font-family: inherit;
   font-size: var(--txt-meta);
   color: var(--text-dim);
-  vertical-align: baseline;
+  line-height: 1.4;
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease), color 120ms var(--ease);
+}
+.thread-welcome-chip[data-clickable='true'] {
+  cursor: pointer;
+}
+.thread-welcome-chip[data-clickable='true']:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.thread-welcome-chip[data-clickable='true']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.thread-welcome-chip[data-clickable='true']:active {
+  background: var(--bg-2);
+  color: var(--accent);
 }
 /* "Load earlier messages" — revealed only when the render cap hides older
    messages. Sits at the top of the scrollback, centered, low-emphasis. */

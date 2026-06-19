@@ -1,4 +1,4 @@
-import { ThreadPrimitive } from '@assistant-ui/react';
+import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
@@ -38,6 +38,50 @@ const messageComponents = {
   SystemMessage: AssistantMessage,
 } as const;
 
+interface WelcomeChip {
+  label: string;
+  /** Text to insert into the composer on click. If absent the chip is decorative. */
+  insert?: string;
+}
+
+const WELCOME_CHIPS: WelcomeChip[] = [
+  { label: 'Plan with /plan-hard', insert: '/plan-hard ' },
+  { label: 'Browse skills (/)', insert: '/' },
+  { label: 'Mention an agent (@)', insert: '@' },
+  { label: 'Dictate (⌘S)' },
+  { label: 'Run a shell command (>_)' },
+];
+
+/** Chip row rendered inside ThreadPrimitive.Empty — has access to composer runtime. */
+function WelcomeChips() {
+  const composer = useComposerRuntime();
+
+  const handleChip = (chip: WelcomeChip) => {
+    if (!chip.insert) return;
+    composer.setText(chip.insert);
+    // Focus the composer textarea so the user sees the inserted text immediately.
+    const ta = document.querySelector<HTMLTextAreaElement>('.composer .composer-input');
+    ta?.focus();
+  };
+
+  return (
+    <div className="thread-welcome-chips" role="list">
+      {WELCOME_CHIPS.map((chip) => (
+        <button
+          key={chip.label}
+          type="button"
+          role="listitem"
+          className="thread-welcome-chip"
+          data-clickable={chip.insert ? 'true' : undefined}
+          onClick={() => handleChip(chip)}
+        >
+          {chip.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Thread({
   hasSelection,
   sessionId,
@@ -67,11 +111,11 @@ export function Thread({
         ) : (
           <ThreadPrimitive.Empty>
             <div className="thread-welcome">
-              <span className="thread-welcome-icon" aria-hidden="true">👋</span>
-              <p className="thread-welcome-heading">New Claude Code session</p>
-              <p className="thread-welcome-hint">
-                Type a prompt, or <kbd>/</kbd> for skills, <kbd>⌘S</kbd> to dictate
+              <h1 className="thread-welcome-heading">What are we shipping today?</h1>
+              <p className="thread-welcome-subtitle">
+                Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
               </p>
+              <WelcomeChips />
             </div>
           </ThreadPrimitive.Empty>
         )}

@@ -20,11 +20,13 @@ interface SessionRailProps {
 }
 
 /** A Claude pane reads as "working" while actively generating OR with very recent
- *  transcript activity (covers tool runs / sub-agents that the pane line misses). */
+ *  transcript activity (covers tool runs / sub-agents that the pane line misses).
+ *  Uses `lastActivityMs` (ms number from server) for the 15 s recency check;
+ *  `lastActivity` is an ISO string and is intentionally ignored here. */
 export function claudeWorking(s: Session): boolean {
   if (s.thinking) return true;
-  const la = typeof s.lastActivity === 'number' ? s.lastActivity : NaN;
-  return Number.isFinite(la) && Date.now() - la < 15_000;
+  const la = s.lastActivityMs;
+  return typeof la === 'number' && Number.isFinite(la) && Date.now() - la < 15_000;
 }
 
 /** Last path segment of a cwd, e.g. "/a/b/c" → "c". */

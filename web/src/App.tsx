@@ -849,9 +849,16 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
-  // True while the selected Claude session is actively generating/thinking.
-  // Used to flip the composer's primary send button to a STOP button.
-  const agentWorking = !!selectedSession && claudeWorking(selectedSession);
+  // True while the selected Claude session is actively generating/thinking,
+  // OR while a just-sent message is still unconfirmed (bridges the ~2-4s poll
+  // gap so the working indicator fires immediately on send). Capped at 20s so a
+  // stray send that never echoes back doesn't stick forever.
+  const SEND_BRIDGE_MS = 20_000;
+  const hasFreshPending =
+    selectedPending.length > 0 &&
+    selectedPending.some((e) => Date.now() - e.at < SEND_BRIDGE_MS);
+  const agentWorking =
+    (!!selectedSession && claudeWorking(selectedSession)) || hasFreshPending;
 
   // Cancel in-flight generation: send Escape to the Claude pane.
   const handleStop = useCallback(() => {
