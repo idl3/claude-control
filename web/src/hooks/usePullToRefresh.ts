@@ -14,7 +14,11 @@ const THRESHOLD = 70; // px (resisted) past which a release triggers refresh
 const MAX = 110; // px clamp on the indicator travel
 const RESIST = 0.5; // drag resistance
 
-const SCROLLER_SEL = '.thread-viewport, .rail, .live-pane-body';
+// The actual scroll containers. NOTE: the sidebar scroller is `.rail-scroll`
+// (the inner list) — `.rail` itself is overflow:hidden, so using it here made
+// PTR think the rail was always at scrollTop 0 and preventDefault every touch,
+// freezing sidebar scrolling.
+const SCROLLER_SEL = '.thread-viewport, .rail-scroll, .live-pane-body';
 
 export function usePullToRefresh(
   rootRef: React.RefObject<HTMLElement | null>,

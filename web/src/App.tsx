@@ -570,46 +570,67 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Entering a session always jumps to the latest message — never inherit the
-  // previous session's scroll position. (assistant-ui's autoScroll then tails
-  // new replies from there.) Double-rAF so the new transcript has laid out.
+  // Own the transcript's tail/detach behaviour (autoScroll is off — it fought
+  // these on re-renders and felt "stuck" on touch). On entering a session: pin
+  // to the bottom. While pinned, a MutationObserver tails new/streaming content.
+  // Scrolling up detaches (stop tailing) and reveals the ↓ button; scrolling back
+  // to the bottom (or tapping ↓) re-attaches. Native touch scrolling is never
+  // intercepted — we only set scrollTop while genuinely pinned.
   useEffect(() => {
     if (!cockpit.selectedId) return;
-    let r2 = 0;
-    const r1 = requestAnimationFrame(() => {
-      r2 = requestAnimationFrame(() => {
-        document.querySelectorAll<HTMLElement>('.thread-viewport').forEach((vp) => {
-          vp.scrollTop = vp.scrollHeight;
-        });
-      });
-    });
+    let vp: HTMLElement | null = null;
+    let btn: HTMLElement | null = null;
+    let mo: MutationObserver | null = null;
+    let ro: ResizeObserver | null = null;
+    let raf = 0;
+    let tries = 0;
+    let pinned = true;
+
+    const atBottom = () =>
+      !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
+    const tail = () => {
+      if (vp && pinned) vp.scrollTop = vp.scrollHeight;
+    };
+    const onScroll = () => {
+      pinned = atBottom();
+      if (btn) btn.dataset.show = pinned ? '' : 'true';
+    };
+    const attach = () => {
+      vp = document.querySelector('.thread-viewport');
+      btn = document.querySelector('.scroll-to-bottom');
+      if (!vp) {
+        if (tries++ < 40) raf = requestAnimationFrame(attach);
+        return;
+      }
+      pinned = true;
+      vp.scrollTop = vp.scrollHeight;
+      if (btn) btn.dataset.show = '';
+      vp.addEventListener('scroll', onScroll, { passive: true });
+      mo = new MutationObserver(tail);
+      mo.observe(vp, { childList: true, subtree: true, characterData: true });
+
+      // Keep the ↓ button anchored ABOVE the composer at any composer height
+      // (it grows with typed lines / attachments) via a --composer-h var.
+      const root = vp.closest<HTMLElement>('.thread-root');
+      const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
+      const setComposerH = () => {
+        if (root && composer) root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+      };
+      setComposerH();
+      if (composer && 'ResizeObserver' in window) {
+        ro = new ResizeObserver(setComposerH);
+        ro.observe(composer);
+      }
+    };
+    raf = requestAnimationFrame(attach);
+
     return () => {
-      cancelAnimationFrame(r1);
-      cancelAnimationFrame(r2);
+      cancelAnimationFrame(raf);
+      if (vp) vp.removeEventListener('scroll', onScroll);
+      if (mo) mo.disconnect();
+      if (ro) ro.disconnect();
     };
   }, [cockpit.selectedId]);
-
-  // Typing keeps the transcript tailing — but only while you're ALREADY at the
-  // bottom. If you've scrolled up to read (detached), typing must NOT yank you
-  // back down; you re-attach by scrolling to the bottom (or the ↓ button), which
-  // assistant-ui's autoScroll then resumes tailing from.
-  useEffect(() => {
-    const pin = (e: Event) => {
-      const t = e.target as HTMLElement | null;
-      if (!t?.closest?.('.composer')) return; // only the composer, not the rail/etc.
-      if (!t.closest('.composer-input')) return;
-      document.querySelectorAll<HTMLElement>('.thread-viewport').forEach((vp) => {
-        const atBottom = vp.scrollHeight - vp.scrollTop - vp.clientHeight < 64;
-        if (atBottom) vp.scrollTop = vp.scrollHeight; // reinforce stick; respect detach
-      });
-    };
-    document.addEventListener('focusin', pin);
-    document.addEventListener('input', pin);
-    return () => {
-      document.removeEventListener('focusin', pin);
-      document.removeEventListener('input', pin);
-    };
-  }, []);
   const select = useCallback(
     (id: string) => {
       cockpit.select(id);
