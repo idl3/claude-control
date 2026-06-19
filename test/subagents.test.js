@@ -97,14 +97,14 @@ test('agent with very stale jsonl (>600 s old) shows status=done', async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('doneByParent overrides fresh mtime (authoritative done signal)', async () => {
+test('a FRESH file stays running even after markDone (background launch-ack must not mark a still-writing agent done)', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
 
   const subDir = path.join(tmp, 'session', 'subagents');
-  const agentId = 'freshbutdone';
-  const toolUseId = 'tu-freshbutdone';
+  const agentId = 'freshandwriting';
+  const toolUseId = 'tu-freshandwriting';
   writeAgentFiles(subDir, agentId, {
     metaContent: JSON.stringify({ agentType: 'test-agent', description: 'test', toolUseId }),
     jsonlContent: '{"type":"assistant"}\n',
@@ -112,16 +112,41 @@ test('doneByParent overrides fresh mtime (authoritative done signal)', async () 
 
   const watcher = new SubAgentsWatcher(parentPath);
   watcher.poll();
+  assert.equal(watcher.snapshot()[0].status, 'running', 'should be running before markDone');
 
-  // Confirm it's running before markDone.
-  const before = watcher.snapshot();
-  assert.equal(before[0].status, 'running', 'should be running before markDone');
+  // A background agent's launch-ack tool_result arrives immediately → markDone —
+  // but the file is still being written, so it must remain RUNNING.
+  watcher.markDone(toolUseId);
+  assert.equal(watcher.snapshot()[0].status, 'running',
+    `fresh file must read running despite a premature doneByParent — got '${watcher.snapshot()[0].status}'`);
 
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('doneByParent marks done once the file goes quiet (> ACTIVE_WINDOW)', async () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'quietdone';
+  const toolUseId = 'tu-quietdone';
+  writeAgentFiles(subDir, agentId, {
+    metaContent: JSON.stringify({ agentType: 'test-agent', description: 'test', toolUseId }),
+    jsonlContent: '{"type":"assistant"}\n',
+  });
+  // Backdate the jsonl mtime past the active window so it reads as quiescent.
+  const jsonl = path.join(subDir, `agent-${agentId}.jsonl`);
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonl, old, old);
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
   watcher.markDone(toolUseId);
 
-  const after = watcher.snapshot();
-  assert.equal(after[0].status, 'done',
-    `doneByParent should override fresh mtime — expected 'done', got '${after[0].status}'`);
+  assert.equal(watcher.snapshot()[0].status, 'done',
+    'a quiet file + doneByParent should be done');
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
