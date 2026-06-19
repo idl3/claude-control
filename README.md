@@ -28,6 +28,8 @@ npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 **Optional local AI (no API key):**
 
 - **Voice → text** — run `claude-control setup` once: it installs `ffmpeg` + `whisper.cpp` (Homebrew) and downloads a ggml model to `~/.claude-control/models/`. The mic in the composer then records audio and transcribes it locally (no API key). *(Manual equivalent: `brew install ffmpeg whisper-cpp` and drop a model at `~/.claude-control/models/ggml-base.en.bin`.)*
+
+  > **Microphone on a phone or tablet**: browsers only allow mic access on a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) (HTTPS or `localhost`). A plain `http://192.168.x.x:4317` URL leaves `navigator.mediaDevices` undefined on iOS/Android — the permission won't stick and re-prompts every reload. `localhost` on the Mac itself is exempt. Easiest fix: `tailscale serve --bg 4317` then open the `https://<host>.ts.net` URL. Or run with your own cert: `TLS_CERT=cert.pem TLS_KEY=key.pem claude-control`.
 - **Prompt enhancer (✨)** — defaults to a **local MLX model** on Apple Silicon. One-time setup:
   ```bash
   python3 -m venv ~/.claude-control/mlx-venv

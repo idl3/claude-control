@@ -153,11 +153,28 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
         draw();
       } catch (err) {
         const kind = err instanceof Error ? err.message : '';
-        setErrorMsg(
-          kind === 'no-mediarecorder'
-            ? 'Audio recording isn’t supported in this browser.'
-            : 'Microphone permission denied or unavailable.',
-        );
+        const name = err instanceof Error ? err.name : '';
+        let msg: string;
+        if (kind === 'no-mediarecorder') {
+          msg = "Audio recording isn’t supported in this browser.";
+        } else if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+          // Insecure origin (http on a LAN IP): the mic API is disabled outright.
+          msg =
+            "Microphone needs a secure (HTTPS) connection. You’re on " +
+            location.origin +
+            " — serve over HTTPS (e.g. `tailscale serve --bg 4317`) so the browser allows the mic.";
+        } else if (name === 'NotAllowedError' || name === 'SecurityError') {
+          // Secure origin but permission blocked/denied. On iOS Safari the grant
+          // also doesn’t persist across reloads in a browser TAB — installing to
+          // the Home Screen (standalone) makes it stick.
+          msg =
+            'Microphone blocked. On iPhone/iPad: reset it in Settings → Apps → Safari → Microphone (or the “aA” → Website Settings menu), then reload. Add this app to your Home Screen so the permission persists across reloads.';
+        } else if (name === 'NotFoundError' || name === 'NotReadableError') {
+          msg = 'No microphone available (or it’s in use by another app).';
+        } else {
+          msg = 'Microphone permission denied or unavailable.';
+        }
+        setErrorMsg(msg);
         setStatus('error');
       }
     })();
