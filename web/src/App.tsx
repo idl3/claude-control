@@ -636,6 +636,14 @@ function AppInner() {
     let tries = 0;
     let pinned = true;
     let interacting = false;
+    // Entering a session must land at the latest message. The transcript mounts
+    // its messages AFTER this effect attaches, so a single scroll-to-bottom gets
+    // undone when late content (markdown, code, images) grows the viewport and
+    // fires a scroll that recomputes pinned→false. While `initial`, we keep
+    // forcing the bottom and never auto-unpin — cleared by the first real user
+    // gesture or a short settle window, after which normal sticky logic resumes.
+    let initial = true;
+    let initTimer = 0;
 
     const atBottom = () => !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
     const updateBtn = () => {
@@ -645,15 +653,23 @@ function AppInner() {
       if (tailRaf) return;
       tailRaf = requestAnimationFrame(() => {
         tailRaf = 0;
-        if (vp && pinned && !interacting) vp.scrollTop = vp.scrollHeight;
+        if (vp && (pinned || initial) && !interacting) vp.scrollTop = vp.scrollHeight;
       });
     };
+    const endInitial = () => {
+      if (!initial) return;
+      initial = false;
+      clearTimeout(initTimer);
+      pinned = atBottom();
+      updateBtn();
+    };
     const onScroll = () => {
-      if (!interacting) pinned = atBottom();
+      if (!interacting && !initial) pinned = atBottom();
       updateBtn();
     };
     const beginInteract = () => {
       interacting = true;
+      endInitial(); // a real gesture takes over from the enter-at-bottom hold
       clearTimeout(settle);
     };
     const endInteract = () => {
@@ -677,8 +693,12 @@ function AppInner() {
         return;
       }
       pinned = true;
+      initial = true;
       vp.scrollTop = vp.scrollHeight;
       updateBtn();
+      // Hold "enter at bottom" until content stops settling (or the user acts).
+      clearTimeout(initTimer);
+      initTimer = window.setTimeout(endInitial, 600);
       vp.addEventListener('scroll', onScroll, { passive: true });
       vp.addEventListener('touchstart', beginInteract, { passive: true });
       vp.addEventListener('touchend', endInteract, { passive: true });
@@ -703,6 +723,7 @@ function AppInner() {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(tailRaf);
       clearTimeout(settle);
+      clearTimeout(initTimer);
       if (vp) {
         vp.removeEventListener('scroll', onScroll);
         vp.removeEventListener('touchstart', beginInteract);
