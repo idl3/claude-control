@@ -202,14 +202,48 @@ body {
   flex-direction: column;
   margin-bottom: 10px;
 }
+/* Accordion header (a button): chevron + session name + collapsed-count. */
 .session-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted, #8a8f98);
-  padding: 4px 6px 2px;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.session-group-head:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.session-group-chevron {
+  flex: 0 0 auto;
+  font-size: 9px;
+  opacity: 0.8;
+}
+.session-group-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-group-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-dim);
 }
 .session-window {
   display: flex;
@@ -2660,6 +2694,37 @@ details.block-tool[open] > summary .tool-arrow,
   opacity: 0.6;
   cursor: default;
 }
+/* Filter toggle beside New session: cycles all → Claude → terminals. */
+.rail-filter {
+  flex: 0 0 auto;
+  height: 30px;
+  min-width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+}
+.rail-filter:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.rail-filter[data-filter='claude'],
+.rail-filter[data-filter='terminal'] {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.rail-filter-tag {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
 .rail-gear {
   flex: none;
   width: var(--hud-h);
@@ -4579,6 +4644,39 @@ select.config-input {
   max-height: min(60vh, 540px);
   overflow-y: auto;
   padding: 0;
+}
+/* CPU/Mem sparklines (cheap inline SVG). */
+.proc-graphs {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.proc-graph {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.proc-graph-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.proc-graph-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-size: 12px;
+}
+.proc-graph .spark {
+  width: 100%;
+  height: 32px;
+  display: block;
 }
 .proc-row {
   display: grid;

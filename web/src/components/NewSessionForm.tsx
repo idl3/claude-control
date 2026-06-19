@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSession } from '../lib/api';
+import { FunnelIcon } from './icons';
+import type { SessionFilter } from './SessionRail';
 
 interface NewSessionFormProps {
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
+  /** Rail filter state + cycle (all → claude → terminal). */
+  filter: SessionFilter;
+  onCycleFilter: () => void;
 }
+
+const FILTER_TITLE: Record<SessionFilter, string> = {
+  all: 'Showing all panes — tap to show only Claude',
+  claude: 'Showing Claude sessions — tap to show only terminals',
+  terminal: 'Showing terminals — tap to show all',
+};
 
 /** Client-side mirror of the server's `session-<short-ts>` default name. */
 function defaultName(now: number = Date.now()): string {
@@ -17,7 +28,7 @@ function defaultName(now: number = Date.now()): string {
  * which names the tmux window and launches Claude with `--name <name>`. The new
  * window appears in the rail on the next registry refresh.
  */
-export function NewSessionForm({ onToast }: NewSessionFormProps) {
+export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFormProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -63,6 +74,19 @@ export function NewSessionForm({ onToast }: NewSessionFormProps) {
           onClick={() => setOpen(true)}
         >
           + New session
+        </button>
+        <button
+          type="button"
+          className="rail-filter"
+          data-filter={filter}
+          aria-label={FILTER_TITLE[filter]}
+          title={FILTER_TITLE[filter]}
+          onClick={onCycleFilter}
+        >
+          <FunnelIcon size={15} />
+          {filter !== 'all' ? (
+            <span className="rail-filter-tag">{filter === 'claude' ? 'CC' : '>_'}</span>
+          ) : null}
         </button>
       </div>
     );

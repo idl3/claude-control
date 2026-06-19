@@ -4,10 +4,27 @@ import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { TerminalSquareIcon } from './icons';
 
+export type SessionFilter = 'all' | 'claude' | 'terminal';
+
 interface SessionRailProps {
   sessions: Session[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Show all panes, only Claude, or only terminals. */
+  filter: SessionFilter;
+  /** Collapsed tmux session names (accordion). */
+  collapsed: Set<string>;
+  onToggleCollapse: (sessionName: string) => void;
+  /** id → "⌘N" badge, computed by App over the VISIBLE+addressable Claude order. */
+  hotkeyById: Map<string, string>;
+}
+
+/** A Claude pane reads as "working" while actively generating OR with very recent
+ *  transcript activity (covers tool runs / sub-agents that the pane line misses). */
+export function claudeWorking(s: Session): boolean {
+  if (s.thinking) return true;
+  const la = typeof s.lastActivity === 'number' ? s.lastActivity : NaN;
+  return Number.isFinite(la) && Date.now() - la < 15_000;
 }
 
 /** Last path segment of a cwd, e.g. "/a/b/c" → "c". */
@@ -77,9 +94,15 @@ function PaneRow({
       : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
 
-  // Claude character state: a pending question (?) > actively generating
-  // (working/bob) > idle (sleeping/Zzz). Terminals have no character state.
-  const claudeState = isTerminal ? null : s.pending ? 'ask' : s.thinking ? 'working' : 'sleeping';
+  // Claude character state: a pending question (?) > working (generating / tools
+  // / sub-agents / recent activity) > idle (sleeping/Zzz). No state for terminals.
+  const claudeState = isTerminal
+    ? null
+    : s.pending
+      ? 'ask'
+      : claudeWorking(s)
+        ? 'working'
+        : 'sleeping';
 
   // One-shot attention nudge: flash an accent ring when this pane STARTS needing
   // a reply (pending false→true). The steady ASK-badge pulse is CSS.
@@ -146,7 +169,7 @@ function PaneRow({
           ) : null}
         </span>
         <span className="session-name">{label}</span>
-        {s.thinking && !s.pending ? (
+        {!isTerminal && claudeState === 'working' ? (
           <span className="thinking-dot" aria-label="working" title="Working…" />
         ) : null}
         {s.pending ? (
@@ -172,61 +195,80 @@ function PaneRow({
   );
 }
 
-export function SessionRail({ sessions, selectedId, onSelect }: SessionRailProps) {
-  const groups = useMemo(() => groupByTmux(sessions), [sessions]);
-
-  // ⌘1-9 maps to the first 9 CLAUDE sessions in the SAME order App.tsx jumps
-  // (kind !== terminal, sorted sessionName → windowIndex → paneIndex). Keep the
-  // two in lockstep so the badge a row shows is the key that actually selects it.
-  const hotkeyById = useMemo(() => {
-    const m = new Map<string, string>();
-    sessions
-      .filter((s) => s.kind !== 'terminal')
-      .sort(
-        (a, b) =>
-          (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
-          (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
-          (a.paneIndex ?? 0) - (b.paneIndex ?? 0),
-      )
-      .slice(0, 9)
-      .forEach((s, i) => m.set(s.id, `⌘${i + 1}`));
-    return m;
-  }, [sessions]);
+export function SessionRail({
+  sessions,
+  selectedId,
+  onSelect,
+  filter,
+  collapsed,
+  onToggleCollapse,
+  hotkeyById,
+}: SessionRailProps) {
+  // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
+  const groups = useMemo(() => {
+    const visible = sessions.filter((s) =>
+      filter === 'all'
+        ? true
+        : filter === 'terminal'
+          ? s.kind === 'terminal'
+          : s.kind !== 'terminal',
+    );
+    return groupByTmux(visible);
+  }, [sessions, filter]);
 
   if (groups.length === 0) {
     return (
       <div className="session-list" role="listbox" aria-label="Sessions">
-        <div className="session-empty">no tmux panes</div>
+        <div className="session-empty">
+          {filter === 'all' ? 'no tmux panes' : `no ${filter} sessions`}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="session-list" role="listbox" aria-label="Sessions">
-      {groups.map((g) => (
-        <section key={g.sessionName} className="session-group">
-          <div className="session-group-head">{g.sessionName}</div>
-          {g.windows.map((w) => (
-            <div key={w.windowIndex} className="session-window">
-              <div className="session-window-head">
-                <span className="window-idx">{w.windowIndex}</span>
-                <span className="window-name">{w.windowName}</span>
-              </div>
-              <ul className="session-pane-list">
-                {w.panes.map((s) => (
-                  <PaneRow
-                    key={s.id}
-                    s={s}
-                    selected={s.id === selectedId}
-                    onSelect={onSelect}
-                    hotkey={hotkeyById.get(s.id)}
-                  />
+      {groups.map((g) => {
+        const isCollapsed = collapsed.has(g.sessionName);
+        const paneCount = g.windows.reduce((n, w) => n + w.panes.length, 0);
+        return (
+          <section key={g.sessionName} className="session-group" data-collapsed={isCollapsed ? 'true' : undefined}>
+            <button
+              type="button"
+              className="session-group-head"
+              aria-expanded={!isCollapsed}
+              onClick={() => onToggleCollapse(g.sessionName)}
+            >
+              <span className="session-group-chevron" aria-hidden="true">
+                {isCollapsed ? '▸' : '▾'}
+              </span>
+              <span className="session-group-name">{g.sessionName}</span>
+              {isCollapsed ? <span className="session-group-count">{paneCount}</span> : null}
+            </button>
+            {isCollapsed
+              ? null
+              : g.windows.map((w) => (
+                  <div key={w.windowIndex} className="session-window">
+                    <div className="session-window-head">
+                      <span className="window-idx">{w.windowIndex}</span>
+                      <span className="window-name">{w.windowName}</span>
+                    </div>
+                    <ul className="session-pane-list">
+                      {w.panes.map((s) => (
+                        <PaneRow
+                          key={s.id}
+                          s={s}
+                          selected={s.id === selectedId}
+                          onSelect={onSelect}
+                          hotkey={hotkeyById.get(s.id)}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
-            </div>
-          ))}
-        </section>
-      ))}
+          </section>
+        );
+      })}
     </div>
   );
 }

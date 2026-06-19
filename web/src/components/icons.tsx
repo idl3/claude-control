@@ -93,6 +93,14 @@ export function XIcon(p: IconProps) {
   );
 }
 
+export function FunnelIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+    </Svg>
+  );
+}
+
 export function ArrowDownIcon(p: IconProps) {
   return (
     <Svg {...p}>
