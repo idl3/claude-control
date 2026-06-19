@@ -762,25 +762,6 @@ export function Composer({
               >
                 <MicIcon />
               </button>
-              {/* Sub-agent toggle: when checked, outgoing prompts are prefixed
-                  with "Using a sub-agent." Data model uses SubAgentMode (boolean |
-                  string) so a future agent picker can set a name here. */}
-              <label
-                className="composer-subagent-toggle"
-                title={subAgentMode ? 'Sub-agent on — click to disable' : 'Sub-agent off — click to enable'}
-              >
-                <input
-                  type="checkbox"
-                  className="composer-subagent-checkbox"
-                  checked={!!subAgentMode}
-                  disabled={disabled}
-                  onChange={(e) => onSubAgentModeChange?.(e.target.checked)}
-                  aria-label="Use sub-agent"
-                />
-                <span className="composer-subagent-label" aria-hidden="true">
-                  sub-agent
-                </span>
-              </label>
             </>
           ) : null}
           {/* Terminal-mode toggle (>_): turns the composer into a CLI. Always
@@ -804,6 +785,26 @@ export function Composer({
             <TerminalIcon />
           </button>
           <span className="composer-toolbar-spacer" />
+          {/* Sub-agent toggle: when active, outgoing prompts are prefixed
+              with "Using a sub-agent." Sits in the right cluster so it's
+              visually adjacent to the send buttons it influences. Only shown
+              in non-terminal mode (terminal has no prompt optimisation). */}
+          {!terminal ? (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={!!subAgentMode}
+              className={`composer-subagent-toggle${subAgentMode ? ' composer-subagent-toggle--on' : ''}`}
+              title={subAgentMode ? 'Sub-agent on — click to disable' : 'Sub-agent off — click to enable'}
+              disabled={disabled}
+              onClick={() => onSubAgentModeChange?.(!subAgentMode)}
+            >
+              <span className="composer-subagent-check" aria-hidden="true">
+                {subAgentMode ? <CheckIcon /> : <UncheckedIcon />}
+              </span>
+              <span className="composer-subagent-label">Dispatch task in sub-agent</span>
+            </button>
+          ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal ? (
             <button
@@ -969,6 +970,30 @@ function SparkleIcon() {
         fill="currentColor"
         opacity="0.6"
       />
+    </svg>
+  );
+}
+
+/** Checkmark tick shown inside the sub-agent toggle when it is ON. */
+function CheckIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M20 6 9 17l-5-5"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Empty box shown inside the sub-agent toggle when it is OFF. */
+function UncheckedIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }
