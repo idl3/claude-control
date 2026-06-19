@@ -815,6 +815,22 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // ⌘/Ctrl+↓ scrolls the transcript to the latest (re-attaches tailing — the
+  // controller's scroll listener flips back to pinned once it reaches bottom).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowDown' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
+      const vp = document.querySelector<HTMLElement>('.thread-viewport');
+      if (vp) {
+        e.preventDefault();
+        vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Palette command list: one switch entry per pane, then global actions
   // (including "View raw tmux window" for the current session).
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
