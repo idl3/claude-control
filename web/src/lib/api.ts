@@ -242,6 +242,17 @@ export interface ControlConfig {
   optimizeBackend: OptimizeBackend;
   /** HuggingFace/MLX model id used when optimizeBackend === 'mlx'. */
   mlxModel: string;
+  /**
+   * Transcript font-size in px (12–18). 0 = use the CSS default (--txt-transcript).
+   * Applied in non-external-display contexts (base / iPad).
+   */
+  transcriptFontSize: number;
+  /**
+   * Transcript font-size in px (12–22) used ONLY when body.is-external-display is set.
+   * Lets a large monitor use a different (usually larger) size without overriding the
+   * base iPad size.
+   */
+  externalFontSize: number;
 }
 
 export interface OptimizeResult {

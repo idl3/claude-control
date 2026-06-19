@@ -3,33 +3,39 @@ import { latestAgentSummary } from '../lib/agentSummary';
 
 interface SubAgentStripProps {
   subagents: SubAgent[];
-  /** Open the full sub-agent panel (clicking the strip). */
-  onOpen: () => void;
+  /** Open a SPECIFIC running agent's transcript (the panel focused on it). */
+  onOpenAgent: (agentId: string) => void;
 }
 
 /**
- * Compact "what are my sub-agents doing right now" strip, shown directly above
- * the composer. Renders ONLY while ≥1 sub-agent is running: each row is the
- * agent type + its latest work line. Clicking opens the full sub-agent panel.
+ * Live "what are my sub-agents doing" strip, stacked directly above the composer.
+ * Renders ONLY while ≥1 sub-agent is running: one tappable row per agent (type +
+ * latest work line). Tapping a row opens THAT agent's transcript — so with 2-3
+ * agents you can toggle between them and read each one's thread.
  */
-export function SubAgentStrip({ subagents, onOpen }: SubAgentStripProps) {
+export function SubAgentStrip({ subagents, onOpenAgent }: SubAgentStripProps) {
   const running = subagents.filter((a) => a.status === 'running');
   if (running.length === 0) return null;
 
   return (
-    <button
-      type="button"
+    <div
       className="subagent-strip"
-      onClick={onOpen}
-      aria-label={`${running.length} sub-agent${running.length === 1 ? '' : 's'} running — open panel`}
-      title="Open sub-agents"
+      role="list"
+      aria-label={`${running.length} sub-agent${running.length === 1 ? '' : 's'} running`}
     >
-      <span className="subagent-strip-rows">
-        {running.map((a) => {
-          const summary = latestAgentSummary(a);
-          return (
-            <span className="subagent-strip-row" key={a.agentId}>
-              <span className="sa-dot" data-status="running" aria-hidden="true" />
+      {running.map((a) => {
+        const summary = latestAgentSummary(a);
+        return (
+          <button
+            type="button"
+            role="listitem"
+            className="subagent-strip-row"
+            key={a.agentId}
+            onClick={() => onOpenAgent(a.agentId)}
+            title={`Open ${a.agentType || 'sub-agent'}'s transcript`}
+          >
+            <span className="sa-dot" data-status="running" aria-hidden="true" />
+            <span className="subagent-strip-head">
               <span className="subagent-strip-type">{a.agentType || 'sub-agent'}</span>
               {summary ? (
                 <span className="subagent-strip-summary">{summary}</span>
@@ -37,9 +43,9 @@ export function SubAgentStrip({ subagents, onOpen }: SubAgentStripProps) {
                 <span className="subagent-strip-summary subagent-strip-idle">working…</span>
               )}
             </span>
-          );
-        })}
-      </span>
-    </button>
+          </button>
+        );
+      })}
+    </div>
   );
 }

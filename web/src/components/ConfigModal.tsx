@@ -29,6 +29,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [claudeBin, setClaudeBin] = useState('');
   const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
   const [mlxModel, setMlxModel] = useState('');
+  // 0 = CSS default (auto); non-zero = user-chosen px value.
+  const [transcriptFontSize, setTranscriptFontSize] = useState(0);
+  const [externalFontSize, setExternalFontSize] = useState(0);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,6 +70,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setClaudeBin(c.claudeBin ?? '');
         setOptimizeBackend(c.optimizeBackend ?? 'mlx');
         setMlxModel(c.mlxModel ?? '');
+        setTranscriptFontSize(c.transcriptFontSize ?? 0);
+        setExternalFontSize(c.externalFontSize ?? 0);
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -129,6 +134,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         claudeBin,
         optimizeBackend,
         mlxModel,
+        transcriptFontSize,
+        externalFontSize,
       });
       setLaunchCommand(saved.launchCommand);
       setDefaultCwd(saved.defaultCwd);
@@ -136,6 +143,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       setClaudeBin(saved.claudeBin ?? '');
       setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
       setMlxModel(saved.mlxModel ?? '');
+      setTranscriptFontSize(saved.transcriptFontSize ?? 0);
+      setExternalFontSize(saved.externalFontSize ?? 0);
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
@@ -278,6 +287,42 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                     models.recommendedMlxModel
                   }. Auto-downloads on first use.`
                 : 'On-device model for the ✨ enhancer. Auto-downloads on first use.'}
+            </span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">Transcript font size</span>
+            <select
+              className="config-input"
+              value={transcriptFontSize}
+              disabled={loading}
+              onChange={(e) => setTranscriptFontSize(Number(e.target.value))}
+            >
+              <option value={0}>Default (auto)</option>
+              {[12, 13, 14, 15, 16, 17, 18].map((px) => (
+                <option key={px} value={px}>{px}px</option>
+              ))}
+            </select>
+            <span className="config-hint">
+              Base transcript size (iPad + desktop). Default uses the built-in CSS token.
+            </span>
+          </label>
+
+          <label className="config-field">
+            <span className="config-label">External display font size</span>
+            <select
+              className="config-input"
+              value={externalFontSize}
+              disabled={loading}
+              onChange={(e) => setExternalFontSize(Number(e.target.value))}
+            >
+              <option value={0}>Default (auto)</option>
+              {[12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((px) => (
+                <option key={px} value={px}>{px}px</option>
+              ))}
+            </select>
+            <span className="config-hint">
+              Applies only when iPad drives an external monitor. Overrides base size on that display.
             </span>
           </label>
 

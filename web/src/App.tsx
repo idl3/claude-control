@@ -10,7 +10,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession } from './lib/api';
+import { renameSession, createSession, getConfig } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -152,6 +152,44 @@ function AppInner() {
     detect();
     window.addEventListener('resize', detect);
     return () => window.removeEventListener('resize', detect);
+  }, []);
+
+  // Load font-size config once at startup and apply --txt-transcript to the
+  // document root. Two independent settings:
+  //  - transcriptFontSize: base (iPad + non-external desktop)
+  //  - externalFontSize:   applies ONLY when body.is-external-display is set
+  // 0 = use the CSS default (no inline override). Re-applies on resize so the
+  // external-display switch mid-session is handled.
+  useEffect(() => {
+    let basePx = 0;
+    let extPx = 0;
+    let alive = true;
+
+    const apply = () => {
+      if (!alive) return;
+      const isExternal = document.body.classList.contains('is-external-display');
+      const chosen = isExternal && extPx > 0 ? extPx : basePx > 0 ? basePx : 0;
+      if (chosen > 0) {
+        document.documentElement.style.setProperty('--txt-transcript', `${chosen}px`);
+      } else {
+        document.documentElement.style.removeProperty('--txt-transcript');
+      }
+    };
+
+    getConfig()
+      .then((c) => {
+        if (!alive) return;
+        basePx = c.transcriptFontSize ?? 0;
+        extPx = c.externalFontSize ?? 0;
+        apply();
+      })
+      .catch(() => { /* non-fatal — keep CSS defaults */ });
+
+    window.addEventListener('resize', apply);
+    return () => {
+      alive = false;
+      window.removeEventListener('resize', apply);
+    };
   }, []);
 
   // Surface WS ack errors / answer confirmations as toasts.
@@ -550,11 +588,17 @@ function AppInner() {
   // (keyed by JSON signature so it re-shows when the prompt changes). Reset the
   // sub-agent panel when the active session changes.
   const [panelOpen, setPanelOpen] = useState(false);
+  // When the panel is opened from a strip row, focus that specific agent.
+  const [panelAgentId, setPanelAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
   useEffect(() => {
     setPanelOpen(false);
   }, [cockpit.selectedId]);
+  const openAgent = useCallback((agentId: string) => {
+    setPanelAgentId(agentId);
+    setPanelOpen(true);
+  }, []);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -926,6 +970,7 @@ function AppInner() {
         toggleTerminal();
       } else if (k === 'u' && cockpit.subagents.length > 0) {
         e.preventDefault();
+        setPanelAgentId(null); // ⌘U opens the list, not a focused agent
         setPanelOpen((v) => !v);
       }
     };
@@ -1355,7 +1400,7 @@ function AppInner() {
                         title="Sub-agents (⌘U)"
                         data-hotkey="⌘U"
                         data-hotkey-dir="down"
-                        onClick={() => setPanelOpen((v) => !v)}
+                        onClick={() => { setPanelAgentId(null); setPanelOpen((v) => !v); }}
                       >
                         <BotIcon />
                         {runningAgents > 0 ? (
@@ -1422,7 +1467,7 @@ function AppInner() {
                 ) : null}
                 <SubAgentStrip
                   subagents={cockpit.subagents}
-                  onOpen={() => setPanelOpen(true)}
+                  onOpenAgent={openAgent}
                 />
                 <Composer
                   disabled={false}
@@ -1446,7 +1491,7 @@ function AppInner() {
                     onSubAgentModeChange={onActiveSubAgentModeChange}
                     onTerminalModeChange={onTerminalModeChange}
                     subagents={cockpit.subagents}
-                    onOpenAgents={() => setPanelOpen(true)}
+                    onOpenAgent={openAgent}
                     working={agentWorking}
                     onStop={handleStop}
                   />
@@ -1515,6 +1560,7 @@ function AppInner() {
           subagents={cockpit.subagents}
           open={panelOpen && cockpit.subagents.length > 0}
           onClose={() => setPanelOpen(false)}
+          focusAgentId={panelAgentId}
         />
 
         {processOpen ? (
