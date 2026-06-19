@@ -1455,6 +1455,69 @@ async function handleClientMessage(ws, msg) {
       if (sub) sub._lastPrompt = '__force__';
       return send(ws, { type: 'ack', op: 'promptkey', ok: true });
     }
+    case 'promptselect': {
+      // Respond to a live TUI multi-select checkbox prompt (surfaced via pane-scrape
+      // fallback). Uses the same capture-driven machinery as `case 'answer'`:
+      // parsePicker → planStep → sendRawKeysSequenced.
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+
+      const labels = Array.isArray(msg.labels) ? msg.labels.map(String) : [];
+      if (labels.length === 0) throw new Error('no labels provided');
+
+      const SETTLE_MS = 300;
+
+      // 1. Capture current picker state.
+      let capture;
+      try {
+        capture = await tmux.capturePane(session.target);
+      } catch (captureErr) {
+        throw new Error(`promptselect: capture failed: ${captureErr?.message}`);
+      }
+
+      // 2. Parse into a structured picker model.
+      const parsed = parsePicker(capture);
+      if (parsed.confidence !== 'ok') {
+        return send(ws, {
+          type: 'ack',
+          op: 'promptselect',
+          ok: false,
+          error: 'promptselect: picker not found or low confidence — please retry',
+        });
+      }
+
+      // 3. Build a synthetic single-question descriptor (multiSelect=true) so
+      //    planStep can calculate Space-toggle + action-row Enter keys.
+      const syntheticQuestion = {
+        multiSelect: true,
+        options: parsed.rows
+          .filter((r) => r.kind === 'option')
+          .map((r) => ({ label: r.label })),
+      };
+
+      // 4. Plan keystrokes via the tested planStep function.
+      const keys = planStep(parsed, syntheticQuestion, labels);
+      if (!keys) {
+        console.log(`[promptselect] planStep returned null for labels=${JSON.stringify(labels)} — low confidence`);
+        return send(ws, {
+          type: 'ack',
+          op: 'promptselect',
+          ok: false,
+          error: 'promptselect: could not map labels to picker rows — please retry',
+        });
+      }
+
+      console.log(`[promptselect] id=${msg.id} labels=${JSON.stringify(labels)} keys=${JSON.stringify(keys)}`);
+
+      // 5. Send keys sequenced with settle delay (same as case 'answer' dynamic path).
+      await tmux.sendRawKeysSequenced(session.target, keys, SETTLE_MS);
+
+      // Force the next poll tick to broadcast (the prompt should now change/clear).
+      const promptSub = subscriptions.get(msg.id);
+      if (promptSub) promptSub._lastPrompt = '__force__';
+      return send(ws, { type: 'ack', op: 'promptselect', ok: true });
+    }
     // Composer terminal mode (>_): each Claude session has its OWN sister shell
     // pane in its window. Resolve the session by id → its target + cwd, then act
     // on (or lazily create) that window's sister shell.
