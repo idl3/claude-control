@@ -22,8 +22,8 @@ interface ThreadProps {
   onTerminalModeChange: (active: boolean) => void;
   /** Sub-agents for the active session — drives the above-composer strip. */
   subagents: SubAgent[];
-  /** Open the full sub-agent panel (strip click). */
-  onOpenAgents: () => void;
+  /** Open a specific running agent's transcript (strip row click). */
+  onOpenAgent: (agentId: string) => void;
   /** True while Claude is actively generating — flips the send button to STOP. */
   working?: boolean;
   /** Cancel in-flight generation (send Escape to the Claude pane). */
@@ -91,7 +91,7 @@ export function Thread({
   onSubAgentModeChange,
   onTerminalModeChange,
   subagents,
-  onOpenAgents,
+  onOpenAgent,
   working,
   onStop,
 }: ThreadProps) {
@@ -146,7 +146,7 @@ export function Thread({
       >
         <ArrowDownIcon size={18} />
       </button>
-      <SubAgentStrip subagents={subagents} onOpen={onOpenAgents} />
+      <SubAgentStrip subagents={subagents} onOpenAgent={onOpenAgent} />
       <Composer
         disabled={!hasSelection}
         sessionId={sessionId}

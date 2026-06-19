@@ -14,6 +14,8 @@ interface SubAgentPanelProps {
   subagents: SubAgent[];
   open: boolean;
   onClose: () => void;
+  /** When set on open, jump straight into this agent's transcript (strip click). */
+  focusAgentId?: string | null;
 }
 
 // Same renderers as the main chat → tool calls, markdown, reasoning all look
@@ -161,9 +163,15 @@ function AgentBadge({ agent }: { agent: SubAgent }) {
  * chat). Tabs filter Active / Completed / All; selecting an agent opens its
  * transcript as a nested chat you can follow live, then back to the list.
  */
-export function SubAgentPanel({ subagents, open, onClose }: SubAgentPanelProps) {
+export function SubAgentPanel({ subagents, open, onClose, focusAgentId }: SubAgentPanelProps) {
   const [tab, setTab] = useState<Tab>('active');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // When opened via a strip row, jump straight into that agent's transcript.
+  // Re-applies whenever the requested focus changes while open.
+  useEffect(() => {
+    if (open && focusAgentId) setSelectedId(focusAgentId);
+  }, [open, focusAgentId]);
 
   const running = subagents.filter((a) => a.status === 'running').length;
   const counts: Record<Tab, number> = {

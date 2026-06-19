@@ -1616,7 +1616,7 @@ body {
 /* ── Markdown (assistant + system text parts) ─────────────────── */
 .aui-md {
   font-size: var(--txt-transcript);
-  line-height: 1.5;
+  line-height: 1.55;
   overflow-wrap: anywhere;
   /* Flex child of .msg-body — must be allowed to shrink so wide descendants
      (pre/table) scroll internally rather than stretching the bubble. */
@@ -1630,7 +1630,7 @@ body {
   margin-bottom: 0;
 }
 .aui-md p {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
 }
 .aui-md h1,
 .aui-md h2,
@@ -2037,20 +2037,29 @@ body.is-external-display .composer {
   padding-bottom: 8px;
 }
 
-/* Active sub-agents strip — sits directly above the composer, one row per
-   running agent (type + latest work line). Whole strip is a button → opens the
-   sub-agent panel. Capped height; scrolls if many agents run at once. */
+/* Active sub-agents strip — stacked directly above the composer, ONE tappable
+   row per running agent (type on top, latest work line below). Tapping a row
+   opens THAT agent's transcript. Centered to the composer width; scrolls past
+   ~3 agents. */
 .subagent-strip {
-  display: block;
-  text-align: left;
-  /* Match the composer card: centered, same 880px cap, 12px side gutters on
-     narrow — NOT full bleed. */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   width: calc(100% - 24px);
   max-width: 880px;
   margin: 0 auto 8px;
-  max-height: 140px;
+  max-height: 230px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+.subagent-strip-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  /* At least double the old cramped height so two readable lines never clip. */
+  min-height: 50px;
   padding: 9px 12px;
   background: color-mix(in oklch, var(--accent) 8%, var(--bg-1));
   border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line));
@@ -2058,43 +2067,36 @@ body.is-external-display .composer {
   cursor: pointer;
   transition: background var(--ease) 0.15s, border-color var(--ease) 0.15s;
 }
-.subagent-strip:hover {
-  background: color-mix(in oklch, var(--accent) 14%, var(--bg-1));
-  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+.subagent-strip-row:hover {
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg-1));
+  border-color: color-mix(in oklch, var(--accent) 50%, var(--line));
 }
-.subagent-strip:focus-visible {
+.subagent-strip-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.subagent-strip-rows {
+.subagent-strip-row .sa-dot {
+  margin-top: 5px;
+  flex: 0 0 auto;
+  animation: pulse 1.4s var(--ease) infinite;
+}
+.subagent-strip-head {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-}
-.subagent-strip-row {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  gap: 2px;
   min-width: 0;
-  font-size: var(--txt-transcript);
-  line-height: 1.4;
-}
-.subagent-strip-row .sa-dot {
-  align-self: center;
-  animation: pulse 1.4s var(--ease) infinite;
+  flex: 1 1 auto;
 }
 .subagent-strip-type {
   font-weight: 700;
   color: var(--accent);
+  font-size: var(--txt-meta);
   white-space: nowrap;
-  flex: 0 0 auto;
 }
 .subagent-strip-summary {
   color: var(--text-dim);
-  /* Legible: wrap to up to two lines rather than hard-truncating one cramped
-     line; the strip's max-height keeps the whole thing bounded + scrollable. */
-  min-width: 0;
-  flex: 1 1 auto;
+  font-size: var(--txt-transcript);
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
