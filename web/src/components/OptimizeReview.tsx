@@ -13,7 +13,7 @@ interface OptimizeReviewProps {
   onClose: () => void;
 }
 
-const AUTO_SEND_SECS = 3;
+const AUTO_SEND_SECS = 1.8;
 
 // Compute a simple line-level diff between two strings.
 // Returns an array of {kind: 'add'|'del'|'same', text: string}.
