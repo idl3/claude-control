@@ -570,30 +570,99 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Keep the ↓ button anchored ABOVE the composer at any height (it grows with
-  // typed lines / attachments) via a --composer-h var. Tailing/detach itself is
-  // handled by assistant-ui's autoScroll — we do NOT touch scrollTop here (a
-  // custom scroll controller deadlocked streaming sessions and froze scroll).
+  // Sticky conversations: tail new/streaming content while pinned to the bottom;
+  // scrolling up detaches (and shows the ↓ button); returning to the bottom (or
+  // tapping ↓) re-attaches. The KEY safety vs the earlier freeze: tailing is
+  // SUPPRESSED while the user is actively touching/scrolling, so a streaming
+  // session can never yank the viewport out from under a swipe. tail() is also
+  // rAF-coalesced so bursty streams cost one scroll write per frame.
   useEffect(() => {
-    if (!cockpit.selectedId || !('ResizeObserver' in window)) return;
+    if (!cockpit.selectedId) return;
+    let vp: HTMLElement | null = null;
+    let btn: HTMLElement | null = null;
+    let mo: MutationObserver | null = null;
     let ro: ResizeObserver | null = null;
     let raf = 0;
+    let tailRaf = 0;
+    let settle = 0;
     let tries = 0;
+    let pinned = true;
+    let interacting = false;
+
+    const atBottom = () => !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
+    const updateBtn = () => {
+      if (btn) btn.dataset.show = vp && !atBottom() ? 'true' : '';
+    };
+    const tail = () => {
+      if (tailRaf) return;
+      tailRaf = requestAnimationFrame(() => {
+        tailRaf = 0;
+        if (vp && pinned && !interacting) vp.scrollTop = vp.scrollHeight;
+      });
+    };
+    const onScroll = () => {
+      if (!interacting) pinned = atBottom();
+      updateBtn();
+    };
+    const beginInteract = () => {
+      interacting = true;
+      clearTimeout(settle);
+    };
+    const endInteract = () => {
+      clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        interacting = false;
+        pinned = atBottom();
+        updateBtn();
+      }, 160);
+    };
+    const onWheel = () => {
+      beginInteract();
+      endInteract();
+    };
+
     const attach = () => {
-      const root = document.querySelector<HTMLElement>('.thread-root');
-      const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
-      if (!root || !composer) {
+      vp = document.querySelector('.thread-viewport');
+      btn = document.querySelector('.scroll-to-bottom');
+      if (!vp) {
         if (tries++ < 40) raf = requestAnimationFrame(attach);
         return;
       }
-      const setH = () => root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
-      setH();
-      ro = new ResizeObserver(setH);
-      ro.observe(composer);
+      pinned = true;
+      vp.scrollTop = vp.scrollHeight;
+      updateBtn();
+      vp.addEventListener('scroll', onScroll, { passive: true });
+      vp.addEventListener('touchstart', beginInteract, { passive: true });
+      vp.addEventListener('touchend', endInteract, { passive: true });
+      vp.addEventListener('touchcancel', endInteract, { passive: true });
+      vp.addEventListener('wheel', onWheel, { passive: true });
+      mo = new MutationObserver(tail);
+      mo.observe(vp, { childList: true, subtree: true, characterData: true });
+
+      // Keep the ↓ button above the composer at any composer height.
+      const root = vp.closest<HTMLElement>('.thread-root');
+      const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
+      if (root && composer && 'ResizeObserver' in window) {
+        const setH = () => root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+        setH();
+        ro = new ResizeObserver(setH);
+        ro.observe(composer);
+      }
     };
     raf = requestAnimationFrame(attach);
+
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(tailRaf);
+      clearTimeout(settle);
+      if (vp) {
+        vp.removeEventListener('scroll', onScroll);
+        vp.removeEventListener('touchstart', beginInteract);
+        vp.removeEventListener('touchend', endInteract);
+        vp.removeEventListener('touchcancel', endInteract);
+        vp.removeEventListener('wheel', onWheel);
+      }
+      if (mo) mo.disconnect();
       if (ro) ro.disconnect();
     };
   }, [cockpit.selectedId]);

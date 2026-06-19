@@ -70,6 +70,10 @@ test('rejects a pane with no numbered options', () => {
   assert.equal(parsePanePrompt('just some output\nno menu here'), null);
 });
 
-test('requires options to start at 1', () => {
-  assert.equal(parsePanePrompt('Would you like to proceed?\n 2. a\n 3. b\nEsc to cancel'), null);
+test('detects a picker that starts mid-sequence (option 1 scrolled off-screen)', () => {
+  // A real picker can start above the capture window; the Esc footer is the
+  // signal, not a visible "1." (requiring start-at-1 silently dropped questions).
+  const r = parsePanePrompt('Would you like to proceed?\n 2. a\n 3. b\nEsc to cancel');
+  assert.ok(r);
+  assert.deepEqual(r.options.map((o) => o.key), ['2', '3']);
 });
