@@ -1,9 +1,9 @@
 #!/bin/bash
-# claude-control setup — install local dependencies for voice transcription.
+# claude-control setup — install local dependencies (voice + raw terminal).
 #
-# Whisper.cpp is NOT bundled. The 🎤 voice input needs three things, all local
-# (no API key, no cloud): ffmpeg, the whisper-cli binary (Homebrew `whisper-cpp`),
-# and a ggml model under ~/.claude-control/models. This installs/downloads them
+# None of these are bundled. The 🎤 voice input needs ffmpeg, the whisper-cli
+# binary (Homebrew `whisper-cpp`), and a ggml model under ~/.claude-control/models.
+# The in-browser raw terminal needs ttyd. This installs/downloads them all
 # idempotently. tmux (required to run the app at all) is checked too.
 set -uo pipefail
 
@@ -28,8 +28,10 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-say "Installing ffmpeg + whisper-cpp (Homebrew, skips if already present)…"
-brew install ffmpeg whisper-cpp || {
+say "Installing ffmpeg + whisper-cpp + ttyd (Homebrew, skips if already present)…"
+# ttyd powers the in-browser raw tmux terminal; the server spawns/manages it on
+# demand (no daemon to start), but the binary must exist first.
+brew install ffmpeg whisper-cpp ttyd || {
   bad "brew install failed — see output above"
   exit 1
 }
@@ -50,10 +52,11 @@ else
   fi
 fi
 
-say "Verifying voice-transcription chain…"
+say "Verifying local dependencies…"
 command -v ffmpeg >/dev/null 2>&1 && ok "ffmpeg: $(command -v ffmpeg)" || bad "ffmpeg missing"
 command -v whisper-cli >/dev/null 2>&1 && ok "whisper-cli: $(command -v whisper-cli)" || bad "whisper-cli missing (brew install whisper-cpp)"
 ls "$MODELS_DIR"/ggml-*.bin >/dev/null 2>&1 && ok "model: $(ls "$MODELS_DIR"/ggml-*.bin | head -1)" || bad "no ggml model in $MODELS_DIR"
+command -v ttyd >/dev/null 2>&1 && ok "ttyd: $(command -v ttyd)" || bad "ttyd missing (brew install ttyd) — raw in-browser terminal won't work without it"
 
 say "Done. The 🎤 mic (voice → text) is ready."
 echo "  Note: the MLX prompt-enhancer (optional) is separate; the optimiser falls"
