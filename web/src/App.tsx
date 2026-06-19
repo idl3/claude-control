@@ -849,6 +849,16 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
+  // True while the selected Claude session is actively generating/thinking.
+  // Used to flip the composer's primary send button to a STOP button.
+  const agentWorking = !!selectedSession && claudeWorking(selectedSession);
+
+  // Cancel in-flight generation: send Escape to the Claude pane.
+  const handleStop = useCallback(() => {
+    cockpit.sendPromptKey('Escape');
+    showToast('Canceled →');
+  }, [cockpit, showToast]);
+
   // Active session's sub-agent mode (default true for unseen sessions).
   const activeSubAgentMode: SubAgentMode =
     cockpit.selectedId != null
@@ -978,6 +988,25 @@ function AppInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Escape-to-cancel: when the selected session is actively generating,
+  // pressing Esc sends an Escape keystroke to the Claude pane (same as clicking
+  // the STOP button). Bail if a dialog, skill-ac dropdown, or terminal mode owns
+  // the Esc so those handlers win.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('[aria-modal="true"]')) return; // dialog owns Esc
+      if (document.querySelector('.skill-ac')) return;           // autocomplete owns Esc
+      if (composerTerminalRef.current) return;                   // terminal mode owns Esc
+      if (!agentWorking) return;                                 // nothing in flight
+      e.preventDefault();
+      cockpit.sendPromptKey('Escape');
+      showToast('Canceled →');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [agentWorking, cockpit, showToast]);
 
   // ⌘/Ctrl+. scrolls the transcript to the latest (re-attaches tailing — the
   // controller's scroll listener flips back to pinned once it reaches bottom).
@@ -1376,6 +1405,8 @@ function AppInner() {
                   subAgentMode={activeSubAgentMode}
                   onSubAgentModeChange={onActiveSubAgentModeChange}
                   onTerminalModeChange={onTerminalModeChange}
+                  working={agentWorking}
+                  onStop={handleStop}
                 />
               </div>
             ) : (
@@ -1391,6 +1422,8 @@ function AppInner() {
                     onTerminalModeChange={onTerminalModeChange}
                     subagents={cockpit.subagents}
                     onOpenAgents={() => setPanelOpen(true)}
+                    working={agentWorking}
+                    onStop={handleStop}
                   />
                 </LiveThinkingContext.Provider>
                 <ArtifactPanel />
