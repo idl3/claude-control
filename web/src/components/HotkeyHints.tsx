@@ -11,10 +11,13 @@ interface HintPosition {
   placedAbove: boolean;
 }
 
-// Rough rendered badge width (chars include the ⌘ glyph + 0.22em letter-spacing
-// + horizontal padding). Used only for de-collision math.
+// Estimated rendered badge width. Font is 11px monospace with 0.22em letter-spacing
+// (~2.4px/char) and 16px total horizontal padding + 2px border.
+// Each character cell ≈ 6.6px wide + 2.4px spacing ≈ 9px/char.
+// Using 8.5px/char + 18px overhead is conservative enough to prevent false
+// collisions that cascade badges rightward, while still catching real overlap.
 function estWidth(label: string): number {
-  return label.length * 11 + 20;
+  return label.length * 8.5 + 18;
 }
 
 function computePositions(): HintPosition[] {
@@ -48,15 +51,16 @@ function computePositions(): HintPosition[] {
     const placedAbove =
       dir === 'down' ? false : dir === 'up' ? true : rect.top >= badgeHeight + gap + 4;
     const top = placedAbove ? rect.top - badgeHeight - gap : rect.bottom + gap;
+    // Default: center the badge on the target element.
     const left = rect.left + rect.width / 2;
 
     hints.push({ key: `hint-${idx}`, label, top, left, width, placedAbove });
   });
 
   // De-collide badges that share a row: when targets sit close together (e.g. the
-  // detail-head icon buttons) their badges would overlap, so nudge each right of
-  // the previous one's edge. Keeps them readable and evenly spaced.
-  const GAP = 8;
+  // detail-head icon buttons) their badges would overlap. Nudge only the minimum
+  // amount needed — prefer staying close to the target over cascading rightward.
+  const GAP = 4;
   const rows = new Map<number, HintPosition[]>();
   for (const h of hints) {
     const row = Math.round(h.top / 8);
@@ -70,6 +74,13 @@ function computePositions(): HintPosition[] {
       const curLeft = row[i].left - row[i].width / 2;
       if (curLeft < prevRight + GAP) row[i].left = prevRight + GAP + row[i].width / 2;
     }
+  }
+
+  // Clamp every badge so its box stays fully within the viewport.
+  // `h.left` is the badge's horizontal centre (translateX(-50%) applied in CSS).
+  const M = 6; // minimum margin from viewport edge
+  for (const h of hints) {
+    h.left = Math.max(h.width / 2 + M, Math.min(window.innerWidth - h.width / 2 - M, h.left));
   }
 
   return hints;
