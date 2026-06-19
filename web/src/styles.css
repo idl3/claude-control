@@ -2629,6 +2629,158 @@ details.block-tool[open] > summary .tool-arrow,
   font-size: var(--txt-meta);
   color: var(--text-dim);
 }
+/* ── AskModal: side-by-side split layout (questions with previews) ── */
+
+/* Container: option list left, preview pane right. Stacks on narrow screens. */
+.ask-split {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+@media (min-width: 760px) {
+  .ask-split {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 12px;
+    min-height: 0;
+  }
+}
+
+/* Left column: the selectable option rows. */
+.ask-split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+@media (min-width: 760px) {
+  .ask-split-list {
+    width: 200px;
+    max-width: 40%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* A single row in the option list. */
+.ask-split-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.ask-split-row:focus {
+  outline: none;
+}
+.ask-split-row:focus-visible,
+.ask-split-row[data-focused='true']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ask-split-row[data-focused='true'] {
+  border-color: var(--accent-2);
+  background: var(--bg-hover);
+}
+.ask-split-row[data-selected='true'] {
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.ask-split-row[data-selected='true'][data-focused='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Selection indicator (radio/checkbox glyph). */
+.ask-split-indicator {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text-dim);
+}
+.ask-split-row[data-selected='true'] .ask-split-indicator {
+  color: var(--accent);
+}
+.ask-check,
+.ask-radio {
+  display: block;
+  font-style: normal;
+}
+
+/* Text column inside each row (label + description). */
+.ask-split-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Right column: the preview pane. */
+.ask-preview {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+@media (min-width: 760px) {
+  .ask-preview {
+    max-height: 320px;
+  }
+}
+
+.ask-preview-label {
+  padding: 8px 12px 0;
+  font-size: var(--txt-meta);
+  font-weight: 700;
+  color: var(--accent-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: 0 0 auto;
+}
+
+.ask-preview-content {
+  margin: 0;
+  padding: 6px 12px 12px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre;
+  overflow: auto;
+  overscroll-behavior: contain;
+  flex: 1 1 auto;
+  tab-size: 4;
+}
+
+.ask-preview-empty {
+  padding: 18px 12px;
+  color: var(--text-faint);
+  font-size: var(--txt-meta);
+  font-style: italic;
+  align-self: center;
+}
+
+/* Reduced motion: skip transition on row state changes. */
+@media (prefers-reduced-motion: reduce) {
+  .ask-split-row {
+    transition: none;
+  }
+}
+
 .capture-output {
   margin: 0;
   padding: 10px;

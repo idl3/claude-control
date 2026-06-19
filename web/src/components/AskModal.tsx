@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Pending } from '../lib/types';
+import type { Pending, PendingQuestion } from '../lib/types';
 import { useModalTransition } from '../lib/anim';
 
 interface AskModalProps {
@@ -17,10 +17,21 @@ function initSelections(pending: Pending): Selections {
   return pending.questions.map(() => new Set<string>());
 }
 
+/** True when any option in the question carries a preview string. */
+export function questionHasPreview(q: PendingQuestion): boolean {
+  return q.options.some((o) => typeof o.preview === 'string' && o.preview.length > 0);
+}
+
 /**
- * AskUserQuestion dialog. Focus-trapped, Esc closes, aria-modal. Each question
- * renders its options as toggle buttons (multiSelect → many, single → radio).
- * "Send answer" stays disabled until every question has ≥1 selection.
+ * AskUserQuestion dialog. Focus-trapped, Esc closes, aria-modal.
+ *
+ * When any option in a question carries a `preview` string the question
+ * renders in a SIDE-BY-SIDE layout: a vertical selectable option list on the
+ * left and the focused option's preview (monospace, scrollable) on the right.
+ * Questions with no previews keep a button-list layout.
+ *
+ * Keyboard: ↑/↓ move focus within an option list; Space/Enter toggle
+ * selection of the focused row; Tab/Shift-Tab cycle the modal focus-trap.
  */
 export function AskModal({
   pending,
@@ -33,19 +44,24 @@ export function AskModal({
   const [selections, setSelections] = useState<Selections>(() =>
     initSelections(pending),
   );
+  // Per-question focused option index for the split layout.
+  const [focusedIdx, setFocusedIdx] = useState<number[]>(() =>
+    pending.questions.map(() => 0),
+  );
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<Element | null>(null);
 
-  // Reset selections whenever a new pending question arrives.
+  // Reset selections + focus when a new pending question arrives.
   useEffect(() => {
     setSelections(initSelections(pending));
+    setFocusedIdx(pending.questions.map(() => 0));
   }, [pending]);
 
   // Focus management: capture prior focus, focus the dialog, restore on unmount.
   useEffect(() => {
     previouslyFocused.current = document.activeElement;
     const first = dialogRef.current?.querySelector<HTMLElement>(
-      'button:not([disabled]), [tabindex]',
+      'button:not([disabled]), [tabindex="0"]',
     );
     (first ?? dialogRef.current)?.focus();
     return () => {
@@ -68,6 +84,14 @@ export function AskModal({
       } else {
         next[qIdx] = new Set([label]);
       }
+      return next;
+    });
+  };
+
+  const moveFocus = (qIdx: number, delta: number, optCount: number) => {
+    setFocusedIdx((prev) => {
+      const next = [...prev];
+      next[qIdx] = Math.max(0, Math.min(optCount - 1, (prev[qIdx] ?? 0) + delta));
       return next;
     });
   };
@@ -132,35 +156,125 @@ export function AskModal({
         </div>
 
         <div className="modal-body">
-          {pending.questions.map((q, qIdx) => (
-            <div className="question" key={qIdx}>
-              {q.header ? <div className="q-header">{q.header}</div> : null}
-              <div className="q-text">{q.question}</div>
-              {q.multiSelect ? (
-                <div className="q-hint">select one or more</div>
-              ) : null}
-              <div className="q-options">
-                {q.options.map((opt) => {
-                  const on = selections[qIdx]?.has(opt.label);
-                  return (
-                    <button
-                      type="button"
-                      key={opt.label}
-                      className="option-btn"
-                      data-on={on ? 'true' : 'false'}
-                      aria-pressed={on}
-                      onClick={() => toggle(qIdx, opt.label, !!q.multiSelect)}
+          {pending.questions.map((q, qIdx) => {
+            const hasSplit = questionHasPreview(q);
+            const focused = focusedIdx[qIdx] ?? 0;
+            const focusedOpt = q.options[focused];
+
+            return (
+              <div className="question" key={qIdx}>
+                {q.header ? <div className="q-header">{q.header}</div> : null}
+                <div className="q-text">{q.question}</div>
+                {q.multiSelect ? (
+                  <div className="q-hint">select one or more</div>
+                ) : null}
+
+                {hasSplit ? (
+                  <div className="ask-split">
+                    {/* Left: selectable option list */}
+                    <div
+                      className="ask-split-list"
+                      role="listbox"
+                      aria-multiselectable={!!q.multiSelect}
+                      aria-label={q.question}
                     >
-                      <span className="option-label">{opt.label}</span>
-                      {opt.description ? (
-                        <span className="option-desc">{opt.description}</span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+                      {q.options.map((opt, oIdx) => {
+                        const selected = selections[qIdx]?.has(opt.label);
+                        const isFocused = oIdx === focused;
+                        return (
+                          <div
+                            key={opt.label}
+                            className="ask-split-row"
+                            data-focused={isFocused ? 'true' : 'false'}
+                            data-selected={selected ? 'true' : 'false'}
+                            role="option"
+                            aria-selected={selected}
+                            tabIndex={isFocused ? 0 : -1}
+                            onMouseEnter={() => setFocusedIdx((prev) => {
+                              const next = [...prev];
+                              next[qIdx] = oIdx;
+                              return next;
+                            })}
+                            onClick={() => {
+                              setFocusedIdx((prev) => {
+                                const next = [...prev];
+                                next[qIdx] = oIdx;
+                                return next;
+                              });
+                              toggle(qIdx, opt.label, !!q.multiSelect);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                moveFocus(qIdx, 1, q.options.length);
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                moveFocus(qIdx, -1, q.options.length);
+                              } else if (e.key === ' ' || e.key === 'Enter') {
+                                e.preventDefault();
+                                toggle(qIdx, opt.label, !!q.multiSelect);
+                              }
+                            }}
+                          >
+                            <span className="ask-split-indicator">
+                              {q.multiSelect ? (
+                                <span className="ask-check" aria-hidden="true">
+                                  {selected ? '▣' : '▢'}
+                                </span>
+                              ) : (
+                                <span className="ask-radio" aria-hidden="true">
+                                  {selected ? '◉' : '○'}
+                                </span>
+                              )}
+                            </span>
+                            <span className="ask-split-text">
+                              <span className="option-label">{opt.label}</span>
+                              {opt.description ? (
+                                <span className="option-desc">{opt.description}</span>
+                              ) : null}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Right: preview pane */}
+                    <div className="ask-preview" aria-live="polite" aria-label="Option preview">
+                      {focusedOpt?.preview ? (
+                        <>
+                          <div className="ask-preview-label">{focusedOpt.label}</div>
+                          <pre className="ask-preview-content">{focusedOpt.preview}</pre>
+                        </>
+                      ) : (
+                        <div className="ask-preview-empty">no preview</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="q-options">
+                    {q.options.map((opt) => {
+                      const on = selections[qIdx]?.has(opt.label);
+                      return (
+                        <button
+                          type="button"
+                          key={opt.label}
+                          className="option-btn"
+                          data-on={on ? 'true' : 'false'}
+                          aria-pressed={on}
+                          onClick={() => toggle(qIdx, opt.label, !!q.multiSelect)}
+                        >
+                          <span className="option-label">{opt.label}</span>
+                          {opt.description ? (
+                            <span className="option-desc">{opt.description}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {capture != null ? (
             <pre className="capture-output">{capture}</pre>
