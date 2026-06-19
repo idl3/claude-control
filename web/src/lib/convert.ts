@@ -88,6 +88,10 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
   // Pass 2: build messages. Drop messages that contain only tool_result
   // blocks (their content is folded into the originating tool-call part).
   const out: ThreadMessageLike[] = [];
+  // assistant-ui's MessageRepository THROWS (crashing the whole thread) if two
+  // messages share an id. Compacted/resumed transcripts can repeat a uuid, so
+  // dedupe defensively: suffix any repeat with its index (always unique).
+  const seenIds = new Set<string>();
   messages.forEach((msg, i) => {
     const parts = buildParts(msg.blocks ?? [], resultsById, msg.role === 'user');
     if (parts.length === 0) return;
@@ -99,9 +103,13 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
     const role: ThreadMessageLike['role'] =
       msg.role === 'user' ? 'user' : 'assistant';
 
+    let id = msg.uuid || `m-${i}`;
+    if (seenIds.has(id)) id = `${id}#${i}`;
+    seenIds.add(id);
+
     out.push({
       role,
-      id: msg.uuid || `m-${i}`,
+      id,
       createdAt: msg.ts ? new Date(msg.ts) : undefined,
       content: parts,
       metadata: { custom: { cockpitRole: msg.role } },
