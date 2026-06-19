@@ -4,6 +4,7 @@
 // monitoring into a localhost web UI. Bind 127.0.0.1 only; never shell out with user text.
 
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,8 +177,33 @@ function isAllowedOrigin(origin) {
   }
 }
 
-// --- HTTP -------------------------------------------------------------------
-const server = http.createServer((req, res) => {
+// --- HTTP / HTTPS -----------------------------------------------------------
+// Optional TLS: set TLS_CERT and TLS_KEY to PEM file paths to serve HTTPS.
+// Both must be set together; a missing file is a hard startup error.
+function loadTls() {
+  const certPath = process.env.TLS_CERT;
+  const keyPath = process.env.TLS_KEY;
+  if (!certPath && !keyPath) return null;
+  if (!certPath || !keyPath) {
+    console.error('TLS error: both TLS_CERT and TLS_KEY must be set (only one was provided).');
+    process.exit(1);
+  }
+  let cert, key;
+  try { cert = fs.readFileSync(certPath); } catch (e) {
+    console.error(`TLS error: cannot read TLS_CERT "${certPath}": ${e.message}`);
+    process.exit(1);
+  }
+  try { key = fs.readFileSync(keyPath); } catch (e) {
+    console.error(`TLS error: cannot read TLS_KEY "${keyPath}": ${e.message}`);
+    process.exit(1);
+  }
+  return { cert, key };
+}
+
+const _tls = loadTls();
+const _scheme = _tls ? 'https' : 'http';
+
+const _handler = (req, res) => {
   const u = new URL(req.url, 'http://localhost');
 
   if (u.pathname === '/api/sessions') {
@@ -364,7 +390,11 @@ const server = http.createServer((req, res) => {
 
   // static
   serveStatic(u.pathname, res);
-});
+};
+
+const server = _tls
+  ? https.createServer(_tls, _handler)
+  : http.createServer(_handler);
 
 // In-UI "Update now" (POST /api/update): run the self-update script DETACHED
 // (it git-pulls, reinstalls, rebuilds the web bundle, then restarts this
@@ -1638,7 +1668,7 @@ async function main() {
 
   server.listen(CONFIG.port, CONFIG.host, () => {
     // eslint-disable-next-line no-console
-    console.log(`claude-control → http://${CONFIG.host}:${CONFIG.port}/`);
+    console.log(`claude-control → ${_scheme}://${CONFIG.host}:${CONFIG.port}/`);
     if (CONFIG.token) {
       // The token is no longer carried in the URL — the web app prompts for it
       // on load and sends it as an Authorization header (HTTP) / subprotocol
