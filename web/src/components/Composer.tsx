@@ -17,7 +17,7 @@ import {
 import { OptimizeReview } from './OptimizeReview';
 import { Lightbox } from './AttachmentPreview';
 import { SkillBrowser } from './SkillBrowser';
-import { VoiceDialog } from './VoiceDialog';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
@@ -453,11 +453,22 @@ export function Composer({
     [composer, activeToken],
   );
 
-  // ── Voice dictation ───────────────────────────────────────────────────────
-  // The mic opens a recording dialog (waveform + Cancel/Pause/Stop) so recording
-  // can always be stopped/exited. On Stop, the transcript is inserted into the
-  // composer (review-then-send, never auto-send).
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  // ── Voice dictation (inline mode) ────────────────────────────────────────
+  // Voice mode flips the composer body into a waveform + status label, and the
+  // toolbar into Cancel / Pause-Resume / Stop & Transcribe. No modal — the
+  // transcript stays readable behind the composer. Mirrors the terminal mode
+  // pattern (data-voice on .composer-card, toolbar swaps, body swaps).
+  const [voice, setVoice] = useState(false);
+
+  const openVoice = useCallback(() => {
+    if (disabled) return;
+    setVoice(true);
+  }, [disabled]);
+
+  const exitVoice = useCallback(() => {
+    setVoice(false);
+  }, []);
+
   // ⌘/Ctrl+S opens voice mode from ANYWHERE (not just when the composer textarea
   // is focused) — window-level + capture phase so it beats the browser's Save.
   useEffect(() => {
@@ -466,11 +477,17 @@ export function Composer({
       if (disabled) return; // no session selected
       if (document.querySelector('[aria-modal="true"]')) return; // a dialog is open
       e.preventDefault();
-      setVoiceOpen(true);
+      if (voice) {
+        // ⌘S while recording = toggle off (cancel gracefully via the hook if mounted)
+        // exitVoice is just the state flip; VoiceInline cancel handles teardown.
+        exitVoice();
+      } else {
+        openVoice();
+      }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [disabled]);
+  }, [disabled, voice, openVoice, exitVoice]);
   // ⌘/Ctrl+D toggles the sub-agent checkbox from anywhere — beats the
   // browser's bookmark-page shortcut via capture-phase + preventDefault.
   useEffect(() => {
@@ -487,21 +504,21 @@ export function Composer({
   }, [disabled, terminal, subAgentMode, onSubAgentModeChange]);
 
   const commitVoice = useCallback(
-    (text: string) => {
-      setVoiceOpen(false);
-      const t = text.trim();
+    (transcribed: string) => {
+      exitVoice();
+      const t = transcribed.trim();
       if (!t) return;
       const cur = composer.getState().text ?? '';
       const sep = cur && !/\s$/.test(cur) ? ' ' : '';
       composer.setText(cur + sep + t + ' ');
     },
-    [composer],
+    [composer, exitVoice],
   );
 
-  // Close the (session-agnostic) skill browser + voice dialog on a session switch.
+  // Close the (session-agnostic) skill browser + voice mode on a session switch.
   useEffect(() => {
     setSkillBrowserOpen(false);
-    setVoiceOpen(false);
+    setVoice(false);
   }, [sessionId]);
 
   const pickSkill = useCallback(
@@ -537,11 +554,21 @@ export function Composer({
   // window-level + capture phase so it fires even when focus is outside the
   // textarea. Mirrors the ⌘S pattern. Does nothing in terminal mode (the
   // textarea's onKeyDown already handles the shell-Enter path).
+  // When in voice mode, ⌘Enter = Stop & Transcribe (the hook's stop() handles it).
+  // The voiceStopRef lets us call the hook's stop from this window handler without
+  // adding the hook return as a dep (it changes identity every render).
+  const voiceStopRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
       if (disabled || terminal) return;
       if (document.querySelector('[aria-modal="true"]')) return; // a dialog is open
+      // In voice mode, ⌘/Ctrl+Enter = Stop & Transcribe.
+      if (voice) {
+        e.preventDefault();
+        voiceStopRef.current?.();
+        return;
+      }
       e.preventDefault();
       if (e.shiftKey) {
         composer.send();
@@ -552,7 +579,7 @@ export function Composer({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [disabled, terminal, composer, runEnhance, refocusComposer]);
+  }, [disabled, terminal, voice, composer, runEnhance, refocusComposer]);
 
   // ── Terminal input relay ────────────────────────────────────────────────────
   // The textarea is a VISIBLE buffer the user types into normally — so the iOS
@@ -756,8 +783,13 @@ export function Composer({
         </div>
       ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
-          then a toolbar with attach on the left and send on the right. */}
-      <div className="composer-card" data-terminal={terminal ? 'true' : undefined}>
+          then a toolbar with attach on the left and send on the right.
+          data-voice flips the body to waveform + toolbar to voice actions. */}
+      <div
+        className="composer-card"
+        data-terminal={terminal ? 'true' : undefined}
+        data-voice={voice ? 'true' : undefined}
+      >
         {activeSkill ? (
           <div className="composer-skill-chip-row">
             <span className="skill-chip composer-skill-chip" title={`Invoking /${activeSkill}`}>
@@ -766,6 +798,15 @@ export function Composer({
             </span>
           </div>
         ) : null}
+        {/* Voice inline body: replaces the textarea area when voice mode is
+            active. Mounts the hook (mic acquisition) only while voice=true. */}
+        {voice ? (
+          <VoiceInline
+            onCommit={commitVoice}
+            onClose={exitVoice}
+            stopRef={voiceStopRef}
+          />
+        ) : null}
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
             working + invisible) and overlay a hint shown only while empty. */}
@@ -773,7 +814,9 @@ export function Composer({
             transparent (CSS) and the overlay renders the visible text with
             pill highlights. When no pills are present, the overlay is empty
             and the textarea renders normally — zero divergence risk. */}
-        <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}>
+        <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}
+          style={voice ? { display: 'none' } : undefined}
+        >
           <ComposerPrimitive.Input
             className="composer-input"
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
@@ -951,14 +994,16 @@ export function Composer({
         </div>
 
         {/* children render form: invoked once per composer attachment. */}
-        <div className="composer-attachments">
-          <ComposerPrimitive.Attachments>
-            {({ attachment }) => <AttachmentChip attachment={attachment} />}
-          </ComposerPrimitive.Attachments>
-        </div>
+        {!voice ? (
+          <div className="composer-attachments">
+            <ComposerPrimitive.Attachments>
+              {({ attachment }) => <AttachmentChip attachment={attachment} />}
+            </ComposerPrimitive.Attachments>
+          </div>
+        ) : null}
 
         <div className="composer-toolbar">
-          {!terminal ? (
+          {!terminal && !voice ? (
             <>
               <ComposerPrimitive.AddAttachment
                 className="composer-attach"
@@ -976,38 +1021,39 @@ export function Composer({
                 title="Voice input"
                 disabled={disabled}
                 data-hotkey="⌘S"
-                onClick={() => setVoiceOpen(true)}
+                onClick={openVoice}
               >
                 <MicIcon />
               </button>
             </>
           ) : null}
-          {/* Terminal-mode toggle (>_): turns the composer into a CLI. Always
-              available (the shell pane is independent of the selected session). */}
-          <button
-            type="button"
-            className="composer-skills-btn composer-term-toggle"
-            aria-label="Terminal mode"
-            title="Terminal mode — run shell commands"
-            aria-pressed={terminal}
-            data-on={terminal ? 'true' : undefined}
-            onClick={() => {
-              if (terminal) {
-                setTerminal(false);
-                onTerminalModeChange?.(false);
-              } else {
-                openTerminal();
-              }
-            }}
-          >
-            <TerminalIcon />
-          </button>
+          {/* Terminal-mode toggle (>_): hidden while voice mode is active. */}
+          {!voice ? (
+            <button
+              type="button"
+              className="composer-skills-btn composer-term-toggle"
+              aria-label="Terminal mode"
+              title="Terminal mode — run shell commands"
+              aria-pressed={terminal}
+              data-on={terminal ? 'true' : undefined}
+              onClick={() => {
+                if (terminal) {
+                  setTerminal(false);
+                  onTerminalModeChange?.(false);
+                } else {
+                  openTerminal();
+                }
+              }}
+            >
+              <TerminalIcon />
+            </button>
+          ) : null}
           <span className="composer-toolbar-spacer" />
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
               with "Using a sub-agent." Sits in the right cluster so it's
               visually adjacent to the send buttons it influences. Only shown
-              in non-terminal mode (terminal has no prompt optimisation). */}
-          {!terminal ? (
+              in non-terminal, non-voice mode. */}
+          {!terminal && !voice ? (
             <label
               className={`composer-subagent-toggle${subAgentMode ? ' composer-subagent-toggle--on' : ''}`}
               aria-label="Dispatch task in sub-agent"
@@ -1026,7 +1072,7 @@ export function Composer({
             </label>
           ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
-          {!terminal ? (
+          {!terminal && !voice ? (
             <button
               type="button"
               className="composer-enhance composer-bypass"
@@ -1041,7 +1087,7 @@ export function Composer({
               <ArrowUpIcon />
             </button>
           ) : null}
-          {terminal ? (
+          {terminal && !voice ? (
             <button
               type="button"
               className="composer-send"
@@ -1053,7 +1099,7 @@ export function Composer({
             >
               <ArrowUpIcon />
             </button>
-          ) : working ? (
+          ) : voice ? null : working ? (
             // Agent is generating — show a STOP button instead of send.
             <button
               type="button"
@@ -1118,10 +1164,99 @@ export function Composer({
           sessionId={sessionId}
         />
       ) : null}
-      {voiceOpen ? (
-        <VoiceDialog onCommit={commitVoice} onClose={() => setVoiceOpen(false)} />
-      ) : null}
     </ComposerPrimitive.Root>
+  );
+}
+
+// ── VoiceInline ──────────────────────────────────────────────────────────────
+// Renders inside .composer-card when voice mode is active. Mounts the
+// useVoiceRecorder hook (acquires mic on mount, tears down on unmount).
+// The stopRef callback is forwarded out so the window ⌘Enter handler can
+// call stop() without the hook result drifting into its deps array.
+
+interface VoiceInlineProps {
+  onCommit: (text: string) => void;
+  onClose: () => void;
+  stopRef: React.MutableRefObject<(() => void) | null>;
+}
+
+function VoiceInline({ onCommit, onClose, stopRef }: VoiceInlineProps) {
+  const { status, errorMsg, canvasRef, pauseResume, stop, cancel } = useVoiceRecorder({
+    onCommit,
+    onClose,
+  });
+
+  // Keep the stopRef current so the window keydown handler can call stop().
+  useEffect(() => {
+    stopRef.current = stop;
+    return () => { stopRef.current = null; };
+  }, [stop, stopRef]);
+
+  const statusLabel =
+    status === 'error'
+      ? 'Microphone unavailable'
+      : status === 'transcribing'
+        ? 'Transcribing…'
+        : status === 'paused'
+          ? 'Paused'
+          : status === 'starting'
+            ? 'Starting…'
+            : 'Listening…';
+
+  return (
+    <div className="voice-inline-body" aria-live="polite">
+      <div className="voice-status">
+        <span className="voice-dot" data-on={status === 'recording' ? 'true' : undefined} />
+        {statusLabel}
+      </div>
+      <canvas
+        ref={canvasRef}
+        className="voice-wave voice-wave-inline"
+        height={64}
+        data-paused={status !== 'recording' ? 'true' : undefined}
+      />
+      {status === 'error' ? (
+        <div className="voice-error">{errorMsg || 'Could not start recording.'}</div>
+      ) : status !== 'transcribing' ? (
+        <div className="voice-hint">Speak, then Stop &amp; Transcribe (or ⌘/Ctrl+↵) to insert.</div>
+      ) : null}
+      <div className="composer-toolbar voice-toolbar">
+        <button
+          type="button"
+          className="btn-secondary voice-btn-cancel"
+          onClick={cancel}
+          disabled={status === 'transcribing'}
+          aria-label="Cancel voice recording"
+        >
+          Cancel
+        </button>
+        <span className="composer-toolbar-spacer" />
+        {status === 'recording' || status === 'paused' ? (
+          <button
+            type="button"
+            className="btn-secondary voice-btn-pause"
+            onClick={pauseResume}
+            aria-label={status === 'recording' ? 'Pause recording' : 'Resume recording'}
+          >
+            {status === 'recording' ? 'Pause' : 'Resume'}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="composer-send voice-btn-stop"
+          onClick={stop}
+          disabled={status === 'error' || status === 'transcribing' || status === 'starting'}
+          aria-label="Stop recording and transcribe"
+          title="Stop & Transcribe (⌘/Ctrl+↵)"
+        >
+          {status === 'transcribing' ? (
+            <span className="composer-enhance-spinner" aria-hidden="true" />
+          ) : (
+            <MicIcon />
+          )}
+        </button>
+      </div>
+    </div>
   );
 }
 

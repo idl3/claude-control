@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { transcribeAudio } from '../lib/api';
-import { useModalTransition } from '../lib/anim';
 
 function getAudioCtx(): typeof AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -29,29 +28,37 @@ function pickMime(): { mime: string; ext: string } {
   return { mime: '', ext: 'webm' };
 }
 
-type Status = 'starting' | 'recording' | 'paused' | 'transcribing' | 'error';
+export type VoiceStatus = 'starting' | 'recording' | 'paused' | 'transcribing' | 'error';
 
-interface VoiceDialogProps {
-  /** Called with the transcribed text (empty if nothing was said). */
+export interface UseVoiceRecorderOptions {
+  /** Called with the transcribed text when stop+transcribe completes. */
   onCommit: (text: string) => void;
-  /** Called on Cancel / Esc / backdrop — discard, nothing committed. */
+  /** Called when the session should be dismissed (cancel or error exit). */
   onClose: () => void;
 }
 
+export interface UseVoiceRecorderResult {
+  status: VoiceStatus;
+  errorMsg: string | null;
+  /** Ref forwarded to the <canvas> the hook drives with waveform data. */
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  pauseResume: () => void;
+  /** Stop recording and kick off transcription → onCommit. */
+  stop: () => void;
+  /** Discard and call onClose. */
+  cancel: () => void;
+}
+
 /**
- * Recording dialog: live mic waveform (Web Audio AnalyserNode) + MediaRecorder
- * capture, with explicit Cancel / Pause-Resume / Stop controls and full
- * teardown — so recording can ALWAYS be stopped/exited. On Stop the recorded
- * audio is uploaded to the server for local speech-to-text (ffmpeg →
- * whisper.cpp), and the transcript is inserted into the composer. This works in
- * any browser that can record audio, including iOS Safari (the Web Speech API
- * does not).
+ * Encapsulates mic acquisition, MediaRecorder capture, Web Audio waveform
+ * drawing, and Whisper transcription upload. The hook is mount-driven: it
+ * requests the mic on mount and tears everything down on unmount. Callers
+ * should mount/unmount it by toggling voice mode — not by conditional
+ * hook calls.
  */
-export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
-  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
-  const [status, setStatus] = useState<Status>('starting');
+export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions): UseVoiceRecorderResult {
+  const [status, setStatus] = useState<VoiceStatus>('starting');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const recSupported = typeof window !== 'undefined' && 'MediaRecorder' in window;
 
   const streamRef = useRef<MediaStream | null>(null);
   const acRef = useRef<AudioContext | null>(null);
@@ -59,7 +66,7 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const mimeRef = useRef<{ mime: string; ext: string }>({ mime: '', ext: 'webm' });
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
   const drawingRef = useRef(false);
   const committedRef = useRef(false);
@@ -156,21 +163,21 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
         const name = err instanceof Error ? err.name : '';
         let msg: string;
         if (kind === 'no-mediarecorder') {
-          msg = "Audio recording isn’t supported in this browser.";
+          msg = "Audio recording isn't supported in this browser.";
         } else if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
           // Insecure origin (http on a LAN IP): the mic API is disabled outright.
           msg =
-            "Microphone needs a secure (HTTPS) connection. You’re on " +
+            "Microphone needs a secure (HTTPS) connection. You're on " +
             location.origin +
             " — serve over HTTPS (e.g. `tailscale serve --bg 4317`) so the browser allows the mic.";
         } else if (name === 'NotAllowedError' || name === 'SecurityError') {
           // Secure origin but permission blocked/denied. On iOS Safari the grant
-          // also doesn’t persist across reloads in a browser TAB — installing to
+          // also doesn't persist across reloads in a browser TAB — installing to
           // the Home Screen (standalone) makes it stick.
           msg =
-            'Microphone blocked. On iPhone/iPad: reset it in Settings → Apps → Safari → Microphone (or the “aA” → Website Settings menu), then reload. Add this app to your Home Screen so the permission persists across reloads.';
+            'Microphone blocked. On iPhone/iPad: reset it in Settings → Apps → Safari → Microphone (or the "aA" → Website Settings menu), then reload. Add this app to your Home Screen so the permission persists across reloads.';
         } else if (name === 'NotFoundError' || name === 'NotReadableError') {
-          msg = 'No microphone available (or it’s in use by another app).';
+          msg = "No microphone available (or it’s in use by another app).";
         } else {
           msg = 'Microphone permission denied or unavailable.';
         }
@@ -196,25 +203,25 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pause = useCallback(() => {
-    try {
-      recorderRef.current?.pause();
-    } catch {
-      /* ignore */
+  const pauseResume = useCallback(() => {
+    if (status === 'recording') {
+      try {
+        recorderRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
+      stopDraw();
+      setStatus('paused');
+    } else if (status === 'paused') {
+      try {
+        recorderRef.current?.resume();
+      } catch {
+        /* ignore */
+      }
+      setStatus('recording');
+      draw();
     }
-    stopDraw();
-    setStatus('paused');
-  }, [stopDraw]);
-
-  const resume = useCallback(() => {
-    try {
-      recorderRef.current?.resume();
-    } catch {
-      /* ignore */
-    }
-    setStatus('recording');
-    draw();
-  }, [draw]);
+  }, [status, stopDraw, draw]);
 
   const stop = useCallback(() => {
     if (committedRef.current) return;
@@ -262,99 +269,5 @@ export function VoiceDialog({ onCommit, onClose: rawClose }: VoiceDialogProps) {
     onClose();
   }, [teardownAudio, onClose]);
 
-  // Esc cancels (but not mid-transcribe — that's a network call in flight).
-  // ⌘/Ctrl+Enter = Stop & Insert, so you never have to reach for the button:
-  // it ends recording and kicks off transcription in one keystroke.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && status !== 'transcribing') {
-        e.preventDefault();
-        cancel();
-      } else if (
-        e.key === 'Enter' &&
-        (e.metaKey || e.ctrlKey) &&
-        (status === 'recording' || status === 'paused')
-      ) {
-        e.preventDefault();
-        stop();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [cancel, stop, status]);
-
-  const statusLabel =
-    status === 'error'
-      ? 'Microphone unavailable'
-      : status === 'transcribing'
-        ? 'Transcribing…'
-        : status === 'paused'
-          ? 'Paused'
-          : status === 'starting'
-            ? 'Starting…'
-            : 'Listening…';
-
-  return (
-    <div
-      className="modal-backdrop"
-      ref={rootRef}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && status !== 'transcribing') cancel();
-      }}
-    >
-      <div className="modal voice-dialog" role="dialog" aria-modal="true" aria-label="Voice input">
-        <div className="voice-status">
-          <span className="voice-dot" data-on={status === 'recording' ? 'true' : undefined} />
-          {statusLabel}
-        </div>
-
-        <canvas
-          ref={canvasRef}
-          className="voice-wave"
-          height={72}
-          data-paused={status !== 'recording' ? 'true' : undefined}
-        />
-
-        <div className="voice-transcript">
-          {status === 'transcribing' ? (
-            <span className="voice-placeholder">Converting speech to text…</span>
-          ) : (
-            <span className="voice-placeholder">
-              Speak, then “Stop &amp; Insert” (or ⌘/Ctrl+↵) to transcribe.
-            </span>
-          )}
-        </div>
-
-        {status === 'error' ? (
-          <div className="voice-error">{errorMsg || 'Could not start recording.'}</div>
-        ) : !recSupported ? (
-          <div className="voice-note">Audio recording isn’t supported in this browser.</div>
-        ) : null}
-
-        <div className="voice-actions">
-          <button type="button" className="btn-secondary" onClick={cancel} disabled={status === 'transcribing'}>
-            Cancel
-          </button>
-          <span className="voice-actions-spacer" />
-          {status === 'recording' ? (
-            <button type="button" className="btn-secondary" onClick={pause}>
-              Pause
-            </button>
-          ) : status === 'paused' ? (
-            <button type="button" className="btn-secondary" onClick={resume}>
-              Resume
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={stop}
-            disabled={status === 'error' || status === 'transcribing' || status === 'starting'}
-          >
-            {status === 'transcribing' ? 'Transcribing…' : 'Stop & Insert'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return { status, errorMsg, canvasRef, pauseResume, stop, cancel };
 }
