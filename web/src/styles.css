@@ -50,6 +50,17 @@
   }
 }
 
+/* Installed full-screen app (iOS standalone PWA): the status bar OVERLAYS the web
+   content, so restore the top safe-area clearance even on iPad — otherwise the
+   header sits under the clock/battery. In a normal browser tab the chrome already
+   offsets the page, so the inset stays zeroed above. Ordered after the ≥760px
+   block so it wins for an installed iPad app. */
+@media (display-mode: standalone) {
+  :root {
+    --safe-top: env(safe-area-inset-top);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
