@@ -1928,7 +1928,11 @@ details.block-tool[open] > summary .tool-arrow,
   /* Seamless with the transcript: no top border, no bar background — the card
      floats on the same surface as the messages. */
   padding: 0 12px 8px;
-  padding-bottom: calc(8px + var(--safe-bottom));
+  /* Use the REAL bottom inset here (not the iPad-zeroed --safe-bottom): the
+     sidebar + everything else sit flush to the screen bottom, but the composer
+     keeps a home-indicator clearance so the input/send isn't under it. env() is
+     0 in a browser tab, so this only adds room in the installed full-screen app. */
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
   background: transparent;
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
