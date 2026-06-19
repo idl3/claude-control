@@ -71,7 +71,7 @@ interface LightboxProps {
   onClose: () => void;
 }
 
-function Lightbox({ src, alt, onClose }: LightboxProps) {
+export function Lightbox({ src, alt, onClose }: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Focus trap: move focus to the dialog on open.

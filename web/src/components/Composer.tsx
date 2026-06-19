@@ -13,6 +13,7 @@ import {
   type SkillEntry,
 } from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
+import { Lightbox } from './AttachmentPreview';
 import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
@@ -74,29 +75,36 @@ interface ComposerProps {
 // otherwise a placeholder. Object URLs are revoked on unmount.
 function AttachmentThumb({ file }: { file: File }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   useEffect(() => {
     const u = URL.createObjectURL(file);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
   }, [file]);
   if (!url) return <div className="chip-thumb chip-thumb-empty" />;
-  // Tap the thumbnail to open the full image in a new tab (preview).
+  // Tap the thumbnail to open the full image in an in-app lightbox modal (NOT a
+  // new tab — that loses app focus/context). Same Lightbox the transcript uses.
   return (
-    <img
-      className="chip-thumb"
-      src={url}
-      alt=""
-      role="button"
-      tabIndex={0}
-      title="Open preview"
-      onClick={() => window.open(url, '_blank', 'noopener')}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          window.open(url, '_blank', 'noopener');
-        }
-      }}
-    />
+    <>
+      <img
+        className="chip-thumb"
+        src={url}
+        alt=""
+        role="button"
+        tabIndex={0}
+        title="Open preview"
+        onClick={() => setLightboxOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setLightboxOpen(true);
+          }
+        }}
+      />
+      {lightboxOpen ? (
+        <Lightbox src={url} alt={file.name} onClose={() => setLightboxOpen(false)} />
+      ) : null}
+    </>
   );
 }
 
