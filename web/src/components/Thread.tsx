@@ -1,8 +1,10 @@
 import { ThreadPrimitive } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
+import { SubAgentStrip } from './SubAgentStrip';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
+import type { SubAgent } from '../lib/types';
 
 interface ThreadProps {
   hasSelection: boolean;
@@ -18,6 +20,10 @@ interface ThreadProps {
   onSubAgentModeChange: (mode: SubAgentMode) => void;
   /** Notifies App when the Composer's >_ terminal mode changes. */
   onTerminalModeChange: (active: boolean) => void;
+  /** Sub-agents for the active session — drives the above-composer strip. */
+  subagents: SubAgent[];
+  /** Open the full sub-agent panel (strip click). */
+  onOpenAgents: () => void;
 }
 
 const messageComponents = {
@@ -36,6 +42,8 @@ export function Thread({
   subAgentMode,
   onSubAgentModeChange,
   onTerminalModeChange,
+  subagents,
+  onOpenAgents,
 }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
@@ -82,6 +90,7 @@ export function Thread({
       >
         <ArrowDownIcon size={18} />
       </button>
+      <SubAgentStrip subagents={subagents} onOpen={onOpenAgents} />
       <Composer
         disabled={!hasSelection}
         sessionId={sessionId}
