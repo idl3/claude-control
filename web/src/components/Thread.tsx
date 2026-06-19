@@ -60,7 +60,13 @@ export function Thread({
           <div className="thread-empty">select a session</div>
         ) : (
           <ThreadPrimitive.Empty>
-            <div className="thread-empty">no messages yet</div>
+            <div className="thread-welcome">
+              <span className="thread-welcome-icon" aria-hidden="true">👋</span>
+              <p className="thread-welcome-heading">New Claude Code session</p>
+              <p className="thread-welcome-hint">
+                Type a prompt, or <kbd>/</kbd> for skills, <kbd>⌘S</kbd> to dictate
+              </p>
+            </div>
           </ThreadPrimitive.Empty>
         )}
         {hasSelection && hiddenCount > 0 ? (
