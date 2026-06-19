@@ -44,6 +44,7 @@ import {
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Msg, ServerMessage } from './lib/types';
+import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
@@ -77,6 +78,24 @@ function loadDrafts(): Record<string, string> {
 function saveDrafts(drafts: Record<string, string>): void {
   try {
     localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+// Per-session sub-agent mode: true | false | agent-name-string.
+// Defaults to true for any session without a stored value.
+const SUBAGENT_KEY = 'cc_subagent';
+function loadSubAgentModes(): Record<string, SubAgentMode> {
+  try {
+    return JSON.parse(localStorage.getItem(SUBAGENT_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+function saveSubAgentModes(modes: Record<string, SubAgentMode>): void {
+  try {
+    localStorage.setItem(SUBAGENT_KEY, JSON.stringify(modes));
   } catch {
     /* ignore storage failures */
   }
@@ -176,6 +195,12 @@ function AppInner() {
     { key: number; sessionId: string; text: string; label: string; at: number }[]
   >([]);
   const sendSeq = useRef(0);
+  // Tracks whether the Composer's >_ terminal mode is active — updated by the
+  // Composer via onTerminalModeChange. Used to gate the sub-agent prefix.
+  const composerTerminalRef = useRef(false);
+  const onTerminalModeChange = useCallback((active: boolean) => {
+    composerTerminalRef.current = active;
+  }, []);
   // Working indicator after answering an AskUserQuestion — the answer is sent as
   // keystrokes (no transcript echo to match), so it clears on the next activity.
   const [answering, setAnswering] = useState<{
@@ -189,18 +214,26 @@ function AppInner() {
       const paths = (message.attachments ?? [])
         .map((att) => attachmentPath(att))
         .filter((p): p is string => !!p);
-      const text = [typed, ...paths].filter(Boolean).join(' ');
+      // Apply the sub-agent prefix when: mode is on for this session AND the
+      // composer is NOT in >_ terminal mode (that would corrupt shell commands).
+      const sid = cockpit.selectedId;
+      const mode = sid != null ? (subAgentModesRef.current[sid] ?? true) : false;
+      const inTerminal = composerTerminalRef.current;
+      const prefixedTyped =
+        !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
+      const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
       const ok = cockpit.sendReply(text);
       showToast(ok ? 'Sent →' : 'Not connected — reconnecting…', ok ? 'ok' : 'error');
-      if (ok && cockpit.selectedId) {
+      if (ok && sid) {
+        // The displayed label mirrors what was sent so the bubble matches reality.
         const label =
-          typed || (paths.length ? `📎 ${paths.length} attachment(s)` : text);
+          prefixedTyped || (paths.length ? `📎 ${paths.length} attachment(s)` : text);
         setPendingSends((q) => [
           ...q,
           {
             key: ++sendSeq.current,
-            sessionId: cockpit.selectedId as string,
+            sessionId: sid,
             text,
             label,
             at: Date.now(),
@@ -378,6 +411,23 @@ function AppInner() {
     onNew,
     adapters: { attachments: attachmentAdapter },
   });
+
+  // Per-session sub-agent mode. Defaults to true for unseen sessions.
+  const subAgentModesRef = useRef<Record<string, SubAgentMode>>(loadSubAgentModes());
+  const [subAgentModes, setSubAgentModes] = useState<Record<string, SubAgentMode>>(
+    () => loadSubAgentModes(),
+  );
+  const setSubAgentMode = useCallback(
+    (sid: string, mode: SubAgentMode) => {
+      setSubAgentModes((prev) => {
+        const next = { ...prev, [sid]: mode };
+        subAgentModesRef.current = next;
+        saveSubAgentModes(next);
+        return next;
+      });
+    },
+    [],
+  );
 
   // Per-session composer drafts: each session retains its staged prompt text
   // across switches AND reloads (localStorage). Attachments are still cleared on
@@ -796,6 +846,18 @@ function AppInner() {
 
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
+  );
+
+  // Active session's sub-agent mode (default true for unseen sessions).
+  const activeSubAgentMode: SubAgentMode =
+    cockpit.selectedId != null
+      ? (subAgentModes[cockpit.selectedId] ?? true)
+      : true;
+  const onActiveSubAgentModeChange = useCallback(
+    (mode: SubAgentMode) => {
+      if (cockpit.selectedId) setSubAgentMode(cockpit.selectedId, mode);
+    },
+    [cockpit.selectedId, setSubAgentMode],
   );
 
   // ⌘K / Ctrl-K toggles the command palette (swap sessions/terminals, jump to
@@ -1276,7 +1338,13 @@ function AppInner() {
                     ))}
                   </div>
                 ) : null}
-                <Composer disabled={false} sessionId={cockpit.selectedId} />
+                <Composer
+                  disabled={false}
+                  sessionId={cockpit.selectedId}
+                  subAgentMode={activeSubAgentMode}
+                  onSubAgentModeChange={onActiveSubAgentModeChange}
+                  onTerminalModeChange={onTerminalModeChange}
+                />
               </div>
             ) : (
               <div className="detail-split">
@@ -1286,6 +1354,9 @@ function AppInner() {
                     sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}
+                    subAgentMode={activeSubAgentMode}
+                    onSubAgentModeChange={onActiveSubAgentModeChange}
+                    onTerminalModeChange={onTerminalModeChange}
                   />
                 </LiveThinkingContext.Provider>
                 <ArtifactPanel />

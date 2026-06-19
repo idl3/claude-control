@@ -4182,6 +4182,57 @@ select.config-input {
   background: var(--bg-hover);
 }
 
+/* ── Sub-agent toggle ─────────────────────────────────────────── */
+.composer-subagent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+  user-select: none;
+}
+.composer-subagent-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+/* Checked state: accent border + text to signal it's active. */
+.composer-subagent-toggle:has(.composer-subagent-checkbox:checked) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.composer-subagent-toggle:has(.composer-subagent-checkbox:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Visually hide the raw checkbox — the label wrapper provides the affordance.
+   The <input> stays in the DOM for keyboard access (Space toggles, Tab focuses). */
+.composer-subagent-checkbox {
+  appearance: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  position: absolute;
+}
+/* Focus ring on the label when the hidden checkbox is keyboard-focused. */
+.composer-subagent-toggle:has(.composer-subagent-checkbox:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ── Voice recording dialog ────────────────────────────────────── */
 .voice-dialog {
   display: flex;

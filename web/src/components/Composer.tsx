@@ -20,6 +20,7 @@ import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
+import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 
 // Module-level per-session cache so the skill list (live, session-discovered
@@ -62,6 +63,13 @@ interface ComposerProps {
   /** Active session id — used to scope the enhance/review state so an
    *  improvement from one session can't leak into another on switch. */
   sessionId?: string | null;
+  /** Per-session sub-agent mode. Defaults to true when not provided. */
+  subAgentMode?: SubAgentMode;
+  /** Called when the sub-agent checkbox changes. */
+  onSubAgentModeChange?: (mode: SubAgentMode) => void;
+  /** Called when the Composer's >_ terminal mode changes, so callers can gate
+   *  the sub-agent prefix (which must not corrupt shell commands). */
+  onTerminalModeChange?: (active: boolean) => void;
 }
 
 // Image preview for an image attachment that still carries its File (pending),
@@ -146,7 +154,13 @@ type EnhanceState = {
 };
 const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
 
-export function Composer({ disabled, sessionId }: ComposerProps) {
+export function Composer({
+  disabled,
+  sessionId,
+  subAgentMode = true,
+  onSubAgentModeChange,
+  onTerminalModeChange,
+}: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
   const { open: openArtifact, close: closeArtifact } = useArtifactPanel();
@@ -163,12 +177,15 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
   const openTerminal = useCallback(() => {
     setTermWarm(true);
     setTerminal(true);
-  }, []);
+    onTerminalModeChange?.(true);
+  }, [onTerminalModeChange]);
 
   // Real unload on session change: drop the warm terminal and hide it.
   useEffect(() => {
     setTerminal(false);
     setTermWarm(false);
+    onTerminalModeChange?.(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   // Cosmetic show/hide of the kept-warm terminal (fade + zoom). The element stays
@@ -568,6 +585,7 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
                 if (e.key === 'Escape') {
                   e.preventDefault();
                   setTerminal(false);
+                  onTerminalModeChange?.(false);
                   refocusComposer();
                   return;
                 }
@@ -744,6 +762,25 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
               >
                 <MicIcon />
               </button>
+              {/* Sub-agent toggle: when checked, outgoing prompts are prefixed
+                  with "Using a sub-agent." Data model uses SubAgentMode (boolean |
+                  string) so a future agent picker can set a name here. */}
+              <label
+                className="composer-subagent-toggle"
+                title={subAgentMode ? 'Sub-agent on — click to disable' : 'Sub-agent off — click to enable'}
+              >
+                <input
+                  type="checkbox"
+                  className="composer-subagent-checkbox"
+                  checked={!!subAgentMode}
+                  disabled={disabled}
+                  onChange={(e) => onSubAgentModeChange?.(e.target.checked)}
+                  aria-label="Use sub-agent"
+                />
+                <span className="composer-subagent-label" aria-hidden="true">
+                  sub-agent
+                </span>
+              </label>
             </>
           ) : null}
           {/* Terminal-mode toggle (>_): turns the composer into a CLI. Always
@@ -755,7 +792,14 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             title="Terminal mode — run shell commands"
             aria-pressed={terminal}
             data-on={terminal ? 'true' : undefined}
-            onClick={() => (terminal ? setTerminal(false) : openTerminal())}
+            onClick={() => {
+              if (terminal) {
+                setTerminal(false);
+                onTerminalModeChange?.(false);
+              } else {
+                openTerminal();
+              }
+            }}
           >
             <TerminalIcon />
           </button>
