@@ -279,9 +279,15 @@ export function Composer({
     if (cached) {
       setSkills(cached);
     } else {
-      loadSkills(sessionId).then((s) => {
-        if (alive) setSkills(s);
-      });
+      loadSkills(sessionId)
+        .then((s) => {
+          if (alive) setSkills(s);
+        })
+        // Don't let a transient skills-API error silently leave the inline
+        // autocomplete + skill browser empty forever.
+        .catch(() => {
+          if (alive) setSkills([]);
+        });
     }
     return () => { alive = false; };
   }, [sessionId]);

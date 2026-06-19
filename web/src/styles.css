@@ -4277,11 +4277,11 @@ select.config-input {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   height: 34px;
-  padding: 0 10px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
+  padding: 0 4px;
+  /* Borderless: just the checkbox + its tag, no pill/box. */
+  border: none;
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
@@ -4290,23 +4290,14 @@ select.config-input {
   letter-spacing: 0.01em;
   white-space: nowrap;
   user-select: none;
-  transition:
-    background var(--ease) 0.15s,
-    color var(--ease) 0.15s,
-    border-color var(--ease) 0.15s;
+  transition: color var(--ease) 0.15s;
 }
 .composer-subagent-toggle:hover:has(input:not(:disabled)) {
-  background: var(--bg-hover);
   color: var(--text-dim);
 }
-/* ON state: accent border + tinted background + accent text */
+/* ON state: accent text only (the checked box already carries the accent fill). */
 .composer-subagent-toggle--on {
-  border-color: var(--accent);
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-.composer-subagent-toggle--on:hover:has(input:not(:disabled)) {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .composer-subagent-toggle:has(input:disabled) {
   opacity: 0.35;
@@ -4338,40 +4329,46 @@ select.config-input {
   background: var(--accent);
   border-color: var(--accent);
 }
-/* Checkmark via pseudo-element when checked */
+/* Checkmark via pseudo-element when checked — centered in the box. The tick is
+   nudged up 1px (top 45%) so its visual mass reads as centred after rotation. */
 .composer-subagent-checkbox:checked::after {
   content: '';
   position: absolute;
-  top: 1px;
-  left: 3px;
-  width: 5px;
-  height: 8px;
-  border: 1.5px solid #fff;
+  left: 50%;
+  top: 45%;
+  width: 4px;
+  height: 7px;
+  border: 1.6px solid #fff;
   border-top: none;
   border-left: none;
-  transform: rotate(45deg);
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 .composer-subagent-checkbox:disabled {
   cursor: not-allowed;
 }
-/* Label text — truncates on narrow viewports */
+/* Label text — truncates only when squeezed inline (desktop). */
 .composer-subagent-label {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  max-width: 18ch;
+  max-width: 22ch;
 }
-/* On very narrow screens let the toolbar row wrap so the send buttons
-   always sit on the same line and remain fully tappable. */
-@media (max-width: 480px) {
+/* Mobile: drop the sub-agent checkbox onto its OWN full-width row BELOW the
+   action buttons (order pushes it last; basis 100% forces the wrap). The send
+   buttons stay together on the row above. */
+@media (max-width: 760px) {
   .composer-toolbar {
     flex-wrap: wrap;
   }
   .composer-subagent-toggle {
-    max-width: 140px;
+    order: 10;
+    flex-basis: 100%;
+    height: auto;
+    padding: 2px 2px 0;
+    margin-top: 2px;
   }
   .composer-subagent-label {
-    max-width: 10ch;
+    max-width: none;
   }
 }
 
