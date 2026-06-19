@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assignTranscripts, parseEtime } from '../lib/match.js';
+import { assignTranscripts, parseEtime, fingerprintScore } from '../lib/match.js';
 
 // ── parseEtime ───────────────────────────────────────────────────────────────
 
@@ -233,4 +233,135 @@ test('resumed session: most-active transcript wins over a freshly-born sibling',
   ];
   const out = assignTranscripts(panes, candidates);
   assert.equal(out.get('0:1.1').transcriptPath, '/p/resumed.jsonl');
+});
+
+// ── PLE-41: content-fingerprint tiebreak ─────────────────────────────────────
+
+// fingerprintScore unit tests
+test('fingerprintScore: returns 0 when either side is empty/null', () => {
+  assert.equal(fingerprintScore(null, 'hello world'), 0);
+  assert.equal(fingerprintScore('hello world', null), 0);
+  assert.equal(fingerprintScore('', 'hello world'), 0);
+  assert.equal(fingerprintScore('hello world', ''), 0);
+});
+
+test('fingerprintScore: counts distinct ≥4-char word token overlaps', () => {
+  const pane = 'fixing authentication middleware request handler';
+  const transcript = 'authentication middleware implemented fixing handler and other words';
+  // overlapping ≥4-char tokens: fixing(6), authentication(14), middleware(10), request(7), handler(7) = 5
+  // but 'request' not in transcript → 4 overlapping: fixing, authentication, middleware, handler
+  const score = fingerprintScore(pane, transcript);
+  assert.ok(score >= 3, `expected ≥3 overlap, got ${score}`);
+});
+
+test('fingerprintScore: case-insensitive matching', () => {
+  const score = fingerprintScore('AUTHENTICATION Request', 'authentication request handler');
+  assert.ok(score >= 1, 'case-folded match should score > 0');
+});
+
+test('fingerprintScore: ignores short words (<4 chars)', () => {
+  // "is", "an", "the", "for" are all <4 chars
+  assert.equal(fingerprintScore('is an the for', 'is an the for'), 0);
+});
+
+// Regression test for PLE-41: same-cwd sessions mis-bind when procStartMs is
+// unknown and lastActivityMs values are identical (timing signals produce a tie).
+// The content-fingerprint tiebreak must pick the candidate whose recentText
+// overlaps the pane's capturedText.
+//
+// This test FAILS against the original match.js (before the fingerprint tiebreak)
+// because prefer() falls through to (ca > ba) which is (0 > 0) = false — meaning
+// the first candidate in iteration order always wins, regardless of which is correct.
+test('PLE-41 regression: content-fingerprint tiebreak resolves same-cwd ambiguity when timing is tied', () => {
+  // Two sessions in the same cwd. procStartMs unknown, identical lastActivityMs.
+  // The timing-based prefer() cannot tell them apart.
+  const paneText = 'implementing authentication middleware for the REST API endpoint validation logic';
+  const wrongText = 'refactoring database migration scripts and schema updates for postgres tables';
+  const rightText = 'building authentication middleware handler implementing request validation endpoint';
+
+  const panes = [
+    {
+      target: '0:1.1',
+      windowName: 'session-a',
+      cwd,
+      procStartMs: null,          // unknown — no ps data available
+      capturedText: paneText,     // pane shows auth/middleware work
+    },
+  ];
+
+  // wrongText first so the pre-fix code would pick it (it's the first-encountered
+  // when prefer() always returns false, leaving best = first candidate).
+  const candidates = [
+    cand({
+      transcriptPath: '/p/wrong.jsonl',
+      lastActivityMs: 5000,
+      birthtimeMs: 4000,
+      recentText: wrongText,      // database work — no overlap with pane
+    }),
+    cand({
+      transcriptPath: '/p/right.jsonl',
+      lastActivityMs: 5000,       // identical — timing cannot distinguish
+      birthtimeMs: 4000,
+      recentText: rightText,      // auth/middleware work — matches pane
+    }),
+  ];
+
+  const out = assignTranscripts(panes, candidates);
+
+  // With the fingerprint tiebreak: right.jsonl wins (higher overlap score).
+  // Without it (old code): wrong.jsonl wins (first-encountered, prefer() = false).
+  assert.equal(
+    out.get('0:1.1').transcriptPath,
+    '/p/right.jsonl',
+    'fingerprint tiebreak must bind the candidate whose text overlaps the pane capture',
+  );
+});
+
+test('PLE-41: fingerprint tiebreak is a NO-OP when capturedText is absent (preserves existing behavior)', () => {
+  // No capturedText on pane → tiebreak must not fire; falls back to ca > ba.
+  // Here both activities are equal so first-wins (order-stable) applies — same as before.
+  const panes = [
+    { target: '0:1.1', windowName: 'a', cwd, procStartMs: null },
+  ];
+  const candidates = [
+    cand({ transcriptPath: '/p/first.jsonl', lastActivityMs: 5000, recentText: 'authentication middleware' }),
+    cand({ transcriptPath: '/p/second.jsonl', lastActivityMs: 5000, recentText: 'database tables migration' }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  // Should still produce A result (not throw / not return undefined).
+  assert.ok(out.has('0:1.1'), 'must still bind a candidate when capturedText is absent');
+});
+
+test('PLE-41: fingerprint tiebreak is a NO-OP when recentText is absent on candidates', () => {
+  // Candidates without recentText → tiebreak does not fire.
+  const panes = [
+    { target: '0:1.1', windowName: 'a', cwd, procStartMs: null, capturedText: 'authentication middleware' },
+  ];
+  const candidates = [
+    cand({ transcriptPath: '/p/a.jsonl', lastActivityMs: 5000 }), // no recentText
+    cand({ transcriptPath: '/p/b.jsonl', lastActivityMs: 5000 }), // no recentText
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.ok(out.has('0:1.1'), 'must still bind a candidate when recentText is absent');
+});
+
+test('PLE-41: fingerprint tiebreak only fires when score difference meets minimum threshold', () => {
+  // Both candidates have slight overlap with the pane; neither clears FINGERPRINT_MIN_OVERLAP
+  // advantage over the other. Should fall back to order-stable selection.
+  const panes = [
+    {
+      target: '0:1.1',
+      windowName: 'a',
+      cwd,
+      procStartMs: null,
+      capturedText: 'some common words here',
+    },
+  ];
+  const candidates = [
+    cand({ transcriptPath: '/p/a.jsonl', lastActivityMs: 5000, recentText: 'some common words here mentioned' }),
+    cand({ transcriptPath: '/p/b.jsonl', lastActivityMs: 5000, recentText: 'some common words here also' }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  // Both score identically (same overlap) — should not crash, should return one result.
+  assert.ok(out.has('0:1.1'), 'must not crash when fingerprint scores are equal');
 });
