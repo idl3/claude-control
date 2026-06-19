@@ -570,64 +570,30 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Own the transcript's tail/detach behaviour (autoScroll is off — it fought
-  // these on re-renders and felt "stuck" on touch). On entering a session: pin
-  // to the bottom. While pinned, a MutationObserver tails new/streaming content.
-  // Scrolling up detaches (stop tailing) and reveals the ↓ button; scrolling back
-  // to the bottom (or tapping ↓) re-attaches. Native touch scrolling is never
-  // intercepted — we only set scrollTop while genuinely pinned.
+  // Keep the ↓ button anchored ABOVE the composer at any height (it grows with
+  // typed lines / attachments) via a --composer-h var. Tailing/detach itself is
+  // handled by assistant-ui's autoScroll — we do NOT touch scrollTop here (a
+  // custom scroll controller deadlocked streaming sessions and froze scroll).
   useEffect(() => {
-    if (!cockpit.selectedId) return;
-    let vp: HTMLElement | null = null;
-    let btn: HTMLElement | null = null;
-    let mo: MutationObserver | null = null;
+    if (!cockpit.selectedId || !('ResizeObserver' in window)) return;
     let ro: ResizeObserver | null = null;
     let raf = 0;
     let tries = 0;
-    let pinned = true;
-
-    const atBottom = () =>
-      !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
-    const tail = () => {
-      if (vp && pinned) vp.scrollTop = vp.scrollHeight;
-    };
-    const onScroll = () => {
-      pinned = atBottom();
-      if (btn) btn.dataset.show = pinned ? '' : 'true';
-    };
     const attach = () => {
-      vp = document.querySelector('.thread-viewport');
-      btn = document.querySelector('.scroll-to-bottom');
-      if (!vp) {
+      const root = document.querySelector<HTMLElement>('.thread-root');
+      const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
+      if (!root || !composer) {
         if (tries++ < 40) raf = requestAnimationFrame(attach);
         return;
       }
-      pinned = true;
-      vp.scrollTop = vp.scrollHeight;
-      if (btn) btn.dataset.show = '';
-      vp.addEventListener('scroll', onScroll, { passive: true });
-      mo = new MutationObserver(tail);
-      mo.observe(vp, { childList: true, subtree: true, characterData: true });
-
-      // Keep the ↓ button anchored ABOVE the composer at any composer height
-      // (it grows with typed lines / attachments) via a --composer-h var.
-      const root = vp.closest<HTMLElement>('.thread-root');
-      const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
-      const setComposerH = () => {
-        if (root && composer) root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
-      };
-      setComposerH();
-      if (composer && 'ResizeObserver' in window) {
-        ro = new ResizeObserver(setComposerH);
-        ro.observe(composer);
-      }
+      const setH = () => root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+      setH();
+      ro = new ResizeObserver(setH);
+      ro.observe(composer);
     };
     raf = requestAnimationFrame(attach);
-
     return () => {
       cancelAnimationFrame(raf);
-      if (vp) vp.removeEventListener('scroll', onScroll);
-      if (mo) mo.disconnect();
       if (ro) ro.disconnect();
     };
   }, [cockpit.selectedId]);

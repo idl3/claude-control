@@ -29,10 +29,10 @@ export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: 
           focused (CSS :focus-within), so text scrolling up behind the nav bar
           dissolves instead of hard-cutting. Fades out on blur. */}
       <div className="thread-fade" aria-hidden="true" />
-      {/* autoScroll is OFF: it fought our scroll on the 2s session re-renders and
-          made the transcript feel stuck on touch. App owns tailing instead (a
-          MutationObserver tails while pinned; scrolling up detaches). */}
-      <ThreadPrimitive.Viewport className="thread-viewport">
+      {/* autoScroll handles tail/detach/re-attach natively — the known-good
+          behaviour. (A custom MutationObserver controller was tried and removed:
+          it deadlocked on streaming sessions, freezing scroll.) */}
+      <ThreadPrimitive.Viewport className="thread-viewport" autoScroll>
         {!hasSelection ? (
           <div className="thread-empty">select a session</div>
         ) : (
@@ -51,21 +51,18 @@ export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: 
         ) : null}
         <ThreadPrimitive.Messages components={messageComponents} />
       </ThreadPrimitive.Viewport>
-      {/* Tail-to-bottom button (plain — App toggles `data-show` when detached and
-          scrolls on click). Outside the Viewport so it can't affect iOS momentum
-          scrolling. */}
-      <button
-        type="button"
-        className="scroll-to-bottom"
-        aria-label="Scroll to latest"
-        title="Scroll to latest"
-        onClick={() => {
-          const vp = document.querySelector<HTMLElement>('.thread-viewport');
-          if (vp) vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
-        }}
-      >
-        <ArrowDownIcon size={18} />
-      </button>
+      {/* Tail-to-bottom: the primitive shows it only when scrolled up + scrolls on
+          click. OUTSIDE the Viewport so it never affects iOS momentum scrolling. */}
+      <ThreadPrimitive.ScrollToBottom asChild>
+        <button
+          type="button"
+          className="scroll-to-bottom"
+          aria-label="Scroll to latest"
+          title="Scroll to latest"
+        >
+          <ArrowDownIcon size={18} />
+        </button>
+      </ThreadPrimitive.ScrollToBottom>
       <Composer disabled={!hasSelection} sessionId={sessionId} />
     </ThreadPrimitive.Root>
   );
