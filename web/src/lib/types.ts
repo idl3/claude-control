@@ -57,6 +57,8 @@ export interface Msg {
 export interface PendingOption {
   label: string;
   description?: string;
+  /** Multi-line text (ASCII diagram, code, arch mockup) shown as monospace in the preview pane. */
+  preview?: string;
 }
 
 export interface PendingQuestion {
