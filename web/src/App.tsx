@@ -11,7 +11,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession, createSession } from './lib/api';
-import { SessionRail, type SessionFilter } from './components/SessionRail';
+import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { LiveThinkingContext } from './components/ThinkingContext';
@@ -347,8 +347,12 @@ function AppInner() {
       }
       base.splice(idx, 0, bubble);
     }
+    // The "Working…" loader mirrors the session activity icon: same claudeWorking
+    // signal (thinking / recent activity), so the two never disagree. A freshly
+    // answered AskUserQuestion bridges the brief gap before the pane shows work.
+    const sess = cockpit.sessions.find((s) => s.id === cockpit.selectedId);
     const working =
-      selectedPending.length > 0 ||
+      (!!sess && claudeWorking(sess)) ||
       (answering !== null && answering.sessionId === cockpit.selectedId);
     if (working) {
       base.push({
@@ -359,7 +363,7 @@ function AppInner() {
       } as ThreadMessageLike);
     }
     return base;
-  }, [fullConverted, hiddenCount, cockpit.selectedId, selectedPending, answering]);
+  }, [fullConverted, hiddenCount, cockpit.selectedId, cockpit.sessions, selectedPending, answering]);
 
   const loadEarlier = useCallback(() => {
     setVisibleCount((c) => c + LOAD_EARLIER_STEP);

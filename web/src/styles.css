@@ -2530,6 +2530,15 @@ details.block-tool[open] > summary .tool-arrow,
   animation: cockpit-spin 0.7s linear infinite;
   flex: none;
 }
+/* The optimistic "Working…" loader uses the SAME jumping Claude robot as the
+   session activity icon (pane-icon-bob), so the two read as one signal. */
+.working-claude {
+  flex: none;
+  display: inline-flex;
+}
+.working-claude svg {
+  animation: pane-icon-bob 0.9s var(--ease) infinite;
+}
 @keyframes cockpit-spin {
   to {
     transform: rotate(360deg);
@@ -2538,6 +2547,9 @@ details.block-tool[open] > summary .tool-arrow,
 @media (prefers-reduced-motion: reduce) {
   .working-spinner {
     animation-duration: 1.6s;
+  }
+  .working-claude svg {
+    animation: none;
   }
   /* No flashing/sweeping for reduced-motion users — settle to a solid accent
      tint that still reads as "active", and a plain dim shimmer label. */

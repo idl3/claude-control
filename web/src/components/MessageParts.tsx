@@ -8,6 +8,7 @@ import { MarkdownText } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
 import { isSkillInvocation, SkillInvocation } from './SkillInvocation';
 import { useArtifactPanel } from './ArtifactContext';
+import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -17,7 +18,9 @@ export const TextPart: TextMessagePartComponent = (props) => {
   if (typeof props.text === 'string' && WORKING_RE.test(props.text)) {
     return (
       <span className="working-indicator" role="status" aria-live="polite">
-        <span className="working-spinner" aria-hidden="true" />
+        <span className="working-claude" aria-hidden="true">
+          <ClaudeRobotIcon size={14} />
+        </span>
         <span className="shimmer-text">Working…</span>
       </span>
     );
