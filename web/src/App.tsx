@@ -1296,8 +1296,7 @@ function AppInner() {
         {processOpen ? (
           <ProcessPanel
             power={cockpit.resources.snapshot?.power ?? null}
-            cpu={cockpit.resources.snapshot?.self?.cpuPct ?? null}
-            mem={cockpit.resources.snapshot?.system?.memUsedPct ?? null}
+            history={cockpit.resourceHistory}
             onClose={() => setProcessOpen(false)}
             onToast={showToast}
           />

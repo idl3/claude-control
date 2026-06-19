@@ -1,40 +1,66 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useModalTransition } from '../lib/anim';
 import { listProcesses, killProcess } from '../lib/api';
+import type { ResourcePoint } from '../hooks/useCockpit';
 import type { ProcessInfo, PowerStatus } from '../lib/types';
 import { BatteryIcon, XIcon } from './icons';
 
 interface ProcessPanelProps {
   power: PowerStatus | null;
-  /** Live system CPU% (self, per-core normalized) + memory used %. */
-  cpu: number | null;
-  mem: number | null;
+  /** Rolling ~10min CPU%/Mem% samples (from useCockpit). */
+  history: ResourcePoint[];
   onClose: () => void;
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
 }
 
 const POLL_MS = 3000;
-const HIST_MAX = 48; // ~2.5 min at the 3s resource cadence
+const WINDOW_MS = 10 * 60_000; // x-axis spans the last 10 minutes
 
 /**
- * Cheap inline sparkline: two SVG polylines (area fill + line), auto-scaled to
- * max(floor, observed peak). No deps, no canvas — fine to re-render at 3s.
+ * Time-windowed line chart (SVG): plots `field` over the last 10 minutes with the
+ * x-axis as real time (gaps where the modal was closed render as gaps). Cheap —
+ * two polylines + a few ticks, no deps/canvas. `now` is passed in so both charts
+ * + the axis share one clock.
  */
-function Sparkline({ values, floor, color }: { values: number[]; floor: number; color: string }) {
-  const W = 150;
-  const H = 32;
-  if (values.length < 2) {
-    return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" />;
-  }
-  const peak = Math.max(floor, ...values, 1);
-  const step = W / (values.length - 1);
-  const pts = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(H - (v / peak) * H).toFixed(1)}`)
-    .join(' ');
+function TimeChart({
+  points,
+  field,
+  now,
+  floor,
+  color,
+}: {
+  points: ResourcePoint[];
+  field: 'cpu' | 'mem';
+  now: number;
+  floor: number;
+  color: string;
+}) {
+  const W = 300;
+  const H = 46;
+  const start = now - WINDOW_MS;
+  const inWin = points.filter((p) => p.t >= start);
+  const x = (t: number) => ((t - start) / WINDOW_MS) * W;
+  const peak = Math.max(floor, ...inWin.map((p) => p[field]), 1);
+  const y = (v: number) => H - (v / peak) * H;
+  const line = inWin.map((p) => `${x(p.t).toFixed(1)},${y(p[field]).toFixed(1)}`).join(' ');
+  // Vertical gridlines every 2 minutes.
+  const ticks = [2, 4, 6, 8].map((m) => x(now - m * 60_000));
   return (
-    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={`0,${H} ${pts} ${W},${H}`} fill={color} fillOpacity="0.12" stroke="none" />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    <svg
+      className="proc-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {ticks.map((tx, i) => (
+        <line key={i} x1={tx} y1={0} x2={tx} y2={H} className="proc-chart-grid" />
+      ))}
+      {inWin.length >= 2 ? (
+        <>
+          <polyline points={`${x(inWin[0].t).toFixed(1)},${H} ${line} ${x(inWin[inWin.length - 1].t).toFixed(1)},${H}`} fill={color} fillOpacity="0.12" stroke="none" />
+          <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        </>
+      ) : null}
     </svg>
   );
 }
@@ -44,17 +70,15 @@ function Sparkline({ values, floor, color }: { values: number[]; floor: number; 
  * kill per row, plus a power/battery readout. Read-mostly; the only mutation is
  * SIGTERM (SIGKILL via shift-click), each behind an inline confirm.
  */
-export function ProcessPanel({ power, cpu, mem, onClose: rawClose, onToast }: ProcessPanelProps) {
+export function ProcessPanel({ power, history, onClose: rawClose, onToast }: ProcessPanelProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [procs, setProcs] = useState<ProcessInfo[] | null>(null);
   const [confirmPid, setConfirmPid] = useState<number | null>(null);
   const [killing, setKilling] = useState<number | null>(null);
-  // Rolling CPU/mem history for the sparklines, sampled from each live snapshot.
-  const [hist, setHist] = useState<{ cpu: number; mem: number }[]>([]);
-  useEffect(() => {
-    if (cpu == null && mem == null) return;
-    setHist((h) => [...h, { cpu: cpu ?? 0, mem: mem ?? 0 }].slice(-HIST_MAX));
-  }, [cpu, mem]);
+  const now = Date.now();
+  const last = history.length ? history[history.length - 1] : null;
+  const cpu = last?.cpu ?? null;
+  const mem = last?.mem ?? null;
 
   const refresh = useCallback(() => {
     listProcesses()
@@ -126,14 +150,20 @@ export function ProcessPanel({ power, cpu, mem, onClose: rawClose, onToast }: Pr
                 <span className="proc-graph-label">CPU</span>
                 <span className="proc-graph-val">{cpu != null ? `${cpu.toFixed(0)}%` : '—'}</span>
               </div>
-              <Sparkline values={hist.map((h) => h.cpu)} floor={100} color="var(--accent)" />
+              <TimeChart points={history} field="cpu" now={now} floor={100} color="var(--accent)" />
             </div>
             <div className="proc-graph">
               <div className="proc-graph-head">
                 <span className="proc-graph-label">MEM</span>
                 <span className="proc-graph-val">{mem != null ? `${mem.toFixed(0)}%` : '—'}</span>
               </div>
-              <Sparkline values={hist.map((h) => h.mem)} floor={100} color="var(--accent-2)" />
+              <TimeChart points={history} field="mem" now={now} floor={100} color="var(--accent-2)" />
+            </div>
+            {/* Shared x-axis: real time over the last 10 minutes. */}
+            <div className="proc-graph-axis">
+              <span>10m ago</span>
+              <span>5m</span>
+              <span>now</span>
             </div>
           </div>
           <div className="proc-row proc-head">
