@@ -291,11 +291,18 @@ export function Composer({
   }, [sessionId]);
 
   // Track composer text → drives both the empty flag and the slash detection.
+  // ALSO refresh the caret here: this subscribe fires on every committed text
+  // change — crucially including iOS soft-keyboard input, which often does NOT
+  // emit keyup/keydown (so the onKeyUp caret handler never runs on iPad). It runs
+  // AFTER the controlled value commits, so it can't reset typing. Without this,
+  // the slash-autocomplete never opens on a touch keyboard.
   useEffect(() => {
     const sync = () => {
       const t = composer.getState().text ?? '';
       setTextMirror(t);
       setEmpty(!t.trim());
+      const ta = document.querySelector<HTMLTextAreaElement>('.composer-input');
+      if (ta) setCaret(ta.selectionStart ?? t.length);
     };
     sync();
     return composer.subscribe(sync);
