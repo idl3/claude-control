@@ -18,6 +18,10 @@ export interface Session {
   transcriptPath?: string;
   pinned?: boolean;
   lastActivity?: number;
+  /** Millisecond timestamp of the last transcript record — the numeric counterpart
+   *  to the ISO-string lastActivity. Used by claudeWorking for the 15 s recency
+   *  check; lastActivity (string) is kept for backwards compat. */
+  lastActivityMs?: number;
   pending?: boolean;
   pendingQuestion?: string | null;
   cmd?: string;
