@@ -26,6 +26,13 @@
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* iOS safe-area insets — phone notch/Dynamic Island (top) + home indicator
+     (bottom). Zeroed at the iPad+ breakpoint below: iPad has no Dynamic Island
+     and we don't want the extra top/bottom gap there. Desktop env() is already
+     0, so routing through these vars only changes iPad. */
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+
   color-scheme: dark;
 }
 
@@ -37,6 +44,9 @@
     --txt-transcript: 14.5px;
     --txt-meta: 12px;
     --txt-composer: 16px;
+    /* iPad / desktop: no Dynamic Island or home-indicator gap. */
+    --safe-top: 0px;
+    --safe-bottom: 0px;
   }
 }
 
@@ -79,7 +89,7 @@ body {
   gap: 12px;
   height: var(--hud-h);
   padding: 0 12px;
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--safe-top);
   background: var(--bg-1);
   border-bottom: 1px solid var(--line);
   font-size: var(--txt-meta);
@@ -852,7 +862,7 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: calc(env(safe-area-inset-top) + 52px);
+  height: calc(var(--safe-top) + 52px);
   background: linear-gradient(to bottom, var(--bg) 55%, transparent);
   pointer-events: none;
   opacity: 0;
@@ -1253,7 +1263,7 @@ body {
   /* Clear the iOS status bar (clock/5G/battery): the panel is fixed at top:0,
      so the head needs the top safe-area inset or its title + close button sit
      under the notch cluster. On desktop the inset is 0 → unchanged 10px. */
-  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  padding: calc(10px + var(--safe-top)) 12px 10px;
   border-bottom: 1px solid var(--line);
 }
 .sa-panel-title {
@@ -1897,15 +1907,18 @@ details.block-tool[open] > summary .tool-arrow,
   /* Seamless with the transcript: no top border, no bar background — the card
      floats on the same surface as the messages. */
   padding: 0 12px 8px;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  padding-bottom: calc(8px + var(--safe-bottom));
   background: transparent;
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
 }
-/* Focused (keyboard up): the on-screen keyboard already covers the home
-   indicator, so drop the safe-area inset + trim the gap below the card. */
-.composer:focus-within {
-  padding-bottom: 6px;
+/* Focused (keyboard up on phones): the on-screen keyboard already covers the
+   home indicator, so drop the safe-area inset + trim the gap below the card.
+   iPad has no soft keyboard pushing the layout up, so skip this there. */
+@media (max-width: 760px) {
+  .composer:focus-within {
+    padding-bottom: 6px;
+  }
 }
 
 /* Inline skill autocomplete — floats just above the composer (keyboard is
@@ -1964,7 +1977,7 @@ details.block-tool[open] > summary .tool-arrow,
    Y tracks the pull distance. */
 .ptr-indicator {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + var(--hud-h) - 30px);
+  top: calc(var(--safe-top) + var(--hud-h) - 30px);
   left: 50%;
   z-index: 45;
   width: 30px;
@@ -2416,7 +2429,7 @@ details.block-tool[open] > summary .tool-arrow,
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  padding-bottom: calc(12px + var(--safe-bottom));
   border-top: 1px solid var(--line);
 }
 .modal-foot-spacer {
@@ -2485,7 +2498,7 @@ details.block-tool[open] > summary .tool-arrow,
   left: 50%;
   /* Desktop: a normal small offset just below the HUD. Mobile overrides this to
      clear the stacked top bars (see the max-width rule below). */
-  top: calc(env(safe-area-inset-top) + var(--hud-h) + 14px);
+  top: calc(var(--safe-top) + var(--hud-h) + 14px);
   transform: translate(-50%, -12px);
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -2505,7 +2518,7 @@ details.block-tool[open] > summary .tool-arrow,
 /* Mobile stacks the HUD + detail header, so push the toast clear of both. */
 @media (max-width: 760px) {
   .toast {
-    top: calc(env(safe-area-inset-top) + var(--hud-h) + 56px);
+    top: calc(var(--safe-top) + var(--hud-h) + 56px);
   }
 }
 .toast.show {
@@ -3181,7 +3194,7 @@ select.config-input {
   justify-content: space-between;
   gap: 8px;
   /* Same fixed-at-top status-bar clearance as .sa-panel-head. */
-  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  padding: calc(8px + var(--safe-top)) 12px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
@@ -3240,7 +3253,7 @@ select.config-input {
   justify-content: center;
   min-height: 100dvh;
   padding: 24px;
-  padding-top: max(24px, env(safe-area-inset-top));
+  padding-top: max(24px, var(--safe-top));
   background:
     radial-gradient(120% 80% at 50% -10%, var(--bg-1), var(--bg) 60%);
 }
@@ -4910,13 +4923,13 @@ select.config-input {
   }
   /* Clear the notch/status bar. */
   .modal-process .modal-head {
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-top: max(12px, var(--safe-top));
   }
   /* Process list fills the remaining height instead of a fixed cap. */
   .modal-process .proc-body {
     max-height: none;
     flex: 1 1 auto;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
   }
 }
 
