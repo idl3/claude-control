@@ -136,6 +136,24 @@ function AppInner() {
     [],
   );
 
+  // Tag <body> with is-ipad / is-external-display so CSS can drop the
+  // home-indicator bottom padding when the iPad is driving an external display
+  // (no home indicator there). Bind the resize listener ONCE (the original
+  // snippet re-added it on every call → listener leak).
+  useEffect(() => {
+    const detect = () => {
+      const isIPad =
+        /iPad/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isExternal = isIPad && (window.screen.width > 1200 || window.innerWidth > 1200);
+      document.body.classList.toggle('is-ipad', isIPad);
+      document.body.classList.toggle('is-external-display', isExternal);
+    };
+    detect();
+    window.addEventListener('resize', detect);
+    return () => window.removeEventListener('resize', detect);
+  }, []);
+
   // Surface WS ack errors / answer confirmations as toasts.
   useEffect(() => {
     const onAck = (e: Event) => {
