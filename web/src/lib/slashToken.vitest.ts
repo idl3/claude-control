@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slashTokenAt } from './slashToken';
+import { slashTokenAt, triggerTokenAt } from './slashToken';
 
 describe('slashTokenAt', () => {
   // ── Basic detection ───────────────────────────────────────────────────────
@@ -105,5 +105,53 @@ describe('slashTokenAt', () => {
     // Simulate splice: replace [start, end) with "/atl:plan-hard "
     const spliced = text.slice(0, result!.start) + '/atl:plan-hard ' + text.slice(result!.end);
     expect(spliced).toBe('use /atl:plan-hard  here');
+  });
+});
+
+describe('triggerTokenAt', () => {
+  it('slash token at start → trigger is /', () => {
+    const result = triggerTokenAt('/foo', 4);
+    expect(result).toEqual({ trigger: '/', query: 'foo', start: 0, end: 4 });
+  });
+
+  it('@arch token at caret 5 → trigger is @, query is arch', () => {
+    const result = triggerTokenAt('@arch', 5);
+    expect(result).toEqual({ trigger: '@', query: 'arch', start: 0, end: 5 });
+  });
+
+  it('@agent token mid-text after a space', () => {
+    const text = 'help @planner here';
+    const caret = 13; // after '@planner' = index 5..12, caret at 13
+    const result = triggerTokenAt(text, caret);
+    expect(result).toEqual({ trigger: '@', query: 'planner', start: 5, end: 13 });
+  });
+
+  it('@100x:100x-officer — colons and dashes in the name', () => {
+    const text = '@100x:100x-officer';
+    const result = triggerTokenAt(text, text.length);
+    expect(result).toEqual({ trigger: '@', query: '100x:100x-officer', start: 0, end: text.length });
+  });
+
+  it('path a/b → null (slash preceded by non-space)', () => {
+    expect(triggerTokenAt('a/b', 3)).toBeNull();
+  });
+
+  it('email foo@bar → null (@ preceded by non-space)', () => {
+    expect(triggerTokenAt('foo@bar', 7)).toBeNull();
+  });
+
+  it('bare @ just typed (@, caret 1) → empty query', () => {
+    const result = triggerTokenAt('@', 1);
+    expect(result).toEqual({ trigger: '@', query: '', start: 0, end: 1 });
+  });
+
+  it('bare / just typed (/, caret 1) → empty slash query', () => {
+    const result = triggerTokenAt('/', 1);
+    expect(result).toEqual({ trigger: '/', query: '', start: 0, end: 1 });
+  });
+
+  it('returns null when caret is at position 0', () => {
+    expect(triggerTokenAt('@foo', 0)).toBeNull();
+    expect(triggerTokenAt('/foo', 0)).toBeNull();
   });
 });

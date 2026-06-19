@@ -2350,6 +2350,52 @@ details.block-tool[open] > summary .tool-arrow,
 .composer-input::placeholder {
   color: var(--text-faint);
 }
+/* ── Inline pill overlay ───────────────────────────────────────────────────
+   .composer-overlay is an absolutely-positioned read-only mirror of the
+   textarea text. It is pointer-events:none and aria-hidden; it only renders
+   pill highlights for committed /skill and @agent mentions. The textarea text
+   is made transparent (via [data-has-pills]) so the pill colors are visible.
+   When no pills are present, the overlay is empty and the textarea renders
+   its own color — zero risk in the common case.
+
+   METRIC CONSTRAINT: .composer-pill must NOT change glyph advance width vs.
+   the textarea. No horizontal padding/margin, no font-weight/size/family
+   change, no letter-spacing. Only background-color, border-radius, color,
+   and box-shadow are allowed — all zero-advance properties. Any advance
+   change will drift the overlay text from the textarea caret. */
+.composer-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 2px; /* must match .composer-input padding exactly */
+  font: inherit;
+  font-size: var(--txt-composer); /* must match .composer-input font-size */
+  line-height: 1.45; /* must match .composer-input line-height */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  pointer-events: none; /* never intercepts clicks or keyboard events */
+  overflow: hidden;
+  color: var(--text);
+}
+/* METRIC CONSTRAINT enforced here: no padding, margin, font changes, or
+   letter-spacing. Only background, border-radius, color, and box-shadow.
+   box-decoration-break:clone keeps the background across wrapped lines. */
+.composer-pill {
+  background: color-mix(in oklch, var(--accent) 18%, var(--bg-1));
+  border-radius: 3px;
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  /* NO padding, NO margin, NO font changes, NO letter-spacing — metric constraint */
+}
+/* When ≥1 pill exists: make textarea text transparent (caret stays visible)
+   so the pill overlay layer shows through. */
+.composer-input-wrap[data-has-pills='true'] .composer-input {
+  color: transparent;
+  caret-color: var(--text);
+}
+
 /* Overlay placeholder: lets the hint use the <Kbd> component (a native
    placeholder is text-only). Sits exactly over the input's text box, click-
    through, and is revealed only while the input shows its (blank) placeholder. */
