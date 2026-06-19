@@ -3652,6 +3652,7 @@ select.config-input {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  position: relative; /* anchor for .transcript-search absolute positioning */
 }
 /* The thread fills available width by default. */
 .detail-split > .thread-root {
@@ -5049,5 +5050,109 @@ select.config-input {
   .composer-send:hover {
     animation: none !important;
     transform: none !important;
+  }
+}
+
+/* ── Transcript search overlay ─────────────────────────────────── */
+
+/* CSS Custom Highlight API — highlights painted without DOM mutation. */
+::highlight(transcript-search) {
+  background-color: color-mix(in oklch, var(--amber) 35%, transparent);
+  color: inherit;
+}
+::highlight(transcript-search-active) {
+  background-color: var(--amber);
+  color: oklch(16% 0.012 260); /* --bg value for contrast on amber */
+}
+
+.transcript-search {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.4);
+  /* Prevent the search box from being dragged off to the side on iPad. */
+  max-width: calc(100% - 28px);
+}
+
+.transcript-search-input {
+  width: 160px;
+  max-width: 40vw;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: var(--txt-meta);
+  font-family: inherit;
+  line-height: 1.4;
+  /* Remove browser's native search clear button — we have our own close. */
+  -webkit-appearance: none;
+  appearance: none;
+}
+.transcript-search-input::placeholder {
+  color: var(--text-faint);
+}
+/* Remove the native ✕ on WebKit search inputs */
+.transcript-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.transcript-search-count {
+  font-size: var(--txt-meta);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 2.5ch; /* keep layout stable as count digits change */
+  text-align: right;
+}
+
+.transcript-search-nav,
+.transcript-search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 3px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: color var(--ease) 0.12s, background var(--ease) 0.12s;
+  flex: 0 0 auto;
+}
+.transcript-search-nav:hover,
+.transcript-search-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.transcript-search-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.transcript-search-nav:focus-visible,
+.transcript-search-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Mobile: wider input on small screens */
+@media (max-width: 480px) {
+  .transcript-search {
+    right: 8px;
+    top: 8px;
+  }
+  .transcript-search-input {
+    width: 120px;
   }
 }

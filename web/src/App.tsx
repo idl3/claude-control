@@ -40,7 +40,9 @@ import {
   PanelLeftIcon,
   SettingsIcon,
   ActivityIcon,
+  SearchIcon,
 } from './components/icons';
+import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Msg, ServerMessage } from './lib/types';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
@@ -420,6 +422,9 @@ function AppInner() {
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // In-transcript search (⌘/).
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Raw-terminal escape hatch with an LRU of warm ttyd panels. The server caps
   // ttyd at 4 live (and self-evicts its oldest), so we keep at most the 4 most-
@@ -914,6 +919,20 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
+  // ⌘/Ctrl+/ toggles the in-transcript search box. Capture phase so it never
+  // leaks to the browser's built-in quick-find (⌘F). Esc to close is handled
+  // inside TranscriptSearch itself.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSearchOpen((v) => !v);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+
   // Palette command list: one switch entry per pane, then global actions
   // (including "View raw tmux window" for the current session).
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
@@ -1171,6 +1190,19 @@ function AppInner() {
                     >
                       <TerminalSquareIcon />
                     </button>
+                    <button
+                      type="button"
+                      className="detail-action"
+                      aria-pressed={searchOpen}
+                      data-on={searchOpen ? 'true' : undefined}
+                      aria-label="Search transcript"
+                      title="Search transcript (⌘/)"
+                      data-hotkey="⌘/"
+                      data-hotkey-dir="down"
+                      onClick={() => setSearchOpen((v) => !v)}
+                    >
+                      <SearchIcon />
+                    </button>
                     {cockpit.subagents.length > 0 ? (
                       <button
                         type="button"
@@ -1257,6 +1289,10 @@ function AppInner() {
                   />
                 </LiveThinkingContext.Provider>
                 <ArtifactPanel />
+                <TranscriptSearch
+                  open={searchOpen}
+                  onClose={() => setSearchOpen(false)}
+                />
               </div>
             )}
             </ShellContext.Provider>
