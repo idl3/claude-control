@@ -4322,12 +4322,20 @@ select.config-input {
 }
 
 /* ── Reload button (lives in the rail foot, beside Settings) ─────── */
-.reload-foot {
-  font-size: 18px;
+/* Only the glyph rotates (not the whole button), and it's a touch smaller. */
+.reload-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
   line-height: 1;
+  transition: transform 0.45s var(--ease);
 }
-.reload-foot:active {
+.reload-foot:hover .reload-glyph {
   transform: rotate(180deg);
+}
+.reload-foot:active .reload-glyph {
+  transform: rotate(360deg);
 }
 
 /* ── Optimiser auto-send: depleting ring around the Send button ──── */
@@ -4828,22 +4836,19 @@ select.config-input {
     transform: scale(1.14);
   }
 }
-/* Refresh: larger on desktop, rotates on hover, full spin on click. */
+/* Refresh: slightly larger glyph on desktop; the GLYPH rotates (see above), the
+   button just tints on hover. */
 @media (min-width: 760px) {
-  .reload-foot {
-    font-size: 22px;
+  .reload-glyph {
+    font-size: 18px;
   }
 }
 .reload-foot {
-  transition: transform 0.45s var(--ease), color 0.15s var(--ease),
-    border-color 0.15s var(--ease), background 0.15s var(--ease);
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease),
+    background 0.15s var(--ease);
 }
 .reload-foot:hover {
-  transform: rotate(180deg);
   color: var(--accent);
-}
-.reload-foot:active {
-  transform: rotate(360deg);
 }
 /* Processes: pulse in the accent on hover. */
 .rail-foot-icon:not(.reload-foot):hover {
@@ -4886,9 +4891,9 @@ select.config-input {
   filter: brightness(1.08);
 }
 @media (prefers-reduced-motion: reduce) {
-  .reload-foot,
-  .reload-foot:hover,
-  .reload-foot:active,
+  .reload-glyph,
+  .reload-foot:hover .reload-glyph,
+  .reload-foot:active .reload-glyph,
   .rail-foot-icon:not(.reload-foot):hover,
   .rail-foot-btn:not(.rail-foot-icon):hover svg,
   .composer-attach,

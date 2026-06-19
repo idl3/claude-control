@@ -821,7 +821,8 @@ function AppInner() {
   // (⌘. not ↓: iPad/Safari reserves ⌘↓.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '.' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const isPeriod = e.key === '.' || e.code === 'Period';
+      if (!isPeriod || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
       const vp = document.querySelector<HTMLElement>('.thread-viewport');
       if (vp) {
@@ -829,8 +830,9 @@ function AppInner() {
         vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Capture phase to beat any browser handling of ⌘.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
   // Palette command list: one switch entry per pane, then global actions
@@ -993,7 +995,7 @@ function AppInner() {
                 title="Reload app"
                 onClick={() => window.location.reload()}
               >
-                ↻
+                <span className="reload-glyph" aria-hidden="true">↻</span>
               </button>
               <button
                 type="button"
