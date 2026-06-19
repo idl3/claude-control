@@ -929,20 +929,36 @@ function AppInner() {
       if (target) {
         e.preventDefault();
         e.stopPropagation();
-        // If focus is inside a ttyd iframe, the NEXT ⌘N would go to the iframe
-        // (and the browser), not our window listener — so chaining ⌘1→⌘2→…
-        // breaks. Pull focus back into the top document after switching.
+        // If focus is currently inside a ttyd iframe, blur it first (the iframe
+        // swallows keydowns in its own document so the window-level listener
+        // never fires while it holds focus).
         const ae = document.activeElement as HTMLElement | null;
         if (ae && ae.tagName === 'IFRAME') ae.blur();
         const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
         host.setAttribute('tabindex', '-1');
         host.focus({ preventScroll: true });
+        // Close any open ttyd overlay BEFORE calling select() so both state
+        // updates are batched by React into a single render. Without this,
+        // the TerminalPanel for the NEW session can briefly see visible=true
+        // (terminalShown is still true from the previous session) and call
+        // frameRef.focus() in its post-commit effect — stealing focus into
+        // the iframe and swallowing the NEXT ⌘1-9 press.
+        setTerminalShown(false);
         select(target.id);
+        // Re-grab focus after React has committed and post-commit effects have
+        // run (defense-in-depth: catches any other component that calls
+        // focus() in a useEffect on mount/update after the session switch).
+        const rafId = requestAnimationFrame(() => {
+          const fresh = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+          fresh.setAttribute('tabindex', '-1');
+          fresh.focus({ preventScroll: true });
+        });
+        return () => cancelAnimationFrame(rafId);
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [addressableClaude, paletteOpen, select]);
+  }, [addressableClaude, paletteOpen, select, setTerminalShown]);
 
   // ⌘/Ctrl+Enter from anywhere jumps focus back INTO the composer — but only when
   // focus isn't already in a text field (where ⌘Enter means send/optimise) and no
