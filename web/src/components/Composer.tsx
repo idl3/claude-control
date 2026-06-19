@@ -301,27 +301,15 @@ export function Composer({
     return composer.subscribe(sync);
   }, [composer]);
 
-  // Track caret position for caret-aware slash autocomplete (Fix 2).
-  // We read selectionStart on input, keyup, click, and selectionchange.
-  useEffect(() => {
-    const ta = document.querySelector<HTMLTextAreaElement>('.composer-input');
-    if (!ta) return;
-    const update = () => setCaret(ta.selectionStart ?? 0);
-    ta.addEventListener('input', update);
-    ta.addEventListener('keyup', update);
-    ta.addEventListener('click', update);
-    ta.addEventListener('select', update);
-    document.addEventListener('selectionchange', update);
-    return () => {
-      ta.removeEventListener('input', update);
-      ta.removeEventListener('keyup', update);
-      ta.removeEventListener('click', update);
-      ta.removeEventListener('select', update);
-      document.removeEventListener('selectionchange', update);
-    };
-  // Re-attach if the textarea re-mounts (e.g. on session switch).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  // Track caret position for caret-aware slash autocomplete (Fix 2). MUST use
+  // React SYNTHETIC handlers on the Input (onKeyUp/onClick/onSelect below), NOT
+  // native 'input'/'selectionchange' listeners: those fire DURING the input
+  // event, before assistant-ui's controlled onChange commits the new text, so the
+  // setCaret re-render would render the Input with the stale (empty) runtime text
+  // and wipe every keystroke (see repro). Synthetic handlers fire after onChange.
+  const updateCaret = useCallback((el: HTMLTextAreaElement | null) => {
+    if (el) setCaret(el.selectionStart ?? 0);
+  }, []);
 
   // Active slash token at the current caret — drives autocomplete suggestions.
   const activeToken = useMemo<SlashToken | null>(
@@ -620,6 +608,9 @@ export function Composer({
             className="composer-input"
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
             submitOnEnter={false}
+            onKeyUp={(e) => updateCaret(e.currentTarget)}
+            onClick={(e) => updateCaret(e.currentTarget)}
+            onSelect={(e) => updateCaret(e.currentTarget)}
             onKeyDown={(e) => {
               // (⌘/Ctrl+S voice toggle is handled window-level above so it works
               // regardless of focus + beats the browser's Save.)
