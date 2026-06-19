@@ -37,6 +37,12 @@ export interface CockpitStore {
   capture: string | null;
   /** Live capture of the dedicated shell pane (composer terminal mode). */
   shellOutput: string | null;
+  /**
+   * True once the server has sent the `messages` frame for the selected session.
+   * False while the session is selected but the transcript tail is still loading.
+   * Used to show a loader instead of the empty-state welcome during the load window.
+   */
+  messagesLoaded: boolean;
   select: (id: string) => void;
   resubscribe: () => void;
   sendReply: (text: string) => boolean;
@@ -319,6 +325,13 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
+  // True once the server has delivered the `messages` frame for this session.
+  // Uses the `in` operator so an empty transcript ([]) still counts as loaded.
+  const messagesLoaded = useMemo(
+    () => selectedId != null && selectedId in messagesById,
+    [selectedId, messagesById],
+  );
+
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
     [selectedId, messagesById],
@@ -344,6 +357,7 @@ export function useCockpit(): CockpitStore {
     sessions,
     selectedId,
     messages,
+    messagesLoaded,
     pending,
     prompt,
     subagents,
