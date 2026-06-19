@@ -1313,6 +1313,11 @@ function AppInner() {
             prompt={cockpit.prompt}
             planMarkdown={planMarkdown}
             onKey={(key) => cockpit.sendPromptKey(key)}
+            onSelect={(labels) =>
+              cockpit.selectedId
+                ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
+                : false
+            }
             onClose={() => setDismissedPrompt(JSON.stringify(cockpit.prompt))}
           />
         ) : null}

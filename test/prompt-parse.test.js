@@ -66,3 +66,68 @@ test('parsePanePrompt detects a picker whose option 1 scrolled off-screen', () =
   assert.deepEqual(r.options.map((o) => o.key), ['2', '3', '4', '5', '6']);
   assert.equal(r.options.find((o) => o.key === '4')?.selected, true);
 });
+
+// ── Multi-select checkbox detection ──────────────────────────────────────────
+
+// Realistic capture of a multi-select AskUserQuestion picker ([ ]/[x] markers).
+// The ❯ cursor marks which row is highlighted, and the Esc footer is the
+// interactive-prompt signal.
+const MULTI_SELECT = `\
+What skills should I activate?
+❯ 1. [ ] /100x:plan-hard
+  2. [ ] Verify change impact
+  3. [x] Run tests
+  4. [ ] Update docs
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+test('parsePanePrompt detects multi-select checkboxes: multiSelect=true, labels stripped, checked correct', () => {
+  const r = parsePanePrompt(MULTI_SELECT);
+  assert.ok(r, 'expected a prompt to be detected');
+  assert.equal(r.multiSelect, true, 'multiSelect must be true for checkbox options');
+  assert.equal(r.options.length, 4);
+  // Labels must have the bracket marker stripped.
+  assert.equal(r.options[0].label, '/100x:plan-hard');
+  assert.equal(r.options[1].label, 'Verify change impact');
+  assert.equal(r.options[2].label, 'Run tests');
+  assert.equal(r.options[3].label, 'Update docs');
+  // checked state: only option 3 has [x].
+  assert.equal(r.options[0].checked, false, 'option 1 [ ] → checked=false');
+  assert.equal(r.options[1].checked, false, 'option 2 [ ] → checked=false');
+  assert.equal(r.options[2].checked, true,  'option 3 [x] → checked=true');
+  assert.equal(r.options[3].checked, false, 'option 4 [ ] → checked=false');
+  // selected (cursor) state: ❯ on option 1.
+  assert.equal(r.options[0].selected, true);
+});
+
+// Variant with ✓ checkmark (Claude Code also uses this).
+const MULTI_SELECT_CHECKMARK = `\
+Choose actions:
+  1. [✓] Deploy to staging
+❯ 2. [ ] Run smoke tests
+  3. [✗] Skip linting
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+test('parsePanePrompt handles [✓] and [✗] checkbox variants', () => {
+  const r = parsePanePrompt(MULTI_SELECT_CHECKMARK);
+  assert.ok(r);
+  assert.equal(r.multiSelect, true);
+  assert.equal(r.options[0].checked, true,  '[✓] → checked=true');
+  assert.equal(r.options[1].checked, false, '[ ] → checked=false');
+  assert.equal(r.options[2].checked, true,  '[✗] → checked=true');
+});
+
+// ── Regression: single-select still parses identically (no multiSelect, labels unchanged) ──
+
+test('parsePanePrompt single-select unchanged: no multiSelect field, labels as-is', () => {
+  // Reuse the existing MULTILINE single-select capture (no [ ] markers).
+  const r = parsePanePrompt(MULTILINE);
+  assert.ok(r);
+  assert.equal(r.multiSelect, undefined, 'single-select must NOT have multiSelect');
+  // Labels must be unchanged — no bracket stripping on plain options.
+  assert.equal(r.options[0].label, 'Build all 3 phases now');
+  assert.equal(r.options[1].label, 'Skill-routing (P3) first');
+  // No checked field on single-select options.
+  assert.equal(r.options[0].checked, undefined);
+});

@@ -41,6 +41,7 @@ export interface CockpitStore {
   resubscribe: () => void;
   sendReply: (text: string) => boolean;
   sendPromptKey: (key: string) => boolean;
+  sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
   requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
@@ -311,6 +312,12 @@ export function useCockpit(): CockpitStore {
     },
     [socket],
   );
+  const sendPromptSelect = useCallback(
+    (id: string, labels: string[]): boolean => {
+      return socket.send({ type: 'promptselect', id, labels });
+    },
+    [socket],
+  );
 
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
@@ -349,6 +356,7 @@ export function useCockpit(): CockpitStore {
     resubscribe,
     sendReply,
     sendPromptKey,
+    sendPromptSelect,
     sendAnswer,
     requestCapture,
     clearCapture,

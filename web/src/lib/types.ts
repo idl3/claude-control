@@ -111,9 +111,13 @@ export interface PanePromptOption {
   key: string;
   label: string;
   selected?: boolean;
+  /** True when this checkbox option is already checked in the TUI. */
+  checked?: boolean;
 }
 export interface PanePrompt {
   question: string;
+  /** True when the prompt is a multi-select checkbox picker (vs. single-select radio). */
+  multiSelect?: boolean;
   options: PanePromptOption[];
 }
 
@@ -170,6 +174,7 @@ export type ClientMessage =
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }
+  | { type: 'promptselect'; id: string; labels: string[] }
   // Interactive terminal panes: forward keystrokes to a pane by id.
   | { type: 'pane-text'; id: string; text: string }
   | { type: 'pane-key'; id: string; key: string }

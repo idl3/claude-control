@@ -13,6 +13,8 @@ import { useModalTransition } from '../lib/anim';
 interface PromptModalProps {
   prompt: PanePrompt;
   onKey: (key: string) => void;
+  /** Called when the user confirms a multi-select prompt; receives the selected labels. */
+  onSelect?: (labels: string[]) => void;
   onClose: () => void;
   /** When the prompt is a plan approval, the plan markdown to render for review. */
   planMarkdown?: string | null;
@@ -67,58 +69,107 @@ function PlanReview({ markdown }: { markdown: string }) {
  * tap from instantly approving a plan. For plan approvals we first render the full
  * plan as markdown (scrollable) and put the approval options at the very bottom,
  * so the plan can be reviewed before deciding.
+ *
+ * When `prompt.multiSelect` is true the options render as toggle buttons (checkbox
+ * style). Confirm calls `onSelect(labels)` instead of `onKey`. The single-select
+ * and plan-approval paths are byte-for-byte unchanged.
  */
-export function PromptModal({ prompt, onKey, onClose: rawClose, planMarkdown }: PromptModalProps) {
+export function PromptModal({
+  prompt,
+  onKey,
+  onSelect,
+  onClose: rawClose,
+  planMarkdown,
+}: PromptModalProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
+  const isMulti = !!prompt.multiSelect;
+
+  // ── Single-select state ───────────────────────────────────────────────────
   // The TUI's own highlighted option is the initial selection; first option as
   // a fallback so Confirm always has a target.
   const defaultKey = useMemo(() => {
+    if (isMulti) return null;
     const pre = prompt.options.find((o) => o.selected);
     return pre?.key ?? prompt.options[0]?.key ?? null;
-  }, [prompt]);
+  }, [prompt, isMulti]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(defaultKey);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+
+  // ── Multi-select state ────────────────────────────────────────────────────
+  // Initialised from each option's `checked` field (already-checked in TUI).
+  const initMultiSelected = useMemo(
+    () => new Set(prompt.options.filter((o) => o.checked).map((o) => o.label)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(prompt)],
+  );
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(initMultiSelected);
+  const [multiSending, setMultiSending] = useState(false);
+
   const sig = JSON.stringify(prompt);
   useEffect(() => {
-    setSelectedKey(defaultKey);
-    setPendingKey(null);
-  }, [sig, defaultKey]);
+    if (!isMulti) {
+      setSelectedKey(defaultKey);
+      setPendingKey(null);
+    } else {
+      setMultiSelected(initMultiSelected);
+      setMultiSending(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, defaultKey, isMulti]);
 
-  const submit = (key: string) => {
+  // ── Single-select submit ──────────────────────────────────────────────────
+  const submitSingle = (key: string) => {
     if (pendingKey) return;
     setPendingKey(key);
     onKey(key);
   };
-  const confirm = () => {
-    if (selectedKey) submit(selectedKey);
+  const confirmSingle = () => {
+    if (selectedKey) submitSingle(selectedKey);
   };
 
+  // ── Multi-select toggle + submit ──────────────────────────────────────────
+  const toggleMulti = (label: string) => {
+    setMultiSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  };
+  const confirmMulti = () => {
+    if (multiSending || multiSelected.size === 0) return;
+    setMultiSending(true);
+    onSelect?.([...multiSelected]);
+  };
+
+  // ── Keyboard handling ─────────────────────────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (pendingKey) return; // already submitting
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (selectedKey) submit(selectedKey);
-        return;
-      }
-      // Number keys 1-9 select the matching option (don't submit).
-      if (prompt.options.some((o) => o.key === e.key)) {
-        e.preventDefault();
-        setSelectedKey(e.key);
+      if (isMulti) {
+        if (multiSending) return;
+        if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+        if (e.key === 'Enter') { e.preventDefault(); confirmMulti(); return; }
+        // Number keys 1-9 TOGGLE the matching option in multi mode.
+        const opt = prompt.options.find((o) => o.key === e.key);
+        if (opt) { e.preventDefault(); toggleMulti(opt.label); }
+      } else {
+        if (pendingKey) return; // already submitting
+        if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+        if (e.key === 'Enter') { e.preventDefault(); if (selectedKey) submitSingle(selectedKey); return; }
+        // Number keys 1-9 select the matching option (don't submit).
+        if (prompt.options.some((o) => o.key === e.key)) {
+          e.preventDefault();
+          setSelectedKey(e.key);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose, pendingKey, selectedKey, sig]);
+  }, [onClose, pendingKey, selectedKey, sig, isMulti, multiSending, multiSelected]);
 
-  const sending = pendingKey !== null;
+  const sending = isMulti ? multiSending : pendingKey !== null;
   const isPlan = !!planMarkdown;
 
   return (
@@ -147,30 +198,55 @@ export function PromptModal({ prompt, onKey, onClose: rawClose, planMarkdown }: 
 
           <div className="question">
             {!isPlan ? <div className="q-text">{prompt.question}</div> : null}
-            <div className="q-options" role="radiogroup" aria-label="Options">
-              {prompt.options.map((opt) => (
-                <button
-                  type="button"
-                  key={opt.key}
-                  className="option-btn"
-                  role="radio"
-                  aria-checked={selectedKey === opt.key}
-                  data-on={selectedKey === opt.key ? 'true' : 'false'}
-                  data-sending={pendingKey === opt.key ? 'true' : undefined}
-                  disabled={sending}
-                  onClick={() => setSelectedKey(opt.key)}
-                >
-                  <span className="option-label">
-                    {opt.key}. {opt.label}
-                  </span>
-                  {pendingKey === opt.key ? (
-                    <span className="option-sending" aria-live="polite">
-                      <span className="working-spinner" aria-hidden="true" /> sending…
+            {isMulti ? <div className="q-hint">select one or more</div> : null}
+
+            {isMulti ? (
+              <div className="q-options" aria-label="Options">
+                {prompt.options.map((opt) => {
+                  const on = multiSelected.has(opt.label);
+                  return (
+                    <button
+                      type="button"
+                      key={opt.key}
+                      className="option-btn"
+                      aria-pressed={on}
+                      data-on={on ? 'true' : 'false'}
+                      disabled={sending}
+                      onClick={() => toggleMulti(opt.label)}
+                    >
+                      <span className="option-label">
+                        {opt.key}. {opt.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="q-options" role="radiogroup" aria-label="Options">
+                {prompt.options.map((opt) => (
+                  <button
+                    type="button"
+                    key={opt.key}
+                    className="option-btn"
+                    role="radio"
+                    aria-checked={selectedKey === opt.key}
+                    data-on={selectedKey === opt.key ? 'true' : 'false'}
+                    data-sending={pendingKey === opt.key ? 'true' : undefined}
+                    disabled={sending}
+                    onClick={() => setSelectedKey(opt.key)}
+                  >
+                    <span className="option-label">
+                      {opt.key}. {opt.label}
                     </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
+                    {pendingKey === opt.key ? (
+                      <span className="option-sending" aria-live="polite">
+                        <span className="working-spinner" aria-hidden="true" /> sending…
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -179,7 +255,7 @@ export function PromptModal({ prompt, onKey, onClose: rawClose, planMarkdown }: 
             type="button"
             className="btn-secondary"
             disabled={sending}
-            onClick={() => submit('Escape')}
+            onClick={() => (isMulti ? onClose() : submitSingle('Escape'))}
           >
             Cancel <Kbd>Esc</Kbd>
           </button>
@@ -188,8 +264,8 @@ export function PromptModal({ prompt, onKey, onClose: rawClose, planMarkdown }: 
           <button
             type="button"
             className="btn-primary"
-            disabled={sending || !selectedKey}
-            onClick={confirm}
+            disabled={sending || (isMulti ? multiSelected.size === 0 : !selectedKey)}
+            onClick={isMulti ? confirmMulti : confirmSingle}
           >
             Confirm <Kbd>↵</Kbd>
           </button>
