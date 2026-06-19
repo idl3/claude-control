@@ -364,6 +364,19 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
   // can always be stopped/exited. On Stop, the transcript is inserted into the
   // composer (review-then-send, never auto-send).
   const [voiceOpen, setVoiceOpen] = useState(false);
+  // ⌘/Ctrl+S opens voice mode from ANYWHERE (not just when the composer textarea
+  // is focused) — window-level + capture phase so it beats the browser's Save.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 's' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (disabled) return; // no session selected
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog is open
+      e.preventDefault();
+      setVoiceOpen(true);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [disabled]);
   const commitVoice = useCallback(
     (text: string) => {
       setVoiceOpen(false);
@@ -544,12 +557,8 @@ export function Composer({ disabled, sessionId }: ComposerProps) {
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
             submitOnEnter={false}
             onKeyDown={(e) => {
-              // ⌘/Ctrl+S → open voice (speaking) mode, in any composer state.
-              if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
-                e.preventDefault();
-                setVoiceOpen(true);
-                return;
-              }
+              // (⌘/Ctrl+S voice toggle is handled window-level above so it works
+              // regardless of focus + beats the browser's Save.)
               // Terminal mode: most keys edit the visible buffer (relayed via the
               // diff). Intercept only the keys that must go straight to the shell.
               if (terminal) {
