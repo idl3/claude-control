@@ -2331,6 +2331,24 @@ details.block-tool[open] > summary .tool-arrow,
 .composer-send[data-terminal]:hover {
   filter: brightness(1.08);
 }
+/* STOP button: shown when the agent is actively generating. */
+.composer-send[data-stop="true"] {
+  background: var(--red);
+  color: oklch(98% 0.01 25);
+  border-color: transparent;
+}
+.composer-send[data-stop="true"]:hover {
+  filter: brightness(1.08);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .composer-send[data-stop="true"] {
+    animation: stop-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes stop-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
 .composer-input {
   width: 100%;
   resize: none;

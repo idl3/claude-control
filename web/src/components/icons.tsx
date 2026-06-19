@@ -120,6 +120,14 @@ export function SearchIcon(p: IconProps) {
 }
 
 // Battery with a fill bar (width set inline by the caller) + optional charge bolt.
+export function StopIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="5" y="5" width="14" height="14" rx="2" ry="2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (

@@ -24,6 +24,10 @@ interface ThreadProps {
   subagents: SubAgent[];
   /** Open the full sub-agent panel (strip click). */
   onOpenAgents: () => void;
+  /** True while Claude is actively generating — flips the send button to STOP. */
+  working?: boolean;
+  /** Cancel in-flight generation (send Escape to the Claude pane). */
+  onStop?: () => void;
 }
 
 const messageComponents = {
@@ -44,6 +48,8 @@ export function Thread({
   onTerminalModeChange,
   subagents,
   onOpenAgents,
+  working,
+  onStop,
 }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
@@ -103,6 +109,8 @@ export function Thread({
         subAgentMode={subAgentMode}
         onSubAgentModeChange={onSubAgentModeChange}
         onTerminalModeChange={onTerminalModeChange}
+        working={working}
+        onStop={onStop}
       />
     </ThreadPrimitive.Root>
   );

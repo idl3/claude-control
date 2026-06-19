@@ -24,6 +24,7 @@ import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods 
 import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { prefersReducedMotion } from '../lib/anim';
+import { StopIcon } from './icons';
 
 // Module-level per-session cache so the skill list (live, session-discovered
 // via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
@@ -96,6 +97,12 @@ interface ComposerProps {
   /** Called when the Composer's >_ terminal mode changes, so callers can gate
    *  the sub-agent prefix (which must not corrupt shell commands). */
   onTerminalModeChange?: (active: boolean) => void;
+  /** True while the selected Claude session is actively generating/thinking.
+   *  Flips the primary send button into a STOP button. Ignored in terminal mode. */
+  working?: boolean;
+  /** Called when the user clicks the STOP button (or presses Esc from App).
+   *  Should send Escape to the session's Claude pane. */
+  onStop?: () => void;
 }
 
 // Image preview for an image attachment that still carries its File (pending),
@@ -193,6 +200,8 @@ export function Composer({
   subAgentMode = true,
   onSubAgentModeChange,
   onTerminalModeChange,
+  working = false,
+  onStop,
 }: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
@@ -1043,6 +1052,18 @@ export function Composer({
               onClick={() => shell.key('Enter')}
             >
               <ArrowUpIcon />
+            </button>
+          ) : working ? (
+            // Agent is generating — show a STOP button instead of send.
+            <button
+              type="button"
+              className="composer-send"
+              data-stop="true"
+              aria-label="Stop (Esc)"
+              title="Stop the agent (Esc)"
+              onClick={() => onStop?.()}
+            >
+              <StopIcon size={14} />
             </button>
           ) : (
             // Primary / default: optimise → review → auto-send.
