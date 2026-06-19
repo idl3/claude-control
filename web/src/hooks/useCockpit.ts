@@ -15,6 +15,14 @@ export interface ResourceState {
   warning: string | null;
 }
 
+/** One sampled point of system load for the process-monitor time chart. */
+export interface ResourcePoint {
+  t: number;
+  cpu: number;
+  mem: number;
+}
+const RESOURCE_WINDOW_MS = 10 * 60_000; // keep the last 10 minutes
+
 export interface CockpitStore {
   sessions: Session[];
   selectedId: string | null;
@@ -24,6 +32,8 @@ export interface CockpitStore {
   subagents: SubAgent[];
   conn: ConnState;
   resources: ResourceState;
+  /** Rolling ~10min CPU%/Mem% history for the process-monitor chart. */
+  resourceHistory: ResourcePoint[];
   capture: string | null;
   /** Live capture of the dedicated shell pane (composer terminal mode). */
   shellOutput: string | null;
@@ -64,6 +74,7 @@ export function useCockpit(): CockpitStore {
     snapshot: null,
     warning: null,
   });
+  const [resourceHistory, setResourceHistory] = useState<ResourcePoint[]>([]);
   const [capture, setCapture] = useState<string | null>(null);
   const [shellOutput, setShellOutput] = useState<string | null>(null);
 
@@ -135,12 +146,23 @@ export function useCockpit(): CockpitStore {
             ),
           );
           break;
-        case 'resources':
-          setResources({
-            snapshot: msg.snapshot ?? null,
-            warning: msg.warning ?? null,
-          });
+        case 'resources': {
+          const snap = msg.snapshot ?? null;
+          setResources({ snapshot: snap, warning: msg.warning ?? null });
+          // Append a sample for the 10-min chart; drop points outside the window.
+          if (snap) {
+            const now = Date.now();
+            const point = {
+              t: now,
+              cpu: snap.self?.cpuPct ?? 0,
+              mem: snap.system?.memUsedPct ?? 0,
+            };
+            setResourceHistory((h) =>
+              [...h, point].filter((p) => now - p.t <= RESOURCE_WINDOW_MS),
+            );
+          }
           break;
+        }
         case 'capture':
           if (msg.id === selectedRef.current) setCapture(msg.text ?? '');
           break;
@@ -320,6 +342,7 @@ export function useCockpit(): CockpitStore {
     subagents,
     conn,
     resources,
+    resourceHistory,
     capture,
     shellOutput,
     select,

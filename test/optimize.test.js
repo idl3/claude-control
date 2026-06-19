@@ -95,6 +95,18 @@ test('optimizePrompt with valid JSON mock → mode:llm, parsed fields', async ()
   assert.deepEqual(result.changes, ['added specificity']);
 });
 
+test('optimizePrompt decodes leaked \\uXXXX the model double-escaped', async () => {
+  // Model double-escapes the apostrophe: the parsed JSON value carries the
+  // LITERAL text "’" instead of ’. It must come back as the real char,
+  // not get typed verbatim into the composer.
+  const mockComplete = async (_prompt) =>
+    '{"optimized": "Fix the typo so it\\\\u2019s correct.", "rationale": [], "changes": []}';
+  const result = await optimizePrompt('fix the typo so its correct', { complete: mockComplete });
+  assert.equal(result.mode, 'llm');
+  assert.ok(!result.optimized.includes('\\u'), 'no literal backslash-u remains');
+  assert.ok(result.optimized.includes('’'), 'decoded to the real ’');
+});
+
 test('optimizePrompt with JSON wrapped in prose/fences → still parses', async () => {
   const mockComplete = async (_prompt) =>
     'Here is the result:\n```json\n{"optimized":"Better prompt.","rationale":["r1"],"changes":["c1"]}\n```';

@@ -34,6 +34,17 @@ test('parseTuiStatus flags thinking when the working line is present', () => {
   assert.equal(parseTuiStatus(capture).thinking, true);
 });
 
+test('parseTuiStatus flags thinking from the loader+timer (no "esc to interrupt")', () => {
+  // High-effort / sub-agent states show the spinner + live timer but omit the
+  // "esc to interrupt" hint. The "verb… (Ns" pattern must still read as working.
+  const capture = '✛ Hyperspacing… (20s · still thinking with high effort)';
+  assert.equal(parseTuiStatus(capture).thinking, true);
+});
+
+test('parseTuiStatus does NOT flag thinking on the idle "Brewed for" summary', () => {
+  assert.equal(parseTuiStatus('✻ Brewed for 8h 2m 53s · 1 shell still running').thinking, false);
+});
+
 test('parseTuiStatus does not flag thinking at an idle prompt', () => {
   const capture = [
     '/claude-cockpit Opus 4.8 (1M context) ctx:35%      Remote Control active',
