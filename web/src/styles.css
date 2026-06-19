@@ -3057,12 +3057,22 @@ select.config-input {
   transform: scale(0.97);
   transform-origin: center 42%;
   pointer-events: none;
-  transition: opacity 0.24s var(--ease, ease), transform 0.24s var(--ease, ease);
+  /* CRITICAL: a fixed full-screen <iframe> swallows touch on iOS even when its
+     container has pointer-events:none, freezing page scroll while a session's
+     warm terminal is preloaded. visibility:hidden removes it (and the iframe)
+     from hit-testing entirely, while keeping its box size so ttyd/tmux don't
+     resize. The visibility flip is delayed past the fade so the exit still plays. */
+  visibility: hidden;
+  transition: opacity 0.24s var(--ease, ease), transform 0.24s var(--ease, ease),
+    visibility 0s linear 0.24s;
 }
 .term-overlay[data-visible='true'] {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.24s var(--ease, ease), transform 0.24s var(--ease, ease),
+    visibility 0s;
 }
 @media (prefers-reduced-motion: reduce) {
   .term-overlay {
