@@ -2,6 +2,7 @@ import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { Composer } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
+import { SubAgentThread } from './SubAgentThread';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { SubAgent } from '../lib/types';
@@ -22,8 +23,12 @@ interface ThreadProps {
   onTerminalModeChange: (active: boolean) => void;
   /** Sub-agents for the active session — drives the above-composer strip. */
   subagents: SubAgent[];
-  /** Open a specific running agent's transcript (strip row click). */
+  /** Open a specific running agent's transcript (pill click → inline view). */
   onOpenAgent: (agentId: string) => void;
+  /** The sub-agent whose transcript is shown inline (null = show session). */
+  viewingAgent?: SubAgent | null;
+  /** Clear the inline agent view (back to session transcript). */
+  onCloseAgent?: () => void;
   /** True while Claude is actively generating — flips the send button to STOP. */
   working?: boolean;
   /** Cancel in-flight generation (send Escape to the Claude pane). */
@@ -92,6 +97,8 @@ export function Thread({
   onTerminalModeChange,
   subagents,
   onOpenAgent,
+  viewingAgent = null,
+  onCloseAgent,
   working,
   onStop,
 }: ThreadProps) {
@@ -101,52 +108,88 @@ export function Thread({
           focused (CSS :focus-within), so text scrolling up behind the nav bar
           dissolves instead of hard-cutting. Fades out on blur. */}
       <div className="thread-fade" aria-hidden="true" />
-      {/* Sticky tailing is owned by App's scroll controller (see useEffect): it
-          tails new content while pinned, but PAUSES while you're actively
-          touching/scrolling so it can never fight your gesture (the deadlock that
-          previously froze scroll). autoScroll is therefore off. */}
-      <ThreadPrimitive.Viewport className="thread-viewport">
-        {!hasSelection ? (
-          <div className="thread-empty">select a session</div>
-        ) : (
-          <ThreadPrimitive.Empty>
-            <div className="thread-welcome">
-              <h1 className="thread-welcome-heading">What are we shipping today?</h1>
-              <p className="thread-welcome-subtitle">
-                Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
-              </p>
-              <WelcomeChips />
-            </div>
-          </ThreadPrimitive.Empty>
-        )}
-        {hasSelection && hiddenCount > 0 ? (
+
+      {viewingAgent ? (
+        /* INLINE AGENT TRANSCRIPT — replaces the session viewport */
+        <div className="agent-inline-view">
+          <div className="agent-inline-head">
+            <button
+              type="button"
+              className="agent-inline-back"
+              aria-label="Back to session"
+              onClick={onCloseAgent}
+            >
+              ‹ back
+            </button>
+            <span className="agent-inline-title">
+              <span className="sa-dot" data-status={viewingAgent.status} aria-hidden="true" />
+              <span className="agent-inline-name">
+                {viewingAgent.agentType || 'sub-agent'}
+              </span>
+              <span className="agent-inline-status">
+                {viewingAgent.status === 'running' ? '· running' : '· done'}
+              </span>
+            </span>
+          </div>
+          <SubAgentThread messages={viewingAgent.messages} />
+        </div>
+      ) : (
+        /* SESSION TRANSCRIPT */
+        <>
+          {/* Sticky tailing is owned by App's scroll controller (see useEffect): it
+              tails new content while pinned, but PAUSES while you're actively
+              touching/scrolling so it can never fight your gesture (the deadlock that
+              previously froze scroll). autoScroll is therefore off. */}
+          <ThreadPrimitive.Viewport className="thread-viewport">
+            {!hasSelection ? (
+              <div className="thread-empty">select a session</div>
+            ) : (
+              <ThreadPrimitive.Empty>
+                <div className="thread-welcome">
+                  <h1 className="thread-welcome-heading">What are we shipping today?</h1>
+                  <p className="thread-welcome-subtitle">
+                    Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
+                  </p>
+                  <WelcomeChips />
+                </div>
+              </ThreadPrimitive.Empty>
+            )}
+            {hasSelection && hiddenCount > 0 ? (
+              <button
+                type="button"
+                className="load-earlier"
+                onClick={onLoadEarlier}
+              >
+                Load earlier messages ({hiddenCount} hidden)
+              </button>
+            ) : null}
+            <ThreadPrimitive.Messages components={messageComponents} />
+          </ThreadPrimitive.Viewport>
+          {/* Tail-to-bottom: App toggles data-show when detached; click re-attaches.
+              OUTSIDE the Viewport so it never affects iOS momentum scrolling. */}
           <button
             type="button"
-            className="load-earlier"
-            onClick={onLoadEarlier}
+            className="scroll-to-bottom"
+            aria-label="Scroll to latest"
+            title="Scroll to latest (⌘.)"
+            data-hotkey="⌘."
+            data-hotkey-dir="up"
+            onClick={() => {
+              const vp = document.querySelector<HTMLElement>('.thread-viewport');
+              if (vp) vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
+            }}
           >
-            Load earlier messages ({hiddenCount} hidden)
+            <ArrowDownIcon size={18} />
           </button>
-        ) : null}
-        <ThreadPrimitive.Messages components={messageComponents} />
-      </ThreadPrimitive.Viewport>
-      {/* Tail-to-bottom: App toggles data-show when detached; click re-attaches.
-          OUTSIDE the Viewport so it never affects iOS momentum scrolling. */}
-      <button
-        type="button"
-        className="scroll-to-bottom"
-        aria-label="Scroll to latest"
-        title="Scroll to latest (⌘.)"
-        data-hotkey="⌘."
-        data-hotkey-dir="up"
-        onClick={() => {
-          const vp = document.querySelector<HTMLElement>('.thread-viewport');
-          if (vp) vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
-        }}
-      >
-        <ArrowDownIcon size={18} />
-      </button>
-      <SubAgentStrip subagents={subagents} onOpenAgent={onOpenAgent} />
+        </>
+      )}
+
+      {/* Pills + composer always visible so user can switch agents or type */}
+      <SubAgentStrip
+        subagents={subagents}
+        onOpenAgent={onOpenAgent}
+        viewingAgentId={viewingAgent?.agentId ?? null}
+      />
       <Composer
         disabled={!hasSelection}
         sessionId={sessionId}

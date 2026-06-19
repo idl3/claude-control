@@ -31,6 +31,7 @@ import { TokenGate } from './components/TokenGate';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import { SubAgentStrip } from './components/SubAgentStrip';
+import { SubAgentThread } from './components/SubAgentThread';
 import { ProcessPanel } from './components/ProcessPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
@@ -590,15 +591,19 @@ function AppInner() {
   const [panelOpen, setPanelOpen] = useState(false);
   // When the panel is opened from a strip row, focus that specific agent.
   const [panelAgentId, setPanelAgentId] = useState<string | null>(null);
+  // Inline agent transcript: set by clicking a pill, cleared on session switch or back.
+  const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
   useEffect(() => {
     setPanelOpen(false);
+    setViewingAgentId(null);
   }, [cockpit.selectedId]);
+  // Pill click → show inline transcript; does NOT open the side panel.
   const openAgent = useCallback((agentId: string) => {
-    setPanelAgentId(agentId);
-    setPanelOpen(true);
+    setViewingAgentId((prev) => (prev === agentId ? null : agentId));
   }, []);
+  const closeAgent = useCallback(() => setViewingAgentId(null), []);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -1445,29 +1450,65 @@ function AppInner() {
               // tmux send-keys.
               <div className="thread-root">
                 <div className="thread-fade" aria-hidden="true" />
-                <LivePane
-                  sessionId={selectedSession.id}
-                  capture={cockpit.capture}
-                  requestCapture={cockpit.requestCapture}
-                  clearCapture={cockpit.clearCapture}
-                />
-                {/* No transcript thread here, so queued sends would otherwise be
-                    invisible (they only echo in the raw pane). Surface them as a
-                    compact strip so you can still see what you sent + that it's
-                    in flight. They clear via the same reconcile path. */}
-                {selectedPending.length > 0 ? (
-                  <div className="live-pending" aria-label="Queued sends">
-                    {selectedPending.map((e) => (
-                      <div key={e.key} className="live-pending-bubble">
-                        <span className="live-pending-dot" aria-hidden="true" />
-                        {e.label}
+                {(() => {
+                  const inlineAgent = viewingAgentId
+                    ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)
+                    : null;
+                  if (inlineAgent) {
+                    return (
+                      <div className="agent-inline-view">
+                        <div className="agent-inline-head">
+                          <button
+                            type="button"
+                            className="agent-inline-back"
+                            aria-label="Back to live pane"
+                            onClick={closeAgent}
+                          >
+                            ‹ back
+                          </button>
+                          <span className="agent-inline-title">
+                            <span className="sa-dot" data-status={inlineAgent.status} aria-hidden="true" />
+                            <span className="agent-inline-name">
+                              {inlineAgent.agentType || 'sub-agent'}
+                            </span>
+                            <span className="agent-inline-status">
+                              {inlineAgent.status === 'running' ? '· running' : '· done'}
+                            </span>
+                          </span>
+                        </div>
+                        <SubAgentThread messages={inlineAgent.messages} />
                       </div>
-                    ))}
-                  </div>
-                ) : null}
+                    );
+                  }
+                  return (
+                    <>
+                      <LivePane
+                        sessionId={selectedSession.id}
+                        capture={cockpit.capture}
+                        requestCapture={cockpit.requestCapture}
+                        clearCapture={cockpit.clearCapture}
+                      />
+                      {/* No transcript thread here, so queued sends would otherwise be
+                          invisible (they only echo in the raw pane). Surface them as a
+                          compact strip so you can still see what you sent + that it's
+                          in flight. They clear via the same reconcile path. */}
+                      {selectedPending.length > 0 ? (
+                        <div className="live-pending" aria-label="Queued sends">
+                          {selectedPending.map((e) => (
+                            <div key={e.key} className="live-pending-bubble">
+                              <span className="live-pending-dot" aria-hidden="true" />
+                              {e.label}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 <SubAgentStrip
                   subagents={cockpit.subagents}
                   onOpenAgent={openAgent}
+                  viewingAgentId={viewingAgentId}
                 />
                 <Composer
                   disabled={false}
@@ -1492,6 +1533,12 @@ function AppInner() {
                     onTerminalModeChange={onTerminalModeChange}
                     subagents={cockpit.subagents}
                     onOpenAgent={openAgent}
+                    viewingAgent={
+                      viewingAgentId
+                        ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)
+                        : null
+                    }
+                    onCloseAgent={closeAgent}
                     working={agentWorking}
                     onStop={handleStop}
                   />
