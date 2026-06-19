@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -9,8 +9,10 @@ import { Kbd } from './Kbd';
 import {
   optimizePrompt,
   listSkills,
+  listAgents,
   type OptimizeResult,
   type SkillEntry,
+  type AgentEntry,
 } from '../lib/api';
 import { OptimizeReview } from './OptimizeReview';
 import { Lightbox } from './AttachmentPreview';
@@ -19,7 +21,7 @@ import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
-import { slashTokenAt, type SlashToken } from '../lib/slashToken';
+import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 
@@ -47,6 +49,31 @@ function loadSkills(id?: string | null): Promise<SkillEntry[]> {
       return [] as SkillEntry[];
     });
   _skillsPromise.set(key, p);
+  return p;
+}
+
+// Module-level per-session cache for the agent list (mirrors the skills cache).
+// Fetched via GET /api/agents?id=<sessionId> → lib/subagents.js listAgents.
+const _agentsCache = new Map<string, AgentEntry[]>();
+const _agentsPromise = new Map<string, Promise<AgentEntry[]>>();
+
+function loadAgents(id?: string | null): Promise<AgentEntry[]> {
+  const key = id ?? '';
+  const hit = _agentsCache.get(key);
+  if (hit) return Promise.resolve(hit);
+  const inflight = _agentsPromise.get(key);
+  if (inflight) return inflight;
+  const p = listAgents(id)
+    .then((a) => {
+      _agentsCache.set(key, a);
+      _agentsPromise.delete(key);
+      return a;
+    })
+    .catch(() => {
+      _agentsPromise.delete(key); // allow retry on next open
+      return [] as AgentEntry[];
+    });
+  _agentsPromise.set(key, p);
   return p;
 }
 
@@ -170,6 +197,8 @@ export function Composer({
   const composer = useComposerRuntime();
   const shell = useShell();
   const [empty, setEmpty] = useState(true);
+  // NOTE: SkillBrowser now unreachable via UI (inline / typing replaced the
+  // toolbar slash button). State + component kept to avoid risky dead-code removal.
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
   // Terminal (>_) mode: the composer runs shell command lines in a dedicated
   // server-side pane instead of replying to Claude. `terminal` = currently SHOWN;
@@ -268,9 +297,12 @@ export function Composer({
     gsap.set(el, { scale: 1 });
   }, [optimizing]);
 
-  // ── Inline skill autocomplete ──────────────────────────────────────────────
+  // ── Inline skill + agent autocomplete ────────────────────────────────────
   const [skills, setSkills] = useState<SkillEntry[]>(
     () => _skillsCache.get(sessionId ?? '') ?? [],
+  );
+  const [agents, setAgents] = useState<AgentEntry[]>(
+    () => _agentsCache.get(sessionId ?? '') ?? [],
   );
   const [text, setTextMirror] = useState('');     // mirror of composer text
   const [caret, setCaret] = useState(0);           // textarea selectionStart
@@ -293,6 +325,24 @@ export function Composer({
         // autocomplete + skill browser empty forever.
         .catch(() => {
           if (alive) setSkills([]);
+        });
+    }
+    return () => { alive = false; };
+  }, [sessionId]);
+
+  // Re-fetch agents whenever the session changes (mirrors skills fetch above).
+  useEffect(() => {
+    let alive = true;
+    const cached = _agentsCache.get(sessionId ?? '');
+    if (cached) {
+      setAgents(cached);
+    } else {
+      loadAgents(sessionId)
+        .then((a) => {
+          if (alive) setAgents(a);
+        })
+        .catch(() => {
+          if (alive) setAgents([]);
         });
     }
     return () => { alive = false; };
@@ -326,9 +376,10 @@ export function Composer({
     if (el) setCaret(el.selectionStart ?? 0);
   }, []);
 
-  // Active slash token at the current caret — drives autocomplete suggestions.
-  const activeToken = useMemo<SlashToken | null>(
-    () => slashTokenAt(text, caret),
+  // Active trigger token at the current caret — drives autocomplete suggestions.
+  // Detects both `/skill` (trigger='/') and `@agent` (trigger='@') tokens.
+  const activeToken = useMemo<TriggerToken | null>(
+    () => triggerTokenAt(text, caret),
     [text, caret],
   );
   const acQuery = activeToken ? activeToken.query : null;
@@ -342,7 +393,9 @@ export function Composer({
   const acItems = useMemo(() => {
     if (acQuery == null || acDismissed) return [];
     const q = acQuery.toLowerCase();
-    return skills
+    // '@' trigger → search agents; '/' trigger → search skills.
+    const source: (SkillEntry | AgentEntry)[] = activeToken?.trigger === '@' ? agents : skills;
+    return source
       .filter((s) => s.name.toLowerCase().includes(q))
       .sort((a, b) => {
         // Prefix matches first, then alphabetical.
@@ -351,7 +404,7 @@ export function Composer({
         return ap !== bp ? ap - bp : a.name.localeCompare(b.name);
       })
       .slice(0, AC_MAX);
-  }, [acQuery, acDismissed, skills]);
+  }, [acQuery, acDismissed, activeToken?.trigger, skills, agents]);
   const acOpen = !terminal && acItems.length > 0;
 
   // Active-skill chip: the leading `/<skill>` once it's a known, completed name.
@@ -363,9 +416,10 @@ export function Composer({
   const selectSkill = useCallback(
     (name: string) => {
       const token = activeToken;
-      const replacement = `/${name} `;
+      // Use the trigger char that opened this autocomplete ('@' for agents, '/' for skills).
+      const replacement = (token?.trigger === '@' ? '@' : '/') + name + ' ';
       if (token) {
-        // Splice: replace only the slash-token at the caret, preserve surrounding text.
+        // Splice: replace only the trigger-token at the caret, preserve surrounding text.
         const current = composer.getState().text ?? '';
         const spliced = current.slice(0, token.start) + replacement + current.slice(token.end);
         composer.setText(spliced);
@@ -554,6 +608,94 @@ export function Composer({
     return composer.subscribe(relay);
   }, [terminal, composer]);
 
+  // ── Inline pill overlay (Part 3) ───────────────────────────────────────────
+  // The overlay is a read-only <div> layered behind the textarea (position:
+  // absolute; pointer-events:none). It mirrors the textarea's text but replaces
+  // each committed `/skill` or `@agent` mention with a styled pill span. The
+  // textarea text is made transparent only when ≥1 pill exists (data-has-pills),
+  // so the common no-mention case has zero visual change and zero risk of
+  // misalignment. The overlay NEVER touches the textarea value or events.
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Known name sets for fast O(1) lookup during rendering.
+  const skillNames = useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
+  const agentNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents]);
+
+  /**
+   * Render `text` into an array of React nodes, wrapping committed `/skill` and
+   * `@agent` mentions (whose names appear in skillNames / agentNames) in a
+   * `.composer-pill` span. Also returns `hasPills` so the caller can gate the
+   * transparent-textarea style without a second pass.
+   *
+   * METRIC CONSTRAINT: The pill span MUST NOT alter glyph advance width vs. the
+   * textarea (no horizontal padding/margin, no font-weight/size/family changes,
+   * no letter-spacing). Only background-color, border-radius, and color may
+   * differ — all zero-advance properties. If these change the overlay drifts.
+   *
+   * Regex matches pattern: (leading-ws)(trigger)(name)(trailing-ws)
+   * where trigger is / or @, and the name is in the known set.
+   */
+  function renderMentions(
+    t: string,
+    knownSkills: Set<string>,
+    knownAgents: Set<string>,
+  ): { nodes: React.ReactNode[]; hasPills: boolean } {
+    // Match a committed mention: (start-or-whitespace)(trigger)(name)(whitespace).
+    // We use a 4-group regex: [1] leading ws, [2] trigger, [3] name, [4] trailing ws.
+    const RE = /(^|\s)([/@])([A-Za-z0-9:_-]+)(\s)/g;
+    const nodes: React.ReactNode[] = [];
+    let last = 0;
+    let hasPills = false;
+    let key = 0;
+    let m: RegExpExecArray | null;
+    while ((m = RE.exec(t)) !== null) {
+      const trigger = m[2] as '/' | '@';
+      const name = m[3];
+      const isKnown =
+        (trigger === '/' && knownSkills.has(name)) ||
+        (trigger === '@' && knownAgents.has(name));
+      if (!isKnown) continue;
+      hasPills = true;
+      const matchStart = m.index; // start of the full match (before leading ws)
+      const leadingWs = m[1];    // leading whitespace (or empty at string start)
+      const trailingWs = m[4];   // trailing whitespace (confirms commit)
+      const mentionStart = matchStart + leadingWs.length; // index of trigger char
+      const mentionEnd = mentionStart + 1 + name.length;  // exclusive end of name
+      // Push any plain text between the last node and the leading whitespace.
+      if (matchStart > last) nodes.push(t.slice(last, matchStart));
+      // Push the leading whitespace as plain text (outside the pill).
+      if (leadingWs) nodes.push(leadingWs);
+      // Push the pill: only the trigger+name, no padding (metric constraint).
+      nodes.push(
+        <span key={key++} className="composer-pill" aria-hidden="true">
+          {t.slice(mentionStart, mentionEnd)}
+        </span>
+      );
+      // Push the trailing whitespace as plain text (outside the pill).
+      nodes.push(t.slice(mentionEnd, mentionEnd + trailingWs.length));
+      last = mentionEnd + trailingWs.length;
+    }
+    // Push any remaining plain text after the last match.
+    if (last < t.length) nodes.push(t.slice(last));
+    return { nodes, hasPills };
+  }
+
+  const { nodes: overlayNodes, hasPills } = useMemo(
+    () => renderMentions(text, skillNames, agentNames),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [text, skillNames, agentNames],
+  );
+
+  // Sync overlay scroll to the textarea scroll after every text change.
+  // This ensures the pill layer stays aligned when the textarea scrolls vertically.
+  useLayoutEffect(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>('.composer-input');
+    const overlay = overlayRef.current;
+    if (!ta || !overlay) return;
+    overlay.scrollTop = ta.scrollTop;
+    overlay.scrollLeft = ta.scrollLeft;
+  }, [text]);
+
   return (
     <ComposerPrimitive.Root className="composer">
       {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
@@ -618,7 +760,11 @@ export function Composer({
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
             working + invisible) and overlay a hint shown only while empty. */}
-        <div className="composer-input-wrap">
+        {/* data-has-pills: when ≥1 pill exists, the textarea text is made
+            transparent (CSS) and the overlay renders the visible text with
+            pill highlights. When no pills are present, the overlay is empty
+            and the textarea renders normally — zero divergence risk. */}
+        <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}>
           <ComposerPrimitive.Input
             className="composer-input"
             placeholder={disabled && !terminal ? 'Select a session…' : ' '}
@@ -626,6 +772,14 @@ export function Composer({
             onKeyUp={(e) => updateCaret(e.currentTarget)}
             onClick={(e) => updateCaret(e.currentTarget)}
             onSelect={(e) => updateCaret(e.currentTarget)}
+            // Sync overlay scroll on textarea scroll (only new handler; no value/selection changes).
+            onScroll={(e) => {
+              const o = overlayRef.current;
+              if (o) {
+                o.scrollTop = e.currentTarget.scrollTop;
+                o.scrollLeft = e.currentTarget.scrollLeft;
+              }
+            }}
             onKeyDown={(e) => {
               // (⌘/Ctrl+S voice toggle is handled window-level above so it works
               // regardless of focus + beats the browser's Save.)
@@ -752,6 +906,18 @@ export function Composer({
             autoCapitalize={terminal ? 'none' : undefined}
             spellCheck={terminal ? false : undefined}
           />
+          {/* READ-ONLY pill overlay. Absolutely positioned over the textarea;
+              pointer-events:none so it never interferes with input. Renders the
+              same text as the textarea but with pill spans around committed
+              mentions — visible only when the textarea is transparent (hasPills).
+              See .composer-overlay and .composer-pill in styles.css. */}
+          <div
+            className="composer-overlay"
+            aria-hidden="true"
+            ref={overlayRef}
+          >
+            {overlayNodes}
+          </div>
           {terminal ? (
             <div className="composer-hint" aria-hidden="true">
               <span className="composer-hint-lead">Keys go to the shell…</span>
@@ -794,16 +960,6 @@ export function Composer({
               >
                 <PlusIcon />
               </ComposerPrimitive.AddAttachment>
-              <button
-                type="button"
-                className="composer-skills-btn"
-                aria-label="Browse skills"
-                title="Browse skills"
-                disabled={disabled}
-                onClick={() => setSkillBrowserOpen((v) => !v)}
-              >
-                <SlashIcon />
-              </button>
               <button
                 type="button"
                 className="composer-mic"
@@ -984,18 +1140,6 @@ function TerminalIcon() {
   );
 }
 
-function SlashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M7 20L17 4"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 function MicIcon() {
   return (

@@ -435,6 +435,12 @@ export interface SkillEntry {
   source: 'user' | 'project' | 'plugin';
 }
 
+export interface AgentEntry {
+  name: string;
+  description: string;
+  source: 'user' | 'project' | 'plugin';
+}
+
 export interface SkillDetail {
   name: string;
   source: 'user' | 'project' | 'plugin';
@@ -450,6 +456,16 @@ export async function listSkills(id?: string | null): Promise<SkillEntry[]> {
   const res = await authFetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return ((await res.json()) as { skills?: SkillEntry[] }).skills ?? [];
+}
+
+/** Fetch the list of available agents from the server.
+ *  Pass the current session id so project agents are merged in for that session's cwd.
+ */
+export async function listAgents(id?: string | null): Promise<AgentEntry[]> {
+  const url = id ? `/api/agents?id=${encodeURIComponent(id)}` : '/api/agents';
+  const res = await authFetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { agents?: AgentEntry[] }).agents ?? [];
 }
 
 /** Fetch a single skill's front-matter + markdown body for the given session. */

@@ -16,7 +16,7 @@ import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
-import { SubAgentsWatcher } from './lib/subagents.js';
+import { SubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
@@ -192,6 +192,13 @@ const server = http.createServer((req, res) => {
     const skillsSession = skillsId ? sessionById(skillsId) : null;
     const skillsCwd = skillsSession?.cwd ?? null;
     return endJson(res, 200, { skills: listSkills(skillsCwd) });
+  }
+  if (u.pathname === '/api/agents') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const agentsId = u.searchParams.get('id');
+    const agentsSession = agentsId ? sessionById(agentsId) : null;
+    const agentsCwd = agentsSession?.cwd ?? null;
+    return endJson(res, 200, { agents: listAgents(agentsCwd) });
   }
   if (u.pathname === '/api/skill') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
