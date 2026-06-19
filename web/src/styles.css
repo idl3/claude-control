@@ -510,12 +510,12 @@ body {
 .detail-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: 0 0 auto;
   margin-left: auto;
-  /* Breathing room from the title so the name truncates a touch earlier rather
-     than butting against the icons. */
-  padding-left: 14px;
+  /* Clear breathing room from the title so the name truncates well before the
+     icons rather than butting against them. */
+  padding-left: 18px;
 }
 .detail-action {
   display: inline-flex;
@@ -4694,16 +4694,14 @@ select.config-input {
 }
 
 /* ── Scroll-to-bottom: tail new replies ─────────────────────────── */
-/* Lives inside the viewport, stuck to its bottom-right edge (above the
-   composer) so it never overlaps composer text. align-self pins it to the
-   right gutter — the centered transcript column on desktop, the 12px gutter on
-   mobile. The primitive disables itself at the bottom → CSS fades it out. */
+/* Absolute (NOT a viewport child) so it can't break iOS momentum scrolling.
+   Floats bottom-right above the composer. Hidden by default; App sets
+   data-show="true" while the user is detached (scrolled up). */
 .scroll-to-bottom {
-  /* Absolute (NOT a viewport child) so it can't break iOS momentum scrolling.
-     Floats at the bottom-right of the thread, just above the composer. */
   position: absolute;
   right: 14px;
-  bottom: 92px;
+  /* Sit just above the composer at any height (var set by App's ResizeObserver). */
+  bottom: calc(var(--composer-h, 88px) + 10px);
   z-index: 5;
   box-sizing: border-box;
   width: 38px;
@@ -4718,8 +4716,15 @@ select.config-input {
   color: var(--text);
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  opacity: 1;
+  opacity: 0;
+  transform: translateY(10px) scale(0.9);
+  pointer-events: none;
   transition: opacity var(--ease) 0.18s, transform var(--ease) 0.18s, background var(--ease) 0.15s;
+}
+.scroll-to-bottom[data-show='true'] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 .scroll-to-bottom:hover {
   background: var(--bg-hover, var(--bg-2));
@@ -4727,12 +4732,6 @@ select.config-input {
 .scroll-to-bottom:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-/* At the bottom the primitive sets [disabled] — fade + drop out of the way. */
-.scroll-to-bottom:disabled {
-  opacity: 0;
-  transform: translateY(10px) scale(0.9);
-  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .scroll-to-bottom {
