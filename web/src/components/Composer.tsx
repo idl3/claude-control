@@ -9,11 +9,9 @@ import { Kbd } from './Kbd';
 import {
   optimizePrompt,
   listSkills,
-  fetchSkill,
   type OptimizeResult,
   type SkillEntry,
 } from '../lib/api';
-import { useArtifactPanel } from './ArtifactContext';
 import { OptimizeReview } from './OptimizeReview';
 import { SkillBrowser } from './SkillBrowser';
 import { VoiceDialog } from './VoiceDialog';
@@ -163,7 +161,6 @@ export function Composer({
 }: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
-  const { open: openArtifact, close: closeArtifact } = useArtifactPanel();
   const [empty, setEmpty] = useState(true);
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
   // Terminal (>_) mode: the composer runs shell command lines in a dedicated
@@ -359,42 +356,6 @@ export function Composer({
     const m = SLASH_DONE_RE.exec(text);
     return m && skills.some((s) => s.name === m[1]) ? m[1] : null;
   }, [text, skills]);
-
-  // Stable artifact id for the active skill (so tab dedup works correctly).
-  const skillArtifactId = activeSkill ? `skill-${activeSkill}` : null;
-
-  // Track the artifact id we opened so we can close it when the skill clears.
-  const openedSkillArtifactIdRef = useRef<string | null>(null);
-
-  // When a skill becomes active: fetch its detail and open the side panel.
-  // When the skill clears: close the panel for the previously-opened skill.
-  useEffect(() => {
-    if (!activeSkill || !skillArtifactId) {
-      // Close the skill artifact that was previously opened (if any).
-      if (openedSkillArtifactIdRef.current) {
-        closeArtifact(openedSkillArtifactIdRef.current);
-        openedSkillArtifactIdRef.current = null;
-      }
-      return;
-    }
-    let alive = true;
-    fetchSkill(activeSkill, sessionId)
-      .then((detail) => {
-        if (!alive) return;
-        openArtifact({
-          id: skillArtifactId,
-          kind: 'skill',
-          title: `/${detail.name}`,
-          content: detail.body,
-          skillFrontMatter: detail.frontMatter,
-          skillSource: detail.source,
-        });
-        openedSkillArtifactIdRef.current = skillArtifactId;
-      })
-      .catch(() => { /* skill not found or network error — silent */ });
-    return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSkill, sessionId]);
 
   const selectSkill = useCallback(
     (name: string) => {
