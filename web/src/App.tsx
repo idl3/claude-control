@@ -11,7 +11,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession, createSession } from './lib/api';
-import { SessionRail } from './components/SessionRail';
+import { SessionRail, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { LiveThinkingContext } from './components/ThinkingContext';
@@ -539,6 +539,49 @@ function AppInner() {
     });
   }, []);
 
+  // Rail filter (all / claude / terminal) + per-session accordion collapse, both
+  // persisted. ⌘1-9 only addresses sessions that are VISIBLE (filter-allowed and
+  // in an expanded group), so the badges and the jump stay in lockstep.
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>(() => {
+    try {
+      const v = localStorage.getItem('cc:sessionFilter');
+      return v === 'claude' || v === 'terminal' ? v : 'all';
+    } catch {
+      return 'all';
+    }
+  });
+  const cycleFilter = useCallback(() => {
+    setSessionFilter((f) => {
+      const next: SessionFilter = f === 'all' ? 'claude' : f === 'claude' ? 'terminal' : 'all';
+      try {
+        localStorage.setItem('cc:sessionFilter', next);
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+  const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('cc:collapsedSessions') || '[]'));
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleCollapse = useCallback((name: string) => {
+    setCollapsedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      try {
+        localStorage.setItem('cc:collapsedSessions', JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   // Animate the desktop rail collapse/expand (width + opacity). On mobile, clear
   // inline styles so the responsive CSS controls the rail.
   const railAnimatedRef = useRef(false);
@@ -762,23 +805,34 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedSession, cockpit.subagents.length, toggleRail, toggleTerminal]);
 
-  // ⌘/Ctrl+1‑9 jumps to the Nth session/pane in the rail's order (session name →
-  // window → pane). Skipped while the command palette is open — it uses ⌘N for
-  // its own quick-select.
+  // Claude panes ⌘1-9 can address: VISIBLE ones only — filter must allow Claude
+  // (not 'terminal') and the session group must be expanded — in rail order. The
+  // rail's badges read from the same list, so badge ⌘N always selects row N.
+  const addressableClaude = useMemo(() => {
+    if (sessionFilter === 'terminal') return [];
+    return cockpit.sessions
+      .filter((s) => s.kind !== 'terminal' && !collapsedSessions.has(s.sessionName ?? '?'))
+      .sort(
+        (a, b) =>
+          (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
+          (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
+          (a.paneIndex ?? 0) - (b.paneIndex ?? 0),
+      );
+  }, [cockpit.sessions, sessionFilter, collapsedSessions]);
+  const railHotkeys = useMemo(() => {
+    const m = new Map<string, string>();
+    addressableClaude.slice(0, 9).forEach((s, i) => m.set(s.id, `⌘${i + 1}`));
+    return m;
+  }, [addressableClaude]);
+
+  // ⌘/Ctrl+1‑9 jumps to the Nth addressable Claude session. Skipped while the
+  // command palette is open — it uses ⌘N for its own quick-select.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (paletteOpen) return;
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (!/^[1-9]$/.test(e.key)) return;
-      const ordered = cockpit.sessions
-        .filter((s) => s.kind !== 'terminal') // Claude Code sessions only
-        .sort(
-          (a, b) =>
-            (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
-            (a.windowIndex ?? 0) - (b.windowIndex ?? 0) ||
-            (a.paneIndex ?? 0) - (b.paneIndex ?? 0),
-        );
-      const target = ordered[Number(e.key) - 1];
+      const target = addressableClaude[Number(e.key) - 1];
       if (target) {
         e.preventDefault();
         e.stopPropagation();
@@ -795,7 +849,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [cockpit.sessions, paletteOpen, select]);
+  }, [addressableClaude, paletteOpen, select]);
 
   // ⌘/Ctrl+Enter from anywhere jumps focus back INTO the composer — but only when
   // focus isn't already in a text field (where ⌘Enter means send/optimise) and no
@@ -977,12 +1031,16 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <NewSessionForm onToast={showToast} />
+            <NewSessionForm onToast={showToast} filter={sessionFilter} onCycleFilter={cycleFilter} />
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
                 selectedId={cockpit.selectedId}
                 onSelect={select}
+                filter={sessionFilter}
+                collapsed={collapsedSessions}
+                onToggleCollapse={toggleCollapse}
+                hotkeyById={railHotkeys}
               />
             </div>
             {/* Bottom bar: reload + settings + process monitor, all on one level
@@ -1238,6 +1296,8 @@ function AppInner() {
         {processOpen ? (
           <ProcessPanel
             power={cockpit.resources.snapshot?.power ?? null}
+            cpu={cockpit.resources.snapshot?.self?.cpuPct ?? null}
+            mem={cockpit.resources.snapshot?.system?.memUsedPct ?? null}
             onClose={() => setProcessOpen(false)}
             onToast={showToast}
           />

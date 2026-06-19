@@ -6,22 +6,55 @@ import { BatteryIcon, XIcon } from './icons';
 
 interface ProcessPanelProps {
   power: PowerStatus | null;
+  /** Live system CPU% (self, per-core normalized) + memory used %. */
+  cpu: number | null;
+  mem: number | null;
   onClose: () => void;
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
 }
 
 const POLL_MS = 3000;
+const HIST_MAX = 48; // ~2.5 min at the 3s resource cadence
+
+/**
+ * Cheap inline sparkline: two SVG polylines (area fill + line), auto-scaled to
+ * max(floor, observed peak). No deps, no canvas — fine to re-render at 3s.
+ */
+function Sparkline({ values, floor, color }: { values: number[]; floor: number; color: string }) {
+  const W = 150;
+  const H = 32;
+  if (values.length < 2) {
+    return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" />;
+  }
+  const peak = Math.max(floor, ...values, 1);
+  const step = W / (values.length - 1);
+  const pts = values
+    .map((v, i) => `${(i * step).toFixed(1)},${(H - (v / peak) * H).toFixed(1)}`)
+    .join(' ');
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={`0,${H} ${pts} ${W},${H}`} fill={color} fillOpacity="0.12" stroke="none" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 /**
  * System monitor: top processes by CPU (polled from /api/ps) with a confirm-gated
  * kill per row, plus a power/battery readout. Read-mostly; the only mutation is
  * SIGTERM (SIGKILL via shift-click), each behind an inline confirm.
  */
-export function ProcessPanel({ power, onClose: rawClose, onToast }: ProcessPanelProps) {
+export function ProcessPanel({ power, cpu, mem, onClose: rawClose, onToast }: ProcessPanelProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [procs, setProcs] = useState<ProcessInfo[] | null>(null);
   const [confirmPid, setConfirmPid] = useState<number | null>(null);
   const [killing, setKilling] = useState<number | null>(null);
+  // Rolling CPU/mem history for the sparklines, sampled from each live snapshot.
+  const [hist, setHist] = useState<{ cpu: number; mem: number }[]>([]);
+  useEffect(() => {
+    if (cpu == null && mem == null) return;
+    setHist((h) => [...h, { cpu: cpu ?? 0, mem: mem ?? 0 }].slice(-HIST_MAX));
+  }, [cpu, mem]);
 
   const refresh = useCallback(() => {
     listProcesses()
@@ -87,6 +120,22 @@ export function ProcessPanel({ power, onClose: rawClose, onToast }: ProcessPanel
         </div>
 
         <div className="modal-body proc-body">
+          <div className="proc-graphs">
+            <div className="proc-graph">
+              <div className="proc-graph-head">
+                <span className="proc-graph-label">CPU</span>
+                <span className="proc-graph-val">{cpu != null ? `${cpu.toFixed(0)}%` : '—'}</span>
+              </div>
+              <Sparkline values={hist.map((h) => h.cpu)} floor={100} color="var(--accent)" />
+            </div>
+            <div className="proc-graph">
+              <div className="proc-graph-head">
+                <span className="proc-graph-label">MEM</span>
+                <span className="proc-graph-val">{mem != null ? `${mem.toFixed(0)}%` : '—'}</span>
+              </div>
+              <Sparkline values={hist.map((h) => h.mem)} floor={100} color="var(--accent-2)" />
+            </div>
+          </div>
           <div className="proc-row proc-head">
             <span className="proc-pid">PID</span>
             <span className="proc-cpu">CPU%</span>
