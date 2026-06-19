@@ -65,6 +65,69 @@ test('parseTuiStatus does NOT flag thinking on the AskUserQuestion picker (esc t
   assert.equal(parseTuiStatus(capture).thinking, false);
 });
 
+// Regression: stale working lines in scrollback history must NOT keep the
+// rainbow animation alive after generation ends.
+//
+// _pollThinking captures 26 lines (visible + history) so parsePanePrompt can
+// find question pickers. If the full 26-line capture is scanned for thinking
+// signals, a completed-turn working line that has scrolled into history — but
+// is still within the 26-line window — would keep reporting thinking:true.
+// The fix restricts the thinking scan to the last THINKING_SCAN_LINES (8).
+test('parseTuiStatus does NOT flag thinking when working line is only in scrollback history', () => {
+  // Simulates a post-completion pane: 20 lines of "above-visible" scrollback
+  // (including a stale working line from the previous turn), followed by the
+  // newly rendered answer and idle status bar.
+  const staleHistory = [
+    // older content above the visible area — scrollback history
+    '> write me a poem',
+    '',
+    '✻ Cogitating… (3s · esc to interrupt)',
+    ...Array(17).fill(''),
+  ];
+  const visibleArea = [
+    'Here is a short poem for you:',
+    '',
+    '  Roses are red',
+    '  Violets are blue',
+    '',
+    '/my-project Sonnet 4.6 (200k context) ctx:12%',
+    '> ',
+  ];
+  const capture = [...staleHistory, ...visibleArea].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, false);
+});
+
+test('parseTuiStatus does NOT flag thinking when WORKING_TIMER_RE line is only in scrollback history', () => {
+  // Same scenario but the stale line matches the loader+timer regex (no "esc to interrupt").
+  const staleHistory = [
+    '> explain async/await',
+    '✛ Hyperspacing… (20s · still thinking with high effort)',
+    ...Array(18).fill(''),
+  ];
+  const visibleArea = [
+    'Async/await is syntactic sugar over Promises.',
+    '',
+    '/my-project Opus 4.8 (1M context) ctx:8%',
+    '> ',
+  ];
+  const capture = [...staleHistory, ...visibleArea].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, false);
+});
+
+test('parseTuiStatus STILL flags thinking when working line is in the visible bottom 8 lines', () => {
+  // The thinking signal must still fire when the working line is within the
+  // visible (bottom 8) rows — i.e. generation is truly in progress.
+  const capture = [
+    ...Array(20).fill(''),  // padding to simulate a tall pane
+    '> some prompt text',
+    '',
+    '✻ Cogitating… (12s · ↑ 3.2k tokens · esc to interrupt)',
+    '',
+    '',
+  ].join('\n');
+  assert.equal(parseTuiStatus(capture).thinking, true);
+});
+
 test('prettyModel shortens transcript model ids', () => {
   assert.equal(prettyModel('claude-opus-4-8'), 'Opus 4.8');
   assert.equal(prettyModel('claude-sonnet-4-6'), 'Sonnet 4.6');
