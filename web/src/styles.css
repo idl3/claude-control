@@ -2031,6 +2031,11 @@ details.block-tool[open] > summary .tool-arrow,
     padding-bottom: 6px;
   }
 }
+/* External display (iPad driving a monitor): no home indicator, so drop the
+   safe-area bottom clearance — flat 8px like a desktop. */
+body.is-external-display .composer {
+  padding-bottom: 8px;
+}
 
 /* Active sub-agents strip — sits directly above the composer, one row per
    running agent (type + latest work line). Whole strip is a button → opens the
