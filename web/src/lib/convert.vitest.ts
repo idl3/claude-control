@@ -393,3 +393,18 @@ describe('convertMessages — assistant turn merging', () => {
     expect(out[1].metadata?.custom?.cockpitRole).toBe('system');
   });
 });
+
+describe('convertMessages id dedupe', () => {
+  // assistant-ui's MessageRepository THROWS on duplicate ids (crashes the thread).
+  // Compacted/resumed transcripts can repeat a uuid, so ids must be made unique.
+  it('produces unique ids even when the transcript repeats a uuid', () => {
+    const out = convertMessages([
+      { uuid: 'dup', role: 'user', ts: 1, blocks: [{ kind: 'text', text: 'first' }] },
+      { uuid: 'dup', role: 'user', ts: 2, blocks: [{ kind: 'text', text: 'second' }] },
+      { uuid: 'other', role: 'user', ts: 3, blocks: [{ kind: 'text', text: 'third' }] },
+    ] as Msg[]);
+    const ids = out.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length); // all unique
+    expect(ids).toContain('dup'); // first occurrence keeps the original id
+  });
+});
