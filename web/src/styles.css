@@ -379,7 +379,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .pane-icon[data-state='working'] svg,
   .pane-icon-ask,
-  .pane-icon-zzz {
+  .pane-icon-zzz,
+  .detail-action[data-running='true'],
+  .subagent-strip-row .sa-dot {
     animation: none;
   }
 }
@@ -626,6 +628,25 @@ body {
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+/* Sub-agents actively running: the button glows + pulses in the accent colour
+   so live work is obvious at a glance. */
+.detail-action[data-running='true'] {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  animation: agents-pulse 1.6s var(--ease) infinite;
+}
+.detail-action[data-running='true'] .detail-action-count {
+  color: var(--accent);
+}
+@keyframes agents-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
+  }
 }
 .detail-name {
   font-weight: 700;
@@ -1944,6 +1965,68 @@ details.block-tool[open] > summary .tool-arrow,
   .composer:focus-within {
     padding-bottom: 6px;
   }
+}
+
+/* Active sub-agents strip — sits directly above the composer, one row per
+   running agent (type + latest work line). Whole strip is a button → opens the
+   sub-agent panel. Capped height; scrolls if many agents run at once. */
+.subagent-strip {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 0 12px 6px;
+  width: calc(100% - 24px);
+  max-height: 84px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 10px;
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg-1));
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line));
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--ease) 0.15s, border-color var(--ease) 0.15s;
+}
+.subagent-strip:hover {
+  background: color-mix(in oklch, var(--accent) 14%, var(--bg-1));
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+}
+.subagent-strip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.subagent-strip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subagent-strip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--txt-meta);
+}
+.subagent-strip-row .sa-dot {
+  align-self: center;
+  animation: pulse 1.4s var(--ease) infinite;
+}
+.subagent-strip-type {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.subagent-strip-summary {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.subagent-strip-idle {
+  font-style: italic;
+  color: var(--text-faint);
 }
 
 /* Inline skill autocomplete — floats just above the composer (keyboard is

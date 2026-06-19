@@ -30,6 +30,7 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
+import { SubAgentStrip } from './components/SubAgentStrip';
 import { ProcessPanel } from './components/ProcessPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
@@ -981,6 +982,10 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
+  // Count of sub-agents actively running (drives the animated Agents button +
+  // the above-composer strip). Done agents stay reachable via the panel.
+  const runningAgents = cockpit.subagents.filter((a) => a.status === 'running').length;
+
   // ⌘/Ctrl+/ toggles the in-transcript search box. Capture phase so it never
   // leaks to the browser's built-in quick-find (⌘F). Esc to close is handled
   // inside TranscriptSearch itself.
@@ -1271,14 +1276,21 @@ function AppInner() {
                         className="detail-action detail-action--count"
                         aria-pressed={panelOpen}
                         data-on={panelOpen ? 'true' : undefined}
-                        aria-label="Sub-agents"
+                        data-running={runningAgents > 0 ? 'true' : undefined}
+                        aria-label={
+                          runningAgents > 0
+                            ? `${runningAgents} sub-agent${runningAgents === 1 ? '' : 's'} running`
+                            : 'Sub-agents'
+                        }
                         title="Sub-agents (⌘U)"
                         data-hotkey="⌘U"
                         data-hotkey-dir="down"
                         onClick={() => setPanelOpen((v) => !v)}
                       >
                         <BotIcon />
-                        <span className="detail-action-count">{cockpit.subagents.length}</span>
+                        {runningAgents > 0 ? (
+                          <span className="detail-action-count">{runningAgents}</span>
+                        ) : null}
                       </button>
                     ) : null}
                   </>
@@ -1338,6 +1350,10 @@ function AppInner() {
                     ))}
                   </div>
                 ) : null}
+                <SubAgentStrip
+                  subagents={cockpit.subagents}
+                  onOpen={() => setPanelOpen(true)}
+                />
                 <Composer
                   disabled={false}
                   sessionId={cockpit.selectedId}
@@ -1357,6 +1373,8 @@ function AppInner() {
                     subAgentMode={activeSubAgentMode}
                     onSubAgentModeChange={onActiveSubAgentModeChange}
                     onTerminalModeChange={onTerminalModeChange}
+                    subagents={cockpit.subagents}
+                    onOpenAgents={() => setPanelOpen(true)}
                   />
                 </LiveThinkingContext.Provider>
                 <ArtifactPanel />
