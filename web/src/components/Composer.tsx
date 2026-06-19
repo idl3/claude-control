@@ -394,6 +394,21 @@ export function Composer({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [disabled]);
+  // ⌘/Ctrl+D toggles the sub-agent checkbox from anywhere — beats the
+  // browser's bookmark-page shortcut via capture-phase + preventDefault.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'd' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (disabled) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog is open
+      if (terminal) return; // terminal mode has no sub-agent concept
+      e.preventDefault();
+      onSubAgentModeChange?.(!subAgentMode);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [disabled, terminal, subAgentMode, onSubAgentModeChange]);
+
   const commitVoice = useCallback(
     (text: string) => {
       setVoiceOpen(false);
@@ -811,20 +826,22 @@ export function Composer({
               visually adjacent to the send buttons it influences. Only shown
               in non-terminal mode (terminal has no prompt optimisation). */}
           {!terminal ? (
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={!!subAgentMode}
+            <label
               className={`composer-subagent-toggle${subAgentMode ? ' composer-subagent-toggle--on' : ''}`}
-              title={subAgentMode ? 'Sub-agent on — click to disable' : 'Sub-agent off — click to enable'}
-              disabled={disabled}
-              onClick={() => onSubAgentModeChange?.(!subAgentMode)}
+              aria-label="Dispatch task in sub-agent"
+              data-hotkey="⌘D"
+              title={subAgentMode ? 'Sub-agent on — click to disable (⌘D)' : 'Sub-agent off — click to enable (⌘D)'}
             >
-              <span className="composer-subagent-check" aria-hidden="true">
-                {subAgentMode ? <CheckIcon /> : <UncheckedIcon />}
-              </span>
+              <input
+                type="checkbox"
+                className="composer-subagent-checkbox"
+                checked={!!subAgentMode}
+                disabled={disabled}
+                onChange={(e) => onSubAgentModeChange?.(e.target.checked)}
+                aria-label="Dispatch task in sub-agent"
+              />
               <span className="composer-subagent-label">Dispatch task in sub-agent</span>
-            </button>
+            </label>
           ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal ? (
@@ -995,26 +1012,3 @@ function SparkleIcon() {
   );
 }
 
-/** Checkmark tick shown inside the sub-agent toggle when it is ON. */
-function CheckIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M20 6 9 17l-5-5"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/** Empty box shown inside the sub-agent toggle when it is OFF. */
-function UncheckedIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
