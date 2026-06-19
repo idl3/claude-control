@@ -20,6 +20,7 @@ import { VoiceDialog } from './VoiceDialog';
 import { TerminalView } from './TerminalView';
 import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
+import { slashTokenAt, type SlashToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 
@@ -50,12 +51,11 @@ function loadSkills(id?: string | null): Promise<SkillEntry[]> {
   return p;
 }
 
-// A leading slash-command still being typed (no space yet): `/`, then the
-// partial name. The capture group is the query that narrows the suggestions.
-const SLASH_TYPING_RE = /^\/([A-Za-z0-9:_-]*)$/;
-// A completed leading slash-command (name followed by a space or end) — used to
-// derive the active-skill chip.
-const SLASH_DONE_RE = /^\/([A-Za-z0-9:_-]+)(?:\s|$)/;
+// A completed leading slash-command (name followed by a space) — used to derive
+// the active-skill chip. Requires trailing whitespace so a name that is a prefix
+// of another (e.g. `100x:plan` vs `100x:plan-hard`) does NOT fire early while
+// the user is still typing.
+const SLASH_DONE_RE = /^\/([A-Za-z0-9:_-]+)\s/;
 const AC_MAX = 4;
 
 interface ComposerProps {
@@ -268,6 +268,7 @@ export function Composer({
     () => _skillsCache.get(sessionId ?? '') ?? [],
   );
   const [text, setTextMirror] = useState('');     // mirror of composer text
+  const [caret, setCaret] = useState(0);           // textarea selectionStart
   const [acIndex, setAcIndex] = useState(0);       // highlighted suggestion
   const [acDismissed, setAcDismissed] = useState(false); // Esc / just-selected
 
@@ -303,10 +304,34 @@ export function Composer({
     return composer.subscribe(sync);
   }, [composer]);
 
-  const acQuery = useMemo(() => {
-    const m = SLASH_TYPING_RE.exec(text);
-    return m ? m[1] : null;
-  }, [text]);
+  // Track caret position for caret-aware slash autocomplete (Fix 2).
+  // We read selectionStart on input, keyup, click, and selectionchange.
+  useEffect(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>('.composer-input');
+    if (!ta) return;
+    const update = () => setCaret(ta.selectionStart ?? 0);
+    ta.addEventListener('input', update);
+    ta.addEventListener('keyup', update);
+    ta.addEventListener('click', update);
+    ta.addEventListener('select', update);
+    document.addEventListener('selectionchange', update);
+    return () => {
+      ta.removeEventListener('input', update);
+      ta.removeEventListener('keyup', update);
+      ta.removeEventListener('click', update);
+      ta.removeEventListener('select', update);
+      document.removeEventListener('selectionchange', update);
+    };
+  // Re-attach if the textarea re-mounts (e.g. on session switch).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  // Active slash token at the current caret — drives autocomplete suggestions.
+  const activeToken = useMemo<SlashToken | null>(
+    () => slashTokenAt(text, caret),
+    [text, caret],
+  );
+  const acQuery = activeToken ? activeToken.query : null;
 
   // Reset highlight + un-dismiss whenever the query changes (new keystroke).
   useEffect(() => {
@@ -373,13 +398,32 @@ export function Composer({
 
   const selectSkill = useCallback(
     (name: string) => {
-      composer.setText(`/${name} `);
+      const token = activeToken;
+      const replacement = `/${name} `;
+      if (token) {
+        // Splice: replace only the slash-token at the caret, preserve surrounding text.
+        const current = composer.getState().text ?? '';
+        const spliced = current.slice(0, token.start) + replacement + current.slice(token.end);
+        composer.setText(spliced);
+        // Restore caret to right after the inserted replacement.
+        const newCaret = token.start + replacement.length;
+        requestAnimationFrame(() => {
+          const ta = document.querySelector<HTMLTextAreaElement>('.composer-input');
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(newCaret, newCaret);
+            setCaret(newCaret);
+          }
+        });
+      } else {
+        composer.setText(replacement);
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>('.composer-input')?.focus();
+        });
+      }
       setAcDismissed(true);
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>('.composer-input')?.focus();
-      });
     },
-    [composer],
+    [composer, activeToken],
   );
 
   // ── Voice dictation ───────────────────────────────────────────────────────
