@@ -31,18 +31,48 @@ In a two-session same-cwd scenario where both sessions are actively being writte
 
 **How**: After binding, periodically re-check whether the pane's visible text still matches the assigned transcript. Evict and re-bind if consistency drifts below a threshold.
 
-**Why deferred**: Higher complexity, continuous overhead, and harder to make safe (risk of flapping). Better suited as a self-healing layer once a clean binding mechanism exists (Option B fully deployed).
+**Status: Shipped in PLE-44.** Implemented as a self-heal pass inside the existing `refresh()` loop (no second poller). See details below.
 
 ## What Remains for Legacy Pre-Hook Long-Runners
 
-Sessions started before the `record-pane.mjs` hook was installed have no registry entry. The content-fingerprint tiebreak helps when the pane has accumulated visible text. However, if both sessions have nearly identical visible text (e.g. two similar refactor sessions), the tiebreak may not fire or may pick the wrong one.
+Sessions started before the `record-pane.mjs` hook was installed have no registry entry. The content-fingerprint tiebreak (PLE-41) helps when the pane has accumulated visible text. For the remaining case where drift goes undetected at binding time, PLE-44's self-heal pass re-verifies on every refresh cycle.
 
-**Self-heal: Explicitly deferred.** The operator's manual recovery step is: use the existing manual-pin UI (the pin button in the session row) to force-bind the pane to the correct transcript. This is a one-time action per session. Automatic periodic re-verify (Option C) is the long-term solution and is out of scope for PLE-41.
+The operator's manual recovery step (pin button in the session row) is still available for edge cases where automatic re-binding is not desired.
+
+## Self-Heal: PLE-44
+
+### How it works
+
+Inside `refresh()`, after the initial `assignTranscripts` call completes, a second pass walks every **matcher-bound** pane (those in `autoPanes` — not registry-hooked, not manually pinned):
+
+1. Read the pane's cached text from `_paneTextCache` (already captured by `_pollThinking`).
+2. Score the current binding against the pane text via `fingerprintScore`.
+3. Score every other candidate in the same pool.
+4. If `shouldRebind(currentScore, bestOtherScore)` returns true, replace the binding and log the heal.
+
+### Thresholds (in `lib/match.js`)
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `SELFHEAL_FLOOR` | 2 | Current score must be **below** this before a rebind is considered |
+| `SELFHEAL_MARGIN` | 6 | Best other score minus current must be **at least** this; prevents near-tie flips |
+| `SELFHEAL_DEBOUNCE_CYCLES` | 5 | Minimum `refresh()` cycles between consecutive rebinds for the same pane |
+
+### Safety invariants
+
+- **Registry-pinned panes are never touched.** Hook-bound (`hookByTarget`) and manually-pinned (`pinnedByTarget`) panes are excluded from `autoPanes` before the self-heal loop runs.
+- **Hysteresis over sensitivity.** `SELFHEAL_MARGIN > FINGERPRINT_MIN_OVERLAP` — the content tiebreak alone cannot trigger a self-heal; the current binding must also be clearly bad.
+- **Debounced.** Each pane can be re-bound at most once per 5 refresh cycles (~20 s at 4 s/cycle).
+- **Always logged.** Every heal emits a `[pane-selfheal]` line with pane target, old→new transcript paths, and both scores.
+- **No new dependency, no new timer.** The pass runs inside the existing `refresh()` call.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `lib/match.js` | Added `fingerprintScore()` export; extended `MatchPane` with `capturedText?`, `MatchCandidate` with `recentText?`; added fingerprint tiebreak as the last fallback in `prefer()` |
-| `lib/sessions.js` | Added `recentText` field to `extractTailRecord` (collects last 3 assistant message snippets); added `_paneTextCache` map; caches raw capture in `_pollThinking`; passes `capturedText` from cache into `assignTranscripts` pane objects |
-| `test/match.test.js` | 8 new tests: 4 `fingerprintScore` unit tests + 4 `assignTranscripts` tiebreak tests including the PLE-41 regression |
+| `lib/match.js` | (PLE-41) Added `fingerprintScore()` export; extended `MatchPane` with `capturedText?`, `MatchCandidate` with `recentText?`; added fingerprint tiebreak as the last fallback in `prefer()` |
+| `lib/match.js` | (PLE-44) Added `SELFHEAL_FLOOR`, `SELFHEAL_MARGIN` constants and `shouldRebind()` export |
+| `lib/sessions.js` | (PLE-41) Added `recentText` field to `extractTailRecord`; added `_paneTextCache` map; caches raw capture in `_pollThinking`; passes `capturedText` into `assignTranscripts` |
+| `lib/sessions.js` | (PLE-44) Added `SELFHEAL_DEBOUNCE_CYCLES` constant, `_refreshCycle` counter, `_healLastCycle` map; self-heal re-verify pass at end of `refresh()` |
+| `test/match.test.js` | (PLE-41) 8 new tests: 4 `fingerprintScore` unit tests + 4 `assignTranscripts` tiebreak tests |
+| `test/match.test.js` | (PLE-44) 4 new tests: `shouldRebind` strong-drift case, near-tie hysteresis, registry-pin exclusion, floor-protection |
