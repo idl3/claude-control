@@ -43,6 +43,7 @@ import {
 } from './components/icons';
 import type { Msg, ServerMessage } from './lib/types';
 import { useIsNarrow } from './hooks/useIsNarrow';
+import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
 
 // Concatenate a transcript message's text blocks (to match a real user echo
@@ -815,11 +816,12 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ⌘/Ctrl+↓ scrolls the transcript to the latest (re-attaches tailing — the
+  // ⌘/Ctrl+. scrolls the transcript to the latest (re-attaches tailing — the
   // controller's scroll listener flips back to pinned once it reaches bottom).
+  // (⌘. not ↓: iPad/Safari reserves ⌘↓.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'ArrowDown' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (e.key !== '.' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
       const vp = document.querySelector<HTMLElement>('.thread-viewport');
       if (vp) {
@@ -926,6 +928,10 @@ function AppInner() {
   const appRef = useRef<HTMLDivElement>(null);
   const { pull, refreshing } = usePullToRefresh(appRef);
 
+  // Holding ⌘/Ctrl reveals hotkey affordances (incl. the scroll-to-bottom
+  // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
+  const cmdHeld = useModifierHeld(500);
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
     <ArtifactPanelProvider>
@@ -934,6 +940,7 @@ function AppInner() {
         className="app"
         data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
+        data-cmd-held={cmdHeld ? 'true' : undefined}
       >
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}

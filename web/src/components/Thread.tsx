@@ -58,7 +58,9 @@ export function Thread({ hasSelection, sessionId, hiddenCount, onLoadEarlier }: 
         type="button"
         className="scroll-to-bottom"
         aria-label="Scroll to latest"
-        title="Scroll to latest"
+        title="Scroll to latest (⌘.)"
+        data-hotkey="⌘."
+        data-hotkey-dir="up"
         onClick={() => {
           const vp = document.querySelector<HTMLElement>('.thread-viewport');
           if (vp) vp.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });

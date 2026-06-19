@@ -4739,7 +4739,9 @@ select.config-input {
   pointer-events: none;
   transition: opacity var(--ease) 0.18s, transform var(--ease) 0.18s, background var(--ease) 0.15s;
 }
-.scroll-to-bottom[data-show='true'] {
+.scroll-to-bottom[data-show='true'],
+/* Holding ⌘ reveals the button (with its ⌘. badge) even when already at bottom. */
+.app[data-cmd-held='true'] .scroll-to-bottom {
   opacity: 1;
   transform: none;
   pointer-events: auto;
