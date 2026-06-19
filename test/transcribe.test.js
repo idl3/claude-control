@@ -1,6 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanTranscript } from '../lib/transcribe.js';
+import { cleanTranscript, clampLang } from '../lib/transcribe.js';
+
+test('clampLang keeps en/zh as-is (null = no second pass)', () => {
+  assert.equal(clampLang('en'), null);
+  assert.equal(clampLang('zh'), null);
+  assert.equal(clampLang(''), null);
+  assert.equal(clampLang(null), null);
+});
+
+test('clampLang folds CJK-script misdetections to zh', () => {
+  assert.equal(clampLang('ja'), 'zh'); // Japanese shares Han chars
+  assert.equal(clampLang('yue'), 'zh'); // Cantonese
+});
+
+test('clampLang folds other misdetections (latin/Singlish space) to en', () => {
+  assert.equal(clampLang('ko'), 'en');
+  assert.equal(clampLang('vi'), 'en');
+  assert.equal(clampLang('ms'), 'en'); // Malay — Singlish borrows from it
+  assert.equal(clampLang('id'), 'en');
+});
 
 test('cleanTranscript collapses lines into one trimmed string', () => {
   assert.equal(cleanTranscript('  Hello   world  \n'), 'Hello world');
