@@ -45,7 +45,10 @@ test('agent with recently-written jsonl shows status=running', async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('agent with stale jsonl (>45 s old, <600 s) shows status=running', async () => {
+// PLE-57 regression: finished agents (quiet file > RUNNING_WINDOW = 45 s, no
+// doneByParent) must show 'done' promptly — NOT 'running' for 10 minutes.
+// This test FAILS against the old 600 s RUNNING_WINDOW_MS and passes with 45 s.
+test('finished agent (quiet file 60 s, doneByParent=false) shows status=done (PLE-57 teeth)', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
@@ -54,7 +57,8 @@ test('agent with stale jsonl (>45 s old, <600 s) shows status=running', async ()
   const agentId = 'stale0000001';
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
 
-  // Back-date the jsonl mtime to 60 s ago (> old 45 s window, < new 600 s window).
+  // Back-date the jsonl mtime to 60 s ago (> RUNNING_WINDOW 45 s, doneByParent never set).
+  // With the old 600 s window this reads 'running'; with 45 s it correctly reads 'done'.
   const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
   const sixtySecondsAgo = new Date(Date.now() - 60_000);
   fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
@@ -64,14 +68,14 @@ test('agent with stale jsonl (>45 s old, <600 s) shows status=running', async ()
 
   const snap = watcher.snapshot();
   assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
-  assert.equal(snap[0].status, 'running',
-    `agent 60 s stale should still be 'running' with 600 s window, got '${snap[0].status}'`);
+  assert.equal(snap[0].status, 'done',
+    `finished agent (60 s quiet, no doneByParent) should be 'done' within 45 s window, got '${snap[0].status}'`);
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('agent with very stale jsonl (>600 s old) shows status=done', async () => {
+test('agent with very stale jsonl (>45 s old) shows status=done', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
@@ -80,7 +84,7 @@ test('agent with very stale jsonl (>600 s old) shows status=done', async () => {
   const agentId = 'ancient00001';
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
 
-  // Back-date to 601 s ago — beyond the new window.
+  // Back-date to 601 s ago — well beyond RUNNING_WINDOW (45 s).
   const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
   const old = new Date(Date.now() - 601_000);
   fs.utimesSync(jsonlPath, old, old);
@@ -92,6 +96,33 @@ test('agent with very stale jsonl (>600 s old) shows status=done', async () => {
   assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
   assert.equal(snap[0].status, 'done',
     `agent 601 s stale should be 'done', got '${snap[0].status}'`);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// Agent quiet for 30 s (> ACTIVE_WINDOW 20 s, < RUNNING_WINDOW 45 s) stays running.
+// This guards against over-eager expiry for slow-but-still-running agents.
+test('agent quiet for 30 s (inside RUNNING_WINDOW of 45 s) stays running', async () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'slowagent0001';
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+  const thirtySecondsAgo = new Date(Date.now() - 30_000);
+  fs.utimesSync(jsonlPath, thirtySecondsAgo, thirtySecondsAgo);
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+
+  const snap = watcher.snapshot();
+  assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
+  assert.equal(snap[0].status, 'running',
+    `agent 30 s quiet (inside 45 s RUNNING_WINDOW) should be 'running', got '${snap[0].status}'`);
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
