@@ -1525,7 +1525,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
+  /* Mirror .thread-viewport centering: 800 px column with a 12 px gutter on
+     mobile. Keeps the inline agent transcript aligned with the main chat. */
+  padding: 12px max(12px, calc((100% - 800px) / 2)) 20px;
 }
 .sa-item {
   border: 1px solid var(--line);
