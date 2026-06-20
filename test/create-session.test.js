@@ -1,19 +1,27 @@
 // Tests for named-session creation: name sanitization, default-name generation,
-// shell quoting for the `--name` launch flag, and the tmux `new-window -n`
-// naming semantics our reliable path depends on.
+// shell quoting for the `--name` launch flag, the tmux `new-window -n` naming
+// semantics, and createWindow argv correctness.
 //
-// The tmux integration test runs against an ISOLATED tmux server (its own
-// `-L <socket>`), so it never touches the operator's live sessions, and uses a
-// benign `cat` command (never a real `claude`). The server is killed in a
-// finally block. It self-skips when no tmux binary is present.
+// Hermetic cases (the majority) drive the REAL createWindow with a stub runner
+// that records argv without shelling out — they pass with NO tmux installed.
+//
+// The one real-tmux smoke case (rename-window naming semantics) gates on the
+// production resolveTmuxBin() so skip-semantics match the production resolver
+// (honours COCKPIT_TMUX + `command -v`, not just three hardcoded paths).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import os from 'node:os';
 
-import { sanitizeName, defaultSessionName, shellQuoteName, renameWindow } from '../lib/tmux.js';
+import {
+  sanitizeName,
+  defaultSessionName,
+  shellQuoteName,
+  renameWindow,
+  createWindow,
+  resolveTmuxBin,
+} from '../lib/tmux.js';
 
 const execFile = promisify(_execFile);
 
@@ -57,19 +65,6 @@ test('shellQuoteName single-quotes and escapes embedded single quotes', () => {
   assert.equal(shellQuoteName('$(touch pwned)'), `'$(touch pwned)'`);
 });
 
-// ── tmux `new-window -n` naming (isolated server, benign command) ────────────
-async function tmuxBin() {
-  for (const p of ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux']) {
-    try {
-      await access(p, fsConstants.X_OK);
-      return p;
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
-}
-
 // ── renameWindow target validation (no tmux contact) ────────────────────────
 test('renameWindow rejects a syntactically invalid target before touching tmux', async () => {
   // assertTarget throws synchronously-in-promise; an invalid target must never
@@ -80,10 +75,158 @@ test('renameWindow rejects a syntactically invalid target before touching tmux',
   );
 });
 
-// ── tmux `rename-window` semantics (isolated server, benign command) ─────────
-test('tmux rename-window renames the window (the rename rail path)', async (t) => {
-  const bin = await tmuxBin();
-  if (!bin) return t.skip('tmux not installed');
+// ── Stub runner helper ───────────────────────────────────────────────────────
+
+/**
+ * Build a pair of stubs for `createWindow`'s `_run` / `_listPanes` seam.
+ *
+ * `listCalls` — what `_listPanes` returns on the first call (simulates an
+ * existing session) and the second call (simulates the post-create list).
+ *
+ * Returns `{ _run, _listPanes, calls }` where `calls` is an array of every
+ * argv array passed to `_run`.
+ */
+function makeStubs({ listCalls = [[], [{ sessionName: 'claude-control', target: 'claude-control:0.0', windowIndex: 0 }]] } = {}) {
+  const calls = [];
+  let listIdx = 0;
+
+  async function _run(args) {
+    calls.push([...args]);
+    // new-window returns the target via -P -F; new-session returns nothing.
+    // If this is a new-window call, return a canned target matching the session
+    // in the second listCalls entry so the caller can verify the round-trip.
+    const isNewWindow = args[0] === 'new-window';
+    return { stdout: isNewWindow ? 'claude-control:1\n' : '', stderr: '' };
+  }
+
+  async function _listPanes() {
+    return listCalls[listIdx++] ?? [];
+  }
+
+  return { _run, _listPanes, calls };
+}
+
+// ── createWindow — hermetic stub cases ──────────────────────────────────────
+//
+// These run with NO tmux installed. Each assertion on `calls` verifies the
+// ACTUAL argv that createWindow would pass to tmux — a wrong target, cwd, or
+// flag would fail the test.
+
+test('createWindow (no existing session) emits new-session with correct argv', async () => {
+  // First _listPanes call: empty → no server. Second: post-create list.
+  const secondList = [{ sessionName: 'claude-control', target: 'claude-control:0.0', windowIndex: 0 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [[], secondList] });
+
+  const target = await createWindow({ cwd: os.tmpdir(), name: 'my session' }, { _run, _listPanes });
+
+  // Must have called new-session exactly once with the right args.
+  assert.equal(calls.length, 1, 'exactly one tmux call in no-server path');
+  const [cmd, ...argv] = calls[0];
+  assert.equal(cmd, 'new-session', 'first call is new-session');
+  assert.ok(argv.includes('-d'), 'detached flag present');
+  assert.ok(argv.includes('-s'), '-s flag present');
+  assert.equal(argv[argv.indexOf('-s') + 1], 'claude-control', 'session named claude-control');
+  assert.ok(argv.includes('-c'), '-c flag present');
+  assert.equal(argv[argv.indexOf('-c') + 1], os.tmpdir(), 'cwd passed to new-session');
+  assert.ok(argv.includes('-n'), '-n flag present');
+  assert.equal(argv[argv.indexOf('-n') + 1], 'my session', 'window name passed to new-session');
+
+  // Target comes from the second _listPanes call (post-create).
+  assert.equal(target, 'claude-control:0.0', 'target from post-create list');
+});
+
+test('createWindow (no existing session, no name) omits -n flag', async () => {
+  const secondList = [{ sessionName: 'claude-control', target: 'claude-control:0.0', windowIndex: 0 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [[], secondList] });
+
+  await createWindow({ cwd: os.tmpdir() }, { _run, _listPanes });
+
+  const [, ...argv] = calls[0];
+  assert.ok(!argv.includes('-n'), '-n must be absent when no name supplied');
+});
+
+test('createWindow (existing session) emits new-window with correct argv', async () => {
+  // First _listPanes: existing session present → skip new-session path.
+  const existingPanes = [{ sessionName: 'work', target: 'work:0.0', windowIndex: 0 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [existingPanes] });
+
+  const target = await createWindow({ cwd: os.tmpdir(), name: 'feat' }, { _run, _listPanes });
+
+  assert.equal(calls.length, 1, 'exactly one tmux call in existing-session path');
+  const [cmd, ...argv] = calls[0];
+  assert.equal(cmd, 'new-window', 'first call is new-window');
+  assert.ok(argv.includes('-t'), '-t flag present');
+  assert.equal(argv[argv.indexOf('-t') + 1], 'work', 'targets first existing session');
+  assert.ok(argv.includes('-P'), '-P (print) flag present');
+  assert.ok(argv.includes('-F'), '-F flag present');
+  assert.equal(argv[argv.indexOf('-F') + 1], '#{session_name}:#{window_index}', 'format string correct');
+  assert.ok(argv.includes('-c'), '-c flag present');
+  assert.equal(argv[argv.indexOf('-c') + 1], os.tmpdir(), 'cwd passed to new-window');
+  assert.ok(argv.includes('-n'), '-n flag present');
+  assert.equal(argv[argv.indexOf('-n') + 1], 'feat', 'window name passed to new-window');
+
+  // Target comes from stdout of the stub runner ("claude-control:1\n").
+  assert.equal(target, 'claude-control:1', 'target parsed from new-window stdout');
+});
+
+test('createWindow (existing session, no name) omits -n flag', async () => {
+  const existingPanes = [{ sessionName: 'work', target: 'work:0.0', windowIndex: 0 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [existingPanes] });
+
+  await createWindow({ cwd: os.tmpdir() }, { _run, _listPanes });
+
+  const [, ...argv] = calls[0];
+  assert.ok(!argv.includes('-n'), '-n must be absent when no name supplied');
+});
+
+test('createWindow rejects missing cwd without calling tmux', async () => {
+  const { _run, _listPanes, calls } = makeStubs();
+
+  await assert.rejects(
+    () => createWindow({ cwd: '' }, { _run, _listPanes }),
+    /cwd is required/,
+  );
+  assert.equal(calls.length, 0, 'tmux must not be called when cwd is missing');
+});
+
+test('createWindow rejects non-existent cwd without calling tmux', async () => {
+  const { _run, _listPanes, calls } = makeStubs();
+
+  await assert.rejects(
+    () => createWindow({ cwd: '/nonexistent/__cc_test__' }, { _run, _listPanes }),
+    /cwd does not exist/,
+  );
+  assert.equal(calls.length, 0, 'tmux must not be called when cwd is missing');
+});
+
+test('createWindow sanitizes the name before passing it to tmux', async () => {
+  const secondList = [{ sessionName: 'claude-control', target: 'claude-control:0.0', windowIndex: 0 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [[], secondList] });
+
+  // Inject a name with a newline — must never reach tmux raw.
+  await createWindow({ cwd: os.tmpdir(), name: 'bad\nname' }, { _run, _listPanes });
+
+  const [, ...argv] = calls[0];
+  const nameIdx = argv.indexOf('-n');
+  assert.ok(nameIdx !== -1, '-n flag present');
+  const passedName = argv[nameIdx + 1];
+  assert.ok(!passedName.includes('\n'), 'newline must not reach tmux argv');
+  assert.equal(passedName, 'bad name', 'sanitized name passed to tmux');
+});
+
+// ── Real-tmux smoke case — gated on production resolveTmuxBin ───────────────
+//
+// Uses an isolated tmux server so it never touches the operator's live sessions.
+// Gates on the same resolveTmuxBin() the production code uses, so skip-semantics
+// are identical (honours COCKPIT_TMUX + `command -v`, not just three paths).
+
+test('tmux rename-window renames the window (real tmux smoke, production gating)', async (t) => {
+  let bin;
+  try {
+    bin = await resolveTmuxBin();
+  } catch {
+    return t.skip('tmux not available (resolveTmuxBin threw)');
+  }
 
   const socket = `cc-test-${process.pid}-${Date.now().toString(36)}-rn`;
   const L = ['-L', socket];
@@ -92,7 +235,14 @@ test('tmux rename-window renames the window (the rename rail path)', async (t) =
 
   try {
     // Isolated server: a detached window running `cat` (benign, NOT claude).
-    await execFile(bin, [...L, 'new-session', '-d', '-s', 'box', '-n', before, 'cat']);
+    // ENOENT here means COCKPIT_TMUX points at a non-existent binary — skip.
+    let bootResult;
+    try {
+      bootResult = await execFile(bin, [...L, 'new-session', '-d', '-s', 'box', '-n', before, 'cat']);
+    } catch (err) {
+      if (err.code === 'ENOENT') return t.skip(`tmux binary not executable: ${bin}`);
+      throw err;
+    }
 
     // Resolve the real target — tmux base-index may not be 0, so we read it back
     // from the server rather than assuming "box:0".
@@ -109,31 +259,6 @@ test('tmux rename-window renames the window (the rename rail path)', async (t) =
 
     assert.equal(winName, after, 'window name should reflect the rename');
     assert.equal(paneCmd, 'cat', 'benign test command should still be running, not claude');
-  } finally {
-    // Tear down the WHOLE isolated server — never touches the operator's tmux.
-    await execFile(bin, [...L, 'kill-server']).catch(() => {});
-  }
-});
-
-test('tmux new-window -n names the window (the reliable rail path)', async (t) => {
-  const bin = await tmuxBin();
-  if (!bin) return t.skip('tmux not installed');
-
-  const socket = `cc-test-${process.pid}-${Date.now().toString(36)}`;
-  const L = ['-L', socket];
-  const name = sanitizeName('my named session');
-
-  try {
-    // Isolated server: a detached session whose first window runs `cat` (a benign
-    // long-lived no-op, NOT claude), named via -n exactly like createWindow does.
-    await execFile(bin, [...L, 'new-session', '-d', '-s', 'box', '-n', name, 'cat']);
-
-    const fmt = '#{window_name}\x1f#{pane_current_command}';
-    const { stdout } = await execFile(bin, [...L, 'list-windows', '-a', '-F', fmt]);
-    const [winName, paneCmd] = stdout.trim().split('\x1f');
-
-    assert.equal(winName, name, 'window name should match the -n argument');
-    assert.equal(paneCmd, 'cat', 'benign test command should be running, not claude');
   } finally {
     // Tear down the WHOLE isolated server — never touches the operator's tmux.
     await execFile(bin, [...L, 'kill-server']).catch(() => {});
