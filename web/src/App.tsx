@@ -896,6 +896,8 @@ function AppInner() {
   // list arrives), and follow back/forward navigation.
   const restoredHash = useRef(false);
   useEffect(() => {
+    // hashchange = user pressed back/forward mid-session: always open the
+    // transcript (close the rail) just like a manual select() call.
     const fromHash = () => {
       const id = decodeURIComponent(window.location.hash.replace(/^#/, ''));
       if (id && id !== cockpit.selectedId && cockpit.sessions.some((s) => s.id === id)) {
@@ -903,14 +905,21 @@ function AppInner() {
         setRailOpenMobile(false);
       }
     };
-    // Initial restore: wait until at least one session is known.
+    // Initial restore: wait until at least one session is known. On mobile
+    // (narrow) we keep the rail visible so the user lands in the sidebar, not
+    // the transcript. The selection is still restored so opening it shows the
+    // right session.
     if (!restoredHash.current && cockpit.sessions.length > 0) {
       restoredHash.current = true;
-      fromHash();
+      const id = decodeURIComponent(window.location.hash.replace(/^#/, ''));
+      if (id && id !== cockpit.selectedId && cockpit.sessions.some((s) => s.id === id)) {
+        cockpit.select(id);
+        if (!narrow) setRailOpenMobile(false);
+      }
     }
     window.addEventListener('hashchange', fromHash);
     return () => window.removeEventListener('hashchange', fromHash);
-  }, [cockpit, cockpit.sessions, cockpit.selectedId]);
+  }, [cockpit, cockpit.sessions, cockpit.selectedId, narrow]);
 
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
@@ -1272,6 +1281,7 @@ function AppInner() {
                 collapsed={collapsedSessions}
                 onToggleCollapse={toggleCollapse}
                 hotkeyById={railHotkeys}
+                workingOverrideId={agentWorking ? cockpit.selectedId : null}
               />
             </div>
             {/* Bottom bar: reload + settings + process monitor, all on one level

@@ -17,6 +17,13 @@ interface SessionRailProps {
   onToggleCollapse: (sessionName: string) => void;
   /** id → "⌘N" badge, computed by App over the VISIBLE+addressable Claude order. */
   hotkeyById: Map<string, string>;
+  /**
+   * When App's `agentWorking` flag fires immediately on send (bridging the
+   * poll gap), the selected session's rail icon should reflect that state even
+   * if `claudeWorking(s)` hasn't caught up yet.  Pass the selected id while
+   * working, null otherwise.
+   */
+  workingOverrideId?: string | null;
 }
 
 /** A Claude pane reads as "working" while actively generating OR with very recent
@@ -81,6 +88,7 @@ function PaneRow({
   selected,
   onSelect,
   hotkey,
+  workingOverrideId,
 }: {
   s: Session;
   selected: boolean;
@@ -88,6 +96,8 @@ function PaneRow({
   /** "⌘N" for the first 9 Claude sessions (matches the ⌘1-9 jump) — drives the
    *  Command-hold hint badge. Undefined for terminals + rows past 9. */
   hotkey?: string;
+  /** See SessionRailProps.workingOverrideId — syncs rail icon with transcript loader. */
+  workingOverrideId?: string | null;
 }) {
   const isTerminal = s.kind === 'terminal';
   const label = isTerminal
@@ -98,11 +108,13 @@ function PaneRow({
 
   // Claude character state: a pending question (?) > working (generating / tools
   // / sub-agents / recent activity) > idle (sleeping/Zzz). No state for terminals.
+  // workingOverrideId bridges the poll gap: if the selected session just sent a
+  // message, show working immediately even if claudeWorking hasn't caught up yet.
   const claudeState = isTerminal
     ? null
     : s.pending
       ? 'ask'
-      : claudeWorking(s)
+      : claudeWorking(s) || s.id === workingOverrideId
         ? 'working'
         : 'sleeping';
 
@@ -205,6 +217,7 @@ export function SessionRail({
   collapsed,
   onToggleCollapse,
   hotkeyById,
+  workingOverrideId,
 }: SessionRailProps) {
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
   const groups = useMemo(() => {
@@ -263,6 +276,7 @@ export function SessionRail({
                           selected={s.id === selectedId}
                           onSelect={onSelect}
                           hotkey={hotkeyById.get(s.id)}
+                          workingOverrideId={workingOverrideId}
                         />
                       ))}
                     </ul>
