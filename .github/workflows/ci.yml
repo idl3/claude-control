@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Backend (Node built-in test runner). The suite is hermetic — no tmux,
+      # ffmpeg, or whisper are required (create-session + transcribe tests stub
+      # their externals).
+      - name: Install backend deps
+        run: npm ci
+
+      - name: Backend tests
+        run: node --test
+
+      # Web (Vite build + Vitest).
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+
+      - name: Web build
+        working-directory: web
+        run: npm run build
+
+      - name: Web tests
+        working-directory: web
+        run: npx vitest run
