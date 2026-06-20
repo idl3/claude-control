@@ -1,0 +1,223 @@
+/**
+ * test/poller-guards.test.js
+ *
+ * Re-entrancy guard tests for SessionRegistry periodic pollers (PLE-55).
+ *
+ * Strategy: build a minimal SessionRegistry with a stubbed _tmux that resolves
+ * after a controllable deferred, then call the guarded method twice concurrently
+ * and assert the core work (listWindows call-count) ran exactly once. After the
+ * first call resolves a subsequent call must run normally (flag reset). After a
+ * rejection the flag must also be reset.
+ *
+ * _pollCtx / _pollThinking are guarded but delegate to capturePane on each
+ * session — unit-driving them in isolation would require constructing session
+ * state. We test their guards via the flag directly (structural) rather than
+ * call-count, and add a note explaining why.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { SessionRegistry } from '../lib/sessions.js';
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/** Returns [deferred, resolve, reject]. */
+function deferred() {
+  let res, rej;
+  const p = new Promise((resolve, reject) => { res = resolve; rej = reject; });
+  return [p, res, rej];
+}
+
+/**
+ * Build a minimal SessionRegistry with a controlled stub for _listWindows.
+ * The stub resolves only when the caller calls the returned `unblock()` fn.
+ *
+ * We stub _listWindows (the very first await inside _doRefresh) so we can
+ * freeze the body without touching file-system or tmux paths.
+ */
+function makeRegistry(stubListWindows) {
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent-projects',
+    tmux: {
+      listWindows: stubListWindows,
+      isValidTarget: () => false,
+    },
+  });
+  return reg;
+}
+
+// ── refresh() skip-if-busy ────────────────────────────────────────────────────
+
+test('refresh(): second call while first is in-flight is a no-op (skip-if-busy)', async () => {
+  let callCount = 0;
+  const [blocker, unblock] = deferred();
+
+  const stub = async () => {
+    callCount++;
+    await blocker; // freeze here until we unblock
+    return [];
+  };
+
+  const reg = makeRegistry(stub);
+
+  // Fire two overlapping calls.
+  const p1 = reg.refresh();
+  const p2 = reg.refresh(); // should skip — flag already set
+
+  // Unblock the first.
+  unblock();
+  await Promise.all([p1, p2]);
+
+  assert.equal(callCount, 1, 'listWindows must be called exactly once when second call overlaps');
+});
+
+test('refresh(): call runs again after the first resolves (flag reset)', async () => {
+  let callCount = 0;
+  const reg = makeRegistry(async () => { callCount++; return []; });
+
+  await reg.refresh();
+  await reg.refresh();
+
+  assert.equal(callCount, 2, 'listWindows must be called twice for two sequential calls');
+});
+
+test('refresh(): flag resets after a rejection so next call still runs', async () => {
+  // _listWindows() has a built-in try/catch and returns [] on error, so we
+  // can't make refresh() itself reject through that path. Instead we stub
+  // _doRefresh() directly on the instance so a genuine throw propagates through
+  // the guard wrapper (refresh → _doRefresh). This proves the finally() resets
+  // the flag even when the body throws.
+  const reg = makeRegistry(async () => []);
+
+  let doRefreshCalls = 0;
+  let shouldThrow = true;
+
+  reg._doRefresh = async () => {
+    doRefreshCalls++;
+    if (shouldThrow) throw new Error('stub body error');
+    return [];
+  };
+
+  // First call: _doRefresh throws → refresh() rejects.
+  await assert.rejects(() => reg.refresh(), /stub body error/);
+  assert.equal(reg._refreshing, false, 'flag must be false after rejected call');
+
+  // Flag is reset; second call must enter _doRefresh again.
+  shouldThrow = false;
+  await reg.refresh();
+  assert.equal(doRefreshCalls, 2, '_doRefresh must run again after flag was reset');
+});
+
+// ── _pollCtx / _pollThinking: structural guard verification ──────────────────
+//
+// These workers iterate over this._sessions and call capturePane per session.
+// Driving them meaningfully in isolation would require constructing full session
+// objects and a capturePane stub for each — significant test scaffolding for a
+// one-line guard. Instead we verify the guard flag directly: set it manually,
+// call the worker, assert capturePane was never called (the flag short-circuits
+// before any iteration begins), then clear the flag and verify a call goes
+// through. This is sufficient to prove the skip-if-busy contract.
+
+test('_pollCtx: skips body when flag is already set', async () => {
+  let captureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { captureCalls++; return ''; },
+    },
+  });
+  // Inject a fake session so there's something to iterate over.
+  reg._sessions = [{ target: 'test:0.0', kind: 'claude' }];
+
+  // Pre-set the flag (simulates a concurrent in-flight call).
+  reg._pollingCtx = true;
+  await reg._pollCtx();
+  assert.equal(captureCalls, 0, '_pollCtx must not call capturePane when flag is set');
+
+  // Clear flag; next call should proceed.
+  reg._pollingCtx = false;
+  await reg._pollCtx();
+  assert.equal(captureCalls, 1, '_pollCtx must call capturePane once when flag is clear');
+});
+
+test('_pollThinking: skips body when flag is already set', async () => {
+  let captureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { captureCalls++; return ''; },
+    },
+  });
+  reg._sessions = [{ target: 'test:0.0', kind: 'claude' }];
+
+  reg._pollingThinking = true;
+  await reg._pollThinking();
+  assert.equal(captureCalls, 0, '_pollThinking must not call capturePane when flag is set');
+
+  reg._pollingThinking = false;
+  await reg._pollThinking();
+  assert.equal(captureCalls, 1, '_pollThinking must call capturePane once when flag is clear');
+});
+
+test('_pollCtx: flag resets after rejection so next call runs', async () => {
+  let callCount = 0;
+  let shouldThrow = true;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => {
+        callCount++;
+        if (shouldThrow) throw new Error('capture failed');
+        return '';
+      },
+    },
+  });
+  reg._sessions = [{ target: 'test:0.0', kind: 'claude' }];
+
+  // The per-session inner catch absorbs the capturePane error; _pollCtx itself
+  // won't reject. The flag must still reset.
+  await reg._pollCtx();
+  assert.equal(callCount, 1, 'first call attempted capturePane');
+
+  // Flag should be clear; second call must attempt capturePane again.
+  shouldThrow = false;
+  await reg._pollCtx();
+  assert.equal(callCount, 2, 'second call must run after flag was reset by first call');
+});
+
+// ── teardown: verify skip-if-busy "teeth" ───────────────────────────────────
+//
+// This test demonstrates that removing the guard from refresh() would cause
+// callCount === 2 instead of 1, making the "ran once" assertion above fail.
+// We can't remove the guard in the same process, so instead we prove the
+// inverse: without the flag check, two concurrent calls would both reach the
+// stub. We simulate the un-guarded scenario by calling _doRefresh() directly
+// (the private body with no guard).
+
+test('teeth: _doRefresh() called twice concurrently increments callCount to 2 (guard needed)', async () => {
+  let callCount = 0;
+  const [blocker, unblock] = deferred();
+
+  const stub = async () => {
+    callCount++;
+    await blocker;
+    return [];
+  };
+
+  const reg = makeRegistry(stub);
+
+  // Call the un-guarded body twice — both proceed.
+  const p1 = reg._doRefresh();
+  const p2 = reg._doRefresh();
+  unblock();
+  await Promise.all([p1, p2]);
+
+  assert.equal(callCount, 2, 'without guard, both concurrent _doRefresh() calls reach the stub');
+});
