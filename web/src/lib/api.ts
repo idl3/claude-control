@@ -315,11 +315,13 @@ export async function optimizePrompt(text: string, intent?: string): Promise<Opt
  * Send a recorded audio blob to the server for local speech-to-text
  * (ffmpeg → whisper.cpp). `ext` names the container so the server writes the
  * temp file with a format ffmpeg recognises. Returns the transcript text.
+ * Pass an `AbortSignal` to cancel the in-flight request (e.g. on user cancel).
  */
-export async function transcribeAudio(blob: Blob, ext = 'webm'): Promise<string> {
+export async function transcribeAudio(blob: Blob, ext = 'webm', signal?: AbortSignal): Promise<string> {
   const res = await authFetch(`/api/transcribe?ext=${encodeURIComponent(ext)}`, {
     method: 'POST',
     body: blob,
+    signal,
   });
   const json = (await res.json().catch(() => ({}))) as {
     ok?: boolean;

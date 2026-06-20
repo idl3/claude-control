@@ -70,6 +70,8 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
   const rafRef = useRef<number | null>(null);
   const drawingRef = useRef(false);
   const committedRef = useRef(false);
+  const mountedRef = useRef(true);
+  const transcribeAbortRef = useRef<AbortController | null>(null);
 
   const stopDraw = useCallback(() => {
     drawingRef.current = false;
@@ -121,6 +123,16 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
     acRef.current = null;
     analyserRef.current = null;
   }, [stopDraw]);
+
+  // Track mount state so post-await setState never fires on an unmounted hook.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      transcribeAbortRef.current?.abort();
+      transcribeAbortRef.current = null;
+    };
+  }, []);
 
   // Mount → request mic, wire analyser + recorder.
   useEffect(() => {
@@ -241,12 +253,20 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
         onCommit('');
         return;
       }
+      const controller = new AbortController();
+      transcribeAbortRef.current = controller;
       try {
-        const text = await transcribeAudio(blob, ext);
-        onCommit(text);
+        const text = await transcribeAudio(blob, ext, controller.signal);
+        if (mountedRef.current && !controller.signal.aborted) {
+          onCommit(text);
+        }
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : 'Transcription failed.');
-        setStatus('error');
+        // User cancel → swallow silently; do NOT set error state.
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        if (mountedRef.current && !controller.signal.aborted) {
+          setErrorMsg(err instanceof Error ? err.message : 'Transcription failed.');
+          setStatus('error');
+        }
       }
     };
     try {
@@ -259,8 +279,15 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
 
   const cancel = useCallback(() => {
     committedRef.current = true; // suppress any in-flight onstop commit
+    transcribeAbortRef.current?.abort();
+    transcribeAbortRef.current = null;
+    // Clear onstop BEFORE calling stop() so the recorder's stop event does not
+    // re-enter the transcription path (onstop was set by stop(); cancel must
+    // not retrigger it).
+    const rec = recorderRef.current;
+    if (rec) rec.onstop = null;
     try {
-      recorderRef.current?.stop();
+      rec?.stop();
     } catch {
       /* ignore */
     }
