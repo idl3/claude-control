@@ -43,6 +43,7 @@ import { listSkills, readSkill } from './lib/skills.js';
 // and echoes it, so we never reflect the raw token back and need no custom
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
 import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
+import { pruneDeadClients } from './lib/ws-heartbeat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -1188,6 +1189,9 @@ function maybeTeardown(id) {
 }
 
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   send(ws, { type: 'sessions', sessions: registry.getSessions() });
   send(ws, { type: 'resources', snapshot: resources.snapshot() });
   ws._subs = new Set();
@@ -1209,6 +1213,9 @@ wss.on('connection', (ws) => {
     }
   });
 });
+
+const heartbeatInterval = setInterval(() => pruneDeadClients(wss.clients), 30000);
+heartbeatInterval.unref();
 
 async function handleClientMessage(ws, msg) {
   switch (msg.type) {
@@ -1708,6 +1715,7 @@ async function main() {
 }
 
 function shutdown() {
+  clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   terminal.shutdownAll();
   mlx.shutdown();
