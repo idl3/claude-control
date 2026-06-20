@@ -221,6 +221,13 @@ test('createWindow sanitizes the name before passing it to tmux', async () => {
 // are identical (honours COCKPIT_TMUX + `command -v`, not just three paths).
 
 test('tmux rename-window renames the window (real tmux smoke, production gating)', async (t) => {
+  // Local-dev smoke only. CI is hermetic: createWindow's argv is fully covered by
+  // the stub-runner tests above, and live-tmux naming (automatic-rename, list
+  // format separators) varies by tmux version/config, so this would flake on the
+  // runner. Skip when CI is set.
+  if (process.env.CI) {
+    return t.skip('real-tmux smoke skipped in CI (hermetic stub tests cover createWindow)');
+  }
   let bin;
   try {
     bin = await resolveTmuxBin();
