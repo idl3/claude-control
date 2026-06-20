@@ -42,7 +42,7 @@ import { listSkills, readSkill } from './lib/skills.js';
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
-import { checkToken as authCheckToken, checkWsToken } from './lib/auth.js';
+import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -152,7 +152,7 @@ function checkTerminalToken(reqUrl) {
   if (!CONFIG.token) return true;
   try {
     const u = new URL(reqUrl, 'http://localhost');
-    return u.searchParams.get('token') === CONFIG.token;
+    return safeTokenEqual(u.searchParams.get('token'), CONFIG.token);
   } catch {
     return false;
   }
