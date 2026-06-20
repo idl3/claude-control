@@ -304,16 +304,18 @@ test('transcribe: temp WAV is cleaned up after a failed run', async () => {
 
   assert.ok(capturedWav, 'failingRun must have captured the wav path');
 
-  // The finally block fire-and-forgets fs.promises.unlink() — give the event
-  // loop one tick to settle the floating promise before we check.
-  await new Promise((resolve) => setImmediate(resolve));
-
-  // The file must be gone — transcribe()'s finally block unlinked it.
+  // The finally block fire-and-forgets fs.promises.unlink() — poll for the
+  // floating promise to settle rather than assuming a single tick is enough.
+  // Under full-suite load one setImmediate can fire before the unlink's IO
+  // completes (flaky); poll up to ~1s for deterministic behavior.
   let exists = true;
-  try {
-    await fs.promises.access(capturedWav);
-  } catch {
-    exists = false;
+  for (let i = 0; i < 50 && exists; i++) {
+    try {
+      await fs.promises.access(capturedWav);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } catch {
+      exists = false;
+    }
   }
   assert.equal(exists, false, `Temp WAV ${capturedWav} must be deleted after failure`);
 });
