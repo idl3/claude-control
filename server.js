@@ -42,7 +42,8 @@ import { listSkills, readSkill } from './lib/skills.js';
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
-import { checkToken as authCheckToken, checkWsToken } from './lib/auth.js';
+import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
+import { pruneDeadClients } from './lib/ws-heartbeat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -152,7 +153,7 @@ function checkTerminalToken(reqUrl) {
   if (!CONFIG.token) return true;
   try {
     const u = new URL(reqUrl, 'http://localhost');
-    return u.searchParams.get('token') === CONFIG.token;
+    return safeTokenEqual(u.searchParams.get('token'), CONFIG.token);
   } catch {
     return false;
   }
@@ -204,6 +205,7 @@ const _tls = loadTls();
 const _scheme = _tls ? 'https' : 'http';
 
 const _handler = (req, res) => {
+  try {
   const u = new URL(req.url, 'http://localhost');
 
   if (u.pathname === '/api/sessions') {
@@ -388,8 +390,16 @@ const _handler = (req, res) => {
     return proxyTerminalHttp(req, res, u);
   }
 
+  // Unknown /api/* path: return JSON 404 instead of falling through to the SPA.
+  if (u.pathname.startsWith('/api/')) return endJson(res, 404, { error: 'not found' });
+
   // static
   serveStatic(u.pathname, res);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[handler] uncaught error:', e?.stack || e);
+    endJson(res, 500, { error: 'internal' });
+  }
 };
 
 const server = _tls
@@ -420,6 +430,7 @@ function handleUpdate(res) {
 }
 
 function endJson(res, code, obj) {
+  if (res.headersSent || res.writableEnded) return;
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'content-type': MIME['.json'], 'content-length': Buffer.byteLength(body) });
   res.end(body);
@@ -1139,20 +1150,27 @@ function ensureSubscription(id) {
 function startPromptPoller(id, sub) {
   if (sub.promptTimer) return;
   sub._lastPrompt = undefined;
+  sub._promptTicking = false;
   const tick = async () => {
-    const session = sessionById(id);
-    if (!session || !tmux.isValidTarget(session.target)) return;
-    let prompt = null;
+    if (sub._promptTicking) return;
+    sub._promptTicking = true;
     try {
-      const cap = await tmux.capturePane(session.target, 40);
-      prompt = parsePanePrompt(cap);
-    } catch {
-      return;
-    }
-    const json = prompt ? JSON.stringify(prompt) : null;
-    if (json !== sub._lastPrompt) {
-      sub._lastPrompt = json;
-      broadcastTo(id, { type: 'prompt', id, prompt });
+      const session = sessionById(id);
+      if (!session || !tmux.isValidTarget(session.target)) return;
+      let prompt = null;
+      try {
+        const cap = await tmux.capturePane(session.target, 40);
+        prompt = parsePanePrompt(cap);
+      } catch {
+        return;
+      }
+      const json = prompt ? JSON.stringify(prompt) : null;
+      if (json !== sub._lastPrompt) {
+        sub._lastPrompt = json;
+        broadcastTo(id, { type: 'prompt', id, prompt });
+      }
+    } finally {
+      sub._promptTicking = false;
     }
   };
   sub.promptTimer = setInterval(() => tick().catch(() => {}), 2000);
@@ -1171,6 +1189,9 @@ function maybeTeardown(id) {
 }
 
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   send(ws, { type: 'sessions', sessions: registry.getSessions() });
   send(ws, { type: 'resources', snapshot: resources.snapshot() });
   ws._subs = new Set();
@@ -1192,6 +1213,9 @@ wss.on('connection', (ws) => {
     }
   });
 });
+
+const heartbeatInterval = setInterval(() => pruneDeadClients(wss.clients), 30000);
+heartbeatInterval.unref();
 
 async function handleClientMessage(ws, msg) {
   switch (msg.type) {
@@ -1691,8 +1715,10 @@ async function main() {
 }
 
 function shutdown() {
+  clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   terminal.shutdownAll();
+  mlx.shutdown();
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
@@ -1702,4 +1728,21 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-main();
+// Safety nets: log unhandled async rejections; exit on truly uncaught sync
+// exceptions so Node doesn't continue with a corrupted process state.
+process.on('unhandledRejection', (e) => {
+  // eslint-disable-next-line no-console
+  console.error('[unhandledRejection]', e?.stack || e);
+});
+process.on('uncaughtException', (e) => {
+  // eslint-disable-next-line no-console
+  console.error('[uncaughtException]', e?.stack || e);
+  process.exit(1);
+});
+
+// Guard: only run the server when executed directly, not when imported for testing.
+const _isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (_isMain) main();
+
+// Exported for unit testing only — not part of the public API.
+export { endJson, _handler };
