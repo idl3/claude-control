@@ -1139,20 +1139,27 @@ function ensureSubscription(id) {
 function startPromptPoller(id, sub) {
   if (sub.promptTimer) return;
   sub._lastPrompt = undefined;
+  sub._promptTicking = false;
   const tick = async () => {
-    const session = sessionById(id);
-    if (!session || !tmux.isValidTarget(session.target)) return;
-    let prompt = null;
+    if (sub._promptTicking) return;
+    sub._promptTicking = true;
     try {
-      const cap = await tmux.capturePane(session.target, 40);
-      prompt = parsePanePrompt(cap);
-    } catch {
-      return;
-    }
-    const json = prompt ? JSON.stringify(prompt) : null;
-    if (json !== sub._lastPrompt) {
-      sub._lastPrompt = json;
-      broadcastTo(id, { type: 'prompt', id, prompt });
+      const session = sessionById(id);
+      if (!session || !tmux.isValidTarget(session.target)) return;
+      let prompt = null;
+      try {
+        const cap = await tmux.capturePane(session.target, 40);
+        prompt = parsePanePrompt(cap);
+      } catch {
+        return;
+      }
+      const json = prompt ? JSON.stringify(prompt) : null;
+      if (json !== sub._lastPrompt) {
+        sub._lastPrompt = json;
+        broadcastTo(id, { type: 'prompt', id, prompt });
+      }
+    } finally {
+      sub._promptTicking = false;
     }
   };
   sub.promptTimer = setInterval(() => tick().catch(() => {}), 2000);
