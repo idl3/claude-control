@@ -2,6 +2,21 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { claudeWorking } from './SessionRail';
 import type { Session } from '../lib/types';
 
+/**
+ * Mirrors the claudeState expression in PaneRow so the override logic can be
+ * unit-tested without rendering the full component tree.
+ */
+function computeClaudeState(
+  s: Session,
+  workingOverrideId?: string | null,
+): 'ask' | 'working' | 'sleeping' {
+  return s.pending
+    ? 'ask'
+    : claudeWorking(s) || s.id === workingOverrideId
+      ? 'working'
+      : 'sleeping';
+}
+
 function makeSession(partial: Partial<Session>): Session {
   return { id: 'test-session', ...partial };
 }
@@ -80,5 +95,45 @@ describe('claudeWorking', () => {
     vi.setSystemTime(now);
     const s = makeSession({ lastActivityMs: now - 15_001 });
     expect(claudeWorking(s)).toBe(false);
+  });
+});
+
+describe('computeClaudeState — workingOverrideId', () => {
+  it('shows working for the selected session when override matches, even though claudeWorking is false', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now());
+    // Session is stale (> 15s ago) — claudeWorking returns false
+    const s = makeSession({ id: 'sess-a', lastActivityMs: Date.now() - 60_000 });
+    expect(claudeWorking(s)).toBe(false);
+    // But the override says this session is working (App just sent a message)
+    expect(computeClaudeState(s, 'sess-a')).toBe('working');
+  });
+
+  it('does NOT show working for a non-matching session when override is set for a different id', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now());
+    const s = makeSession({ id: 'sess-b', lastActivityMs: Date.now() - 60_000 });
+    expect(claudeWorking(s)).toBe(false);
+    expect(computeClaudeState(s, 'sess-a')).toBe('sleeping');
+  });
+
+  it('shows working for matching session even when override is the only signal (no thinking, stale activity)', () => {
+    const s = makeSession({ id: 'sess-c', thinking: false, lastActivityMs: undefined });
+    expect(computeClaudeState(s, 'sess-c')).toBe('working');
+  });
+
+  it('pending takes priority over workingOverrideId', () => {
+    const s = makeSession({ id: 'sess-d', pending: true });
+    expect(computeClaudeState(s, 'sess-d')).toBe('ask');
+  });
+
+  it('works without override (null) — sleeping session stays sleeping', () => {
+    const s = makeSession({ id: 'sess-e', thinking: false, lastActivityMs: undefined });
+    expect(computeClaudeState(s, null)).toBe('sleeping');
+  });
+
+  it('works without override (undefined) — sleeping session stays sleeping', () => {
+    const s = makeSession({ id: 'sess-f', thinking: false, lastActivityMs: undefined });
+    expect(computeClaudeState(s)).toBe('sleeping');
   });
 });
