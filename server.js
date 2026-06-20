@@ -1710,6 +1710,7 @@ async function main() {
 function shutdown() {
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   terminal.shutdownAll();
+  mlx.shutdown();
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
