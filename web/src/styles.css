@@ -801,6 +801,11 @@ body {
   overflow-wrap: anywhere;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  /* Allow the user to select and copy terminal output text, overriding any
+     inherited user-select: none from a parent container. */
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 .terminal-view-body a {
   color: #7dcfff;
