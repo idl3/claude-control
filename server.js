@@ -964,6 +964,47 @@ function serveIndexHtml(res) {
   });
 }
 
+// --- Per-target WS op serialisation ----------------------------------------
+// Multiple browser/device clients on the same session can fire overlapping
+// send-keys ops concurrently.  Two such ops dispatched to the same tmux pane
+// interleave keystrokes mid-sequence.  We prevent this with a per-target FIFO
+// promise chain: each send-keys op appends to the tail of its target's chain
+// and runs only after its predecessor settles.  Different targets run in
+// parallel.  Read-only ops (subscribe, capture, shell-capture, …) are NOT
+// enqueued — they never touch the pane input buffer.
+const _opChains = new Map(); // target → current-tail Promise
+
+/**
+ * Enqueue `fn` behind any in-flight op on `target`.
+ *
+ * Contract:
+ *  - The returned promise settles exactly as fn() settles (value / throw).
+ *  - A rejected op does NOT poison the next op on the same target — the chain
+ *    continues regardless of whether prev settled fulfilled or rejected.
+ *  - The Map entry is deleted once the queued op is the sole tail and it has
+ *    settled, preventing unbounded growth on idle targets.
+ *
+ * @param {string} target  tmux pane target (the serialisation key)
+ * @param {() => Promise<any>} fn  async work to serialise
+ * @returns {Promise<any>}
+ */
+function runSerial(target, fn) {
+  const prev = _opChains.get(target) ?? Promise.resolve();
+  // chain: run fn after prev regardless of prev's outcome
+  const tail = prev.then(fn, fn);
+  // Store the tail so the NEXT enqueue can chain behind it.
+  // Suppress any rejection on the stored promise so Node's
+  // unhandledRejection handler never fires on the chain itself —
+  // the caller's `tail` reference will surface the error to the caller.
+  const stored = tail.then(() => {}, () => {});
+  _opChains.set(target, stored);
+  // Clean up once this op is the last in the chain and it has settled.
+  stored.finally(() => {
+    if (_opChains.get(target) === stored) _opChains.delete(target);
+  });
+  return tail;
+}
+
 // --- WebSocket --------------------------------------------------------------
 // 1 MB cap: control messages are tiny; this prevents a single huge frame from
 // forcing a multi-hundred-MB string allocation in the cockpit process.
@@ -1252,8 +1293,11 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
-      await tmux.sendText(session.target, String(msg.text ?? ''));
-      return send(ws, { type: 'ack', op: 'reply', ok: true });
+      const replyText = String(msg.text ?? '');
+      return runSerial(session.target, async () => {
+        await tmux.sendText(session.target, replyText);
+        send(ws, { type: 'ack', op: 'reply', ok: true });
+      });
     }
     case 'answer': {
       const session = sessionById(msg.id);
@@ -1268,6 +1312,7 @@ async function handleClientMessage(ws, msg) {
         throw new Error('stale question (already answered or changed)');
       }
 
+      return runSerial(session.target, async () => {
       // ── Capture-driven path ──────────────────────────────────────────────
       // Attempt to navigate by parsing the live picker render. Falls back to
       // the static buildAnswerProgram on ANY parse failure, unknown label, or
@@ -1473,7 +1518,8 @@ async function handleClientMessage(ws, msg) {
         console.log(`[answer] sent toolUseId=${msg.toolUseId} via dynamic path`);
       }
 
-      return send(ws, { type: 'ack', op: 'answer', ok: true });
+      send(ws, { type: 'ack', op: 'answer', ok: true });
+      }); // end runSerial
     }
     case 'capture': {
       const session = sessionById(msg.id);
@@ -1491,16 +1537,22 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
-      await tmux.sendLiteral(session.target, String(msg.text ?? ''));
-      return send(ws, { type: 'ack', op: 'pane-text', ok: true });
+      const paneText = String(msg.text ?? '');
+      return runSerial(session.target, async () => {
+        await tmux.sendLiteral(session.target, paneText);
+        send(ws, { type: 'ack', op: 'pane-text', ok: true });
+      });
     }
     case 'pane-key': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       if (!shell.SHELL_KEYS.has(String(msg.key ?? ''))) throw new Error('key not allowed');
-      await tmux.sendRawKeys(session.target, [String(msg.key)]);
-      return send(ws, { type: 'ack', op: 'pane-key', ok: true });
+      const paneKey = String(msg.key);
+      return runSerial(session.target, async () => {
+        await tmux.sendRawKeys(session.target, [paneKey]);
+        send(ws, { type: 'ack', op: 'pane-key', ok: true });
+      });
     }
     case 'promptkey': {
       // Respond to a live TUI selection prompt (permission/menu). Whitelisted
@@ -1510,11 +1562,14 @@ async function handleClientMessage(ws, msg) {
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const ALLOWED = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down']);
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
-      await tmux.sendRawKeys(session.target, [msg.key]);
-      // Force the next poll tick to broadcast (the prompt should now change/clear).
-      const sub = subscriptions.get(msg.id);
-      if (sub) sub._lastPrompt = '__force__';
-      return send(ws, { type: 'ack', op: 'promptkey', ok: true });
+      const promptKey = msg.key;
+      return runSerial(session.target, async () => {
+        await tmux.sendRawKeys(session.target, [promptKey]);
+        // Force the next poll tick to broadcast (the prompt should now change/clear).
+        const sub = subscriptions.get(msg.id);
+        if (sub) sub._lastPrompt = '__force__';
+        send(ws, { type: 'ack', op: 'promptkey', ok: true });
+      });
     }
     case 'promptselect': {
       // Respond to a live TUI multi-select checkbox prompt (surfaced via pane-scrape
@@ -1527,57 +1582,61 @@ async function handleClientMessage(ws, msg) {
       const labels = Array.isArray(msg.labels) ? msg.labels.map(String) : [];
       if (labels.length === 0) throw new Error('no labels provided');
 
-      const SETTLE_MS = 300;
+      return runSerial(session.target, async () => {
+        const SETTLE_MS = 300;
 
-      // 1. Capture current picker state.
-      let capture;
-      try {
-        capture = await tmux.capturePane(session.target);
-      } catch (captureErr) {
-        throw new Error(`promptselect: capture failed: ${captureErr?.message}`);
-      }
+        // 1. Capture current picker state.
+        let capture;
+        try {
+          capture = await tmux.capturePane(session.target);
+        } catch (captureErr) {
+          throw new Error(`promptselect: capture failed: ${captureErr?.message}`);
+        }
 
-      // 2. Parse into a structured picker model.
-      const parsed = parsePicker(capture);
-      if (parsed.confidence !== 'ok') {
-        return send(ws, {
-          type: 'ack',
-          op: 'promptselect',
-          ok: false,
-          error: 'promptselect: picker not found or low confidence — please retry',
-        });
-      }
+        // 2. Parse into a structured picker model.
+        const parsed = parsePicker(capture);
+        if (parsed.confidence !== 'ok') {
+          send(ws, {
+            type: 'ack',
+            op: 'promptselect',
+            ok: false,
+            error: 'promptselect: picker not found or low confidence — please retry',
+          });
+          return;
+        }
 
-      // 3. Build a synthetic single-question descriptor (multiSelect=true) so
-      //    planStep can calculate Space-toggle + action-row Enter keys.
-      const syntheticQuestion = {
-        multiSelect: true,
-        options: parsed.rows
-          .filter((r) => r.kind === 'option')
-          .map((r) => ({ label: r.label })),
-      };
+        // 3. Build a synthetic single-question descriptor (multiSelect=true) so
+        //    planStep can calculate Space-toggle + action-row Enter keys.
+        const syntheticQuestion = {
+          multiSelect: true,
+          options: parsed.rows
+            .filter((r) => r.kind === 'option')
+            .map((r) => ({ label: r.label })),
+        };
 
-      // 4. Plan keystrokes via the tested planStep function.
-      const keys = planStep(parsed, syntheticQuestion, labels);
-      if (!keys) {
-        console.log(`[promptselect] planStep returned null for labels=${JSON.stringify(labels)} — low confidence`);
-        return send(ws, {
-          type: 'ack',
-          op: 'promptselect',
-          ok: false,
-          error: 'promptselect: could not map labels to picker rows — please retry',
-        });
-      }
+        // 4. Plan keystrokes via the tested planStep function.
+        const keys = planStep(parsed, syntheticQuestion, labels);
+        if (!keys) {
+          console.log(`[promptselect] planStep returned null for labels=${JSON.stringify(labels)} — low confidence`);
+          send(ws, {
+            type: 'ack',
+            op: 'promptselect',
+            ok: false,
+            error: 'promptselect: could not map labels to picker rows — please retry',
+          });
+          return;
+        }
 
-      console.log(`[promptselect] id=${msg.id} labels=${JSON.stringify(labels)} keys=${JSON.stringify(keys)}`);
+        console.log(`[promptselect] id=${msg.id} labels=${JSON.stringify(labels)} keys=${JSON.stringify(keys)}`);
 
-      // 5. Send keys sequenced with settle delay (same as case 'answer' dynamic path).
-      await tmux.sendRawKeysSequenced(session.target, keys, SETTLE_MS);
+        // 5. Send keys sequenced with settle delay (same as case 'answer' dynamic path).
+        await tmux.sendRawKeysSequenced(session.target, keys, SETTLE_MS);
 
-      // Force the next poll tick to broadcast (the prompt should now change/clear).
-      const promptSub = subscriptions.get(msg.id);
-      if (promptSub) promptSub._lastPrompt = '__force__';
-      return send(ws, { type: 'ack', op: 'promptselect', ok: true });
+        // Force the next poll tick to broadcast (the prompt should now change/clear).
+        const promptSub = subscriptions.get(msg.id);
+        if (promptSub) promptSub._lastPrompt = '__force__';
+        send(ws, { type: 'ack', op: 'promptselect', ok: true });
+      });
     }
     // Composer terminal mode (>_): each Claude session has its OWN sister shell
     // pane in its window. Resolve the session by id → its target + cwd, then act
@@ -1585,20 +1644,29 @@ async function handleClientMessage(ws, msg) {
     case 'shell-input': {
       const s = sessionById(msg.id);
       if (!s) throw new Error('unknown session');
-      await shell.shellInput(s.target, s.cwd, String(msg.line ?? ''));
-      return send(ws, { type: 'ack', op: 'shell-input', ok: true });
+      const shellInputLine = String(msg.line ?? '');
+      return runSerial(s.target + ':shell', async () => {
+        await shell.shellInput(s.target, s.cwd, shellInputLine);
+        send(ws, { type: 'ack', op: 'shell-input', ok: true });
+      });
     }
     case 'shell-text': {
       const s = sessionById(msg.id);
       if (!s) throw new Error('unknown session');
-      await shell.shellText(s.target, s.cwd, String(msg.text ?? ''));
-      return send(ws, { type: 'ack', op: 'shell-text', ok: true });
+      const shellTextVal = String(msg.text ?? '');
+      return runSerial(s.target + ':shell', async () => {
+        await shell.shellText(s.target, s.cwd, shellTextVal);
+        send(ws, { type: 'ack', op: 'shell-text', ok: true });
+      });
     }
     case 'shell-key': {
       const s = sessionById(msg.id);
       if (!s) throw new Error('unknown session');
-      await shell.shellKey(s.target, s.cwd, String(msg.key ?? ''));
-      return send(ws, { type: 'ack', op: 'shell-key', ok: true });
+      const shellKeyVal = String(msg.key ?? '');
+      return runSerial(s.target + ':shell', async () => {
+        await shell.shellKey(s.target, s.cwd, shellKeyVal);
+        send(ws, { type: 'ack', op: 'shell-key', ok: true });
+      });
     }
     case 'shell-capture': {
       const s = sessionById(msg.id);
@@ -1745,4 +1813,4 @@ const _isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resol
 if (_isMain) main();
 
 // Exported for unit testing only — not part of the public API.
-export { endJson, _handler };
+export { endJson, _handler, runSerial };
