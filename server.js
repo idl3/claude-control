@@ -204,6 +204,7 @@ const _tls = loadTls();
 const _scheme = _tls ? 'https' : 'http';
 
 const _handler = (req, res) => {
+  try {
   const u = new URL(req.url, 'http://localhost');
 
   if (u.pathname === '/api/sessions') {
@@ -388,8 +389,16 @@ const _handler = (req, res) => {
     return proxyTerminalHttp(req, res, u);
   }
 
+  // Unknown /api/* path: return JSON 404 instead of falling through to the SPA.
+  if (u.pathname.startsWith('/api/')) return endJson(res, 404, { error: 'not found' });
+
   // static
   serveStatic(u.pathname, res);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[handler] uncaught error:', e?.stack || e);
+    endJson(res, 500, { error: 'internal' });
+  }
 };
 
 const server = _tls
@@ -420,6 +429,7 @@ function handleUpdate(res) {
 }
 
 function endJson(res, code, obj) {
+  if (res.headersSent || res.writableEnded) return;
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'content-type': MIME['.json'], 'content-length': Buffer.byteLength(body) });
   res.end(body);
@@ -1709,4 +1719,21 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-main();
+// Safety nets: log unhandled async rejections; exit on truly uncaught sync
+// exceptions so Node doesn't continue with a corrupted process state.
+process.on('unhandledRejection', (e) => {
+  // eslint-disable-next-line no-console
+  console.error('[unhandledRejection]', e?.stack || e);
+});
+process.on('uncaughtException', (e) => {
+  // eslint-disable-next-line no-console
+  console.error('[uncaughtException]', e?.stack || e);
+  process.exit(1);
+});
+
+// Guard: only run the server when executed directly, not when imported for testing.
+const _isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (_isMain) main();
+
+// Exported for unit testing only — not part of the public API.
+export { endJson, _handler };
