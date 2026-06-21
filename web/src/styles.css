@@ -376,13 +376,55 @@ body {
   0%, 100% { opacity: 0.25; transform: translateY(0); }
   50% { opacity: 0.85; transform: translateY(-2px); }
 }
+/* Cloning: session has ≥1 running sub-agent — cell division / amoeba split.
+   The icon jumps up slightly while a small "offspring" pseudo-blob buds off
+   bottom-right and fades, evoking Claude spawning a child agent. */
+.pane-icon[data-state='cloning'] {
+  opacity: 1;
+}
+.pane-icon[data-state='cloning'] svg {
+  animation: pane-icon-clone-bob 1.4s var(--ease) infinite;
+}
+/* The offspring bud: a tiny circle that appears to split off bottom-right. */
+.pane-icon-clone {
+  position: absolute;
+  bottom: -4px;
+  right: -5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--bg);
+  animation: pane-icon-clone-bud 1.4s var(--ease) infinite;
+}
+@keyframes pane-icon-clone-bob {
+  0%, 100% { transform: translateY(0) scale(1); }
+  /* brief jump + slight pinch to signal "giving off" a child */
+  35% { transform: translateY(-3px) scale(1.08, 0.92); }
+  55% { transform: translateY(-1px) scale(0.95, 1.05); }
+  75% { transform: translateY(0) scale(1); }
+}
+@keyframes pane-icon-clone-bud {
+  /* bud appears at 20%, swells, then fades away as it "detaches" */
+  0%, 18% { opacity: 0; transform: scale(0.2); }
+  35%      { opacity: 1; transform: scale(1.2); }
+  70%      { opacity: 0.6; transform: scale(1) translate(2px, 2px); }
+  100%     { opacity: 0; transform: scale(0.3) translate(4px, 4px); }
+}
 @media (prefers-reduced-motion: reduce) {
   .pane-icon[data-state='working'] svg,
+  .pane-icon[data-state='cloning'] svg,
   .pane-icon-ask,
+  .pane-icon-clone,
   .pane-icon-zzz,
   .detail-action[data-running='true'],
   .subagent-strip-row .sa-dot {
     animation: none;
+  }
+  /* Reduced-motion: distinguish cloning from sleeping via a static teal dot. */
+  .pane-icon-clone {
+    opacity: 0.85;
+    transform: scale(1);
   }
 }
 /* Shell/terminal rows are a single lean line: dashed card, tighter padding, and
