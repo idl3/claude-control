@@ -544,15 +544,15 @@ export function Composer({
   // The CSS .composer-card min-height mirrors this constant.
   const COMPOSER_MIN_HEIGHT = 96;
 
-  // ── Timing constants — intentionally SLOW for visual tuning. ────────────────
-  // To speed up: edit T below (e.g. fade → 0.22, height → 0.20, gap → 0.08).
+  // ── Timing constants — production tempo. ────────────────────────────────────
   // All durations in seconds; all stagger values are per-element delays.
+  // Ratios are preserved from the original slow values so phasing reads the same.
   const T = {
-    fade:       0.40,   // per-element fade duration (in or out)
-    height:     0.35,   // card height tween duration
-    btnStagger: 0.07,   // delay between successive button reveals/hides
-    topStagger: 0.06,   // delay between status / wave / hint reveals
-    gap:        0.15,   // pause between Phase 1 completion and Phase 2 start
+    fade:       0.20,   // per-element fade duration (in or out)
+    height:     0.22,   // card height tween duration
+    btnStagger: 0.035,  // delay between successive button reveals/hides
+    topStagger: 0.03,   // delay between status / wave / hint reveals
+    gap:        0.08,   // pause between Phase 1 completion and Phase 2 start
     enterEase:  ANIM.enterEase,
     exitEase:   ANIM.exitEase,
   } as const;
@@ -1880,7 +1880,7 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRe
       { opacity: 0, y: 8 },
       {
         opacity: 1, y: 0,
-        duration: 0.40,    // matches T.fade in the parent morph driver
+        duration: 0.20,    // matches T.fade in the parent morph driver
         ease: ANIM.enterEase,
       },
     );
