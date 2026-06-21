@@ -459,31 +459,29 @@ export function Composer({
   // transcript stays readable behind the composer. Mirrors the terminal mode
   // pattern (data-voice on .composer-card, toolbar swaps, body swaps).
   //
-  // Animation split: `voice` = the logical desired state (mic acquired / not).
-  // `voiceRendered` = whether VoiceInline is currently in the DOM — it stays
-  // true during the EXIT animation so we can play a timeline THEN unmount, giving
-  // us the mounted-while-leaving pattern (same approach as useModalTransition).
+  // Pre-render strategy: VoiceInline is ALWAYS mounted (the shell is in the DOM
+  // while idle). When idle the .voice-inline-body is display:none so it adds
+  // zero height to the composer. `voice` = logical/desired state (mic gated).
+  // The VoiceInline receives `active={voice}` — mic is acquired ONLY when true.
   const [voice, setVoice] = useState(false);
-  const [voiceRendered, setVoiceRendered] = useState(false);
   // Ref for the .composer-card so we can reach into it for animation targets.
   const composerCardRef = useRef<HTMLDivElement>(null);
   // Guard: only one in-flight timeline at a time (avoids enter/exit overlap).
   const voiceAnimRef = useRef<gsap.core.Timeline | null>(null);
+  // Ref to the always-mounted voice-inline-body so we can toggle display:none
+  // without React re-renders (layout read happens in useLayoutEffect).
+  const voiceBodyRef = useRef<HTMLDivElement>(null);
 
   const openVoice = useCallback(() => {
     if (disabled) return;
     setVoice(true);
-    setVoiceRendered(true);
   }, [disabled]);
 
   const exitVoice = useCallback(() => {
     setVoice(false);
-    // voiceRendered is cleared only AFTER the exit timeline completes (see effect
-    // below). In reduced-motion mode we clear it immediately here.
-    if (prefersReducedMotion()) setVoiceRendered(false);
   }, []);
 
-  // Drive the two-phase ENTER / EXIT GSAP timelines whenever `voice` or `voiceRendered` change.
+  // Drive the two-phase ENTER / EXIT GSAP timelines whenever `voice` changes.
   //
   // ENTER (composer → voice) — strictly sequenced:
   //   Phase 1: stagger composer toolbar buttons out + fade input/body out +
@@ -495,6 +493,13 @@ export function Composer({
   //   Phase 1: stagger voice elements out + tween .composer-card height back.
   //   Phase 2: stagger composer input + toolbar buttons back in.
   //
+  // Pre-render model: VoiceInline is always mounted. When idle the
+  // .voice-inline-body has display:none (set by this effect on exit, or on
+  // the initial render path). On ENTER we un-hide it (display:'') THEN
+  // immediately pre-hide child targets with gsap.set BEFORE paint so Phase 2
+  // reveals existing nodes instead of newly-mounted ones — eliminating the
+  // flash-of-full-opacity-before-effect frame that useEffect had.
+  //
   // Height tween without a plugin (manual FLIP):
   //   We measure FROM = card.offsetHeight, then temporarily float the
   //   to-be-hidden elements out of flow (position:absolute) so their layout
@@ -502,7 +507,7 @@ export function Composer({
   //   pin the card at FROM explicitly, force a reflow, then tween FROM → TO.
   //   After Phase 1 completes we clear the inline height (back to auto) so
   //   the card stays responsive.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const card = composerCardRef.current;
     if (!card) return;
 
@@ -510,34 +515,43 @@ export function Composer({
     voiceAnimRef.current?.kill();
     voiceAnimRef.current = null;
 
-    // Reduced-motion: no animation. The immediate-flip is handled in open/exitVoice.
-    if (prefersReducedMotion()) return;
+    if (voice) {
+      // ── ENTER: un-hide voice shell, pre-hide targets, composer body out ──────
 
-    if (voice && voiceRendered) {
-      // ── ENTER: composer body out → frame settles → voice body in ────────────
+      const voiceBody   = voiceBodyRef.current;
+      const toolbar     = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
+      const inputWrap   = card.querySelector<HTMLElement>('.composer-input-wrap');
 
-      const toolbar    = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
-      const inputWrap  = card.querySelector<HTMLElement>('.composer-input-wrap');
-      const voiceStatus     = card.querySelector<HTMLElement>('.voice-status');
-      const voiceWave       = card.querySelector<HTMLElement>('.voice-wave-inline');
-      const voiceHintEl     = card.querySelector<HTMLElement>('.voice-hint, .voice-error');
-      const voiceToolbar    = card.querySelector<HTMLElement>('.voice-toolbar');
+      // Bring the pre-rendered voice shell back into layout (was display:none).
+      if (voiceBody) voiceBody.style.display = '';
+
+      // Reduced-motion: instant swap — no tweens.
+      if (prefersReducedMotion()) {
+        if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+        return;
+      }
+
+      const voiceStatus  = card.querySelector<HTMLElement>('.voice-status');
+      const voiceWave    = card.querySelector<HTMLElement>('.voice-wave-inline');
+      const voiceHintEl  = card.querySelector<HTMLElement>('.voice-hint, .voice-error');
+      const voiceToolbar = card.querySelector<HTMLElement>('.voice-toolbar');
 
       // Ensure inputWrap is visible at the start of the enter animation
       // (it may have display:none from a prior reduced-motion session).
       if (inputWrap) gsap.set(inputWrap, { clearProps: 'display,position,visibility', opacity: 1, y: 0 });
 
-      // Pre-hide voice elements so they don't flash before Phase 2 reveals them.
+      // Pre-hide voice targets BEFORE paint (useLayoutEffect guarantee) so they
+      // start invisible and Phase 2 slides them in — no flash of final state.
       const topTargets = [voiceStatus, voiceWave, voiceHintEl].filter(Boolean) as HTMLElement[];
-      if (topTargets.length) gsap.set(topTargets, { opacity: 0, y: -12 });
-      if (voiceToolbar)      gsap.set(voiceToolbar, { opacity: 0, y: 12 });
+      if (topTargets.length) gsap.set(topTargets, { opacity: 0, y: -24 });
+      if (voiceToolbar)      gsap.set(voiceToolbar, { opacity: 0, y: 24 });
 
       // ── Measure heights for the height tween (manual FLIP). ─────────────────
       // FROM = current card height (composer + voice both in layout).
       const heightFrom = card.offsetHeight;
       // TO   = voice-only height: temporarily float composer elements out of flow.
       if (inputWrap) {
-        inputWrap.style.position  = 'absolute';
+        inputWrap.style.position   = 'absolute';
         inputWrap.style.visibility = 'hidden';
       }
       if (toolbar) {
@@ -621,16 +635,24 @@ export function Composer({
 
       voiceAnimRef.current = tl;
 
-    } else if (!voice && voiceRendered) {
+    } else {
       // ── EXIT: voice body out → frame settles → composer body in ─────────────
 
-      const voiceInlineBody = card.querySelector<HTMLElement>('.voice-inline-body');
+      const voiceBody       = voiceBodyRef.current;
       const voiceToolbar    = card.querySelector<HTMLElement>('.voice-toolbar');
       const voiceStatus     = card.querySelector<HTMLElement>('.voice-status');
       const voiceWave       = card.querySelector<HTMLElement>('.voice-wave-inline');
       const voiceHintEl     = card.querySelector<HTMLElement>('.voice-hint, .voice-error');
       const toolbar         = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
       const inputWrap       = card.querySelector<HTMLElement>('.composer-input-wrap');
+
+      // Reduced-motion: instant swap — hide voice body immediately.
+      if (prefersReducedMotion()) {
+        if (voiceBody) voiceBody.style.display = 'none';
+        if (inputWrap) gsap.set(inputWrap, { clearProps: 'all' });
+        if (toolbar)   gsap.set(toolbar,   { clearProps: 'all' });
+        return;
+      }
 
       // Restore inputWrap + toolbar into layout at opacity 0 so Phase 2 can fade
       // them in — prevents a React re-render flash of composer buttons appearing.
@@ -645,14 +667,14 @@ export function Composer({
       // ── Measure heights for the height tween (manual FLIP). ─────────────────
       const heightFrom = card.offsetHeight;
       // TO = composer-only height: float voice body out of flow temporarily.
-      if (voiceInlineBody) {
-        voiceInlineBody.style.position  = 'absolute';
-        voiceInlineBody.style.visibility = 'hidden';
+      if (voiceBody) {
+        voiceBody.style.position   = 'absolute';
+        voiceBody.style.visibility = 'hidden';
       }
       const heightTo = card.offsetHeight;
-      if (voiceInlineBody) {
-        voiceInlineBody.style.position  = '';
-        voiceInlineBody.style.visibility = '';
+      if (voiceBody) {
+        voiceBody.style.position   = '';
+        voiceBody.style.visibility = '';
       }
       card.style.height   = `${heightFrom}px`;
       card.style.overflow = 'hidden';
@@ -692,8 +714,8 @@ export function Composer({
           { opacity: 0, y: -8, duration: ANIM.fast, ease: ANIM.exitEase, stagger: 0.04 },
           0,
         );
-      } else if (voiceInlineBody) {
-        phase1.to(voiceInlineBody, { opacity: 0, y: -8, duration: ANIM.fast, ease: ANIM.exitEase }, 0);
+      } else if (voiceBody) {
+        phase1.to(voiceBody, { opacity: 0, y: -8, duration: ANIM.fast, ease: ANIM.exitEase }, 0);
       }
 
       // Tween card height back.
@@ -706,12 +728,12 @@ export function Composer({
       // ── Phase 2 timeline: reveal composer — strictly after Phase 1 ──────────
       const phase2 = gsap.timeline({
         onComplete: () => {
-          // Unmount VoiceInline now that it has animated out.
-          setVoiceRendered(false);
+          // Hide the pre-rendered voice shell (display:none = zero layout contribution).
+          if (voiceBody) voiceBody.style.display = 'none';
           // Clear GSAP inline styles so they're clean for next time.
-          if (inputWrap)       gsap.set(inputWrap,    { clearProps: 'all' });
-          if (toolbar)         gsap.set(toolbar,       { clearProps: 'all' });
-          if (toolbarBtns.length) gsap.set(toolbarBtns, { clearProps: 'all' });
+          if (inputWrap)          gsap.set(inputWrap,    { clearProps: 'all' });
+          if (toolbar)            gsap.set(toolbar,       { clearProps: 'all' });
+          if (toolbarBtns.length) gsap.set(toolbarBtns,  { clearProps: 'all' });
         },
       });
 
@@ -740,13 +762,23 @@ export function Composer({
 
       voiceAnimRef.current = tl;
     }
-  }, [voice, voiceRendered]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Kill any in-flight voice timeline on unmount to avoid setState-after-unmount.
+  // Kill any in-flight voice timeline on unmount to avoid post-unmount callbacks.
   useEffect(() => {
     return () => {
       voiceAnimRef.current?.kill();
     };
+  }, []);
+
+  // On initial mount, ensure the voice shell is hidden (display:none) so it
+  // adds zero height to the idle composer. This runs synchronously before paint.
+  useLayoutEffect(() => {
+    const voiceBody = voiceBodyRef.current;
+    if (voiceBody && !voice) {
+      voiceBody.style.display = 'none';
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ⌘/Ctrl+S opens voice mode from ANYWHERE (not just when the composer textarea
@@ -796,6 +828,8 @@ export function Composer({
   );
 
   // Close the (session-agnostic) skill browser + voice mode on a session switch.
+  // The voice shell stays mounted (always-mounted) — just flip voice=false so
+  // the mic is released and the layout effect hides the shell on next render.
   useEffect(() => {
     setSkillBrowserOpen(false);
     setVoice(false);
@@ -1079,16 +1113,19 @@ export function Composer({
             </span>
           </div>
         ) : null}
-        {/* Voice inline body: stays rendered during the exit animation so we can
-            animate it out before unmounting (mounted-while-leaving pattern).
-            voiceRendered=true on enter, cleared only after the exit timeline. */}
-        {voiceRendered ? (
-          <VoiceInline
-            onCommit={commitVoice}
-            onClose={exitVoice}
-            stopRef={voiceStopRef}
-          />
-        ) : null}
+        {/* Voice inline body: always mounted so the DOM nodes exist before the
+            enter animation runs — the layout effect pre-hides targets before
+            paint and the animation REVEALS existing nodes (no mount-flash).
+            The shell is display:none when idle (zero height, zero layout impact).
+            `active={voice}` gates mic acquisition — mic is never grabbed while
+            the shell is pre-rendered-idle. */}
+        <VoiceInline
+          active={voice}
+          bodyRef={voiceBodyRef}
+          onCommit={commitVoice}
+          onClose={exitVoice}
+          stopRef={voiceStopRef}
+        />
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
             working + invisible) and overlay a hint shown only while empty. */}
@@ -1097,7 +1134,6 @@ export function Composer({
             pill highlights. When no pills are present, the overlay is empty
             and the textarea renders normally — zero divergence risk. */}
         <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}
-          style={voice && prefersReducedMotion() ? { display: 'none' } : undefined}
         >
           <ComposerPrimitive.Input
             className="composer-input"
@@ -1459,19 +1495,27 @@ export function Composer({
 }
 
 // ── VoiceInline ──────────────────────────────────────────────────────────────
-// Renders inside .composer-card when voice mode is active. Mounts the
-// useVoiceRecorder hook (acquires mic on mount, tears down on unmount).
+// Always mounted inside .composer-card. When idle (active=false) the wrapper
+// div is display:none (managed by the layout effect in Composer) so it
+// contributes zero height and zero layout impact. When active=true the
+// useVoiceRecorder hook acquires the mic and starts recording.
+// The bodyRef lets Composer's layout effect toggle display without re-renders.
 // The stopRef callback is forwarded out so the window ⌘Enter handler can
 // call stop() without the hook result drifting into its deps array.
 
 interface VoiceInlineProps {
+  /** Gates mic acquisition — true only when voice mode is actually active. */
+  active: boolean;
+  /** Ref placed on the wrapper div so Composer can set display:none/'' directly. */
+  bodyRef: React.RefObject<HTMLDivElement>;
   onCommit: (text: string) => void;
   onClose: () => void;
   stopRef: React.MutableRefObject<(() => void) | null>;
 }
 
-function VoiceInline({ onCommit, onClose, stopRef }: VoiceInlineProps) {
+function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlineProps) {
   const { status, errorMsg, canvasRef, pauseResume, stop, cancel } = useVoiceRecorder({
+    active,
     onCommit,
     onClose,
   });
@@ -1494,7 +1538,7 @@ function VoiceInline({ onCommit, onClose, stopRef }: VoiceInlineProps) {
             : 'Listening…';
 
   return (
-    <div className="voice-inline-body" aria-live="polite">
+    <div ref={bodyRef} className="voice-inline-body" aria-live="polite">
       <div className="voice-status">
         <span className="voice-dot" data-on={status === 'recording' ? 'true' : undefined} />
         {statusLabel}
