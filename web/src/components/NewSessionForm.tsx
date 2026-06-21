@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents } from '../lib/api';
+import { createSession, fetchSpawnAgents, getConfig } from '../lib/api';
 import type { SpawnAgentInfo } from '../lib/api';
 import { FunnelIcon } from './icons';
 import type { SessionFilter } from './SessionRail';
@@ -48,9 +48,10 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
   // A fresh default each time the form opens, so the placeholder is current.
   const [placeholder, setPlaceholder] = useState(defaultName);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
+  const [defaultCwd, setDefaultCwd] = useState('~');
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
-  // On open: refresh default name, reset state, fetch agent availability.
+  // On open: refresh default name, reset state, fetch agent availability + config.
   useEffect(() => {
     if (!open) return;
     setPlaceholder(defaultName());
@@ -62,6 +63,11 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
       .then(setAgentInfos)
       .catch(() => {
         // Non-fatal: form still works, agents just won't show disabled state.
+      });
+    getConfig()
+      .then((cfg) => setDefaultCwd(cfg.defaultCwd || '~'))
+      .catch(() => {
+        // Non-fatal: placeholder falls back to '~'.
       });
     // Focus the name field after a tick (form mount).
     setTimeout(() => nameInputRef.current?.focus(), 0);
@@ -138,25 +144,29 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
         void submit();
       }}
     >
-      {/* Agent-type toggle */}
-      <div className="rail-new-agent-toggle" role="group" aria-label="Agent type">
+      {/* Agent-type segmented control */}
+      <div className="rail-new-agent-seg" role="group" aria-label="Agent type">
         {(['claude', 'codex'] as const).map((id) => {
           const info = id === 'claude' ? claudeInfo : codexInfo;
           const unavailable = info && !info.available;
+          const isActive = agent === id;
           return (
             <button
               key={id}
               type="button"
-              className="rail-new-agent-btn"
-              data-active={agent === id ? 'true' : 'false'}
+              className="rail-new-agent-seg-btn"
+              data-active={isActive ? 'true' : 'false'}
+              data-unavailable={unavailable ? 'true' : 'false'}
               disabled={creating || !!unavailable}
               title={unavailable ? info?.reason : undefined}
-              aria-pressed={agent === id}
+              aria-pressed={isActive}
               onClick={() => setAgent(id)}
             >
-              {id === 'claude' ? 'Claude' : 'Codex'}
+              <span className="rail-new-agent-seg-label">
+                {id === 'claude' ? 'Claude' : 'Codex'}
+              </span>
               {unavailable ? (
-                <span className="rail-new-agent-unavail" aria-hidden="true"> ✕</span>
+                <span className="rail-new-agent-seg-hint" aria-hidden="true">unavailable</span>
               ) : null}
             </button>
           );
@@ -181,14 +191,18 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
           autoCorrect="off"
           spellCheck={false}
         />
-      ) : null}
+      ) : (
+        <div className="rail-new-name-note" aria-live="polite">
+          Codex has no session name
+        </div>
+      )}
 
       {/* CWD field — plain text, server defaults when blank */}
       <input
         className="rail-new-cwd"
         type="text"
         value={cwd}
-        placeholder="Working directory (default)"
+        placeholder={`(default) ${defaultCwd}`}
         disabled={creating}
         onChange={(e) => setCwd(e.target.value)}
         onKeyDown={(e) => {

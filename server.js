@@ -798,10 +798,13 @@ async function handleSessionNew(req, res) {
     if (agent === 'codex') {
       // Codex path: uses -C <cwd> (its own cwd flag). No --name flag — Codex
       // has none. The tmux window is still named (above) so the rail shows it.
-      // cwd is shell-quoted (same quoting as names) since the command is typed
-      // into an interactive shell via sendText.
-      void buildSpawnCommand({ cwd, bin: config.codexLaunchCommand }); // validate shape
-      launch = `${config.codexLaunchCommand} -C ${tmux.shellQuoteName(cwd)}`;
+      // buildSpawnCommand is the single source of truth for Codex's launch
+      // shape; the cwd arg is shell-quoted since the command is typed into an
+      // interactive shell via sendText. The executed command is
+      // config.codexLaunchCommand (may be a shell alias), validated above via
+      // codexBin||codexLaunchCommand — same pattern as the Claude branch.
+      const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
+      launch = `${bin} ${args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a)).join(' ')}`;
     } else {
       // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation.
       // (2) Claude's own session title: `claude --help` exposes `-n/--name`
