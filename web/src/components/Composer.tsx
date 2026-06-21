@@ -538,12 +538,14 @@ export function Composer({
     if (voice) {
       // ── ENTER: composer → voice morph ────────────────────────────────────────
       //
-      // Phase 1: stagger composer toolbar buttons out ONE-BY-ONE + fade input/body
-      //          out + tween .composer-card height FROM→TO (voice height).
-      // Gap:     explicit T.gap delay after Phase 1; overflow cleared + height
-      //          settled to auto BEFORE Phase 2 starts so nothing is clipped.
-      // Phase 2: reveal transcriber top group (status + wave + hint), THEN
-      //          reveal each voice action button ONE-BY-ONE.
+      // Phase 1a: stagger composer toolbar buttons out ONE-BY-ONE + fade input out.
+      //           NO height tween yet, NO overflow:hidden — buttons exit VISIBLY.
+      // Phase 1b: after 1a completes, pin height + apply overflow:hidden, THEN
+      //           tween the card height FROM → TO (composer → voice height).
+      // Gap:      explicit T.gap delay after Phase 1b; overflow cleared + height
+      //           settled to auto BEFORE Phase 2 starts so nothing is clipped.
+      // Phase 2:  reveal transcriber top group (status + wave + hint), THEN
+      //           reveal each voice action button ONE-BY-ONE.
       //
       // HEIGHT-JUMP FIX:
       //   heightFrom is captured BEFORE voiceBody is shown (while it is still
@@ -552,6 +554,11 @@ export function Composer({
       //   THEN show the voiceBody and measure heightTo (voice-only). Because the
       //   card is pinned before voiceBody enters flow there is no frame where the
       //   card's layout height = compositor + voice stacked — no jump.
+      //
+      // BUTTON CLIP FIX:
+      //   overflow:hidden is NOT applied during Phase 1a so the staggered button
+      //   exit is fully visible. It is applied only just before the height tween
+      //   (Phase 1b), at which point there is no longer any visible content to clip.
 
       const voiceBody   = voiceBodyRef.current;
       const toolbar     = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
@@ -571,10 +578,11 @@ export function Composer({
 
       // Pin the card at FROM *before* voiceBody enters flow so the card never
       // renders taller than heightFrom for even a single frame.
-      card.style.height   = `${heightFrom}px`;
-      card.style.overflow = 'hidden';
+      card.style.height = `${heightFrom}px`;
+      // NOTE: overflow is NOT locked yet — we need the buttons to be visible
+      // during Phase 1a. It will be applied in Phase 1b right before the tween.
 
-      // Now it is safe to un-hide the voice body; the card is pinned.
+      // Now it is safe to un-hide the voice body; the card is pinned in height.
       if (voiceBody) voiceBody.style.display = '';
 
       // TO = voice-only height: temporarily float composer elements out of flow
@@ -628,7 +636,7 @@ export function Composer({
         : [];
 
       // ── Phase 2 builder: reveal voice elements ───────────────────────────────
-      // Called from Phase 1's onComplete after the T.gap settle delay so that
+      // Called from Phase 1b's onComplete after the T.gap settle delay so that
       // overflow:hidden is fully cleared and height is auto before any button
       // tries to render outside the previous clipped bounds.
       const runPhase2Enter = () => {
@@ -674,48 +682,65 @@ export function Composer({
         voiceAnimRef.current = phase2;
       };
 
-      // ── Phase 1 timeline: settle the frame ──────────────────────────────────
-      const phase1 = gsap.timeline({
-        onComplete: () => {
-          // Frame has settled — restore card to auto height, clear overflow lock
-          // (MUST happen before Phase 2 so buttons aren't clipped), then take
-          // inputWrap/toolbar out of flow. After T.gap, fire Phase 2.
-          card.style.height   = '';
-          card.style.overflow = '';
-          if (inputWrap) gsap.set(inputWrap, { display: 'none' });
-          if (toolbar)   gsap.set(toolbar,   { clearProps: 'opacity,y' });
-          gsap.delayedCall(T.gap, runPhase2Enter);
-        },
+      // ── Phase 1b: height collapse ────────────────────────────────────────────
+      // Called when 1a (buttons/input out) is complete. At this point there is no
+      // visible content that could be clipped, so it is safe to apply
+      // overflow:hidden and tween the card height down to the voice-only size.
+      const runPhase1b = () => {
+        // All composer content is now invisible — lock overflow for the height tween.
+        card.style.overflow = 'hidden';
+        void card.offsetHeight; // force reflow so the new overflow takes effect
+
+        const phase1b = gsap.timeline({
+          onComplete: () => {
+            // Frame has settled — restore card to auto height, clear overflow lock
+            // (MUST happen before Phase 2 so buttons aren't clipped), then take
+            // inputWrap/toolbar out of flow. After T.gap, fire Phase 2.
+            card.style.height   = '';
+            card.style.overflow = '';
+            if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+            if (toolbar)   gsap.set(toolbar,   { clearProps: 'opacity,y' });
+            gsap.delayedCall(T.gap, runPhase2Enter);
+          },
+        });
+
+        phase1b.to(
+          card,
+          { height: heightTo, duration: T.height, ease: T.exitEase },
+          0,
+        );
+
+        voiceAnimRef.current = phase1b;
+      };
+
+      // ── Phase 1a timeline: buttons + input out (no height change, no clip) ───
+      // Stagger composer toolbar buttons out ONE-BY-ONE + fade inputWrap out.
+      // overflow:hidden is NOT applied here — buttons must exit visibly.
+      const phase1a = gsap.timeline({
+        onComplete: runPhase1b,
       });
 
       // Stagger composer toolbar buttons out ONE-BY-ONE.
       if (toolbarBtns.length) {
-        phase1.to(
+        phase1a.to(
           toolbarBtns,
           { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger },
           0,
         );
       } else if (toolbar) {
-        phase1.to(toolbar, { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase }, 0);
+        phase1a.to(toolbar, { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase }, 0);
       }
 
-      // Fade + nudge inputWrap out.
+      // Fade + nudge inputWrap out alongside the buttons.
       if (inputWrap) {
-        phase1.to(
+        phase1a.to(
           inputWrap,
           { opacity: 0, y: 6, duration: T.fade, ease: T.exitEase },
           0,
         );
       }
 
-      // Tween card height FROM → TO simultaneously with content exit.
-      phase1.to(
-        card,
-        { height: heightTo, duration: T.height, ease: T.exitEase },
-        0,
-      );
-
-      voiceAnimRef.current = phase1;
+      voiceAnimRef.current = phase1a;
 
     } else {
       // ── EXIT: voice → composer morph ─────────────────────────────────────────
@@ -1661,6 +1686,36 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlin
     return () => { stopRef.current = null; };
   }, [stop, stopRef]);
 
+  // Ref for the Pause/Resume button so we can animate its entrance.
+  const pauseBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Whether the Pause/Resume button should currently be visible.
+  const showPauseBtn = status === 'recording' || status === 'paused';
+
+  // Animate the Pause/Resume button in whenever it transitions from hidden → shown.
+  // This fires after every render where showPauseBtn flips to true (e.g. status
+  // transitions to 'recording' after the Phase 2 voice-toolbar reveal has already
+  // run and would not cover this late-appearing button).
+  // Guard with prefersReducedMotion() — instant when true.
+  useLayoutEffect(() => {
+    if (!showPauseBtn) return;
+    const btn = pauseBtnRef.current;
+    if (!btn) return;
+    if (prefersReducedMotion()) {
+      gsap.set(btn, { opacity: 1, y: 0 });
+      return;
+    }
+    gsap.fromTo(
+      btn,
+      { opacity: 0, y: 8 },
+      {
+        opacity: 1, y: 0,
+        duration: 0.40,    // matches T.fade in the parent morph driver
+        ease: ANIM.enterEase,
+      },
+    );
+  }, [showPauseBtn]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const statusLabel =
     status === 'error'
       ? 'Microphone unavailable'
@@ -1700,8 +1755,9 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlin
           Cancel
         </button>
         <span className="composer-toolbar-spacer" />
-        {status === 'recording' || status === 'paused' ? (
+        {showPauseBtn ? (
           <button
+            ref={pauseBtnRef}
             type="button"
             className="btn-secondary voice-btn-pause"
             onClick={pauseResume}
