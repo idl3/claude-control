@@ -1297,6 +1297,7 @@ function AppInner() {
                 onToggleCollapse={toggleCollapse}
                 hotkeyById={railHotkeys}
                 workingOverrideId={agentWorking ? cockpit.selectedId : null}
+                runningSubagentCountById={cockpit.runningSubagentCountById}
               />
             </div>
             {/* Bottom bar: reload + settings + process monitor, all on one level

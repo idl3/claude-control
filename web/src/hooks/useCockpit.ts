@@ -30,6 +30,11 @@ export interface CockpitStore {
   pending: Pending | null;
   prompt: PanePrompt | null;
   subagents: SubAgent[];
+  /**
+   * Number of *running* sub-agents per session id. Only sessions with ≥1 running
+   * sub-agent appear as keys. Used by SessionRail to show the "cloning" icon state.
+   */
+  runningSubagentCountById: Record<string, number>;
   conn: ConnState;
   resources: ResourceState;
   /** Rolling ~10min CPU%/Mem% history for the process-monitor chart. */
@@ -353,6 +358,16 @@ export function useCockpit(): CockpitStore {
     );
   }, [selectedId, subagentsById]);
 
+  // Running sub-agent count per session — drives the "cloning" rail icon state.
+  const runningSubagentCountById = useMemo<Record<string, number>>(() => {
+    const result: Record<string, number> = {};
+    for (const [sid, agentMap] of Object.entries(subagentsById)) {
+      const count = Object.values(agentMap).filter((a) => a.status === 'running').length;
+      if (count > 0) result[sid] = count;
+    }
+    return result;
+  }, [subagentsById]);
+
   return {
     sessions,
     selectedId,
@@ -361,6 +376,7 @@ export function useCockpit(): CockpitStore {
     pending,
     prompt,
     subagents,
+    runningSubagentCountById,
     conn,
     resources,
     resourceHistory,
