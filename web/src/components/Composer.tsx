@@ -536,20 +536,66 @@ export function Composer({
     voiceAnimRef.current = null;
 
     if (voice) {
-      // ── ENTER: un-hide voice shell, pre-hide targets, composer body out ──────
+      // ── ENTER: composer → voice morph ────────────────────────────────────────
+      //
+      // Phase 1: stagger composer toolbar buttons out ONE-BY-ONE + fade input/body
+      //          out + tween .composer-card height FROM→TO (voice height).
+      // Gap:     explicit T.gap delay after Phase 1; overflow cleared + height
+      //          settled to auto BEFORE Phase 2 starts so nothing is clipped.
+      // Phase 2: reveal transcriber top group (status + wave + hint), THEN
+      //          reveal each voice action button ONE-BY-ONE.
+      //
+      // HEIGHT-JUMP FIX:
+      //   heightFrom is captured BEFORE voiceBody is shown (while it is still
+      //   display:none). The card's intrinsic height at that moment equals the
+      //   composer-only height. We pin the card at heightFrom immediately after,
+      //   THEN show the voiceBody and measure heightTo (voice-only). Because the
+      //   card is pinned before voiceBody enters flow there is no frame where the
+      //   card's layout height = compositor + voice stacked — no jump.
 
       const voiceBody   = voiceBodyRef.current;
       const toolbar     = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
       const inputWrap   = card.querySelector<HTMLElement>('.composer-input-wrap');
 
-      // Bring the pre-rendered voice shell back into layout (was display:none).
-      if (voiceBody) voiceBody.style.display = '';
-
       // Reduced-motion: instant swap — no tweens.
       if (prefersReducedMotion()) {
+        if (voiceBody) voiceBody.style.display = '';
         if (inputWrap) gsap.set(inputWrap, { display: 'none' });
         return;
       }
+
+      // ── Measure heights (no-jump order). ────────────────────────────────────
+      // FROM = current card height while voiceBody is still display:none —
+      //        this is the composer-only height and is the correct start value.
+      const heightFrom = card.offsetHeight;
+
+      // Pin the card at FROM *before* voiceBody enters flow so the card never
+      // renders taller than heightFrom for even a single frame.
+      card.style.height   = `${heightFrom}px`;
+      card.style.overflow = 'hidden';
+
+      // Now it is safe to un-hide the voice body; the card is pinned.
+      if (voiceBody) voiceBody.style.display = '';
+
+      // TO = voice-only height: temporarily float composer elements out of flow
+      // so the card's intrinsic height collapses to the voice body alone.
+      // Clear the pinned height temporarily so card.offsetHeight reads intrinsic.
+      if (inputWrap) {
+        inputWrap.style.position   = 'absolute';
+        inputWrap.style.visibility = 'hidden';
+      }
+      if (toolbar) {
+        toolbar.style.position   = 'absolute';
+        toolbar.style.visibility = 'hidden';
+      }
+      card.style.height = '';  // clear pin so we read intrinsic voice-only height
+      const heightTo = card.offsetHeight;
+      card.style.height = `${heightFrom}px`;  // restore pin
+      // Restore.
+      if (inputWrap) { inputWrap.style.position = ''; inputWrap.style.visibility = ''; }
+      if (toolbar)   { toolbar.style.position   = ''; toolbar.style.visibility   = ''; }
+
+      void card.offsetHeight; // force reflow so GSAP starts from the pinned value
 
       const voiceStatus  = card.querySelector<HTMLElement>('.voice-status');
       const voiceWave    = card.querySelector<HTMLElement>('.voice-wave-inline');
@@ -575,27 +621,6 @@ export function Composer({
       // Ensure toolbar container is fully visible — only its children are hidden.
       if (voiceToolbar) gsap.set(voiceToolbar, { clearProps: 'opacity,y' });
       if (voiceBtns.length) gsap.set(voiceBtns, { opacity: 0, y: 12 });
-
-      // ── Measure heights for the height tween (manual FLIP). ─────────────────
-      // FROM = current card height (composer + voice both in layout).
-      const heightFrom = card.offsetHeight;
-      // TO   = voice-only height: temporarily float composer elements out of flow.
-      if (inputWrap) {
-        inputWrap.style.position   = 'absolute';
-        inputWrap.style.visibility = 'hidden';
-      }
-      if (toolbar) {
-        toolbar.style.position   = 'absolute';
-        toolbar.style.visibility = 'hidden';
-      }
-      const heightTo = card.offsetHeight;  // reflow reads voice-only height
-      // Restore.
-      if (inputWrap) { inputWrap.style.position = ''; inputWrap.style.visibility = ''; }
-      if (toolbar)   { toolbar.style.position   = ''; toolbar.style.visibility   = ''; }
-      // Pin the card at FROM before tweening.
-      card.style.height   = `${heightFrom}px`;
-      card.style.overflow = 'hidden';
-      void card.offsetHeight; // force reflow so GSAP starts from the pinned value
 
       // Toolbar action buttons (children of .composer-toolbar) for per-item stagger.
       const toolbarBtns = toolbar
@@ -693,7 +718,7 @@ export function Composer({
       voiceAnimRef.current = phase1;
 
     } else {
-      // ── EXIT: transcriber out → gap → frame restore + composer in ────────────
+      // ── EXIT: voice → composer morph ─────────────────────────────────────────
       //
       // Mirror of ENTER (exact reverse):
       //   Phase 1 = transcriber out (card stays at transcriber height so nothing
@@ -704,6 +729,13 @@ export function Composer({
       //   Phase 2 = FLIP-measure composer height, tween card height back, then
       //             reveal composer inputWrap + toolbar buttons one-by-one.
       //             Reverse of ENTER Phase 1.
+      //
+      // HEIGHT-JUMP FIX (EXIT):
+      //   heightFrom is captured before inputWrap is restored to flow (it is
+      //   display:none from ENTER's phase1 onComplete). heightTo is measured by
+      //   temporarily floating voiceBody out while inputWrap re-enters flow.
+      //   The card is pinned at heightFrom before activating the tween, so there
+      //   is no frame where composer + voice are stacked.
 
       const voiceBody       = voiceBodyRef.current;
       const voiceToolbar    = card.querySelector<HTMLElement>('.voice-toolbar');
@@ -721,9 +753,39 @@ export function Composer({
         return;
       }
 
+      // ── Measure heights (no-jump order). ────────────────────────────────────
+      // FROM = current voice-mode card height. inputWrap is display:none here
+      //        (set during ENTER phase1 onComplete) so the card height equals
+      //        the voice content only — correct start value.
+      const heightFrom = card.offsetHeight;
+
+      // TO = composer-only height. Pre-show inputWrap in normal flow (opacity:0
+      // so invisible) and float voiceBody out temporarily.
+      if (inputWrap) {
+        inputWrap.style.display = '';
+        inputWrap.style.opacity = '0';   // invisible during measurement
+      }
+      if (voiceBody) {
+        voiceBody.style.position   = 'absolute';
+        voiceBody.style.visibility = 'hidden';
+      }
+      const heightTo = card.offsetHeight;
+      // Restore measurement scaffolding.
+      if (voiceBody) {
+        voiceBody.style.position   = '';
+        voiceBody.style.visibility = '';
+      }
+      if (inputWrap) {
+        inputWrap.style.display = 'none'; // will be re-shown via gsap.set below
+        inputWrap.style.opacity = '';
+      }
+
+      // Pin the card at heightFrom *before* restoring inputWrap to flow so the
+      // card never renders at the stacked height for even a single frame.
+      card.style.height   = `${heightFrom}px`;
+      card.style.overflow = 'hidden';
+
       // Pre-hide composer elements at opacity 0 so Phase 2 can reveal them.
-      // They stay in flow (display:'') so the FLIP measurement below can read
-      // the composer-only height without temporarily floating them.
       if (inputWrap) gsap.set(inputWrap, { display: '', opacity: 0, y: 6 });
       if (toolbar)   gsap.set(toolbar,   { opacity: 0, y: 4 });
       const toolbarBtns = toolbar
@@ -731,25 +793,6 @@ export function Composer({
         : [];
       if (toolbarBtns.length) gsap.set(toolbarBtns, { opacity: 0, y: 4 });
 
-      // ── Measure heights for the Phase 2 height tween (manual FLIP). ──────────
-      // FROM = current card height at transcriber size (card is still showing
-      //        the transcriber — this is the height we hold during Phase 1).
-      const heightFrom = card.offsetHeight;
-      // TO = composer-only height: float voice body out of flow temporarily.
-      if (voiceBody) {
-        voiceBody.style.position   = 'absolute';
-        voiceBody.style.visibility = 'hidden';
-      }
-      const heightTo = card.offsetHeight;
-      if (voiceBody) {
-        voiceBody.style.position   = '';
-        voiceBody.style.visibility = '';
-      }
-
-      // Pin the card at the transcriber height for Phase 1 so the transcriber
-      // elements animate out without the frame collapsing on them.
-      card.style.height   = `${heightFrom}px`;
-      card.style.overflow = 'hidden';
       void card.offsetHeight; // force reflow so GSAP starts from the pinned value
 
       // Voice content targets for Phase 1 stagger.
