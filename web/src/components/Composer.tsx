@@ -547,12 +547,13 @@ export function Composer({
   // ── Timing constants — production tempo. ────────────────────────────────────
   // All durations in seconds; all stagger values are per-element delays.
   // Ratios are preserved from the original slow values so phasing reads the same.
+  // Values are ~45% faster than the previous set (×0.55 scale factor).
   const T = {
-    fade:       0.20,   // per-element fade duration (in or out)
-    height:     0.22,   // card height tween duration
-    btnStagger: 0.035,  // delay between successive button reveals/hides
-    topStagger: 0.03,   // delay between status / wave / hint reveals
-    gap:        0.08,   // pause between Phase 1 completion and Phase 2 start
+    fade:       0.11,   // per-element fade duration (in or out)
+    height:     0.12,   // card height tween duration (ENTER)
+    btnStagger: 0.02,   // delay between successive button reveals/hides
+    topStagger: 0.017,  // delay between status / wave / hint reveals
+    gap:        0.045,  // pause between Phase 1 completion and Phase 2 start
     enterEase:  ANIM.enterEase,
     exitEase:   ANIM.exitEase,
   } as const;
@@ -952,9 +953,11 @@ export function Composer({
         });
 
         // Tween card height transcriber → composer simultaneously with the reveal.
+        // EXIT: use T.fade (not T.height) so the frame-shrink is as quick as
+        // the button-out sequence — they feel equally snappy.
         phase2.to(
           card,
-          { height: heightTo, duration: T.height, ease: T.enterEase },
+          { height: heightTo, duration: T.fade, ease: T.enterEase },
           0,
         );
 
@@ -1880,7 +1883,7 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRe
       { opacity: 0, y: 8 },
       {
         opacity: 1, y: 0,
-        duration: 0.20,    // matches T.fade in the parent morph driver
+        duration: 0.11,    // matches T.fade in the parent morph driver
         ease: ANIM.enterEase,
       },
     );
