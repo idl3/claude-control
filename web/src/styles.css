@@ -4836,9 +4836,13 @@ select.config-input {
   color: var(--text-faint);
   padding: 0 2px;
 }
-/* Inline body: flex column inside .composer-card, fills the input area. */
+/* Inline body: flex column inside .composer-card, fills the input area.
+   Hidden by default so the idle composer's first paint is the normal
+   (small) composer with zero voice-body height contribution. The morph
+   driver sets display:'' / display:none at runtime; this default means
+   display is never ''/'flex' on the very first render. */
 .voice-inline-body {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 0;
