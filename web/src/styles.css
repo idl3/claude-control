@@ -4783,6 +4783,7 @@ select.config-input {
     height: auto;
     padding: 2px 2px 0;
     margin-top: 2px;
+    justify-content: flex-end;
   }
   .composer-subagent-label {
     max-width: none;
