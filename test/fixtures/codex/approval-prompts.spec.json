@@ -1,0 +1,54 @@
+{
+  "_comment": "Codex CLI v0.131.0-alpha.4 approval-modal shapes captured live via tmux capture-pane (Phase 0a gate). All modals share one structure; parser anchors on it.",
+  "cliVersion": "0.131.0-alpha.4",
+  "highlightMarker": "›",
+  "optionLineRegex": "^\\s*[›\\s]\\s*(\\d+)\\.\\s+(.+?)(?:\\s+\\(([^)]+)\\))?\\s*$",
+  "footerHints": [
+    "Press enter to confirm or esc to cancel",
+    "Press enter to continue"
+  ],
+  "answerKeystrokes": {
+    "byNumber": "send the option's digit then Enter",
+    "byShortcut": "send the parenthetical char (e.g. y / p / a / esc)",
+    "byArrows": "Up/Down to move the › highlight, then Enter"
+  },
+  "modals": [
+    {
+      "kind": "directory_trust",
+      "heading": "Do you trust the contents of this directory?",
+      "options": [
+        { "n": 1, "label": "Yes, continue", "shortcut": null },
+        { "n": 2, "label": "No, quit", "shortcut": null }
+      ],
+      "footer": "Press enter to continue",
+      "esc": null
+    },
+    {
+      "kind": "exec_command",
+      "heading": "Would you like to run the following command?",
+      "bodyKind": "command",
+      "bodyPrefix": "$ ",
+      "options": [
+        { "n": 1, "label": "Yes, proceed", "shortcut": "y" },
+        { "n": 2, "label": "Yes, and don't ask again for commands that start with `<cmd>`", "shortcut": "p", "labelDynamic": true },
+        { "n": 3, "label": "No, and tell Codex what to do differently", "shortcut": "esc" }
+      ],
+      "footer": "Press enter to confirm or esc to cancel",
+      "esc": 3,
+      "resolvedLine": "✔ You approved codex to run <cmd> this time"
+    },
+    {
+      "kind": "apply_patch",
+      "heading": "Would you like to make the following edits?",
+      "bodyKind": "diff",
+      "bodyExample": ["• Edited hello.txt (+1 -1)", "    1 -hi", "    1 +hello"],
+      "options": [
+        { "n": 1, "label": "Yes, proceed", "shortcut": "y" },
+        { "n": 2, "label": "Yes, and don't ask again for these files", "shortcut": "a" },
+        { "n": 3, "label": "No, and tell Codex what to do differently", "shortcut": "esc" }
+      ],
+      "footer": "Press enter to confirm or esc to cancel",
+      "esc": 3
+    }
+  ]
+}

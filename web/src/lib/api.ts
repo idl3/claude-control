@@ -362,18 +362,21 @@ export interface CreateSessionResult {
   target: string;
   /** Resolved name (server-generated default when the request name was blank). */
   name: string;
+  /** Agent type used to spawn the session ('claude' | 'codex'). */
+  agent?: 'claude' | 'codex';
 }
 
 /**
  * Create a new session: POST /api/session/new creates a NAMED tmux window and
- * types the configured launch command (with `--name <name>`) into it. The new
- * window shows up in the rail on the next ~4s registry refresh — no optimistic
- * insert needed. A blank `name` is fine: the server fills a `session-<ts>`
- * default and returns it.
+ * types the configured launch command into it. The new window shows up in the
+ * rail on the next ~4s registry refresh — no optimistic insert needed. A blank
+ * `name` is fine: the server fills a `session-<ts>` default and returns it.
  */
 export async function createSession(opts?: {
   cwd?: string;
   name?: string;
+  /** Agent type to spawn. Defaults to 'claude' on the server when absent. */
+  agent?: 'claude' | 'codex';
 }): Promise<CreateSessionResult> {
   const res = await authFetch('/api/session/new', {
     method: 'POST',
@@ -388,6 +391,30 @@ export async function createSession(opts?: {
     throw new Error(err);
   }
   return json;
+}
+
+/** One agent entry from /api/spawn-agents. */
+export interface SpawnAgentInfo {
+  id: 'claude' | 'codex';
+  available: boolean;
+  /** Present when available is false. */
+  reason?: string;
+}
+
+/**
+ * Fetch which spawn agents (claude, codex) are available on this machine.
+ * GET /api/spawn-agents — resolves each binary and returns availability.
+ */
+export async function fetchSpawnAgents(): Promise<SpawnAgentInfo[]> {
+  const res = await authFetch('/api/spawn-agents');
+  const json = (await res.json().catch(() => ({}))) as
+    | { agents: SpawnAgentInfo[] }
+    | { error?: string };
+  if (!res.ok || !('agents' in json)) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+  return json.agents;
 }
 
 /**

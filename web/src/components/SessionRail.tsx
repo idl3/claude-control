@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon } from './icons';
+import { TerminalSquareIcon, BotIcon } from './icons';
 
-export type SessionFilter = 'all' | 'claude' | 'terminal';
+export type SessionFilter = 'all' | 'claude' | 'codex' | 'terminal';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -100,16 +100,16 @@ function PaneRow({
   workingOverrideId?: string | null;
 }) {
   const isTerminal = s.kind === 'terminal';
+  const isCodex = s.kind === 'codex';
   const label = isTerminal
     ? s.ccShell
       ? `shell · ${s.cmd || 'sh'}`
       : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
 
-  // Claude character state: a pending question (?) > working (generating / tools
-  // / sub-agents / recent activity) > idle (sleeping/Zzz). No state for terminals.
-  // workingOverrideId bridges the poll gap: if the selected session just sent a
-  // message, show working immediately even if claudeWorking hasn't caught up yet.
+  // Claude/Codex character state: a pending question (?) > working (generating /
+  // tools / sub-agents / recent activity) > idle (sleeping/Zzz). No state for
+  // terminals. workingOverrideId bridges the poll gap.
   const claudeState = isTerminal
     ? null
     : s.pending
@@ -159,10 +159,10 @@ function PaneRow({
             opacity; inactive panes dim (this replaces the old green/grey orb). */}
         <span
           className="pane-icon"
-          data-kind={isTerminal ? 'terminal' : 'claude'}
+          data-kind={isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude'}
           data-active={s.active ? 'true' : 'false'}
           data-state={claudeState ?? undefined}
-          aria-label={isTerminal ? 'terminal pane' : 'Claude pane'}
+          aria-label={isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane'}
           title={
             isTerminal
               ? s.active
@@ -175,7 +175,13 @@ function PaneRow({
                   : 'idle'
           }
         >
-          {isTerminal ? <TerminalSquareIcon size={15} /> : <ClaudeRobotIcon size={14} />}
+          {isTerminal ? (
+            <TerminalSquareIcon size={15} />
+          ) : isCodex ? (
+            <BotIcon size={14} />
+          ) : (
+            <ClaudeRobotIcon size={14} />
+          )}
           {claudeState === 'ask' ? (
             <span className="pane-icon-badge pane-icon-ask" aria-hidden="true">?</span>
           ) : claudeState === 'sleeping' ? (
@@ -221,13 +227,13 @@ export function SessionRail({
 }: SessionRailProps) {
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
   const groups = useMemo(() => {
-    const visible = sessions.filter((s) =>
-      filter === 'all'
-        ? true
-        : filter === 'terminal'
-          ? s.kind === 'terminal'
-          : s.kind !== 'terminal',
-    );
+    const visible = sessions.filter((s) => {
+      if (filter === 'all') return true;
+      if (filter === 'terminal') return s.kind === 'terminal';
+      if (filter === 'codex') return s.kind === 'codex';
+      // 'claude' filter: show claude panes (kind === 'claude' or kind unset, but not terminal/codex)
+      return s.kind !== 'terminal' && s.kind !== 'codex';
+    });
     return groupByTmux(visible);
   }, [sessions, filter]);
 
