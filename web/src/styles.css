@@ -2322,6 +2322,11 @@ body.is-external-display .composer {
   /* Establishes the containing block for absolutely-positioned content layers
      during the voice morph transition (prevents jump by overlapping layers). */
   position: relative;
+  /* Floor: matches the single-row composer resting height (96px). Prevents the
+     card from collapsing to near-zero during a voice-morph height tween if the
+     voice-body measurement returns a low value. The JS morph clamps its tween
+     target to the same constant (COMPOSER_MIN_HEIGHT). */
+  min-height: 96px;
 }
 .composer-card:focus-within {
   border-color: var(--accent);
