@@ -731,11 +731,26 @@ function AppInner() {
   }, [railCollapsed, narrow]);
 
   // Subtle content transition when switching sessions (desktop + mobile).
+  // Scoped to the thread/live-pane content element only — the .composer is
+  // explicitly excluded so it NEVER opacity-fades or y-shifts on session
+  // open/switch.  The user requirement is zero animation on the composer
+  // except for the voice enter/exit morph.
   useEffect(() => {
     const el = detailBodyRef.current;
     if (!el || !cockpit.selectedId || prefersReducedMotion()) return;
+    // Target the scrollable content container.  Priority:
+    //   1. .thread-viewport  — transcript sessions (messages scroller)
+    //   2. .live-pane        — no-transcript sessions (raw tmux pane)
+    //   3. .terminal-pane-root — plain terminal sessions
+    // The .composer lives INSIDE .thread-root (a sibling/ancestor of these
+    // targets), never as a direct child of .detail-body, so it is not reached.
+    const contentEl =
+      el.querySelector<HTMLElement>('.thread-viewport') ??
+      el.querySelector<HTMLElement>('.live-pane') ??
+      el.querySelector<HTMLElement>('.terminal-pane-root');
+    if (!contentEl) return; // content not mounted yet — skip (next switch will catch)
     gsap.fromTo(
-      el,
+      contentEl,
       { opacity: 0.35, y: 6 },
       { opacity: 1, y: 0, duration: 0.22, ease: 'power3.out' },
     );
