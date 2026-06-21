@@ -693,7 +693,17 @@ export function Composer({
       voiceAnimRef.current = phase1;
 
     } else {
-      // ── EXIT: voice body out → frame settles → composer body in ─────────────
+      // ── EXIT: transcriber out → gap → frame restore + composer in ────────────
+      //
+      // Mirror of ENTER (exact reverse):
+      //   Phase 1 = transcriber out (card stays at transcriber height so nothing
+      //             is clipped and the exit is fully visible).
+      //             Reverse of ENTER Phase 2: voice buttons out one-by-one, then
+      //             top group (status/wave/hint) out.
+      //   Gap     = T.gap settle pause.
+      //   Phase 2 = FLIP-measure composer height, tween card height back, then
+      //             reveal composer inputWrap + toolbar buttons one-by-one.
+      //             Reverse of ENTER Phase 1.
 
       const voiceBody       = voiceBodyRef.current;
       const voiceToolbar    = card.querySelector<HTMLElement>('.voice-toolbar');
@@ -711,17 +721,19 @@ export function Composer({
         return;
       }
 
-      // Restore inputWrap + toolbar into layout at opacity 0 so Phase 2 can fade
-      // them in — prevents a React re-render flash of composer buttons appearing.
+      // Pre-hide composer elements at opacity 0 so Phase 2 can reveal them.
+      // They stay in flow (display:'') so the FLIP measurement below can read
+      // the composer-only height without temporarily floating them.
       if (inputWrap) gsap.set(inputWrap, { display: '', opacity: 0, y: 6 });
       if (toolbar)   gsap.set(toolbar,   { opacity: 0, y: 4 });
-
       const toolbarBtns = toolbar
         ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
         : [];
       if (toolbarBtns.length) gsap.set(toolbarBtns, { opacity: 0, y: 4 });
 
-      // ── Measure heights for the height tween (manual FLIP). ─────────────────
+      // ── Measure heights for the Phase 2 height tween (manual FLIP). ──────────
+      // FROM = current card height at transcriber size (card is still showing
+      //        the transcriber — this is the height we hold during Phase 1).
       const heightFrom = card.offsetHeight;
       // TO = composer-only height: float voice body out of flow temporarily.
       if (voiceBody) {
@@ -733,19 +745,32 @@ export function Composer({
         voiceBody.style.position   = '';
         voiceBody.style.visibility = '';
       }
+
+      // Pin the card at the transcriber height for Phase 1 so the transcriber
+      // elements animate out without the frame collapsing on them.
       card.style.height   = `${heightFrom}px`;
       card.style.overflow = 'hidden';
-      void card.offsetHeight; // force reflow
+      void card.offsetHeight; // force reflow so GSAP starts from the pinned value
 
-      // Voice content targets for stagger.
+      // Voice content targets for Phase 1 stagger.
       const voiceTopTargets = [voiceStatus, voiceWave, voiceHintEl].filter(Boolean) as HTMLElement[];
+      const voiceBtns = voiceToolbar
+        ? Array.from(voiceToolbar.querySelectorAll<HTMLElement>('button, [role="button"]'))
+        : [];
 
-      // ── Phase 2 builder: reveal composer elements ────────────────────────────
-      // Called after Phase 1 completes + T.gap settle delay. overflow is already
-      // cleared by this point.
+      // ── Phase 2 builder: restore frame + reveal composer elements ────────────
+      // Called after Phase 1 completes + T.gap settle delay.
+      // overflow is cleared BEFORE tween starts so buttons aren't clipped.
       const runPhase2Exit = () => {
+        // Clear overflow before the height tween so the composer body (now taller
+        // than the pinned transcriber height) is never clipped as it comes in.
+        card.style.height   = `${heightFrom}px`; // re-pin at current (transcriber) height
+        card.style.overflow = '';                 // ← unlock before tween
+
         const phase2 = gsap.timeline({
           onComplete: () => {
+            // Tween has settled — let the card breathe (auto height).
+            card.style.height = '';
             // Hide the pre-rendered voice shell (display:none = zero layout contribution).
             if (voiceBody) voiceBody.style.display = 'none';
             // Clear GSAP inline styles so they're clean for next time.
@@ -755,7 +780,14 @@ export function Composer({
           },
         });
 
-        // Fade in composer body first.
+        // Tween card height transcriber → composer simultaneously with the reveal.
+        phase2.to(
+          card,
+          { height: heightTo, duration: T.height, ease: T.enterEase },
+          0,
+        );
+
+        // Fade in composer body.
         if (inputWrap) {
           phase2.to(
             inputWrap,
@@ -783,48 +815,42 @@ export function Composer({
         voiceAnimRef.current = phase2;
       };
 
-      // ── Phase 1 timeline: settle the frame ──────────────────────────────────
+      // ── Phase 1 timeline: transcriber OUT (no height change) ─────────────────
+      // The frame stays pinned at transcriber height so the voice elements are
+      // fully visible as they leave. This is the reverse of ENTER Phase 2.
       const phase1 = gsap.timeline({
         onComplete: () => {
-          card.style.height   = '';
-          card.style.overflow = '';
+          // Phase 1 done — transcriber content is gone. Start gap then Phase 2.
+          // height + overflow are still set (frame still pinned at transcriber size).
           gsap.delayedCall(T.gap, runPhase2Exit);
         },
       });
 
-      // Stagger voice toolbar buttons out ONE-BY-ONE (bottom → top visual flow).
-      if (voiceToolbar) {
-        const voiceBtns = Array.from(
-          voiceToolbar.querySelectorAll<HTMLElement>('button, [role="button"]'),
+      // Reverse of ENTER Phase 2 button reveal: animate voice buttons OUT one-by-one.
+      if (voiceBtns.length) {
+        phase1.to(
+          voiceBtns,
+          { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger },
+          0,
         );
-        if (voiceBtns.length) {
-          phase1.to(
-            voiceBtns,
-            { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger },
-            0,
-          );
-        } else {
-          phase1.to(voiceToolbar, { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase }, 0);
-        }
+      } else if (voiceToolbar) {
+        phase1.to(voiceToolbar, { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase }, 0);
       }
 
-      // Fade voice top targets out ONE-BY-ONE.
+      // Reverse of ENTER Phase 2 top-group reveal: fade top group OUT.
+      const voiceBtnsDuration = voiceBtns.length
+        ? T.fade + T.btnStagger * (voiceBtns.length - 1)
+        : 0;
+      const topStart = voiceBtns.length ? voiceBtnsDuration * 0.5 : 0;
       if (voiceTopTargets.length) {
         phase1.to(
           voiceTopTargets,
           { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase, stagger: T.topStagger },
-          0,
+          topStart,
         );
       } else if (voiceBody) {
         phase1.to(voiceBody, { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase }, 0);
       }
-
-      // Tween card height back.
-      phase1.to(
-        card,
-        { height: heightTo, duration: T.height, ease: T.exitEase },
-        0,
-      );
 
       voiceAnimRef.current = phase1;
     }
