@@ -4845,7 +4845,10 @@ select.config-input {
   display: none;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px 0;
+  /* No horizontal padding: let .composer-card's own 12px padding govern both
+     this block and .voice-toolbar, so the waveform edges align with the
+     action buttons below. 8px top matches the card's top padding rhythm. */
+  padding: 8px 0 0;
 }
 /* Inline waveform: sized to the composer body, shorter than the modal wave. */
 .voice-wave-inline {
@@ -4855,7 +4858,7 @@ select.config-input {
 /* Voice toolbar: reuses .composer-toolbar layout; rendered inside VoiceInline
    but below the waveform so it inherits .composer-card padding/border context. */
 .voice-toolbar {
-  margin-top: 2px;
+  margin-top: 0;
 }
 /* btn-secondary: small secondary button used for Cancel / Pause / Resume.
    Uses the composer's existing surface tokens. */
