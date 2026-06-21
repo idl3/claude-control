@@ -1,13 +1,14 @@
 # claude-control
 
-A tiny, local web UI to **watch and drive your Claude Code sessions from a
-browser or phone**. It discovers the Claude sessions you already run inside
-**tmux**, streams each session's transcript live, lets you reply, answer
-`AskUserQuestion` prompts, attach screenshots/files, and capture the pane — all
-over `127.0.0.1` (or your Tailscale tailnet), guarded by a token.
+A tiny, local web UI to **watch and drive your Claude Code and Codex CLI
+sessions from a browser or phone**. It discovers the agent sessions you already
+run inside **tmux**, streams each session's transcript live, lets you reply,
+answer approval prompts (Claude `AskUserQuestion` + Codex TUI modals), attach
+screenshots/files, and capture the pane — all over `127.0.0.1` (or your
+Tailscale tailnet), guarded by a token.
 
-No daemon to babysit, no database: it reads Claude Code's transcript files and
-talks to tmux. Bind is localhost-only by default.
+No daemon to babysit, no database: it reads agent transcript files and talks to
+tmux. Bind is localhost-only by default.
 
 ---
 
@@ -76,7 +77,8 @@ Version numbers follow npm semver (bump `package.json` per release); this is
 
 ## Configuration
 
-All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
+All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work
+(the server tries `CLAUDE_CONTROL_<X>` first, then `COCKPIT_<X>`).
 
 | Env | Default | Purpose |
 |---|---|---|
@@ -84,6 +86,8 @@ All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
 | `CLAUDE_CONTROL_HOST` | `127.0.0.1` | Bind address |
 | `CLAUDE_CONTROL_TOKEN` | _(none)_ | Require `?token=` on every request (recommended if exposed beyond localhost) |
 | `CLAUDE_CONTROL_PROJECTS` | `~/.claude/projects` | Where Claude Code transcripts live |
+| `CLAUDE_CONTROL_CODEX` | `codex` | Codex binary name or absolute path; used to spawn Codex sessions and to check binary availability for `/api/agents` |
+| `CLAUDE_CONTROL_CODEX_SESSIONS` | `~/.codex/sessions` | Codex rollout sessions root; today's and yesterday's date dirs are scanned for transcript discovery |
 | `CLAUDE_CONTROL_UPLOADS` | `~/.claude-control/uploads` | Where attachments are stored (TTL-swept) |
 | `CLAUDE_CONTROL_TMUX` | _(auto)_ | tmux binary override |
 | `CLAUDE_CONTROL_MAX_UPLOAD_MB` | `25` | Per-file upload cap |
@@ -102,12 +106,26 @@ All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
 ## How it works
 
 - **Discovery** — polls `tmux list-windows` every few seconds and matches each
-  window to the newest transcript for its cwd (`lib/sessions.js`).
-- **Transcript** — tails each subscribed session's `*.jsonl` (bounded reads)
-  and streams appends over WebSocket (`lib/transcript.js`).
-- **Input** — replies and answers are sent with `tmux send-keys` to the exact
-  pane (`lib/tmux.js`); attachments upload to the uploads dir and their path is
-  appended to the message for Claude to read.
+  window to the newest transcript for its cwd. Claude Code sessions are matched
+  by process title (version string) and transcript from `~/.claude/projects/`;
+  Codex sessions are matched by process name and rollout JSONL from
+  `~/.codex/sessions/<YYYY>/<MM>/<DD>/` (`lib/sessions.js`, `lib/agents/`).
+- **Transcript** — tails each subscribed session's JSONL (bounded reads) and
+  streams appends over WebSocket. Claude and Codex use different record schemas,
+  parsed by their respective adapters (`lib/transcript.js`, `lib/agents/`).
+- **Spawn** — the spawn picker lets you choose a tmux target (new window in an
+  existing session, or a new named session), a working directory, and an agent
+  type (`claude` or `codex`). The server validates the binary, realpaths the
+  cwd, and launches the agent via `tmux new-window` or `tmux new-session`.
+- **Approvals** — Claude `AskUserQuestion` prompts are detected in the JSONL
+  transcript and surfaced as a modal; Codex approval modals ("Would you like to
+  run the following command?", etc.) are detected via `capture-pane` (TUI-only,
+  not written to the rollout JSONL). Both are surfaced through the same `pending`
+  WebSocket frame and answered through the same `answer` message; the server
+  routes each answer through the correct adapter's keystroke builder.
+- **Input** — replies and keystrokes are sent with `tmux send-keys` to the
+  exact pane (`lib/tmux.js`); attachments upload to the uploads dir and their
+  path is appended to the message.
 
 ## Development
 

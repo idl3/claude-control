@@ -1,6 +1,8 @@
 // Token + URL helpers. The page is loaded as `?token=<t>`; every API call and
 // the WS URL must carry it. Same-origin throughout.
 
+import type { AgentInfo, TmuxSessionInfo } from './spawn';
+
 export function getToken(): string | null {
   return new URLSearchParams(window.location.search).get('token');
 }
@@ -98,6 +100,32 @@ export async function postPushUnsubscribe(endpoint: string): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+/** Fetch available agent info from /api/agents (best-effort; [] on error). */
+export async function getAgents(): Promise<AgentInfo[]> {
+  try {
+    const res = await fetch(`/api/agents?${authQuery().slice(1)}`);
+    if (!res.ok) return [];
+    return (await res.json()) as AgentInfo[];
+  } catch {
+    return [];
+  }
+}
+
+/** Fetch tmux session list from /api/tmux/sessions (best-effort; [] on error). */
+export async function getTmuxSessions(): Promise<TmuxSessionInfo[]> {
+  try {
+    const res = await fetch(`/api/tmux/sessions?${authQuery().slice(1)}`);
+    if (!res.ok) return [];
+    const json = (await res.json()) as
+      | { sessions: TmuxSessionInfo[] }
+      | TmuxSessionInfo[];
+    if (Array.isArray(json)) return json;
+    return json.sessions ?? [];
+  } catch {
+    return [];
   }
 }
 

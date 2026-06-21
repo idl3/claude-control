@@ -268,6 +268,29 @@ body {
   text-align: center;
 }
 
+/* Agent-type badge: compact pill shown beside the session name.
+   Two accent variants — claude uses --accent (blue-purple), codex uses --accent-2 (teal). */
+.agent-badge {
+  flex: 0 0 auto;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: 5px;
+  line-height: 1.2;
+}
+.agent-badge[data-kind='claude'] {
+  background: oklch(from var(--accent) l c h / 0.18);
+  color: var(--accent);
+  border: 1px solid oklch(from var(--accent) l c h / 0.35);
+}
+.agent-badge[data-kind='codex'] {
+  background: oklch(from var(--accent-2) l c h / 0.18);
+  color: var(--accent-2);
+  border: 1px solid oklch(from var(--accent-2) l c h / 0.35);
+}
+
 /* ── Detail header ────────────────────────────────────────────── */
 .detail-head {
   display: flex;
@@ -1141,6 +1164,215 @@ details.block-tool[open] > summary .tool-arrow {
 .notify-bell:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ── Spawn Picker ─────────────────────────────────────────────── */
+.spawn-picker-title {
+  color: var(--accent);
+}
+
+.spawn-picker-form {
+  gap: 14px;
+}
+
+/* "+ New session" rail button */
+.spawn-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: calc(100% - 12px);
+  margin: 6px;
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background var(--ease) 0.15s,
+    border-color var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.spawn-trigger:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.spawn-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.spawn-trigger-icon {
+  font-size: 15px;
+  line-height: 1;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* Fieldset resets */
+.spawn-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  margin: 0;
+}
+.spawn-legend {
+  padding: 0 6px;
+  font-size: var(--txt-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* Agent radio row */
+.spawn-agent-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.spawn-agent-option {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  cursor: pointer;
+  transition:
+    border-color var(--ease) 0.15s,
+    background var(--ease) 0.15s;
+}
+.spawn-agent-option input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.spawn-agent-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.spawn-agent-option:has(input:not(:disabled)):hover {
+  background: var(--bg-hover);
+}
+.spawn-agent-option[data-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.spawn-agent-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.spawn-agent-unavail {
+  font-size: 9.5px;
+  color: var(--red);
+  letter-spacing: 0.04em;
+}
+
+/* Mode toggle row */
+.spawn-mode-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.spawn-mode-option {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  cursor: pointer;
+  transition:
+    border-color var(--ease) 0.15s,
+    background var(--ease) 0.15s;
+}
+.spawn-mode-option input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.spawn-mode-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.spawn-mode-option:hover {
+  background: var(--bg-hover);
+}
+.spawn-mode-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Form fields */
+.spawn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.spawn-field-label {
+  font-size: var(--txt-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.spawn-input,
+.spawn-select {
+  padding: 8px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color var(--ease) 0.15s;
+  width: 100%;
+}
+.spawn-input:focus,
+.spawn-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.spawn-input::placeholder {
+  color: var(--text-faint);
+}
+.spawn-input-error {
+  border-color: var(--red);
+}
+.spawn-input-error:focus {
+  border-color: var(--red);
+}
+.spawn-field-error {
+  font-size: var(--txt-meta);
+  color: var(--red);
+}
+.spawn-field-loading {
+  font-size: 12px;
+  color: var(--text-faint);
+  padding: 6px 0;
+}
+
+/* Server-error region */
+.spawn-error {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  color: var(--text);
+  font-size: 12.5px;
 }
 
 /* One-line iOS "add to home screen" push hint */

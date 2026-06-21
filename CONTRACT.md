@@ -1,16 +1,19 @@
-# claude-cockpit — module contract (authoritative)
+# claude-control — module contract (authoritative)
 
 All files are **ESM** (`"type":"module"`). Node ≥20. Only runtime dependency: `ws`.
 Everything else uses Node built-ins. Bind to **127.0.0.1 only**. Never pass user
 strings through a shell — always `execFile`/`spawn` with an args array.
 
-Environment knobs (read in `server.js`, with defaults):
-- `COCKPIT_PORT` (default `4317`)
-- `COCKPIT_HOST` (default `127.0.0.1` — do not default to 0.0.0.0)
-- `COCKPIT_PROJECTS` (default `~/.claude/projects`)
-- `COCKPIT_TMUX` (default: auto-resolved tmux binary)
-- `COCKPIT_RSS_LIMIT_MB` (default `350`) — self-RSS soft cap
-- `COCKPIT_TOKEN` (optional) — if set, WS upgrade and `/api/*` require `?token=` match
+Environment knobs (read in `server.js`, with defaults). Prefer
+`CLAUDE_CONTROL_<X>`; legacy `COCKPIT_<X>` names are checked as a fallback:
+- `CLAUDE_CONTROL_PORT` / `COCKPIT_PORT` (default `4317`)
+- `CLAUDE_CONTROL_HOST` / `COCKPIT_HOST` (default `127.0.0.1` — do not default to 0.0.0.0)
+- `CLAUDE_CONTROL_PROJECTS` / `COCKPIT_PROJECTS` (default `~/.claude/projects`)
+- `CLAUDE_CONTROL_CODEX` / `COCKPIT_CODEX` (default `codex`) — Codex binary name or absolute path
+- `CLAUDE_CONTROL_CODEX_SESSIONS` / `COCKPIT_CODEX_SESSIONS` (default `~/.codex/sessions`) — Codex rollout sessions root
+- `CLAUDE_CONTROL_TMUX` / `COCKPIT_TMUX` (default: auto-resolved tmux binary)
+- `CLAUDE_CONTROL_RSS_LIMIT_MB` / `COCKPIT_RSS_LIMIT_MB` (default `768`) — self-RSS soft cap
+- `CLAUDE_CONTROL_TOKEN` / `COCKPIT_TOKEN` (optional) — if set, WS upgrade and `/api/*` require `?token=` match
 
 ## Resource doctrine (the whole point — "don't go overboard")
 - **Never read a transcript fully.** Files reach 200 MB+. Initial load reads only a
@@ -96,7 +99,7 @@ Parsing rules (verified against real transcripts):
 ## lib/sessions.js
 ```js
 export class SessionRegistry extends EventEmitter {
-  constructor({ projectsRoot, tmux /* the lib/tmux module */, debounceMs = 1000 } = {})
+  constructor({ projectsRoot, codexSessionsRoot, tmux /* the lib/tmux module */, debounceMs = 1000 } = {})
   async refresh(): Promise<Session[]>   // rescan tmux + project dirs
   start(): void   // periodic refresh (e.g. every 4s) + initial refresh
   stop(): void
@@ -107,7 +110,8 @@ export class SessionRegistry extends EventEmitter {
 }
 ```
 `Session = { id, sessionId, name, target, sessionName, windowIndex, active:boolean,
-             cwd, transcriptPath, lastActivity:string|null, pending:boolean, cmd }`
+             cwd, transcriptPath, lastActivity:string|null, pending:boolean, cmd,
+             agentType?:'claude'|'codex' }`
 Linking algorithm:
 1. `tmux.listWindows()`.
 2. For each project dir under `projectsRoot`, find the newest `*.jsonl` (by mtime).
@@ -141,7 +145,22 @@ export class ResourceMonitor extends EventEmitter {
 - `overLimit` when `self.rssMB > rssLimitMB`; emit `'overlimit'` on the rising edge.
 
 ## server.js (I own this — listed for reference)
-HTTP: serves `public/` (static, path-traversal-safe) and `GET /api/sessions`.
+HTTP: serves `web/dist/` (authoritative — built from `web/src`, the React/Vite
+app) with `public/` as a fallback when `web/dist/index.html` does not exist.
+All routes are path-traversal-safe.
+
+HTTP endpoints:
+- `GET  /api/sessions`       — `{ sessions: Session[] }`
+- `GET  /api/health`         — `{ ok:true, snapshot: Snapshot }`
+- `GET  /api/version`        — version + upstream check result
+- `POST /api/update`         — trigger in-place self-update
+- `POST /api/upload`         — raw-body file upload; returns `{ ok, path, name }`
+- `GET  /api/push/vapid`     — `{ publicKey: string }`
+- `POST /api/push/subscribe` — add a Web Push subscription
+- `POST /api/push/unsubscribe` — remove a subscription
+- `GET  /api/tmux/sessions`  — `{ sessions: [{name:string, cwd:string}] }` — raw tmux session list (not filtered by agent)
+- `GET  /api/agents`         — `[{id:'claude'|'codex', available:boolean, reason?:string}]` — per-adapter binary check
+
 WS (`ws`): bound to the same server.
 Client→server messages:
 - `{ type:'subscribe', id }`         start tailing that session; reply with `messages`
@@ -149,16 +168,63 @@ Client→server messages:
 - `{ type:'reply', id, text }`        sendText into the session's tmux target
 - `{ type:'answer', id, toolUseId, selections: string[][] }`
         selections[i] = chosen option labels for questions[i]; build picker keys
-        (lib/answer.js) and sendRawKeys, then sendText fallback is NOT auto-used.
-- `{ type:'capture', id }`            return a one-shot capture-pane snapshot
+        (lib/answer.js / adapter.buildAnswerProgram) and sendRawKeys.
+        For Codex sessions: selections[0][0] is a digit string or option label;
+        the Codex adapter converts it to the TUI keystroke [digit, 'Enter'].
+- `{ type:'capture', id, lines? }`   return a one-shot capture-pane snapshot
+- `{ type:'spawn', agentType:'claude'|'codex', target:{mode:'new-window',session:string}|{mode:'new-session'}, cwd:string, name?:string }`
+        spawn a new agent in tmux; `name` is the new session name when mode is
+        'new-session'. Server validates binary, realpaths cwd, and dispatches to
+        tmux. Responds with `{ type:'ack', op:'spawn', ok:true, target:string }`
+        on success (target = new tmux target, e.g. "sess:7"), or
+        `{ type:'ack', op:'spawn', ok:false, error:string }` on failure.
 Server→client messages:
 - `{ type:'sessions', sessions }`
 - `{ type:'messages', id, messages, pending }`   full buffer on (re)subscribe
 - `{ type:'append', id, messages }`
-- `{ type:'pending', id, pending }`
-- `{ type:'resources', snapshot }`
+- `{ type:'pending', id, pending }`              Pending | null — same shape for both Claude and Codex
+- `{ type:'resources', snapshot, warning? }`
 - `{ type:'capture', id, text }`
 - `{ type:'ack', op, ok, error? }`
+
+Codex pending contract:
+- Approval modals ("Would you like to run the following command?", "Would you
+  like to make the following edits?", "Do you trust the contents of this
+  directory?") are TUI-only — **never written to the rollout JSONL**. They are
+  detected via `capture-pane` in `CodexAdapter.detectPendingFromCapture`.
+- Once detected, they are surfaced through the same `{ type:'pending', id,
+  pending }` frame and the same `Pending` shape as Claude questions: one entry
+  in `pending.questions`, with the modal's numbered choices as `options`.
+  `toolUseId` is a synthetic id assigned at capture time.
+- Answered through the same `{ type:'answer', ... }` WS message. The server
+  routes Codex answers through `CodexAdapter.buildAnswerProgram`, which sends
+  a digit key + Enter to the TUI.
+- Codex reasoning blocks are rendered as `[reasoning encrypted]` (the rollout
+  JSONL stores encrypted reasoning; the plaintext is unavailable).
+
+## lib/agents/ (adapter registry + adapters)
+```js
+// lib/agents/index.js
+export const ADAPTERS: AgentAdapter[]     // [ClaudeAdapter, CodexAdapter] — registration order
+export const DEFAULT_ADAPTER: AgentAdapter  // ClaudeAdapter (back-compat default)
+export function adapterFor(cmd: string): AgentAdapter|null   // first adapter whose matchesProcess(cmd) returns true
+export function adapterById(id: string): AgentAdapter|null
+```
+`AgentAdapter` interface (see `lib/agents/adapter.js`):
+- `id: string` — stable identifier (`'claude'` | `'codex'`)
+- `matchesProcess(cmd): boolean` — does the tmux pane command belong to this agent?
+- `parseRecord(line): NormalizedMessage|null`
+- `trackPending(msg, pendingMap): void`
+- `detectTranscriptPending(lines): { transcriptPending, pendingToolUseId, pendingQuestion }`
+- `detectPendingFromCapture(capture): { transcriptPending, pendingKind?, header?, options[] }` (Codex only; Claude stub returns no-modal)
+- `parseTuiStatus(capture): { ctxPct, model }`
+- `prettyModel(modelId): string|null`
+- `buildSpawnCommand({ cwd?, bin? }): { bin, args }`
+- `buildAnswerProgram(pending, selections): string[]`
+- `buildTranscriptIndex(roots): Promise<TranscriptIndex>`
+
+To add a third agent: implement `AgentAdapter`, add it to the `ADAPTERS` literal in
+`lib/agents/index.js`. No plugin loader or config file — one array entry.
 
 ## lib/answer.js (I own this)
 `export function buildAnswerKeys(question, selectedLabels): string[]`
@@ -166,13 +232,15 @@ Single-select: `['Down'*index, 'Enter']`. Multi-select: navigate Down to each ch
 index and press `Space`, then `Enter`. (Picker-navigation assumption — documented in
 README as the one load-bearing assumption, with the free-text `reply` as fallback.)
 
-## public/ (frontend — vanilla, no build)
-`index.html`, `styles.css`, `app.js`. Connects to `ws://<host>:<port>` (+ `?token=` if
-served a token). Renders: left session rail (active dot, pending badge, cwd), a chat
-transcript pane (text/thinking/tool blocks visually distinct, thinking collapsible), a
-reply composer (Enter to send → `reply`), and an **AskUserQuestion modal** that appears
-when `pending` is set: shows each question + options as buttons (multi-select toggles),
-and a Send Answer button → `answer`. A fixed resource HUD (self CPU%/RSS, system load,
-mem%) that turns warning-colored when `overLimit`. Aesthetic: dark terminal-cockpit,
-CSS custom properties, compositor-friendly transitions only. Accessible (keyboard,
-focus states, aria on the modal). No external network calls/CDNs.
+## web/dist/ (frontend — authoritative)
+Built from `web/src/` (React + Vite). `server.js` serves `web/dist/` when
+`web/dist/index.html` exists; falls back to `public/` (the legacy zero-build
+vanilla UI) otherwise.
+
+`public/` is retained as a zero-dependency fallback. Its feature set is a subset
+of the React app: session rail, transcript pane, reply composer, AskUserQuestion
+modal, and resource HUD. It does not support the spawn picker or Codex-specific UI.
+
+Both frontends connect via `ws://<host>:<port>` (+ `?token=`). Core wire
+protocol is identical: subscribe → messages → append/pending/resources frames;
+reply/answer/capture/spawn client messages.

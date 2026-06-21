@@ -13,6 +13,7 @@ import { SessionRail } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { AskModal } from './components/AskModal';
+import { SpawnPicker } from './components/SpawnPicker';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import type { ServerMessage } from './lib/types';
@@ -41,6 +42,10 @@ export default function App() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastSeq = useRef(0);
 
+  // Spawn picker state.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [spawnError, setSpawnError] = useState<string | null>(null);
+
   const showToast = useCallback(
     (text: string, kind: 'ok' | 'error' | '' = '') => {
       setToast({ id: ++toastSeq.current, text, kind });
@@ -49,10 +54,20 @@ export default function App() {
   );
 
   // Surface WS ack errors / answer confirmations as toasts.
+  // Also handle spawn acks: on failure set spawnError; on success close picker.
   useEffect(() => {
     const onAck = (e: Event) => {
       const ack = (e as CustomEvent<Extract<ServerMessage, { type: 'ack' }>>)
         .detail;
+      if (ack.op === 'spawn') {
+        if (!ack.ok) {
+          setSpawnError(ack.error ?? 'spawn failed');
+        } else {
+          setSpawnError(null);
+          setPickerOpen(false);
+        }
+        return;
+      }
       if (!ack.ok) showToast(`${ack.op} failed: ${ack.error ?? 'error'}`, 'error');
       else if (ack.op === 'answer') showToast('Answer sent →', 'ok');
     };
@@ -235,6 +250,18 @@ export default function App() {
 
         <div className="app-body">
           <aside className="rail">
+            <button
+              type="button"
+              className="spawn-trigger"
+              onClick={() => {
+                setSpawnError(null);
+                setPickerOpen(true);
+              }}
+              aria-label="Open new session picker"
+            >
+              <span className="spawn-trigger-icon" aria-hidden="true">+</span>
+              New session
+            </button>
             <SessionRail
               sessions={cockpit.sessions}
               selectedId={cockpit.selectedId}
@@ -288,6 +315,17 @@ export default function App() {
             }}
           />
         ) : null}
+
+        <SpawnPicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onSpawn={(msg) => {
+            cockpit.sendSpawn(msg);
+            // Leave picker open — success arrives via 'spawn' ack listener above.
+            // New session will appear via normal sessions broadcast.
+          }}
+          error={spawnError}
+        />
 
         <ToastView toast={toast} />
       </div>

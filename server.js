@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFile as _execFile } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
@@ -19,6 +19,9 @@ import { buildAnswerProgram } from './lib/answer.js';
 import { sweepUploads } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
+import { ADAPTERS, adapterById } from './lib/agents/index.js';
+import { codexPendingToFrontend, frontendSelectionToNative } from './lib/agents/codex-pending.js';
+import { handleSpawn, resolveBinary } from './lib/spawn.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -51,6 +54,9 @@ const CONFIG = {
   host: env('HOST') || '127.0.0.1',
   projectsRoot:
     env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
+  codexSessionsRoot:
+    env('CODEX_SESSIONS') || path.join(os.homedir(), '.codex', 'sessions'),
+  codexBin: env('CODEX') || 'codex',
   // 768MB: a long-running Node server (WS + transcript tailing + the bundled
   // web app) baselines ~300-450MB of V8 heap + RSS, so the old 350MB budget
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
@@ -75,7 +81,7 @@ const MIME = {
 };
 
 // --- shared state -----------------------------------------------------------
-const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, tmux });
+const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 
 /** id -> { tailer, clients:Set<ws>, pending } */
@@ -166,6 +172,36 @@ const server = http.createServer((req, res) => {
       push.removeSubscription(endpoint);
       return endJson(res, 200, { ok: true });
     });
+  }
+  if (u.pathname === '/api/tmux/sessions') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return tmux.listWindows()
+      .then((windows) => {
+        // Group by sessionName; pick the active window's cwd, or first.
+        const seen = new Map();
+        for (const w of windows) {
+          const existing = seen.get(w.sessionName);
+          if (!existing || w.active) {
+            seen.set(w.sessionName, { name: w.sessionName, cwd: w.cwd });
+          }
+        }
+        return endJson(res, 200, { sessions: [...seen.values()] });
+      })
+      .catch(() => endJson(res, 200, { sessions: [] }));
+  }
+  if (u.pathname === '/api/agents') {
+    if (!checkToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
+    return Promise.all(
+      ADAPTERS.map(async (adapter) => {
+        const bin = adapter.id === 'codex' ? CONFIG.codexBin : 'claude';
+        const available = await resolveBinary(bin);
+        const entry = { id: adapter.id, available };
+        if (!available) entry.reason = `binary "${bin}" not found on PATH`;
+        return entry;
+      }),
+    )
+      .then((agents) => endJson(res, 200, agents))
+      .catch(() => endJson(res, 200, []));
   }
 
   // static
@@ -462,6 +498,25 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+
+      if (session.agentType === 'codex') {
+        // Codex answer path: modal selection via capture-detected native pending.
+        const native = registry.getCodexPending(msg.id);
+        if (!native) throw new Error('no pending question');
+        // Stale-guard: require the client to name the exact modal it is answering.
+        const fe = codexPendingToFrontend(native);
+        if (msg.toolUseId !== fe?.toolUseId) {
+          throw new Error('stale question (already answered or changed)');
+        }
+        const validated = frontendSelectionToNative(native, msg.selections || []);
+        const keys = adapterById('codex').buildAnswerProgram(native, validated);
+        await tmux.sendRawKeysSequenced(session.target, keys);
+        // Clear the stored native so the modal re-arms for the next approval.
+        registry.clearCodexPending(msg.id);
+        return send(ws, { type: 'ack', op: 'answer', ok: true });
+      }
+
+      // Claude answer path (unchanged).
       const sub = subscriptions.get(msg.id);
       const pending = sub?.tailer ? sub.tailer.getPending() : null;
       if (!pending) throw new Error('no pending question');
@@ -482,6 +537,16 @@ async function handleClientMessage(ws, msg) {
       const lines = Math.max(1, Math.min(10000, Number(msg.lines) || 40));
       const text = await tmux.capturePane(session.target, lines);
       return send(ws, { type: 'capture', id: msg.id, text });
+    }
+    case 'spawn': {
+      const newTarget = await handleSpawn(msg, {
+        tmux,
+        adapterById,
+        registry,
+        codexBin: CONFIG.codexBin,
+        resolveBinary,
+      });
+      return send(ws, { type: 'ack', op: 'spawn', ok: true, target: newTarget });
     }
     default:
       return;
@@ -531,6 +596,14 @@ function firePushForChange(sessions) {
 registry.on('change', (sessions) => {
   firePushForChange(sessions);
   broadcast({ type: 'sessions', sessions });
+});
+
+// Codex approval modal: emit the frontend pending frame to subscribed clients
+// whenever the registry detects a new (or cleared) modal. The 'codexPending'
+// event is edge-detected inside _pollCtx so this handler fires only on change.
+registry.on('codexPending', (id, native) => {
+  const fe = codexPendingToFrontend(native);
+  broadcastTo(id, { type: 'pending', id, pending: fe });
 });
 resources.on('sample', (snapshot) => broadcast({ type: 'resources', snapshot }));
 resources.on('overlimit', (snapshot) => {

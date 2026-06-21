@@ -112,12 +112,12 @@ export function AskModal({
         className="modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Question from Claude"
+        aria-label="Pending question"
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
         <div className="modal-head">
-          <span className="modal-title">Claude is asking</span>
+          <span className="modal-title">Waiting for your answer</span>
           <button
             type="button"
             className="modal-close"

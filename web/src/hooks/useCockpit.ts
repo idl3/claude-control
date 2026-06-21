@@ -5,6 +5,7 @@ import type {
   Pending,
   ResourceSnapshot,
   Session,
+  SpawnClientMessage,
 } from '../lib/types';
 
 export interface ResourceState {
@@ -23,6 +24,7 @@ export interface CockpitStore {
   select: (id: string) => void;
   sendReply: (text: string) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
+  sendSpawn: (msg: SpawnClientMessage) => boolean;
   requestCapture: () => boolean;
   clearCapture: () => void;
 }
@@ -140,6 +142,11 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
+  const sendSpawn = useCallback(
+    (msg: SpawnClientMessage): boolean => socket.send(msg),
+    [socket],
+  );
+
   const requestCapture = useCallback((): boolean => {
     const id = selectedRef.current;
     if (!id) return false;
@@ -168,6 +175,7 @@ export function useCockpit(): CockpitStore {
     select,
     sendReply,
     sendAnswer,
+    sendSpawn,
     requestCapture,
     clearCapture,
   };

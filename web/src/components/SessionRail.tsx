@@ -1,4 +1,5 @@
 import type { Session } from '../lib/types';
+import { agentBadge } from '../lib/agent-badge';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -57,6 +58,18 @@ export function SessionRail({
                 aria-hidden="true"
               />
               <span className="session-name">{s.name || s.id}</span>
+              {(() => {
+                const badge = agentBadge(s.agentType);
+                return badge ? (
+                  <span
+                    className="agent-badge"
+                    data-kind={badge.kind}
+                    aria-label={`agent type: ${badge.kind}`}
+                  >
+                    {badge.label}
+                  </span>
+                ) : null;
+              })()}
               {s.pending ? (
                 <span className="ask-badge" aria-label="pending question">
                   ASK
@@ -74,7 +87,7 @@ export function SessionRail({
         );
       })}
       {sorted.length === 0 ? (
-        <li className="session-empty">no Claude sessions</li>
+        <li className="session-empty">no agent sessions</li>
       ) : null}
     </ul>
   );

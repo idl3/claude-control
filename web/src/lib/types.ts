@@ -22,6 +22,7 @@ export interface Session {
   isClaude?: boolean;
   model?: string | null;
   ctxPct?: number | null;
+  agentType?: 'claude' | 'codex';
 }
 
 export type Role = 'user' | 'assistant' | 'system';
@@ -84,7 +85,16 @@ export type ServerMessage =
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }
-  | { type: 'ack'; op: string; ok: boolean; error?: string };
+  | { type: 'ack'; op: string; ok: boolean; error?: string; target?: string };
+
+// Spawn a new agent in an existing tmux window or a brand-new tmux session.
+export type SpawnClientMessage = {
+  type: 'spawn';
+  agentType: 'claude' | 'codex';
+  target: { mode: 'new-window'; session: string } | { mode: 'new-session' };
+  cwd: string;
+  name?: string;
+};
 
 // Client -> server WebSocket frames.
 export type ClientMessage =
@@ -92,4 +102,5 @@ export type ClientMessage =
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
-  | { type: 'capture'; id: string; lines?: number };
+  | { type: 'capture'; id: string; lines?: number }
+  | SpawnClientMessage;
