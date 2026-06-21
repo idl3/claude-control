@@ -24,6 +24,12 @@ interface SessionRailProps {
    * working, null otherwise.
    */
   workingOverrideId?: string | null;
+  /**
+   * Number of running sub-agents per session id. Sessions with ≥1 running
+   * sub-agent show the "cloning" icon state (amoeba-split animation) instead
+   * of "sleeping". Priority: ask > cloning > working > sleeping.
+   */
+  runningSubagentCountById?: Record<string, number>;
 }
 
 /** A Claude pane reads as "working" while actively generating OR with very recent
@@ -89,6 +95,7 @@ function PaneRow({
   onSelect,
   hotkey,
   workingOverrideId,
+  hasRunningSubagents,
 }: {
   s: Session;
   selected: boolean;
@@ -98,6 +105,8 @@ function PaneRow({
   hotkey?: string;
   /** See SessionRailProps.workingOverrideId — syncs rail icon with transcript loader. */
   workingOverrideId?: string | null;
+  /** True when this session has ≥1 running sub-agent — triggers "cloning" icon state. */
+  hasRunningSubagents?: boolean;
 }) {
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
@@ -107,16 +116,21 @@ function PaneRow({
       : s.cmd || s.tmuxName || 'shell'
     : s.title || s.name || s.id;
 
-  // Claude/Codex character state: a pending question (?) > working (generating /
-  // tools / sub-agents / recent activity) > idle (sleeping/Zzz). No state for
-  // terminals. workingOverrideId bridges the poll gap.
+  // Claude/Codex character state priority (highest first):
+  //   ask      — pending question (needs user reply)
+  //   cloning  — ≥1 sub-agent actively running (cell-division amoeba animation)
+  //   working  — Claude is generating / recent transcript activity
+  //   sleeping — idle
+  // No state for terminals. workingOverrideId bridges the poll gap on send.
   const claudeState = isTerminal
     ? null
     : s.pending
       ? 'ask'
-      : claudeWorking(s) || s.id === workingOverrideId
-        ? 'working'
-        : 'sleeping';
+      : hasRunningSubagents
+        ? 'cloning'
+        : claudeWorking(s) || s.id === workingOverrideId
+          ? 'working'
+          : 'sleeping';
 
   // One-shot attention nudge: flash an accent ring when this pane STARTS needing
   // a reply (pending false→true). The steady ASK-badge pulse is CSS.
@@ -170,9 +184,11 @@ function PaneRow({
                 : 'inactive pane'
               : claudeState === 'ask'
                 ? 'waiting on a question'
-                : claudeState === 'working'
-                  ? 'working…'
-                  : 'idle'
+                : claudeState === 'cloning'
+                  ? 'running sub-agents…'
+                  : claudeState === 'working'
+                    ? 'working…'
+                    : 'idle'
           }
         >
           {isTerminal ? (
@@ -184,6 +200,8 @@ function PaneRow({
           )}
           {claudeState === 'ask' ? (
             <span className="pane-icon-badge pane-icon-ask" aria-hidden="true">?</span>
+          ) : claudeState === 'cloning' ? (
+            <span className="pane-icon-badge pane-icon-clone" aria-hidden="true" />
           ) : claudeState === 'sleeping' ? (
             <span className="pane-icon-badge pane-icon-zzz" aria-hidden="true">z</span>
           ) : null}
@@ -224,6 +242,7 @@ export function SessionRail({
   onToggleCollapse,
   hotkeyById,
   workingOverrideId,
+  runningSubagentCountById,
 }: SessionRailProps) {
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
   const groups = useMemo(() => {
@@ -283,6 +302,10 @@ export function SessionRail({
                           onSelect={onSelect}
                           hotkey={hotkeyById.get(s.id)}
                           workingOverrideId={workingOverrideId}
+                          hasRunningSubagents={
+                            runningSubagentCountById != null &&
+                            (runningSubagentCountById[s.id] ?? 0) > 0
+                          }
                         />
                       ))}
                     </ul>
