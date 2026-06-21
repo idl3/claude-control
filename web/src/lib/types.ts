@@ -26,8 +26,8 @@ export interface Session {
   pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
-  /** 'claude' = a Claude Code pane (transcript Thread); 'terminal' = a plain shell pane (live terminal). */
-  kind?: 'claude' | 'terminal';
+  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal). */
+  kind?: 'claude' | 'codex' | 'terminal';
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */
   ccShell?: boolean;
   model?: string | null;

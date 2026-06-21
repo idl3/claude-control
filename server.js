@@ -10,7 +10,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFile as _execFileRaw } from 'node:child_process';
+import { promisify } from 'node:util';
+import fsp from 'node:fs/promises';
+
+const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
@@ -27,6 +31,7 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+import { parseCodexRecord, parseCodexPrompt, buildSpawnCommand } from './lib/codex.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import * as mlx from './lib/mlx.js';
 import {
@@ -76,6 +81,8 @@ const CONFIG = {
   host: env('HOST') || '127.0.0.1',
   projectsRoot:
     env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
+  codexSessionsRoot:
+    env('CODEX_SESSIONS') || path.join(os.homedir(), '.codex', 'sessions'),
   // 768MB: a long-running Node server (WS + transcript tailing + the bundled
   // web app) baselines ~300-450MB of V8 heap + RSS, so the old 350MB budget
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
@@ -123,7 +130,7 @@ const IMAGE_MIME = {
 };
 
 // --- shared state -----------------------------------------------------------
-const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, tmux });
+const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 
 // Manual transcript pins (windowId.paneIndex -> transcript path). Loaded at boot,
@@ -346,6 +353,33 @@ const _handler = (req, res) => {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleTranscribe(req, res, u);
+  }
+  // GET /api/spawn-agents — agent-type availability (claude vs codex).
+  // Returns which agent binaries are resolvable on this machine so the UI can
+  // disable an unavailable agent picker option and show a reason.
+  // Token-gated + localhost, same as other GET endpoints.
+  if (u.pathname === '/api/spawn-agents') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const cfg = readConfig();
+    return Promise.all([
+      resolveBin(cfg.claudeBin || cfg.launchCommand),
+      resolveBin(cfg.codexBin || cfg.codexLaunchCommand),
+    ]).then(([claudeResult, codexResult]) => {
+      return endJson(res, 200, {
+        agents: [
+          {
+            id: 'claude',
+            available: claudeResult.available,
+            ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+          },
+          {
+            id: 'codex',
+            available: codexResult.available,
+            ...(codexResult.available ? {} : { reason: codexResult.reason }),
+          },
+        ],
+      });
+    }).catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
   }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
@@ -672,6 +706,40 @@ function handleTranscribe(req, res, u) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// resolveBin — async PATH lookup for a binary name or absolute path.
+//
+// If `bin` is an absolute path, checks it is executable directly.
+// Otherwise runs `which <bin>` on PATH.
+//
+// Returns { available: true, path } on success, { available: false, reason }
+// on failure. Never throws.
+// ---------------------------------------------------------------------------
+async function resolveBin(bin) {
+  if (!bin || typeof bin !== 'string' || !bin.trim()) {
+    return { available: false, reason: 'no binary configured' };
+  }
+  const b = bin.trim();
+  // Absolute path: check existence + execute permission directly.
+  if (b.startsWith('/')) {
+    try {
+      await fsp.access(b, fsp.constants?.X_OK ?? 1);
+      return { available: true, path: b };
+    } catch {
+      return { available: false, reason: `binary not found or not executable: ${b}` };
+    }
+  }
+  // Relative / bare name: resolve via `which`.
+  try {
+    const { stdout } = await _execFile('which', [b], { timeout: 5000 });
+    const resolved = stdout.trim();
+    if (resolved) return { available: true, path: resolved };
+    return { available: false, reason: `${b} not found on PATH` };
+  } catch {
+    return { available: false, reason: `${b} not found on PATH` };
+  }
+}
+
 // POST /api/session/new — create a new tmux window in the configured (or
 // body-overridden) cwd, then type the launch command into it via send-keys so
 // the interactive shell resolves aliases. Security: the command is operator
@@ -687,23 +755,66 @@ async function handleSessionNew(req, res) {
   const config = readConfig();
   const cwd =
     typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
+
+  // agent ∈ {'claude','codex'}, default 'claude'.
+  const agent = body.agent === 'codex' ? 'codex' : 'claude';
+
   // Name is required-with-default: sanitize the requested name, falling back to
   // `session-<short-ts>` so a session is ALWAYS named (the rail reads the tmux
   // window name until a transcript title exists).
   const name = tmux.sanitizeName(body.name) || tmux.defaultSessionName();
+
+  // --- Pre-validation: binary resolution + cwd check BEFORE creating any window ---
+
+  // (i) Resolve the agent binary and return 400 if unavailable.
+  const agentBin = agent === 'codex'
+    ? (config.codexBin || config.codexLaunchCommand)
+    : (config.claudeBin || config.launchCommand);
+  const binCheck = await resolveBin(agentBin);
+  if (!binCheck.available) {
+    return endJson(res, 400, { error: `agent binary unavailable: ${binCheck.reason}` });
+  }
+
+  // (ii) For codex: pre-validate cwd exists and is a directory BEFORE createWindow,
+  //      so a bad request creates NO window (400 not 500, window-leak prevention).
+  if (agent === 'codex') {
+    try {
+      const st = await fsp.stat(cwd);
+      if (!st.isDirectory()) {
+        return endJson(res, 400, { error: `cwd is not a directory: ${cwd}` });
+      }
+    } catch {
+      return endJson(res, 400, { error: `cwd does not exist: ${cwd}` });
+    }
+  }
+
   try {
     // (1) Reliable named path: the tmux window name. createWindow sets it via
-    //     `new-window -n`, so the rail shows the name immediately.
+    //     `new-window -n` and the `-c cwd` flag — cwd flows through tmux's own
+    //     working-directory flag, never a shell `cd`.
     const target = await tmux.createWindow({ cwd, name });
-    // (2) Claude's own session title: `claude --help` exposes `-n/--name`
-    //     (display name in the prompt box, /resume picker, terminal title), so
-    //     we append it to the launch command rather than relying on a delayed
-    //     `/rename`. The name is shell-quoted (sanitizeName already stripped
-    //     control chars/newlines) since the command is typed into an interactive
-    //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
-    const launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
+
+    let launch;
+    if (agent === 'codex') {
+      // Codex path: uses -C <cwd> (its own cwd flag). No --name flag — Codex
+      // has none. The tmux window is still named (above) so the rail shows it.
+      // cwd is shell-quoted (same quoting as names) since the command is typed
+      // into an interactive shell via sendText.
+      void buildSpawnCommand({ cwd, bin: config.codexLaunchCommand }); // validate shape
+      launch = `${config.codexLaunchCommand} -C ${tmux.shellQuoteName(cwd)}`;
+    } else {
+      // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation.
+      // (2) Claude's own session title: `claude --help` exposes `-n/--name`
+      //     (display name in the prompt box, /resume picker, terminal title), so
+      //     we append it to the launch command rather than relying on a delayed
+      //     `/rename`. The name is shell-quoted (sanitizeName already stripped
+      //     control chars/newlines) since the command is typed into an interactive
+      //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
+      launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
+    }
+
     await tmux.sendText(target, launch);
-    return endJson(res, 200, { ok: true, target, name });
+    return endJson(res, 200, { ok: true, target, name, agent });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
@@ -1135,7 +1246,7 @@ function ensureSubscription(id) {
     return sub;
   }
 
-  const tailer = new TranscriptTailer(session.transcriptPath, { maxBuffer: CONFIG.maxBuffer });
+  const tailer = new TranscriptTailer(session.transcriptPath, { maxBuffer: CONFIG.maxBuffer, parser: session.kind === 'codex' ? parseCodexRecord : undefined });
   // Watch this session's sub-agent transcripts (Task/Agent). Discovery is polled
   // when the parent transcript grows (when sub-agents spawn) + once at subscribe.
   const subagents = new SubAgentsWatcher(session.transcriptPath);
@@ -1201,7 +1312,7 @@ function startPromptPoller(id, sub) {
       let prompt = null;
       try {
         const cap = await tmux.capturePane(session.target, 40);
-        prompt = parsePanePrompt(cap);
+        prompt = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
       } catch {
         return;
       }
