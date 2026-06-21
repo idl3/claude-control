@@ -18,20 +18,33 @@ import fsp from 'node:fs/promises';
 import { sanitizeName, shellQuoteName, defaultSessionName } from '../lib/tmux.js';
 import { buildSpawnCommand } from '../lib/codex.js';
 
+// Mirror of server.js handleSessionNew's Codex launch construction EXACTLY:
+// buildSpawnCommand is the single source of truth for the flags, and the cwd
+// arg is shell-quoted because the command is typed into an interactive shell.
+// Keeping this in lockstep with the server guards against the prior bug where
+// buildSpawnCommand's result was discarded (`void`) and the string hand-rolled.
+function launchFor(config, cwd) {
+  const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
+  return `${bin} ${args.map((a) => (a === cwd ? shellQuoteName(cwd) : a)).join(' ')}`;
+}
+
 // ── Launch string construction ───────────────────────────────────────────────
 
 describe('handleSessionNew codex launch string', () => {
-  test('codex launch string is `codex -C <quoted-cwd>` — no --name', () => {
-    const config = { codexLaunchCommand: 'codex' };
+  test('buildSpawnCommand is the source of truth: {bin, args:[-C, cwd]}', () => {
     const cwd = '/home/user/project';
-    const launch = `${config.codexLaunchCommand} -C ${shellQuoteName(cwd)}`;
+    const { bin, args } = buildSpawnCommand({ cwd, bin: 'codex' });
+    assert.equal(bin, 'codex');
+    assert.deepEqual(args, ['-C', cwd]);
+  });
+
+  test('codex launch string is `codex -C <quoted-cwd>` — no --name', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/home/user/project');
     assert.equal(launch, `codex -C '/home/user/project'`);
   });
 
   test('codex launch string quotes cwd with embedded single quote', () => {
-    const config = { codexLaunchCommand: 'codex' };
-    const cwd = "/home/user/it's-a-project";
-    const launch = `${config.codexLaunchCommand} -C ${shellQuoteName(cwd)}`;
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, "/home/user/it's-a-project");
     assert.ok(launch.startsWith("codex -C '"), 'starts with codex -C quote');
     // shellQuoteName escapes embedded single quotes as '\''
     // Result: codex -C '/home/user/it'\''s-a-project'
@@ -39,9 +52,7 @@ describe('handleSessionNew codex launch string', () => {
   });
 
   test('codex launch string with custom codexLaunchCommand', () => {
-    const config = { codexLaunchCommand: '/usr/local/bin/codex' };
-    const cwd = '/workspace';
-    const launch = `${config.codexLaunchCommand} -C ${shellQuoteName(cwd)}`;
+    const launch = launchFor({ codexLaunchCommand: '/usr/local/bin/codex' }, '/workspace');
     assert.equal(launch, `/usr/local/bin/codex -C '/workspace'`);
   });
 
