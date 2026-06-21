@@ -138,11 +138,6 @@ export function Thread({
 }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
-      {/* Top scrim: fades messages under the header while the composer is
-          focused (CSS :focus-within), so text scrolling up behind the nav bar
-          dissolves instead of hard-cutting. Fades out on blur. */}
-      <div className="thread-fade" aria-hidden="true" />
-
       {viewingAgent ? (
         /* INLINE AGENT TRANSCRIPT — replaces the session viewport */
         <div className="agent-inline-view">
