@@ -606,7 +606,7 @@ export function Composer({
 
       // Reduced-motion: instant swap — no tweens.
       if (prefersReducedMotion()) {
-        if (voiceBody) voiceBody.style.display = '';
+        if (voiceBody) voiceBody.style.display = 'flex';
         if (inputWrap) gsap.set(inputWrap, { display: 'none' });
         return;
       }
@@ -623,7 +623,7 @@ export function Composer({
       // during Phase 1a. It will be applied in Phase 1b right before the tween.
 
       // Now it is safe to un-hide the voice body; the card is pinned in height.
-      if (voiceBody) voiceBody.style.display = '';
+      if (voiceBody) voiceBody.style.display = 'flex';
 
       // Defensively clear any position/visibility overrides left on voice children
       // from a prior animation cycle (e.g. a prior exit phase that floated something

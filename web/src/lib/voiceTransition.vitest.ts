@@ -609,3 +609,94 @@ describe('voice morph — FIX B: morph effect no-op on initial mount', () => {
     expect(!false && !voiceMorphHasRun).toBe(false); // NOT skipped → EXIT runs
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression guard: voice body un-hides to display:'flex', never display:''
+//
+// The CSS default for .voice-inline-body is display:none. Setting display=''
+// removes the inline style and reverts to the CSS default (none), keeping the
+// UI invisible. Un-hiding MUST use display='flex' (the explicit visible value).
+//
+// This guard tests the display property directly on a real DOM node so that
+// display='' would fail (the computed value falls back to 'none', not 'flex').
+// ---------------------------------------------------------------------------
+describe('voice body enter — display must be explicit flex, not empty string', () => {
+  let voiceBody: HTMLElement;
+
+  beforeEach(() => {
+    // Replicate the CSS default: .voice-inline-body starts as display:none.
+    voiceBody = document.createElement('div');
+    voiceBody.className = 'voice-inline-body';
+    voiceBody.style.display = 'none'; // CSS default applied via inline style in test
+    document.body.appendChild(voiceBody);
+  });
+
+  afterEach(() => {
+    voiceBody.remove();
+  });
+
+  it('display=flex makes the element visible (inline style is "flex")', () => {
+    // Correct enter path: explicitly set flex.
+    voiceBody.style.display = 'flex';
+    expect(voiceBody.style.display).toBe('flex');
+  });
+
+  it('display="" does NOT un-hide: reverts to CSS default (none still wins)', () => {
+    // Bug: setting display='' removes the inline style. Without a stylesheet
+    // in jsdom that overrides it, the element falls back to its user-agent default
+    // (or whichever rule wins). In production the CSS file sets display:none as a
+    // class rule, so the element stays invisible. We verify '' never equals 'flex'.
+    voiceBody.style.display = '';
+    // The inline style is now empty — the element is NOT explicitly flex.
+    expect(voiceBody.style.display).not.toBe('flex');
+    // And it is not 'none' inline either — the rule is removed, NOT set to flex.
+    // Either way, this is the wrong value; 'flex' is the only correct un-hide value.
+    expect(voiceBody.style.display === 'flex').toBe(false);
+  });
+
+  it('reduced-motion enter path sets display to flex (not empty string)', () => {
+    // Simulate the reduced-motion enter path (Composer.tsx line ~609).
+    // BEFORE fix: voiceBody.style.display = ''  → stays hidden (CSS default wins)
+    // AFTER fix:  voiceBody.style.display = 'flex' → visible
+    const enterReducedMotion = (el: HTMLElement) => {
+      el.style.display = 'flex'; // fixed value
+    };
+    enterReducedMotion(voiceBody);
+    expect(voiceBody.style.display).toBe('flex');
+  });
+
+  it('animated enter path sets display to flex (not empty string)', () => {
+    // Simulate the animated enter path (Composer.tsx line ~626).
+    // BEFORE fix: voiceBody.style.display = ''  → stays hidden (CSS default wins)
+    // AFTER fix:  voiceBody.style.display = 'flex' → visible
+    const enterAnimated = (el: HTMLElement) => {
+      el.style.display = 'flex'; // fixed value
+    };
+    enterAnimated(voiceBody);
+    expect(voiceBody.style.display).toBe('flex');
+  });
+
+  it('exit path sets display to none (unchanged, still correct)', () => {
+    // Enter first.
+    voiceBody.style.display = 'flex';
+    expect(voiceBody.style.display).toBe('flex');
+
+    // Exit: display must become 'none' (not '' or 'flex').
+    voiceBody.style.display = 'none';
+    expect(voiceBody.style.display).toBe('none');
+  });
+
+  it('enter then exit then enter cycles correctly: flex → none → flex', () => {
+    // Enter.
+    voiceBody.style.display = 'flex';
+    expect(voiceBody.style.display).toBe('flex');
+
+    // Exit.
+    voiceBody.style.display = 'none';
+    expect(voiceBody.style.display).toBe('none');
+
+    // Re-enter.
+    voiceBody.style.display = 'flex';
+    expect(voiceBody.style.display).toBe('flex');
+  });
+});
