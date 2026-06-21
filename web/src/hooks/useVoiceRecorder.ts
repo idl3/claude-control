@@ -35,6 +35,16 @@ export interface UseVoiceRecorderOptions {
   onCommit: (text: string) => void;
   /** Called when the session should be dismissed (cancel or error exit). */
   onClose: () => void;
+  /**
+   * When true the hook acquires the mic and starts recording.
+   * When false (pre-rendered-idle shell) the mic is NOT acquired — no
+   * getUserMedia call, no MediaRecorder, no analyser. The hook is mounted
+   * and holds its refs, but stays completely inactive until active=true.
+   *
+   * This allows the VoiceInline shell to be always-mounted in the DOM for
+   * pre-render animation while respecting privacy (no mic grab when idle).
+   */
+  active: boolean;
 }
 
 export interface UseVoiceRecorderResult {
@@ -51,12 +61,17 @@ export interface UseVoiceRecorderResult {
 
 /**
  * Encapsulates mic acquisition, MediaRecorder capture, Web Audio waveform
- * drawing, and Whisper transcription upload. The hook is mount-driven: it
- * requests the mic on mount and tears everything down on unmount. Callers
- * should mount/unmount it by toggling voice mode — not by conditional
- * hook calls.
+ * drawing, and Whisper transcription upload.
+ *
+ * Mic lifecycle is GATED by `active`. When active=false the hook is mounted
+ * but dormant — no getUserMedia is called. When active=true the mic is
+ * acquired and recording starts. When active flips back to false the mic is
+ * torn down (and any in-flight transcription is aborted per PLE-50).
+ *
+ * Callers should keep the hook mounted while the voice shell is in the DOM
+ * (even when idle/hidden) and simply toggle `active` to start/stop recording.
  */
-export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions): UseVoiceRecorderResult {
+export function useVoiceRecorder({ onCommit, onClose, active }: UseVoiceRecorderOptions): UseVoiceRecorderResult {
   const [status, setStatus] = useState<VoiceStatus>('starting');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -134,9 +149,22 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
     };
   }, []);
 
-  // Mount → request mic, wire analyser + recorder.
+  // Mic lifecycle: acquire when active=true, tear down when active=false.
+  // This is the ONLY place getUserMedia is called — never when active=false.
   useEffect(() => {
+    if (!active) {
+      // Idle / pre-rendered shell: reset to starting state without touching the mic.
+      committedRef.current = false;
+      chunksRef.current = [];
+      setStatus('starting');
+      setErrorMsg(null);
+      return;
+    }
+
     let cancelled = false;
+    committedRef.current = false;
+    chunksRef.current = [];
+
     (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('no-getusermedia');
@@ -189,7 +217,7 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
           msg =
             'Microphone blocked. On iPhone/iPad: reset it in Settings → Apps → Safari → Microphone (or the "aA" → Website Settings menu), then reload. Add this app to your Home Screen so the permission persists across reloads.';
         } else if (name === 'NotFoundError' || name === 'NotReadableError') {
-          msg = "No microphone available (or it’s in use by another app).";
+          msg = "No microphone available (or it's in use by another app).";
         } else {
           msg = 'Microphone permission denied or unavailable.';
         }
@@ -197,8 +225,12 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
         setStatus('error');
       }
     })();
+
     return () => {
       cancelled = true;
+      // Abort any in-flight transcription (PLE-50).
+      transcribeAbortRef.current?.abort();
+      transcribeAbortRef.current = null;
       stopDraw();
       try {
         recorderRef.current?.stop();
@@ -213,7 +245,7 @@ export function useVoiceRecorder({ onCommit, onClose }: UseVoiceRecorderOptions)
       analyserRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
 
   const pauseResume = useCallback(() => {
     if (status === 'recording') {
