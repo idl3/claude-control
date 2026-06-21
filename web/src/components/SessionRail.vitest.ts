@@ -3,18 +3,23 @@ import { claudeWorking } from './SessionRail';
 import type { Session } from '../lib/types';
 
 /**
- * Mirrors the claudeState expression in PaneRow so the override logic can be
- * unit-tested without rendering the full component tree.
+ * Mirrors the claudeState expression in PaneRow so the state-priority logic
+ * can be unit-tested without rendering the full component tree.
+ *
+ * Priority (highest → lowest): ask > cloning > working > sleeping
  */
 function computeClaudeState(
   s: Session,
   workingOverrideId?: string | null,
-): 'ask' | 'working' | 'sleeping' {
+  hasRunningSubagents?: boolean,
+): 'ask' | 'cloning' | 'working' | 'sleeping' {
   return s.pending
     ? 'ask'
-    : claudeWorking(s) || s.id === workingOverrideId
-      ? 'working'
-      : 'sleeping';
+    : hasRunningSubagents
+      ? 'cloning'
+      : claudeWorking(s) || s.id === workingOverrideId
+        ? 'working'
+        : 'sleeping';
 }
 
 function makeSession(partial: Partial<Session>): Session {
@@ -135,5 +140,46 @@ describe('computeClaudeState — workingOverrideId', () => {
   it('works without override (undefined) — sleeping session stays sleeping', () => {
     const s = makeSession({ id: 'sess-f', thinking: false, lastActivityMs: undefined });
     expect(computeClaudeState(s)).toBe('sleeping');
+  });
+});
+
+describe('computeClaudeState — cloning state (running sub-agents)', () => {
+  it('shows cloning when hasRunningSubagents is true and session is otherwise sleeping', () => {
+    const s = makeSession({ id: 'sess-g', thinking: false, lastActivityMs: undefined });
+    expect(computeClaudeState(s, null, true)).toBe('cloning');
+  });
+
+  it('shows cloning when hasRunningSubagents is true even while claudeWorking is true', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    const s = makeSession({ id: 'sess-h', lastActivityMs: now - 1_000 });
+    expect(claudeWorking(s)).toBe(true);
+    // cloning takes priority over working
+    expect(computeClaudeState(s, null, true)).toBe('cloning');
+  });
+
+  it('ask takes priority over cloning (pending question is highest)', () => {
+    const s = makeSession({ id: 'sess-i', pending: true });
+    expect(computeClaudeState(s, null, true)).toBe('ask');
+  });
+
+  it('falls back to working when hasRunningSubagents is false and workingOverrideId matches', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now());
+    const s = makeSession({ id: 'sess-j', lastActivityMs: Date.now() - 60_000 });
+    expect(computeClaudeState(s, 'sess-j', false)).toBe('working');
+  });
+
+  it('shows sleeping when hasRunningSubagents is false and no other working signal', () => {
+    const s = makeSession({ id: 'sess-k', thinking: false, lastActivityMs: undefined });
+    expect(computeClaudeState(s, null, false)).toBe('sleeping');
+  });
+
+  it('shows cloning when hasRunningSubagents is true and workingOverrideId matches — cloning wins', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now());
+    const s = makeSession({ id: 'sess-l', lastActivityMs: Date.now() - 60_000 });
+    expect(computeClaudeState(s, 'sess-l', true)).toBe('cloning');
   });
 });
