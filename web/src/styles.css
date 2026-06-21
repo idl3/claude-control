@@ -322,8 +322,9 @@ body {
   color: var(--accent-2);
 }
 
-/* ── Claude character state: working / sleeping / question ─────── */
-.pane-icon[data-kind='claude'] {
+/* ── Claude/Codex character state: working / sleeping / question ── */
+.pane-icon[data-kind='claude'],
+.pane-icon[data-kind='codex'] {
   position: relative;
   overflow: visible;
 }
