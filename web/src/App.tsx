@@ -15,6 +15,7 @@ import { SessionRail, claudeWorking, type SessionFilter } from './components/Ses
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import { LiveThinkingContext } from './components/ThinkingContext';
+import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { LivePane } from './components/LivePane';
@@ -1547,6 +1548,7 @@ function AppInner() {
               </div>
             ) : (
               <div className="detail-split">
+                <AgentKindContext.Provider value={selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   <Thread
                     hasSelection={!!cockpit.selectedId}
@@ -1569,6 +1571,7 @@ function AppInner() {
                     onStop={handleStop}
                   />
                 </LiveThinkingContext.Provider>
+                </AgentKindContext.Provider>
                 <ArtifactPanel />
                 <TranscriptSearch
                   open={searchOpen}
