@@ -859,22 +859,33 @@ export function Composer({
       const toolbar         = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
       const inputWrap       = card.querySelector<HTMLElement>('.composer-input-wrap');
 
-      // Reduced-motion: instant swap — hide voice body immediately.
+      // Reduced-motion: instant swap — hide voice body immediately + refocus.
       if (prefersReducedMotion()) {
         if (voiceBody) voiceBody.style.display = 'none';
         if (inputWrap) gsap.set(inputWrap, { clearProps: 'all' });
         if (toolbar)   gsap.set(toolbar,   { clearProps: 'all' });
+        // FIX 2 (reduced-motion): return focus to the composer textarea.
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
+        });
         return;
       }
 
       // ── Measure heights (no-jump order). ────────────────────────────────────
-      // FROM = current voice-mode card height. inputWrap is display:none here
-      //        (set during ENTER phase1 onComplete) so the card height equals
-      //        the voice content only — correct start value.
-      const heightFrom = card.offsetHeight;
+      // FROM = current voice-mode card height.
+      // IMPORTANT: exitVoice() pins card.style.height before setVoice(false) so
+      // the React re-render doesn't collapse the card prematurely. We read
+      // heightFrom from that pin, then we MUST clear the pin before measuring
+      // heightTo so card.offsetHeight reads the intrinsic composer-only height
+      // (not the still-pinned voice height). Without this clear, heightFrom ===
+      // heightTo → the tween is a no-op → the card snaps instantly.
+      const heightFrom = card.offsetHeight; // pinned = voice-mode height (correct)
 
-      // TO = composer-only height. Pre-show inputWrap in normal flow (opacity:0
-      // so invisible) and float voiceBody out temporarily.
+      // TO = composer-only height. First clear the pin so offsetHeight reads
+      // intrinsic layout. Then float composer elements back in (opacity:0 so
+      // invisible) and voiceBody out, read the intrinsic height, restore.
+      card.style.height = ''; // ← FIX 1: clear pin before measuring heightTo
+
       if (inputWrap) {
         inputWrap.style.display = '';
         inputWrap.style.opacity = '0';   // invisible during measurement
@@ -949,6 +960,9 @@ export function Composer({
             if (inputWrap)          gsap.set(inputWrap,    { clearProps: 'all' });
             if (toolbar)            gsap.set(toolbar,       { clearProps: 'all' });
             if (toolbarBtns.length) gsap.set(toolbarBtns,  { clearProps: 'all' });
+            // FIX 2: Return focus to the composer textarea after exit settles.
+            // Only on voice→composer exit (not on enter, not on session load).
+            document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
           },
         });
 
