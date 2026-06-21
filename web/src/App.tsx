@@ -672,14 +672,14 @@ function AppInner() {
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>(() => {
     try {
       const v = localStorage.getItem('cc:sessionFilter');
-      return v === 'claude' || v === 'terminal' ? v : 'all';
+      return v === 'claude' || v === 'codex' || v === 'terminal' ? v : 'all';
     } catch {
       return 'all';
     }
   });
   const cycleFilter = useCallback(() => {
     setSessionFilter((f) => {
-      const next: SessionFilter = f === 'all' ? 'claude' : f === 'claude' ? 'terminal' : 'all';
+      const next: SessionFilter = f === 'all' ? 'claude' : f === 'claude' ? 'codex' : f === 'codex' ? 'terminal' : 'all';
       try {
         localStorage.setItem('cc:sessionFilter', next);
       } catch {
@@ -1654,6 +1654,7 @@ function AppInner() {
         JSON.stringify(cockpit.prompt) !== dismissedPrompt ? (
           <PromptModal
             prompt={cockpit.prompt}
+            agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
             planMarkdown={planMarkdown}
             onKey={(key) => cockpit.sendPromptKey(key)}
             onSelect={(labels) =>

@@ -18,6 +18,8 @@ interface PromptModalProps {
   onClose: () => void;
   /** When the prompt is a plan approval, the plan markdown to render for review. */
   planMarkdown?: string | null;
+  /** Display name of the agent that raised the prompt (e.g. "Claude", "Codex"). */
+  agentName?: string;
 }
 
 const messageComponents = {
@@ -80,6 +82,7 @@ export function PromptModal({
   onSelect,
   onClose: rawClose,
   planMarkdown,
+  agentName = 'Claude',
 }: PromptModalProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const isMulti = !!prompt.multiSelect;
@@ -187,7 +190,7 @@ export function PromptModal({
         aria-label={isPlan ? 'Review plan' : 'Terminal prompt'}
       >
         <div className="modal-head">
-          <span className="modal-title">{isPlan ? 'Review plan' : 'Claude needs a choice'}</span>
+          <span className="modal-title">{isPlan ? 'Review plan' : `${agentName} needs a choice`}</span>
           <button type="button" className="modal-close" aria-label="Hide" onClick={onClose}>
             ✕
           </button>
