@@ -471,6 +471,10 @@ export function Composer({
   // Ref to the always-mounted voice-inline-body so we can toggle display:none
   // without React re-renders (layout read happens in useLayoutEffect).
   const voiceBodyRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the ENTER Phase 2 reveal has completed. VoiceInline's
+  // Pause button uses this to decide whether to run its own entrance
+  // (late-mount path) or stay pre-hidden (Phase 2 will reveal it in order).
+  const phase2DoneRef = useRef<boolean>(false);
 
   const openVoice = useCallback(() => {
     if (disabled) return;
@@ -664,8 +668,37 @@ export function Composer({
       // Called from Phase 1b's onComplete after the T.gap settle delay so that
       // overflow:hidden is fully cleared and height is auto before any button
       // tries to render outside the previous clipped bounds.
+      //
+      // PAUSE-ORDER FIX: re-query voice buttons fresh at Phase 2 run-time (not
+      // at closure-capture time) so that a Pause button that mounted late
+      // (status flip to 'recording' after Phase 2 started) is included. Buttons
+      // are ordered explicitly Cancel → Stop → Pause so the stagger always
+      // reveals them in that order regardless of DOM order or mount timing.
       const runPhase2Enter = () => {
-        const phase2 = gsap.timeline();
+        // Re-query fresh at execution time to catch any buttons that mounted
+        // between Phase 1b start and Phase 2 start (e.g. Pause mounting late).
+        const lateCancelBtn = card.querySelector<HTMLElement>('.voice-btn-cancel');
+        const lateStopBtn   = card.querySelector<HTMLElement>('.voice-btn-stop');
+        const latePauseBtn  = card.querySelector<HTMLElement>('.voice-btn-pause');
+        // Explicit order: Cancel → Stop → Pause. Pause is always last.
+        const orderedVoiceBtns = [lateCancelBtn, lateStopBtn, latePauseBtn]
+          .filter((b): b is HTMLElement => b !== null);
+        // Pre-hide any button not already hidden (e.g. Pause mounted after the
+        // initial gsap.set(voiceBtns, ...) above ran on the old capture).
+        orderedVoiceBtns.forEach((btn) => {
+          const opacity = parseFloat(btn.style.opacity);
+          if (btn.style.opacity === '' || isNaN(opacity) || opacity > 0) {
+            gsap.set(btn, { opacity: 0, y: 12 });
+          }
+        });
+
+        const phase2 = gsap.timeline({
+          onComplete: () => {
+            // Signal that Phase 2 has fully completed — VoiceInline's Pause
+            // mount guard reads this to decide whether to self-animate.
+            phase2DoneRef.current = true;
+          },
+        });
 
         // Reveal top group (status → wave → hint) first, with stagger.
         if (topTargets.length) {
@@ -680,15 +713,15 @@ export function Composer({
           );
         }
 
-        // Then reveal each voice button ONE-BY-ONE with stagger.
+        // Then reveal each voice button in explicit order Cancel → Stop → Pause.
         // Targets individual buttons, NOT the container — avoids clip.
-        if (voiceBtns.length) {
+        if (orderedVoiceBtns.length) {
           const topDuration = topTargets.length
             ? T.fade + T.topStagger * (topTargets.length - 1)
             : 0;
           const btnsStart = topTargets.length ? topDuration * 0.5 : 0;
           phase2.to(
-            voiceBtns,
+            orderedVoiceBtns,
             {
               opacity: 1, y: 0,
               duration: T.fade, ease: T.enterEase,
@@ -787,6 +820,9 @@ export function Composer({
       //   The card is pinned at heightFrom before activating the tween, so there
       //   is no frame where composer + voice are stacked.
 
+      // Reset phase2 completion signal — next ENTER starts fresh.
+      phase2DoneRef.current = false;
+
       const voiceBody       = voiceBodyRef.current;
       const voiceToolbar    = card.querySelector<HTMLElement>('.voice-toolbar');
       const voiceStatus     = card.querySelector<HTMLElement>('.voice-status');
@@ -856,7 +892,20 @@ export function Composer({
       // ── Phase 2 builder: restore frame + reveal composer elements ────────────
       // Called after Phase 1 completes + T.gap settle delay.
       // overflow is cleared BEFORE tween starts so buttons aren't clipped.
+      //
+      // EXIT DOUBLE-HEIGHT FIX: voiceBody must be display:none before the card
+      // height is tweened AND before card.style.height is cleared to 'auto'.
+      // If voiceBody is still in normal flow (even at opacity:0) the card's
+      // intrinsic height = composer + voice stacked → a double-height spike when
+      // height:auto kicks in. Taking it out of flow first ensures the card's
+      // intrinsic height = composer-only for the entire Phase 2 tween.
       const runPhase2Exit = () => {
+        // Take the transcriber layer COMPLETELY out of flow before any height
+        // measurement or tween. This is the critical exit no-double-height guard:
+        // once voiceBody is display:none the card's intrinsic height is composer-
+        // only, so the height tween and the final height:auto clear are both safe.
+        if (voiceBody) voiceBody.style.display = 'none';
+
         // Clear overflow before the height tween so the composer body (now taller
         // than the pinned transcriber height) is never clipped as it comes in.
         card.style.height   = `${heightFrom}px`; // re-pin at current (transcriber) height
@@ -865,9 +914,9 @@ export function Composer({
         const phase2 = gsap.timeline({
           onComplete: () => {
             // Tween has settled — let the card breathe (auto height).
+            // voiceBody is already display:none (set at runPhase2Exit entry), so
+            // clearing height:auto here will NOT cause a double-height spike.
             card.style.height = '';
-            // Hide the pre-rendered voice shell (display:none = zero layout contribution).
-            if (voiceBody) voiceBody.style.display = 'none';
             // Clear GSAP inline styles so they're clean for next time.
             if (inputWrap)          gsap.set(inputWrap,    { clearProps: 'all' });
             if (toolbar)            gsap.set(toolbar,       { clearProps: 'all' });
@@ -1312,6 +1361,7 @@ export function Composer({
           onCommit={commitVoice}
           onClose={exitVoice}
           stopRef={voiceStopRef}
+          phase2DoneRef={phase2DoneRef}
         />
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
@@ -1698,9 +1748,17 @@ interface VoiceInlineProps {
   onCommit: (text: string) => void;
   onClose: () => void;
   stopRef: React.MutableRefObject<(() => void) | null>;
+  /**
+   * Ref that Composer's ENTER Phase 2 sets to `true` when the reveal sequence
+   * completes. VoiceInline's Pause button checks this: if false, Phase 2 has
+   * not run yet so Pause stays pre-hidden (Phase 2 will reveal it in order);
+   * if true, Phase 2 is done so Pause animates itself in (late-mount path —
+   * always appears AFTER Cancel/Stop which are already visible).
+   */
+  phase2DoneRef: React.RefObject<boolean>;
 }
 
-function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlineProps) {
+function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRef }: VoiceInlineProps) {
   const { status, errorMsg, canvasRef, pauseResume, stop, cancel } = useVoiceRecorder({
     active,
     onCommit,
@@ -1719,15 +1777,36 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlin
   // Whether the Pause/Resume button should currently be visible.
   const showPauseBtn = status === 'recording' || status === 'paused';
 
-  // Animate the Pause/Resume button in whenever it transitions from hidden → shown.
-  // This fires after every render where showPauseBtn flips to true (e.g. status
-  // transitions to 'recording' after the Phase 2 voice-toolbar reveal has already
-  // run and would not cover this late-appearing button).
-  // Guard with prefersReducedMotion() — instant when true.
+  // Pre-hide Pause on mount so it starts invisible regardless of when Phase 2
+  // runs. This prevents the button from flashing at full opacity before either
+  // Phase 2 or the late-mount entrance below takes effect.
+  useLayoutEffect(() => {
+    const btn = pauseBtnRef.current;
+    if (btn && !prefersReducedMotion()) {
+      gsap.set(btn, { opacity: 0, y: 12 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pause-ordering guard: when showPauseBtn transitions false → true (status
+  // flips to 'recording' or 'paused'), decide how to reveal Pause:
+  //
+  //   phase2DoneRef.current === false → Phase 2 has NOT run yet.
+  //     Pause stays pre-hidden (opacity:0). Phase 2 will include it in the
+  //     ordered stagger (Cancel → Stop → Pause), ensuring it appears last.
+  //
+  //   phase2DoneRef.current === true → Phase 2 has ALREADY completed.
+  //     Cancel + Stop are already visible. Run Pause's own entrance now —
+  //     it still appears AFTER Cancel/Stop so ordering is preserved.
+  //
+  // Either branch guarantees Pause never appears before Cancel/Stop.
   useLayoutEffect(() => {
     if (!showPauseBtn) return;
     const btn = pauseBtnRef.current;
     if (!btn) return;
+    // Phase 2 not yet done — stay hidden; Phase 2 will reveal in order.
+    if (!phase2DoneRef.current) return;
+    // Phase 2 already done — self-animate (late-mount, always after Cancel/Stop).
     if (prefersReducedMotion()) {
       gsap.set(btn, { opacity: 1, y: 0 });
       return;
@@ -1741,7 +1820,7 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef }: VoiceInlin
         ease: ANIM.enterEase,
       },
     );
-  }, [showPauseBtn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showPauseBtn, phase2DoneRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel =
     status === 'error'
