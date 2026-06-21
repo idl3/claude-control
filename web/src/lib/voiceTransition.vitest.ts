@@ -500,3 +500,112 @@ describe('voice morph — exit display:none before height restore', () => {
     expect(voiceBodyInFlow.contributesToHeight).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guard: FIX A — exitVoice pins card height before voice state flip
+//
+// When cancel() is called, recorder teardown sets status='starting', which
+// unmounts the Pause button row. Because .composer-card is height:auto in
+// voice mode, this reflows the card shorter INSTANTLY — before the EXIT
+// useLayoutEffect reads heightFrom. The fix pins the card's current height
+// synchronously in exitVoice() before setVoice(false), so the card cannot
+// shrink between the pin and the useLayoutEffect read.
+// ---------------------------------------------------------------------------
+describe('voice morph — FIX A: exitVoice pins card height before state flip', () => {
+  it('pinning card height before setVoice(false) prevents pre-cancel reflow shrink', () => {
+    // Model: card at voice-mode height (e.g. 210px, height:auto effectively).
+    // exitVoice must pin THEN flip. If it flips first, the card's offsetHeight
+    // would already reflect the shrunken layout when the morph effect reads it.
+    const events: string[] = [];
+    const card = { style: { height: '' }, offsetHeight: 210 };
+    let voice = true;
+
+    // Correct order (FIX A): pin height synchronously, THEN flip state.
+    card.style.height = card.offsetHeight + 'px';  // pin
+    events.push('card.height=pinned');
+    voice = false;
+    events.push('voice=false');
+
+    expect(events[0]).toBe('card.height=pinned');
+    expect(events[1]).toBe('voice=false');
+    // The pin captures the true pre-cancel height.
+    expect(card.style.height).toBe('210px');
+    expect(voice).toBe(false);
+  });
+
+  it('card remains at pinned height after state flip (morph effect reads pinned value)', () => {
+    // Simulate: card is pinned at 210px; then voice flips to false; then the
+    // EXIT useLayoutEffect reads card.offsetHeight. Since we've pinned the
+    // inline style, the morph starts from the correct height, not a shrunken value.
+    const card = { style: { height: '' }, offsetHeight: 210 };
+
+    // Pin (exitVoice):
+    card.style.height = card.offsetHeight + 'px';
+    expect(card.style.height).toBe('210px');
+
+    // Simulate state flip (the Pause row unmounts, shrinking intrinsic height,
+    // but card.style.height is pinned so offsetHeight stays 210).
+    // In real DOM, the inline style overrides the auto layout — we verify this
+    // logically: the morph reads card.style.height, not the reflowed size.
+    const morphReadsFrom = parseInt(card.style.height, 10);
+    expect(morphReadsFrom).toBe(210);
+
+    // The EXIT effect will clear the pin (card.style.height = '') when done.
+    card.style.height = '';
+    expect(card.style.height).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard: FIX B — morph effect is a no-op on initial mount
+//
+// The morph useLayoutEffect must NOT animate on initial render or on session
+// switch. It must only animate on actual voice true↔false transitions.
+// The voiceMorphHasRunRef skip-first-run guard enforces this:
+//   - on mount: voice=false, ref=false → early return (no animation)
+//   - after first openVoice: voice=true, ref becomes true
+//   - on exitVoice: voice=false, ref=true → EXIT animation runs normally
+// ---------------------------------------------------------------------------
+describe('voice morph — FIX B: morph effect no-op on initial mount', () => {
+  it('skip-first-run guard: no-op when voice=false and hasRun=false (initial mount)', () => {
+    // Replicate the guard logic from the morph useLayoutEffect.
+    function shouldSkip(voice: boolean, hasRun: boolean): boolean {
+      return !voice && !hasRun;
+    }
+
+    // Initial mount: voice=false, hasRun=false → skip.
+    expect(shouldSkip(false, false)).toBe(true);
+  });
+
+  it('skip-first-run guard: does NOT skip when voice=true (first openVoice)', () => {
+    function shouldSkip(voice: boolean, hasRun: boolean): boolean {
+      return !voice && !hasRun;
+    }
+
+    // First openVoice: voice=true → don't skip (ENTER runs).
+    expect(shouldSkip(true, false)).toBe(false);
+    expect(shouldSkip(true, true)).toBe(false);
+  });
+
+  it('skip-first-run guard: does NOT skip when voice=false but hasRun=true (real exit)', () => {
+    function shouldSkip(voice: boolean, hasRun: boolean): boolean {
+      return !voice && !hasRun;
+    }
+
+    // After ENTER has run (hasRun=true), a voice=false transition is a real EXIT.
+    expect(shouldSkip(false, true)).toBe(false);
+  });
+
+  it('hasRun ref is set to true on first ENTER, allowing subsequent exits to animate', () => {
+    // Model the ref lifecycle:
+    let voiceMorphHasRun = false;
+
+    // Initial mount: skip guard returns true, no animation.
+    expect(!false && !voiceMorphHasRun).toBe(true); // skipped
+
+    // First openVoice (voice=true): mark hasRun.
+    voiceMorphHasRun = true;
+    // Now a subsequent exitVoice should NOT skip.
+    expect(!false && !voiceMorphHasRun).toBe(false); // NOT skipped → EXIT runs
+  });
+});

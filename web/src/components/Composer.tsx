@@ -475,6 +475,13 @@ export function Composer({
   // Pause button uses this to decide whether to run its own entrance
   // (late-mount path) or stay pre-hidden (Phase 2 will reveal it in order).
   const phase2DoneRef = useRef<boolean>(false);
+  // FIX B: Skip the morph useLayoutEffect on initial mount (and on any run
+  // where voice is false and we haven't yet had a true→false transition).
+  // Without this guard the initial-mount run hits the EXIT branch which tries
+  // to animate the card from voice→composer on first render — causing the
+  // "composer starts big then snaps in" symptom on session load/switch.
+  // The ref starts false; it's set to true on the first real voice=true run.
+  const voiceMorphHasRunRef = useRef<boolean>(false);
 
   const openVoice = useCallback(() => {
     if (disabled) return;
@@ -482,6 +489,16 @@ export function Composer({
   }, [disabled]);
 
   const exitVoice = useCallback(() => {
+    // FIX A: Pin the card to its current rendered height BEFORE flipping voice
+    // state. Without this pin, the React re-render triggered by setVoice(false)
+    // unmounts the Pause button row (showPauseBtn = false when status resets to
+    // 'starting'), which reflows the height:auto card shorter INSTANTLY — before
+    // the EXIT useLayoutEffect reads heightFrom. The tween then starts from the
+    // already-shrunken value, producing a visible one-bar upward jump.
+    // Pinning here captures the true pre-cancel height; the EXIT effect reads the
+    // pinned value and clears the pin (card.style.height='') on completion.
+    const card = composerCardRef.current;
+    if (card) card.style.height = card.offsetHeight + 'px';
     setVoice(false);
   }, []);
 
@@ -543,6 +560,16 @@ export function Composer({
   useLayoutEffect(() => {
     const card = composerCardRef.current;
     if (!card) return;
+
+    // FIX B: Skip the morph entirely when voice is false and no ENTER has run
+    // yet. This covers: (a) initial mount, (b) session-switch where the effect
+    // re-runs because `voice` was reset to false by the session-change effect.
+    // In both cases voice was never true, so there is no voice→composer
+    // transition to animate — the composer should just render statically.
+    if (!voice && !voiceMorphHasRunRef.current) return;
+
+    // Mark that we've had at least one ENTER — future false runs are real exits.
+    if (voice) voiceMorphHasRunRef.current = true;
 
     // Kill any in-flight timeline before starting a new one.
     voiceAnimRef.current?.kill();
@@ -1007,15 +1034,10 @@ export function Composer({
     };
   }, []);
 
-  // On initial mount, ensure the voice shell is hidden (display:none) so it
-  // adds zero height to the idle composer. This runs synchronously before paint.
-  useLayoutEffect(() => {
-    const voiceBody = voiceBodyRef.current;
-    if (voiceBody && !voice) {
-      voiceBody.style.display = 'none';
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: No initial-mount useLayoutEffect to hide the voice shell is needed.
+  // The CSS default for .voice-inline-body is display:none, so the shell is
+  // hidden from the very first paint without any post-mount JS. The morph
+  // driver sets display:'' on ENTER and display:none on EXIT at runtime.
 
   // ⌘/Ctrl+S opens voice mode from ANYWHERE (not just when the composer textarea
   // is focused) — window-level + capture phase so it beats the browser's Save.
