@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon, BotIcon } from './icons';
+import { TerminalSquareIcon } from './icons';
+import { CodexIcon } from './CodexIcon';
 
 export type SessionFilter = 'all' | 'claude' | 'codex' | 'terminal';
 
@@ -194,7 +195,7 @@ function PaneRow({
           {isTerminal ? (
             <TerminalSquareIcon size={15} />
           ) : isCodex ? (
-            <BotIcon size={14} />
+            <CodexIcon size={12} />
           ) : (
             <ClaudeRobotIcon size={14} />
           )}
