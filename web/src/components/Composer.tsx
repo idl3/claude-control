@@ -1088,9 +1088,51 @@ export function Composer({
   // Close the (session-agnostic) skill browser + voice mode on a session switch.
   // The voice shell stays mounted (always-mounted) — just flip voice=false so
   // the mic is released and the layout effect hides the shell on next render.
+  //
+  // ANIMATION CLEANUP (race-proof):
+  // Kill any in-flight voice animation and clear ALL GSAP inline styles that
+  // the morph may have left on composer elements (inputWrap, toolbar, toolbarBtns,
+  // card height). This prevents stale opacity:0/transform/height values from
+  // persisting across the session switch when the animation was interrupted
+  // mid-flight and its onComplete (which would have run clearProps) never fired.
+  //
+  // Reset voiceMorphHasRunRef so the guard is correct for the next voice ENTER/EXIT
+  // cycle on this session (the compositor will re-initialize from a clean state).
   useEffect(() => {
     setSkillBrowserOpen(false);
     setVoice(false);
+
+    // Kill in-flight animation immediately.
+    voiceAnimRef.current?.kill();
+    voiceAnimRef.current = null;
+
+    // Reset the morph-has-run guard so the next ENTER is treated as a fresh start.
+    voiceMorphHasRunRef.current = false;
+    phase2DoneRef.current = false;
+
+    // Clear any GSAP inline styles left by an interrupted animation so the
+    // composer always renders at its correct natural (un-animated) state.
+    const card = composerCardRef.current;
+    if (card) {
+      // Clear the card's pinned height (set by exitVoice or the height tween).
+      card.style.height = '';
+      card.style.overflow = '';
+
+      // Clear inline styles on compositor children.
+      const inputWrap = card.querySelector<HTMLElement>('.composer-input-wrap');
+      const toolbar   = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
+      if (inputWrap) gsap.set(inputWrap, { clearProps: 'all' });
+      if (toolbar)   gsap.set(toolbar,   { clearProps: 'all' });
+      const toolbarBtns = toolbar
+        ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
+        : [];
+      if (toolbarBtns.length) gsap.set(toolbarBtns, { clearProps: 'all' });
+
+      // Hide the voice body (in case the session switch happened while it was shown).
+      const voiceBody = voiceBodyRef.current;
+      if (voiceBody) voiceBody.style.display = 'none';
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   const pickSkill = useCallback(
