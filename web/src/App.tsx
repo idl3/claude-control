@@ -1475,7 +1475,6 @@ function AppInner() {
               // isn't an empty "no messages yet". The composer still replies via
               // tmux send-keys.
               <div className="thread-root">
-                <div className="thread-fade" aria-hidden="true" />
                 {(() => {
                   const inlineAgent = viewingAgentId
                     ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)

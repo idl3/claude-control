@@ -922,26 +922,6 @@ body {
   min-height: 0;
   position: relative;
 }
-/* Top scrim over the message area. Hidden by default; fades in while the
-   composer (a descendant) is focused so messages scrolling up under the header
-   dissolve smoothly, and fades out when the input is dismissed. */
-.thread-fade {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  /* Match the thread's own background (--bg) so messages scrolling up dissolve
-     INTO it rather than getting a faint mismatched tint. Solid cap then fade. */
-  background: linear-gradient(to bottom, var(--bg) 38%, transparent);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.28s var(--ease, ease);
-  z-index: 5;
-}
-.thread-root:focus-within .thread-fade {
-  opacity: 1;
-}
 /* Fixed scrim pinned to the very top of the viewport, covering the status-bar
    safe area. Mobile only: when the composer is focused iOS scrolls the app up
    (nav bars leave, content reaches the status bar), so this fades that content
@@ -965,11 +945,6 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .app-top-fade {
-    transition: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .thread-fade {
     transition: none;
   }
 }

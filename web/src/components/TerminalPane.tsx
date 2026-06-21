@@ -55,7 +55,6 @@ export function TerminalPane({
 
   return (
     <div className="thread-root terminal-pane-root" ref={rootRef}>
-      <div className="thread-fade" aria-hidden="true" />
       <TerminalView
         key={sessionId}
         output={capture}
