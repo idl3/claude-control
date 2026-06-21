@@ -408,7 +408,7 @@ describe('voice morph — Pause button reveal ordering', () => {
     pauseEl.className  = 'voice-btn-pause';
 
     // The explicit ordered array from runPhase2Enter (Cancel → Stop → Pause).
-    const orderedVoiceBtns = [cancelEl, stopEl, pauseEl]
+    const orderedVoiceBtns = ([cancelEl, stopEl, pauseEl] as (HTMLElement | null)[])
       .filter((b): b is HTMLElement => b !== null);
 
     expect(orderedVoiceBtns[0]).toBe(cancelEl);  // Cancel is first
@@ -426,7 +426,7 @@ describe('voice morph — Pause button reveal ordering', () => {
     // pauseEl not in DOM — query returns null.
     const latePauseBtn: HTMLElement | null = null;
 
-    const orderedVoiceBtns = [cancelEl, stopEl, latePauseBtn]
+    const orderedVoiceBtns = ([cancelEl, stopEl, latePauseBtn] as (HTMLElement | null)[])
       .filter((b): b is HTMLElement => b !== null);
 
     expect(orderedVoiceBtns).toHaveLength(2);
