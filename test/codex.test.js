@@ -11,6 +11,7 @@ import {
   parseCodexRecord,
   detectPendingFromCapture,
   buildAnswerProgram,
+  parseTuiStatus,
 } from '../lib/codex.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -380,4 +381,73 @@ test('buildAnswerProgram: label selection "Yes, proceed" → [1, Enter]', () => 
   const pending = detectPendingFromCapture(execApprovalCapture);
   const result = buildAnswerProgram(pending, [['Yes, proceed']]);
   assert.deepEqual(result, ['1', 'Enter']);
+});
+
+// ---------------------------------------------------------------------------
+// 9. parseTuiStatus — Codex working-state detection (Fix B)
+// ---------------------------------------------------------------------------
+
+test('parseTuiStatus: working true when capture contains "esc to interrupt"', () => {
+  const capture = `╭───────────────────────────────────╮
+│ model:     gpt-4.5   fast  /model  │
+╰───────────────────────────────────╯
+• Working (12s • esc to interrupt)
+>`;
+  const result = parseTuiStatus(capture);
+  assert.equal(result.working, true);
+  assert.equal(result.model, 'gpt-4.5');
+  assert.equal(result.ctxPct, null);
+});
+
+test('parseTuiStatus: working true when capture contains "Working (" without "esc to interrupt"', () => {
+  const capture = `• Working (5s • thinking…)\n> `;
+  const result = parseTuiStatus(capture);
+  assert.equal(result.working, true);
+});
+
+test('parseTuiStatus: working false for idle composer placeholder', () => {
+  const capture = `╭───────────────────────────────────╮
+│ model:     gpt-4.5   fast  /model  │
+╰───────────────────────────────────╯
+> Ask anything…`;
+  const result = parseTuiStatus(capture);
+  assert.equal(result.working, false);
+  assert.equal(result.model, 'gpt-4.5');
+});
+
+test('parseTuiStatus: working false for empty capture', () => {
+  const result = parseTuiStatus('');
+  assert.equal(result.working, false);
+  assert.equal(result.model, null);
+  assert.equal(result.ctxPct, null);
+});
+
+// ---------------------------------------------------------------------------
+// 10. buildTranscriptIndex — lastActivityMs from transcript timestamp (Fix C)
+// ---------------------------------------------------------------------------
+
+test('buildTranscriptIndex: lastActivityMs is parsed from transcript timestamp', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-test-'));
+  const now = new Date('2026-06-21T12:00:00');
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateDir = path.join(temp, yyyy, mm, dd);
+  fs.mkdirSync(dateDir, { recursive: true });
+
+  const destFile = path.join(dateDir, 'rollout-test.jsonl');
+  fs.copyFileSync(path.join(FIX, 'sample-rollout.jsonl'), destFile);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    const rec = index.byCwd.get('/private/tmp/codex-spike');
+    assert.notEqual(rec, undefined);
+    // lastActivityMs should be a finite number derived from the timestamp, not mtime.
+    assert.equal(typeof rec.lastActivityMs, 'number');
+    assert.ok(Number.isFinite(rec.lastActivityMs));
+    // The fixture session_meta timestamp is known; verify it round-trips.
+    assert.equal(rec.lastActivityMs, Date.parse(rec.lastActivity));
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
 });

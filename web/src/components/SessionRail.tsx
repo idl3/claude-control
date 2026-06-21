@@ -179,7 +179,7 @@ function PaneRow({
           {isTerminal ? (
             <TerminalSquareIcon size={15} />
           ) : isCodex ? (
-            <CodexIcon size={14} />
+            <CodexIcon size={12} />
           ) : (
             <ClaudeRobotIcon size={14} />
           )}
