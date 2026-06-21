@@ -2319,6 +2319,9 @@ body.is-external-display .composer {
   border-radius: 16px;
   background: var(--bg-1);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  /* Establishes the containing block for absolutely-positioned content layers
+     during the voice morph transition (prevents jump by overlapping layers). */
+  position: relative;
 }
 .composer-card:focus-within {
   border-color: var(--accent);
