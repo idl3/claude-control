@@ -337,3 +337,52 @@ describe('voice transition — animated path', () => {
     expect(lastState.voiceShellMounted).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guard: COMPOSER_MIN_HEIGHT clamping
+//
+// The morph driver clamps heightTo = Math.max(rawMeasured, COMPOSER_MIN_HEIGHT)
+// to prevent a near-zero measurement from collapsing the card mid-morph.
+// This describe block tests the clamping invariant as a pure logic unit test
+// (no DOM layout required — jsdom always returns 0 for offsetHeight, which is
+// exactly the near-zero scenario we're guarding against).
+// ---------------------------------------------------------------------------
+describe('voice morph height — MIN_HEIGHT clamp guard', () => {
+  const COMPOSER_MIN_HEIGHT = 96; // must match the constant in Composer.tsx
+
+  function clampMorphHeight(rawMeasured: number): number {
+    return Math.max(rawMeasured, COMPOSER_MIN_HEIGHT);
+  }
+
+  it('COMPOSER_MIN_HEIGHT is a reasonable single-row composer floor (≥ 80px)', () => {
+    // The floor should cover at least: card border(2) + padding(20) + textarea(24)
+    // + gap(8) + toolbar(34) = 88px. Using 80 as the test lower bound to give
+    // a little slack against font/line-height variation.
+    expect(COMPOSER_MIN_HEIGHT).toBeGreaterThanOrEqual(80);
+  });
+
+  it('clamp returns MIN when rawMeasured is 0 (jsdom / unmeasured DOM)', () => {
+    // jsdom always returns 0 for offsetHeight — this is the near-zero scenario.
+    expect(clampMorphHeight(0)).toBe(COMPOSER_MIN_HEIGHT);
+  });
+
+  it('clamp returns MIN when rawMeasured is smaller than MIN', () => {
+    expect(clampMorphHeight(20)).toBe(COMPOSER_MIN_HEIGHT);
+    expect(clampMorphHeight(50)).toBe(COMPOSER_MIN_HEIGHT);
+    expect(clampMorphHeight(COMPOSER_MIN_HEIGHT - 1)).toBe(COMPOSER_MIN_HEIGHT);
+  });
+
+  it('clamp returns rawMeasured when it is larger than MIN (voice body taller)', () => {
+    // Typical voice body is ~180-210px tall.
+    expect(clampMorphHeight(180)).toBe(180);
+    expect(clampMorphHeight(COMPOSER_MIN_HEIGHT)).toBe(COMPOSER_MIN_HEIGHT);
+    expect(clampMorphHeight(COMPOSER_MIN_HEIGHT + 1)).toBe(COMPOSER_MIN_HEIGHT + 1);
+  });
+
+  it('clamp is monotonic: larger rawMeasured always produces a larger-or-equal result', () => {
+    const samples = [0, 10, 50, 96, 100, 150, 200, 300];
+    for (let i = 1; i < samples.length; i++) {
+      expect(clampMorphHeight(samples[i])).toBeGreaterThanOrEqual(clampMorphHeight(samples[i - 1]));
+    }
+  });
+});

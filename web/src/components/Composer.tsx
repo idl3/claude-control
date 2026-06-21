@@ -514,6 +514,15 @@ export function Composer({
   //   After Phase 1 completes (+ gap) we clear the inline height (back to auto)
   //   BEFORE Phase 2 so buttons are never clipped by overflow:hidden.
   //
+  // ── Minimum composer height floor ───────────────────────────────────────────
+  // Matches the single-row composer resting height:
+  //   card border (2) + card padding top+bottom (20) + textarea single-row (28)
+  //   + flex gap (8) + toolbar button height (34) ≈ 92px.
+  // Used as the lower clamp for the voice-morph height tween so the card never
+  // collapses to near-zero even if the voice-body measurement returns low.
+  // The CSS .composer-card min-height mirrors this constant.
+  const COMPOSER_MIN_HEIGHT = 96;
+
   // ── Timing constants — intentionally SLOW for visual tuning. ────────────────
   // To speed up: edit T below (e.g. fade → 0.22, height → 0.20, gap → 0.08).
   // All durations in seconds; all stagger values are per-element delays.
@@ -585,6 +594,18 @@ export function Composer({
       // Now it is safe to un-hide the voice body; the card is pinned in height.
       if (voiceBody) voiceBody.style.display = '';
 
+      // Defensively clear any position/visibility overrides left on voice children
+      // from a prior animation cycle (e.g. a prior exit phase that floated something
+      // out of flow). While opacity and transform do NOT affect offsetHeight,
+      // position:absolute and visibility:hidden DO affect flow layout. This ensures
+      // the voiceBody's children are genuinely in normal flow when we measure below.
+      if (voiceBody) {
+        voiceBody.querySelectorAll<HTMLElement>('*').forEach((el) => {
+          if (el.style.position)   el.style.position   = '';
+          if (el.style.visibility) el.style.visibility = '';
+        });
+      }
+
       // TO = voice-only height: temporarily float composer elements out of flow
       // so the card's intrinsic height collapses to the voice body alone.
       // Clear the pinned height temporarily so card.offsetHeight reads intrinsic.
@@ -597,7 +618,11 @@ export function Composer({
         toolbar.style.visibility = 'hidden';
       }
       card.style.height = '';  // clear pin so we read intrinsic voice-only height
-      const heightTo = card.offsetHeight;
+      const rawHeightTo = card.offsetHeight;
+      // Clamp: never let the tween target fall below COMPOSER_MIN_HEIGHT.
+      // This prevents any near-zero measurement (e.g. when voiceBody hasn't fully
+      // laid out yet) from collapsing the card to near-zero during Phase 1b.
+      const heightTo = Math.max(rawHeightTo, COMPOSER_MIN_HEIGHT);
       card.style.height = `${heightFrom}px`;  // restore pin
       // Restore.
       if (inputWrap) { inputWrap.style.position = ''; inputWrap.style.visibility = ''; }
@@ -794,7 +819,9 @@ export function Composer({
         voiceBody.style.position   = 'absolute';
         voiceBody.style.visibility = 'hidden';
       }
-      const heightTo = card.offsetHeight;
+      const rawExitHeightTo = card.offsetHeight;
+      // Clamp: the exit target (composer height) should also never be below MIN.
+      const heightTo = Math.max(rawExitHeightTo, COMPOSER_MIN_HEIGHT);
       // Restore measurement scaffolding.
       if (voiceBody) {
         voiceBody.style.position   = '';
