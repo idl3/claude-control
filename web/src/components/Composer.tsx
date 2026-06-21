@@ -484,14 +484,20 @@ export function Composer({
   // Drive the two-phase ENTER / EXIT GSAP timelines whenever `voice` changes.
   //
   // ENTER (composer → voice) — strictly sequenced:
-  //   Phase 1: stagger composer toolbar buttons out + fade input/body out +
-  //            tween .composer-card height FROM→TO (voice height). Frame settles.
-  //   Phase 2: reveal voice elements — status + wave slide from top, voice
-  //            toolbar from bottom — with stagger within Phase 2.
+  //   Phase 1: stagger composer toolbar buttons out ONE-BY-ONE + fade input/body
+  //            out + tween .composer-card height FROM→TO (voice height).
+  //   Gap:     explicit T.gap delay after Phase 1; overflow cleared + height
+  //            settled to auto BEFORE Phase 2 starts so nothing is clipped.
+  //   Phase 2: reveal transcriber top group (status + wave + hint), THEN
+  //            reveal each voice action button ONE-BY-ONE (targets individual
+  //            child buttons inside .voice-toolbar, NOT the container).
   //
-  // EXIT (voice → composer) — reverse:
-  //   Phase 1: stagger voice elements out + tween .composer-card height back.
-  //   Phase 2: stagger composer input + toolbar buttons back in.
+  // EXIT (voice → composer) — symmetric reverse:
+  //   Phase 1: hide each voice toolbar button ONE-BY-ONE + fade top group out
+  //            + tween .composer-card height back.
+  //   Gap:     same T.gap settle delay.
+  //   Phase 2: fade in composer body + reveal each composer toolbar button
+  //            ONE-BY-ONE in succession.
   //
   // Pre-render model: VoiceInline is always mounted. When idle the
   // .voice-inline-body has display:none (set by this effect on exit, or on
@@ -505,8 +511,22 @@ export function Composer({
   //   to-be-hidden elements out of flow (position:absolute) so their layout
   //   contribution is removed, read card.offsetHeight as TO, restore them,
   //   pin the card at FROM explicitly, force a reflow, then tween FROM → TO.
-  //   After Phase 1 completes we clear the inline height (back to auto) so
-  //   the card stays responsive.
+  //   After Phase 1 completes (+ gap) we clear the inline height (back to auto)
+  //   BEFORE Phase 2 so buttons are never clipped by overflow:hidden.
+  //
+  // ── Timing constants — intentionally SLOW for visual tuning. ────────────────
+  // To speed up: edit T below (e.g. fade → 0.22, height → 0.20, gap → 0.08).
+  // All durations in seconds; all stagger values are per-element delays.
+  const T = {
+    fade:       0.40,   // per-element fade duration (in or out)
+    height:     0.35,   // card height tween duration
+    btnStagger: 0.07,   // delay between successive button reveals/hides
+    topStagger: 0.06,   // delay between status / wave / hint reveals
+    gap:        0.15,   // pause between Phase 1 completion and Phase 2 start
+    enterEase:  ANIM.enterEase,
+    exitEase:   ANIM.exitEase,
+  } as const;
+
   useLayoutEffect(() => {
     const card = composerCardRef.current;
     if (!card) return;
@@ -536,15 +556,25 @@ export function Composer({
       const voiceHintEl  = card.querySelector<HTMLElement>('.voice-hint, .voice-error');
       const voiceToolbar = card.querySelector<HTMLElement>('.voice-toolbar');
 
+      // Individual voice toolbar buttons (revealed one-by-one in Phase 2 —
+      // targeting children NOT the container avoids clipping from overflow:hidden).
+      const voiceBtns = voiceToolbar
+        ? Array.from(voiceToolbar.querySelectorAll<HTMLElement>('button, [role="button"]'))
+        : [];
+
       // Ensure inputWrap is visible at the start of the enter animation
       // (it may have display:none from a prior reduced-motion session).
       if (inputWrap) gsap.set(inputWrap, { clearProps: 'display,position,visibility', opacity: 1, y: 0 });
 
       // Pre-hide voice targets BEFORE paint (useLayoutEffect guarantee) so they
       // start invisible and Phase 2 slides them in — no flash of final state.
+      // Target individual buttons (NOT the toolbar container) so Phase 2 can
+      // reveal them while the container itself remains at full opacity/position.
       const topTargets = [voiceStatus, voiceWave, voiceHintEl].filter(Boolean) as HTMLElement[];
-      if (topTargets.length) gsap.set(topTargets, { opacity: 0, y: -24 });
-      if (voiceToolbar)      gsap.set(voiceToolbar, { opacity: 0, y: 24 });
+      if (topTargets.length) gsap.set(topTargets, { opacity: 0, y: -16 });
+      // Ensure toolbar container is fully visible — only its children are hidden.
+      if (voiceToolbar) gsap.set(voiceToolbar, { clearProps: 'opacity,y' });
+      if (voiceBtns.length) gsap.set(voiceBtns, { opacity: 0, y: 12 });
 
       // ── Measure heights for the height tween (manual FLIP). ─────────────────
       // FROM = current card height (composer + voice both in layout).
@@ -572,34 +602,83 @@ export function Composer({
         ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
         : [];
 
+      // ── Phase 2 builder: reveal voice elements ───────────────────────────────
+      // Called from Phase 1's onComplete after the T.gap settle delay so that
+      // overflow:hidden is fully cleared and height is auto before any button
+      // tries to render outside the previous clipped bounds.
+      const runPhase2Enter = () => {
+        const phase2 = gsap.timeline();
+
+        // Reveal top group (status → wave → hint) first, with stagger.
+        if (topTargets.length) {
+          phase2.to(
+            topTargets,
+            {
+              opacity: 1, y: 0,
+              duration: T.fade, ease: T.enterEase,
+              stagger: T.topStagger,
+            },
+            0,
+          );
+        }
+
+        // Then reveal each voice button ONE-BY-ONE with stagger.
+        // Targets individual buttons, NOT the container — avoids clip.
+        if (voiceBtns.length) {
+          const topDuration = topTargets.length
+            ? T.fade + T.topStagger * (topTargets.length - 1)
+            : 0;
+          const btnsStart = topTargets.length ? topDuration * 0.5 : 0;
+          phase2.to(
+            voiceBtns,
+            {
+              opacity: 1, y: 0,
+              duration: T.fade, ease: T.enterEase,
+              stagger: T.btnStagger,
+            },
+            btnsStart,
+          );
+        } else if (voiceToolbar) {
+          phase2.to(
+            voiceToolbar,
+            { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase },
+            topTargets.length ? T.topStagger * topTargets.length : 0,
+          );
+        }
+
+        voiceAnimRef.current = phase2;
+      };
+
       // ── Phase 1 timeline: settle the frame ──────────────────────────────────
       const phase1 = gsap.timeline({
         onComplete: () => {
-          // Frame has settled — restore card to auto height, clear overflow lock,
-          // and take inputWrap/toolbar fully out of flow for Phase 2.
+          // Frame has settled — restore card to auto height, clear overflow lock
+          // (MUST happen before Phase 2 so buttons aren't clipped), then take
+          // inputWrap/toolbar out of flow. After T.gap, fire Phase 2.
           card.style.height   = '';
           card.style.overflow = '';
           if (inputWrap) gsap.set(inputWrap, { display: 'none' });
           if (toolbar)   gsap.set(toolbar,   { clearProps: 'opacity,y' });
+          gsap.delayedCall(T.gap, runPhase2Enter);
         },
       });
 
-      // Stagger toolbar buttons out.
+      // Stagger composer toolbar buttons out ONE-BY-ONE.
       if (toolbarBtns.length) {
         phase1.to(
           toolbarBtns,
-          { opacity: 0, y: 4, duration: ANIM.fast, ease: ANIM.exitEase, stagger: 0.05 },
+          { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger },
           0,
         );
       } else if (toolbar) {
-        phase1.to(toolbar, { opacity: 0, y: 4, duration: ANIM.fast, ease: ANIM.exitEase }, 0);
+        phase1.to(toolbar, { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase }, 0);
       }
 
       // Fade + nudge inputWrap out.
       if (inputWrap) {
         phase1.to(
           inputWrap,
-          { opacity: 0, y: 6, duration: ANIM.fast, ease: ANIM.exitEase },
+          { opacity: 0, y: 6, duration: T.fade, ease: T.exitEase },
           0,
         );
       }
@@ -607,33 +686,11 @@ export function Composer({
       // Tween card height FROM → TO simultaneously with content exit.
       phase1.to(
         card,
-        { height: heightTo, duration: ANIM.fast, ease: ANIM.exitEase },
+        { height: heightTo, duration: T.height, ease: T.exitEase },
         0,
       );
 
-      // ── Phase 2 timeline: reveal voice — strictly after Phase 1 ─────────────
-      const phase2 = gsap.timeline();
-
-      if (topTargets.length) {
-        phase2.to(
-          topTargets,
-          { opacity: 1, y: 0, duration: ANIM.base, ease: ANIM.enterEase, stagger: 0.05 },
-          0,
-        );
-      }
-      if (voiceToolbar) {
-        phase2.to(
-          voiceToolbar,
-          { opacity: 1, y: 0, duration: ANIM.base, ease: ANIM.enterEase },
-          topTargets.length ? 0.05 : 0, // slight offset after top targets start
-        );
-      }
-
-      // Chain Phase 2 to start ONLY after Phase 1 completes.
-      const tl = gsap.timeline();
-      tl.add(phase1).add(phase2);
-
-      voiceAnimRef.current = tl;
+      voiceAnimRef.current = phase1;
 
     } else {
       // ── EXIT: voice body out → frame settles → composer body in ─────────────
@@ -683,15 +740,59 @@ export function Composer({
       // Voice content targets for stagger.
       const voiceTopTargets = [voiceStatus, voiceWave, voiceHintEl].filter(Boolean) as HTMLElement[];
 
+      // ── Phase 2 builder: reveal composer elements ────────────────────────────
+      // Called after Phase 1 completes + T.gap settle delay. overflow is already
+      // cleared by this point.
+      const runPhase2Exit = () => {
+        const phase2 = gsap.timeline({
+          onComplete: () => {
+            // Hide the pre-rendered voice shell (display:none = zero layout contribution).
+            if (voiceBody) voiceBody.style.display = 'none';
+            // Clear GSAP inline styles so they're clean for next time.
+            if (inputWrap)          gsap.set(inputWrap,    { clearProps: 'all' });
+            if (toolbar)            gsap.set(toolbar,       { clearProps: 'all' });
+            if (toolbarBtns.length) gsap.set(toolbarBtns,  { clearProps: 'all' });
+          },
+        });
+
+        // Fade in composer body first.
+        if (inputWrap) {
+          phase2.to(
+            inputWrap,
+            { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase },
+            0,
+          );
+        }
+
+        // Then reveal each composer toolbar button ONE-BY-ONE in succession.
+        if (toolbarBtns.length) {
+          const bodyDuration = inputWrap ? T.fade * 0.4 : 0;
+          phase2.to(
+            toolbarBtns,
+            {
+              opacity: 1, y: 0,
+              duration: T.fade, ease: T.enterEase,
+              stagger: T.btnStagger,
+            },
+            bodyDuration,
+          );
+        } else if (toolbar) {
+          phase2.to(toolbar, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase }, 0);
+        }
+
+        voiceAnimRef.current = phase2;
+      };
+
       // ── Phase 1 timeline: settle the frame ──────────────────────────────────
       const phase1 = gsap.timeline({
         onComplete: () => {
           card.style.height   = '';
           card.style.overflow = '';
+          gsap.delayedCall(T.gap, runPhase2Exit);
         },
       });
 
-      // Stagger voice toolbar buttons out first (bottom → top visual flow).
+      // Stagger voice toolbar buttons out ONE-BY-ONE (bottom → top visual flow).
       if (voiceToolbar) {
         const voiceBtns = Array.from(
           voiceToolbar.querySelectorAll<HTMLElement>('button, [role="button"]'),
@@ -699,68 +800,33 @@ export function Composer({
         if (voiceBtns.length) {
           phase1.to(
             voiceBtns,
-            { opacity: 0, y: 8, duration: ANIM.fast, ease: ANIM.exitEase, stagger: 0.05 },
+            { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger },
             0,
           );
         } else {
-          phase1.to(voiceToolbar, { opacity: 0, y: 8, duration: ANIM.fast, ease: ANIM.exitEase }, 0);
+          phase1.to(voiceToolbar, { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase }, 0);
         }
       }
 
-      // Fade voice top targets out.
+      // Fade voice top targets out ONE-BY-ONE.
       if (voiceTopTargets.length) {
         phase1.to(
           voiceTopTargets,
-          { opacity: 0, y: -8, duration: ANIM.fast, ease: ANIM.exitEase, stagger: 0.04 },
+          { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase, stagger: T.topStagger },
           0,
         );
       } else if (voiceBody) {
-        phase1.to(voiceBody, { opacity: 0, y: -8, duration: ANIM.fast, ease: ANIM.exitEase }, 0);
+        phase1.to(voiceBody, { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase }, 0);
       }
 
       // Tween card height back.
       phase1.to(
         card,
-        { height: heightTo, duration: ANIM.fast, ease: ANIM.exitEase },
+        { height: heightTo, duration: T.height, ease: T.exitEase },
         0,
       );
 
-      // ── Phase 2 timeline: reveal composer — strictly after Phase 1 ──────────
-      const phase2 = gsap.timeline({
-        onComplete: () => {
-          // Hide the pre-rendered voice shell (display:none = zero layout contribution).
-          if (voiceBody) voiceBody.style.display = 'none';
-          // Clear GSAP inline styles so they're clean for next time.
-          if (inputWrap)          gsap.set(inputWrap,    { clearProps: 'all' });
-          if (toolbar)            gsap.set(toolbar,       { clearProps: 'all' });
-          if (toolbarBtns.length) gsap.set(toolbarBtns,  { clearProps: 'all' });
-        },
-      });
-
-      if (inputWrap) {
-        phase2.to(
-          inputWrap,
-          { opacity: 1, y: 0, duration: ANIM.base, ease: ANIM.enterEase },
-          0,
-        );
-      }
-
-      // Stagger toolbar buttons back in.
-      if (toolbarBtns.length) {
-        phase2.to(
-          toolbarBtns,
-          { opacity: 1, y: 0, duration: ANIM.base, ease: ANIM.enterEase, stagger: 0.05 },
-          inputWrap ? 0.04 : 0,
-        );
-      } else if (toolbar) {
-        phase2.to(toolbar, { opacity: 1, y: 0, duration: ANIM.base, ease: ANIM.enterEase }, 0);
-      }
-
-      // Chain Phase 2 strictly after Phase 1.
-      const tl = gsap.timeline();
-      tl.add(phase1).add(phase2);
-
-      voiceAnimRef.current = tl;
+      voiceAnimRef.current = phase1;
     }
   }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
