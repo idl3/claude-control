@@ -234,6 +234,132 @@ test('Claude regression: parsePanePrompt handles a Claude Code permission prompt
   assert.equal(p.multiSelect, undefined);
 });
 
+// ---------------------------------------------------------------------------
+// 7. New: wrap-tolerant heading match + generic planning question fallback
+// ---------------------------------------------------------------------------
+
+test('detectPendingFromCapture: wrapped exec_command heading still detected as exec_command', () => {
+  // Simulate a narrow-pane capture where the heading is split across two lines.
+  const wrappedExecCapture = [
+    'Would you like to run the follo',
+    'wing command?',
+    '',
+    '› 1. Yes, proceed (y)',
+    '  2. No',
+    '  3. Explain',
+    '',
+    'Press enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const pending = detectPendingFromCapture(wrappedExecCapture);
+  assert.equal(pending.transcriptPending, true);
+  assert.equal(pending.pendingKind, 'exec_command');
+  assert.equal(pending.header, 'Would you like to run the following command?');
+  assert.ok(pending.options.length >= 1, 'expected at least 1 option');
+  assert.equal(pending.options[0].n, 1);
+  assert.equal(pending.options[0].label, 'Yes, proceed');
+  assert.equal(pending.options[0].shortcut, 'y');
+  assert.equal(pending.options[0].highlighted, true);
+});
+
+test('detectPendingFromCapture: planning question with numbered picker + footer → pendingKind=question', () => {
+  // Codex planning/clarifying question: no recognized heading, but a › picker
+  // and the standard confirm/cancel footer.
+  const planningCapture = [
+    'What would you like to do with the existing tests?',
+    '',
+    '› 1. Keep them as-is',
+    '  2. Rewrite them to match the new API',
+    '  3. Delete and start fresh',
+    '',
+    'Press enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const pending = detectPendingFromCapture(planningCapture);
+  assert.equal(pending.transcriptPending, true);
+  assert.equal(pending.pendingKind, 'question');
+  assert.ok(pending.header && pending.header.length > 0, 'header must be non-empty');
+  assert.ok(pending.header.includes('existing tests') || pending.header !== 'Question',
+    'header should derive from text above options');
+  assert.equal(pending.options.length, 3);
+  assert.equal(pending.options[0].n, 1);
+  assert.equal(pending.options[0].label, 'Keep them as-is');
+  assert.equal(pending.options[0].highlighted, true);
+  assert.equal(pending.options[1].n, 2);
+  assert.equal(pending.options[2].n, 3);
+});
+
+test('detectPendingFromCapture: planning question with "Press enter to continue" footer variant', () => {
+  const planningCapture2 = [
+    'Which approach should I use?',
+    '› 1. Option A',
+    '  2. Option B',
+    'Press enter to continue',
+  ].join('\n');
+
+  const pending = detectPendingFromCapture(planningCapture2);
+  assert.equal(pending.transcriptPending, true);
+  assert.equal(pending.pendingKind, 'question');
+  assert.equal(pending.options.length, 2);
+});
+
+test('detectPendingFromCapture: regression — numbered text but no footer and no heading → noModal', () => {
+  // A capture that looks like it might have options but has no recognized
+  // heading AND no footer — must NOT be detected as a pending question.
+  const nonModalCapture = [
+    'Recent changes:',
+    '  1. Added logging to server.js',
+    '  2. Fixed the auth bug',
+    '  3. Updated dependencies',
+    '',
+    'Done.',
+  ].join('\n');
+
+  const pending = detectPendingFromCapture(nonModalCapture);
+  assert.equal(pending.transcriptPending, false);
+  assert.equal(pending.pendingKind, null);
+});
+
+test('detectPendingFromCapture: wrapped footer ("Press enter to confirm or esc to") stops option collection', () => {
+  // The footer itself may be wrapped — prefix-based detection must handle it.
+  const wrappedFooterCapture = [
+    'Would you like to make the following edits?',
+    '',
+    '› 1. Yes, apply edits (y)',
+    "  2. Yes, and don't ask again for these files (a)",
+    '  3. No, reject edits (n)',
+    '',
+    'Press enter to confirm or esc to',
+    'cancel',
+  ].join('\n');
+
+  const pending = detectPendingFromCapture(wrappedFooterCapture);
+  assert.equal(pending.transcriptPending, true);
+  assert.equal(pending.pendingKind, 'apply_patch');
+  assert.equal(pending.options.length, 3);
+});
+
+test('parseCodexPrompt: returns non-null for planning question capture', () => {
+  const planningCapture = [
+    'How should I structure the new module?',
+    '',
+    '› 1. Feature-first layout',
+    '  2. Type-first layout',
+    '',
+    'Press enter to confirm or esc to cancel',
+  ].join('\n');
+
+  const result = parseCodexPrompt(planningCapture);
+  assert.ok(result, 'parseCodexPrompt must return non-null for planning question');
+  assert.ok(result.question && result.question.length > 0);
+  assert.equal(result.options.length, 2);
+  assert.equal(result.options[0].key, '1');
+  assert.equal(result.options[1].key, '2');
+  assert.equal(result.options[0].selected, true);
+  assert.equal(result.options[1].selected, false);
+  assert.equal(result.multiSelect, undefined);
+});
+
 test('Claude regression: parsePanePrompt returns null for a Codex-style capture (› without Esc footer)', () => {
   // Codex uses › as the highlight character and "Press enter to confirm or esc to cancel"
   // as the footer (not a bare "Esc to cancel"). This capture should NOT match parsePanePrompt's
