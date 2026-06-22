@@ -1678,7 +1678,16 @@ async function handleClientMessage(ws, msg) {
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
       const promptKey = msg.key;
       return runSerial(session.target, async () => {
-        await tmux.sendRawKeys(session.target, [promptKey]);
+        // Codex confirms a numbered choice with <digit> THEN Enter ("Press enter
+        // to confirm"); the digit alone only moves the highlight, so without the
+        // Enter the modal hangs on "submitting…". Claude's numbered menus act on
+        // the digit alone, so only Codex needs the trailing Enter.
+        const isDigit = /^[1-9]$/.test(promptKey);
+        if (session.kind === 'codex' && isDigit) {
+          await tmux.sendRawKeysSequenced(session.target, [promptKey, 'Enter'], 120);
+        } else {
+          await tmux.sendRawKeys(session.target, [promptKey]);
+        }
         // Force the next poll tick to broadcast (the prompt should now change/clear).
         const sub = subscriptions.get(msg.id);
         if (sub) sub._lastPrompt = '__force__';
