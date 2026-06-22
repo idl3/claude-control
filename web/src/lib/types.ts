@@ -34,6 +34,10 @@ export interface Session {
   ctxPct?: number | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
   thinking?: boolean;
+  /** Codex-only: primary rate-limit used_percent (0–100). null for Claude sessions. */
+  usagePct?: number | null;
+  /** Codex-only: primary rate-limit window in minutes (e.g. 300 = 5h, 10080 = 7d). */
+  usageWindowMin?: number | null;
 }
 
 export type Role = 'user' | 'assistant' | 'system';

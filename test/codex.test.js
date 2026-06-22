@@ -12,6 +12,7 @@ import {
   detectPendingFromCapture,
   buildAnswerProgram,
   parseTuiStatus,
+  extractUsageFromTail,
 } from '../lib/codex.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -464,6 +465,150 @@ test('buildTranscriptIndex: lastActivityMs is parsed from transcript timestamp',
     assert.ok(Number.isFinite(rec.lastActivityMs));
     // The fixture session_meta timestamp is known; verify it round-trips.
     assert.equal(rec.lastActivityMs, Date.parse(rec.lastActivity));
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 11. extractUsageFromTail — pure unit tests
+// ---------------------------------------------------------------------------
+
+test('extractUsageFromTail: returns newest token_count primary rate_limits', () => {
+  const older = JSON.stringify({
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: { primary: { used_percent: 5.0, window_minutes: 300 } },
+    },
+  });
+  const newer = JSON.stringify({
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: { primary: { used_percent: 12.0, window_minutes: 300 } },
+    },
+  });
+  // Newest is at the end of the blob — extractUsageFromTail reads from the bottom.
+  const text = `${older}\n${newer}\n`;
+  const result = extractUsageFromTail(text);
+  assert.notEqual(result, null);
+  assert.equal(result.usagePct, 12.0);
+  assert.equal(result.usageWindowMin, 300);
+});
+
+test('extractUsageFromTail: newest token_count wins (later line overrides earlier)', () => {
+  const lines = [
+    JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: null,
+        rate_limits: { primary: { used_percent: 1.0, window_minutes: 300 } },
+      },
+    }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [] } }),
+    JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: null,
+        rate_limits: { primary: { used_percent: 2.0, window_minutes: 300 } },
+      },
+    }),
+  ];
+  const result = extractUsageFromTail(lines.join('\n'));
+  assert.equal(result.usagePct, 2.0);
+});
+
+test('extractUsageFromTail: returns null when no token_count lines present', () => {
+  const text = JSON.stringify({ type: 'session_meta', payload: { cwd: '/tmp' } }) + '\n';
+  assert.equal(extractUsageFromTail(text), null);
+});
+
+test('extractUsageFromTail: skips unparseable lines, still finds valid one', () => {
+  const valid = JSON.stringify({
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: { primary: { used_percent: 7.0, window_minutes: 10080 } },
+    },
+  });
+  const text = `{not valid json}\n${valid}\n{also bad\n`;
+  const result = extractUsageFromTail(text);
+  assert.notEqual(result, null);
+  assert.equal(result.usagePct, 7.0);
+  assert.equal(result.usageWindowMin, 10080);
+});
+
+test('extractUsageFromTail: null for empty string', () => {
+  assert.equal(extractUsageFromTail(''), null);
+});
+
+test('extractUsageFromTail: null for null input', () => {
+  assert.equal(extractUsageFromTail(null), null);
+});
+
+// ---------------------------------------------------------------------------
+// 12. buildTranscriptIndex — usagePct populated from fixture token_count
+// ---------------------------------------------------------------------------
+
+test('buildTranscriptIndex: usagePct and usageWindowMin populated from sample-rollout.jsonl', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-usage-test-'));
+  const now = new Date('2026-06-21T12:00:00');
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateDir = path.join(temp, yyyy, mm, dd);
+  fs.mkdirSync(dateDir, { recursive: true });
+
+  const destFile = path.join(dateDir, 'rollout-usage.jsonl');
+  fs.copyFileSync(path.join(FIX, 'sample-rollout.jsonl'), destFile);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    const rec = index.byCwd.get('/private/tmp/codex-spike');
+    assert.notEqual(rec, undefined);
+    // sample-rollout.jsonl has token_count events with primary rate_limits.
+    assert.equal(typeof rec.usagePct, 'number');
+    assert.equal(typeof rec.usageWindowMin, 'number');
+    assert.equal(rec.usageWindowMin, 300); // 5h window
+    // The fixture's last token_count has used_percent: 3.0.
+    assert.equal(rec.usagePct, 3.0);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('buildTranscriptIndex: usagePct null when file has no token_count events', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-nousage-test-'));
+  const now = new Date('2026-06-21T12:00:00');
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateDir = path.join(temp, yyyy, mm, dd);
+  fs.mkdirSync(dateDir, { recursive: true });
+
+  // A minimal rollout with only a session_meta — no token_count events.
+  const minimalRollout = JSON.stringify({
+    timestamp: '2026-06-21T06:27:24.067Z',
+    type: 'session_meta',
+    payload: {
+      id: 'test-no-usage-id',
+      cwd: '/private/tmp/no-usage',
+    },
+  }) + '\n';
+  fs.writeFileSync(path.join(dateDir, 'rollout-nousage.jsonl'), minimalRollout);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    const rec = index.byCwd.get('/private/tmp/no-usage');
+    assert.notEqual(rec, undefined);
+    assert.equal(rec.usagePct, null);
+    assert.equal(rec.usageWindowMin, null);
   } finally {
     fs.rmSync(temp, { recursive: true });
   }
