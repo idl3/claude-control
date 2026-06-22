@@ -563,6 +563,16 @@ body {
   color: var(--text-dim);
   margin-left: auto; /* right-align ctx within the meta row */
 }
+.meta-usage {
+  /* Codex rate-limit chip — distinct muted tone (not ctx: colour) */
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--text-faint);
+  margin-left: auto; /* right-align within the meta row */
+  opacity: 0.85;
+}
 .session-empty {
   list-style: none;
   padding: 16px;

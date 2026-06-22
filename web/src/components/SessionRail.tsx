@@ -61,6 +61,19 @@ interface SessionGroup {
 }
 
 /**
+ * Format a Codex rate-limit window in minutes to a human label.
+ * 300 → "5h", 10080 → "7d", other → "${min}m".
+ */
+function formatUsageWindow(windowMin?: number | null): string {
+  if (windowMin == null) return '?';
+  if (windowMin === 300) return '5h';
+  if (windowMin === 10080) return '7d';
+  const hours = windowMin / 60;
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+  return `${windowMin}m`;
+}
+
+/**
  * Deterministic tmux structure: SESSION → WINDOW → PANE, in natural tmux order
  * (session name, then window index, then pane index). Each pane is one row,
  * tagged Claude (transcript) or terminal (live shell) — mirroring exactly what
@@ -222,11 +235,16 @@ function PaneRow({
           <span className="meta-cwd meta-cwd-inline">{basename(s.cwd)}</span>
         ) : null}
       </div>
-      {!isTerminal && (s.model || s.ctxPct != null) ? (
+      {!isTerminal && (s.model || s.ctxPct != null || (isCodex && s.usagePct != null)) ? (
         <div className="session-meta">
           {s.model ? <span className="meta-model">{s.model}</span> : null}
           {s.ctxPct != null ? (
             <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
+          ) : null}
+          {isCodex && s.usagePct != null ? (
+            <span className="meta-usage">
+              {formatUsageWindow(s.usageWindowMin)}:{Math.round(s.usagePct)}%
+            </span>
           ) : null}
         </div>
       ) : null}
