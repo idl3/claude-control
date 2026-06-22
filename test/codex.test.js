@@ -415,6 +415,23 @@ test('parseTuiStatus: working false for idle composer placeholder', () => {
   assert.equal(result.model, 'gpt-4.5');
 });
 
+test('parseTuiStatus: header captures model + effort (gpt-5.5 xhigh)', () => {
+  const capture = `│ model:     gpt-5.5 xhigh   fast   /model to change │`;
+  assert.equal(parseTuiStatus(capture).model, 'gpt-5.5 xhigh');
+});
+
+test('parseTuiStatus: footer line captures model + effort when header not in view', () => {
+  // What the 8-line bottom ctx-poll capture actually sees once output scrolls
+  // the header box away: the persistent "model effort speed · cwd" footer.
+  const capture = `• Edited file\n› Run /review\n  gpt-5.5 xhigh Fast · ~/Projects/claude-control`;
+  assert.equal(parseTuiStatus(capture).model, 'gpt-5.5 xhigh');
+});
+
+test('parseTuiStatus: footer without an effort token captures the model only', () => {
+  const capture = `  gpt-5.5 Fast · ~/Projects/claude-control`;
+  assert.equal(parseTuiStatus(capture).model, 'gpt-5.5');
+});
+
 test('parseTuiStatus: working false for empty capture', () => {
   const result = parseTuiStatus('');
   assert.equal(result.working, false);
