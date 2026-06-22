@@ -238,6 +238,17 @@ export interface ControlConfig {
   defaultCwd: string;
   optimizeModel: string;
   claudeBin: string;
+  /**
+   * Command typed into a new pane to launch Codex. May be a shell alias
+   * (e.g. `yodex`). Server spawns this string verbatim.
+   */
+  codexLaunchCommand: string;
+  /**
+   * Optional absolute path to the codex binary used for availability checks.
+   * Blank = resolve from PATH. When codexLaunchCommand is a shell alias, set
+   * this to the real binary path so availability checks pass.
+   */
+  codexBin: string;
   /** Prompt-enhancer backend: local MLX model, claude -p, or deterministic rules. */
   optimizeBackend: OptimizeBackend;
   /** HuggingFace/MLX model id used when optimizeBackend === 'mlx'. */

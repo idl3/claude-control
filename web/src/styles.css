@@ -3706,6 +3706,41 @@ select.config-input {
   padding: 0 4px;
   border-radius: 4px;
 }
+/* Section divider label (e.g. "CLI", "Session") spanning the full grid. */
+.config-section-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 4px 0 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+}
+/* Agent group: a labelled sub-block that spans the full grid and lays out its
+   own fields inside a nested 2-column grid. */
+.config-agent-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.config-agent-group-title {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  padding-bottom: 2px;
+}
+/* Wide fields inside agent groups still span both columns. */
+.config-agent-group .config-field--wide {
+  grid-column: 1 / -1;
+}
 .config-icon-row {
   display: flex;
   align-items: center;
