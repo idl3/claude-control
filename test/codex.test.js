@@ -80,6 +80,39 @@ test('discovery: indexes sample-rollout.jsonl by cwd, sets agentType=codex', asy
   }
 });
 
+// Helper: write a minimal valid session_meta rollout and force its mtime.
+function writeRollout(dir, name, cwd, sessionId, mtimeDate) {
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  const meta = {
+    type: 'session_meta',
+    payload: { id: sessionId, cwd },
+    timestamp: new Date(mtimeDate).toISOString(),
+  };
+  fs.writeFileSync(file, JSON.stringify(meta) + '\n');
+  fs.utimesSync(file, mtimeDate, mtimeDate);
+  return file;
+}
+
+test('discovery window: active session in an old date dir is indexed; stale one is skipped', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-test-'));
+  const now = new Date('2026-06-23T12:00:00');
+
+  // Active: started 2 days ago, mtime = now → must be indexed.
+  writeRollout(path.join(temp, '2026', '06', '21'), 'rollout-active.jsonl', '/work/phone-suite', 'aaaa1111', now);
+  // Stale: started today, but mtime 5 days ago → must be skipped.
+  const stale = new Date(now.getTime() - 5 * 24 * 3600 * 1000);
+  writeRollout(path.join(temp, '2026', '06', '23'), 'rollout-stale.jsonl', '/work/dead', 'bbbb2222', stale);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    assert.equal(index.byCwd.has('/work/phone-suite'), true, 'active old-dir session must be indexed');
+    assert.equal(index.byCwd.has('/work/dead'), false, 'stale session must be skipped');
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 3. discovery resilience
 // ---------------------------------------------------------------------------
