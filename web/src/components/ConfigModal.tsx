@@ -24,9 +24,11 @@ interface ConfigModalProps {
 export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const [launchCommand, setLaunchCommand] = useState('');
+  const [claudeBin, setClaudeBin] = useState('');
+  const [codexLaunchCommand, setCodexLaunchCommand] = useState('');
+  const [codexBin, setCodexBin] = useState('');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [optimizeModel, setOptimizeModel] = useState('');
-  const [claudeBin, setClaudeBin] = useState('');
   const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
   const [mlxModel, setMlxModel] = useState('');
   // 0 = CSS default (auto); non-zero = user-chosen px value.
@@ -65,9 +67,11 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       .then((c) => {
         if (!alive) return;
         setLaunchCommand(c.launchCommand);
+        setClaudeBin(c.claudeBin ?? '');
+        setCodexLaunchCommand(c.codexLaunchCommand ?? 'codex');
+        setCodexBin(c.codexBin ?? '');
         setDefaultCwd(c.defaultCwd);
         setOptimizeModel(c.optimizeModel ?? '');
-        setClaudeBin(c.claudeBin ?? '');
         setOptimizeBackend(c.optimizeBackend ?? 'mlx');
         setMlxModel(c.mlxModel ?? '');
         setTranscriptFontSize(c.transcriptFontSize ?? 0);
@@ -129,18 +133,22 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     try {
       const saved = await saveConfig({
         launchCommand,
+        claudeBin,
+        codexLaunchCommand,
+        codexBin,
         defaultCwd,
         optimizeModel,
-        claudeBin,
         optimizeBackend,
         mlxModel,
         transcriptFontSize,
         externalFontSize,
       });
       setLaunchCommand(saved.launchCommand);
+      setClaudeBin(saved.claudeBin ?? '');
+      setCodexLaunchCommand(saved.codexLaunchCommand ?? 'codex');
+      setCodexBin(saved.codexBin ?? '');
       setDefaultCwd(saved.defaultCwd);
       setOptimizeModel(saved.optimizeModel ?? '');
-      setClaudeBin(saved.claudeBin ?? '');
       setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
       setMlxModel(saved.mlxModel ?? '');
       setTranscriptFontSize(saved.transcriptFontSize ?? 0);
@@ -189,21 +197,91 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         </div>
 
         <div className="config-body">
-          <label className="config-field">
-            <span className="config-label">Launch command</span>
-            <input
-              className="config-input"
-              type="text"
-              placeholder="claude"
-              value={launchCommand}
-              disabled={loading}
-              onChange={(e) => setLaunchCommand(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-            <span className="config-hint">Run in each new session's pane.</span>
-          </label>
+          {/* ── CLI section ─────────────────────────────────────────── */}
+          <div className="config-section-label">CLI</div>
+
+          {/* Claude Code group */}
+          <div className="config-agent-group">
+            <span className="config-agent-group-title">Claude Code</span>
+            <label className="config-field">
+              <span className="config-label">Command to run</span>
+              <input
+                className="config-input"
+                type="text"
+                placeholder="claude"
+                value={launchCommand}
+                disabled={loading}
+                onChange={(e) => setLaunchCommand(e.target.value)}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <span className="config-hint">
+                What gets typed to launch the agent — may be a shell alias (e.g.{' '}
+                <code>yolo</code>).
+              </span>
+            </label>
+            <label className="config-field config-field--wide">
+              <span className="config-label">CLI path (optional)</span>
+              <input
+                className="config-input"
+                type="text"
+                placeholder="auto-detected"
+                value={claudeBin}
+                disabled={loading}
+                onChange={(e) => setClaudeBin(e.target.value)}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <span className="config-hint">
+                Optional absolute path to the binary for availability checks; blank = resolve from PATH.
+              </span>
+            </label>
+          </div>
+
+          {/* Codex group */}
+          <div className="config-agent-group">
+            <span className="config-agent-group-title">Codex</span>
+            <label className="config-field">
+              <span className="config-label">Command to run</span>
+              <input
+                className="config-input"
+                type="text"
+                placeholder="codex"
+                value={codexLaunchCommand}
+                disabled={loading}
+                onChange={(e) => setCodexLaunchCommand(e.target.value)}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <span className="config-hint">
+                What gets typed to launch the agent — may be a shell alias (e.g.{' '}
+                <code>yodex</code>).
+              </span>
+            </label>
+            <label className="config-field config-field--wide">
+              <span className="config-label">CLI path (optional)</span>
+              <input
+                className="config-input"
+                type="text"
+                placeholder="auto-detected"
+                value={codexBin}
+                disabled={loading}
+                onChange={(e) => setCodexBin(e.target.value)}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <span className="config-hint">
+                Optional absolute path to the binary for availability checks; blank = resolve from PATH.
+              </span>
+            </label>
+          </div>
+
+          {/* ── Session section ──────────────────────────────────────── */}
+          <div className="config-section-label">Session</div>
 
           <label className="config-field">
             <span className="config-label">Default cwd</span>
@@ -323,24 +401,6 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
             </select>
             <span className="config-hint">
               Applies only when iPad drives an external monitor. Overrides base size on that display.
-            </span>
-          </label>
-
-          <label className="config-field config-field--wide">
-            <span className="config-label">Claude CLI path (optional)</span>
-            <input
-              className="config-input"
-              type="text"
-              placeholder="auto-detected"
-              value={claudeBin}
-              disabled={loading}
-              onChange={(e) => setClaudeBin(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-            <span className="config-hint">
-              Path to the <code>claude</code> binary. Blank = auto-detect.
             </span>
           </label>
 
