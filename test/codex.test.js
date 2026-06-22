@@ -13,6 +13,8 @@ import {
   buildAnswerProgram,
   parseTuiStatus,
   extractUsageFromTail,
+  readRolloutMeta,
+  parseLsofRollout,
 } from '../lib/codex.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -645,4 +647,182 @@ test('buildTranscriptIndex: usagePct null when file has no token_count events', 
   } finally {
     fs.rmSync(temp, { recursive: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 13. readRolloutMeta — direct per-file reader
+// ---------------------------------------------------------------------------
+
+test('readRolloutMeta: returns record for a valid rollout fixture', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-meta-test-'));
+  const destFile = path.join(temp, 'rollout-test.jsonl');
+  fs.copyFileSync(path.join(FIX, 'sample-rollout.jsonl'), destFile);
+
+  try {
+    const rec = await readRolloutMeta(destFile);
+    assert.notEqual(rec, null, 'should return a record');
+    assert.equal(rec.agentType, 'codex');
+    assert.equal(rec.cwd, '/private/tmp/codex-spike');
+    assert.equal(rec.sessionId, '019ee8dc-bd3a-7140-a6fa-43829d915da3');
+    assert.equal(typeof rec.mtime, 'number');
+    assert.equal(rec.transcriptPath, destFile);
+    assert.equal(rec.transcriptPending, false);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('readRolloutMeta: returns null for empty file', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-meta-test-'));
+  const f = path.join(temp, 'rollout-empty.jsonl');
+  fs.writeFileSync(f, '');
+  try {
+    const rec = await readRolloutMeta(f);
+    assert.equal(rec, null);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('readRolloutMeta: returns null for bad JSON first line', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-meta-test-'));
+  const f = path.join(temp, 'rollout-bad.jsonl');
+  fs.writeFileSync(f, '{not valid json}\n');
+  try {
+    const rec = await readRolloutMeta(f);
+    assert.equal(rec, null);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('readRolloutMeta: returns null when first line is not session_meta', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-meta-test-'));
+  const f = path.join(temp, 'rollout-nonmeta.jsonl');
+  const line = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [] } });
+  fs.writeFileSync(f, line + '\n');
+  try {
+    const rec = await readRolloutMeta(f);
+    assert.equal(rec, null);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('readRolloutMeta: returns null for non-existent file', async () => {
+  const rec = await readRolloutMeta('/nonexistent/path/rollout-nope.jsonl');
+  assert.equal(rec, null);
+});
+
+test('readRolloutMeta: record shape is identical to buildTranscriptIndex output for same file', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-meta-shape-test-'));
+  const now = new Date('2026-06-21T12:00:00');
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateDir = path.join(temp, yyyy, mm, dd);
+  fs.mkdirSync(dateDir, { recursive: true });
+  const destFile = path.join(dateDir, 'rollout-shape.jsonl');
+  fs.copyFileSync(path.join(FIX, 'sample-rollout.jsonl'), destFile);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    const indexRec = index.byCwd.get('/private/tmp/codex-spike');
+    assert.notEqual(indexRec, undefined);
+
+    const directRec = await readRolloutMeta(destFile, now);
+    assert.notEqual(directRec, null);
+
+    // All fields should match between the two paths.
+    assert.equal(directRec.cwd, indexRec.cwd);
+    assert.equal(directRec.sessionId, indexRec.sessionId);
+    assert.equal(directRec.lastActivity, indexRec.lastActivity);
+    assert.equal(directRec.lastActivityMs, indexRec.lastActivityMs);
+    assert.equal(directRec.agentType, indexRec.agentType);
+    assert.equal(directRec.usagePct, indexRec.usagePct);
+    assert.equal(directRec.usageWindowMin, indexRec.usageWindowMin);
+    assert.equal(directRec.transcriptPath, indexRec.transcriptPath);
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 14. parseLsofRollout — pure stdout parser
+// ---------------------------------------------------------------------------
+
+test('parseLsofRollout: returns rollout path from lsof -Fn output', () => {
+  const stdout = [
+    'p12345',
+    'f0',
+    'n/dev/null',
+    'f1',
+    'n/Users/ernie/.config/codex/something.json',
+    'f4',
+    'n/Users/ernie/.codex/sessions/2026/06/21/rollout-1750484844067-019ee8dc.jsonl',
+    'f5',
+    'n/usr/lib/libsystem.B.dylib',
+  ].join('\n');
+
+  const result = parseLsofRollout(stdout);
+  assert.equal(result, '/Users/ernie/.codex/sessions/2026/06/21/rollout-1750484844067-019ee8dc.jsonl');
+});
+
+test('parseLsofRollout: returns first rollout when multiple rollout lines present', () => {
+  const stdout = [
+    'p12345',
+    'n/Users/ernie/.codex/sessions/2026/06/20/rollout-first.jsonl',
+    'n/Users/ernie/.codex/sessions/2026/06/21/rollout-second.jsonl',
+  ].join('\n');
+
+  const result = parseLsofRollout(stdout);
+  assert.equal(result, '/Users/ernie/.codex/sessions/2026/06/20/rollout-first.jsonl');
+});
+
+test('parseLsofRollout: returns null when no rollout line present', () => {
+  const stdout = [
+    'p12345',
+    'f0',
+    'n/dev/null',
+    'f1',
+    'n/Users/ernie/.config/codex/config.json',
+    'f2',
+    'n/usr/lib/libsystem.B.dylib',
+  ].join('\n');
+
+  assert.equal(parseLsofRollout(stdout), null);
+});
+
+test('parseLsofRollout: returns null for empty stdout', () => {
+  assert.equal(parseLsofRollout(''), null);
+});
+
+test('parseLsofRollout: returns null for null/undefined input', () => {
+  assert.equal(parseLsofRollout(null), null);
+  assert.equal(parseLsofRollout(undefined), null);
+});
+
+test('parseLsofRollout: ignores f-lines and p-lines that contain rollout in name', () => {
+  // Only n-lines should be matched; f-lines and p-lines with rollout in name should be ignored.
+  const stdout = [
+    'p999',
+    'f99',
+    // This is NOT an n-line — should be ignored.
+    '/Users/ernie/.codex/sessions/2026/06/21/rollout-fake.jsonl',
+    'n/Users/ernie/.codex/sessions/2026/06/21/rollout-real.jsonl',
+  ].join('\n');
+
+  const result = parseLsofRollout(stdout);
+  assert.equal(result, '/Users/ernie/.codex/sessions/2026/06/21/rollout-real.jsonl');
+});
+
+test('parseLsofRollout: does not match .json files (only .jsonl)', () => {
+  const stdout = [
+    'p12345',
+    'n/Users/ernie/.codex/sessions/2026/06/21/rollout-something.json',
+    'n/Users/ernie/.codex/sessions/2026/06/21/rollout-real.jsonl',
+  ].join('\n');
+
+  const result = parseLsofRollout(stdout);
+  assert.equal(result, '/Users/ernie/.codex/sessions/2026/06/21/rollout-real.jsonl');
 });
