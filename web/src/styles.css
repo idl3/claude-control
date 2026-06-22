@@ -334,14 +334,18 @@ body {
 .pane-icon[data-state='working'] {
   opacity: 1;
 }
-/* Working: the robot bobs. */
+/* Working: the robot jumps with a slight squeeze at the apex (squash-and-stretch). */
 @keyframes pane-icon-bob {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
   50% {
-    transform: translateY(-2px);
+    transform: translateY(-2px) scaleX(0.9);
   }
 }
 .pane-icon[data-state='working'] svg {
-  animation: pane-icon-bob 0.9s var(--ease) infinite;
+  animation: pane-icon-bob 0.9s ease-in-out infinite;
+  transform-origin: center bottom;
 }
 /* Small overlay badge top-right of the character. */
 .pane-icon-badge {
