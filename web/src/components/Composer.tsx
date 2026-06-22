@@ -1685,25 +1685,9 @@ export function Composer({
             </button>
           ) : null}
           <span className="composer-toolbar-spacer" />
-          {/* Secondary: bypass — send the raw composer text without optimising. */}
-          {!terminal && !voice ? (
-            <button
-              type="button"
-              className="composer-enhance composer-bypass"
-              aria-label="Send without optimising"
-              title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
-              disabled={disabled || optimizing || empty}
-              onClick={() => {
-                composer.send();
-                refocusComposer();
-              }}
-            >
-              <ArrowUpIcon />
-            </button>
-          ) : null}
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
-              with "Using a sub-agent." Placed immediately before the primary
-              send button so it reads as part of the send cluster on the right.
+              with "Using a sub-agent." Sits to the LEFT of the raw-dispatch
+              button so the raw button reads as the right-most secondary action.
               Only shown in non-terminal, non-voice mode. */}
           {!terminal && !voice ? (
             <label
@@ -1722,6 +1706,22 @@ export function Composer({
               />
               <span className="composer-subagent-label">Dispatch task in sub-agent</span>
             </label>
+          ) : null}
+          {/* Secondary: bypass — send the raw composer text without optimising. */}
+          {!terminal && !voice ? (
+            <button
+              type="button"
+              className="composer-enhance composer-bypass"
+              aria-label="Send without optimising"
+              title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
+              disabled={disabled || optimizing || empty}
+              onClick={() => {
+                composer.send();
+                refocusComposer();
+              }}
+            >
+              <ArrowUpIcon />
+            </button>
           ) : null}
           {terminal && !voice ? (
             <button
