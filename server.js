@@ -1375,6 +1375,7 @@ codexRpc.on('messages', (id, messages) => {
     source: 'codex-rpc',
     kind: 'messages',
     summary: `${messages?.length ?? 0} message(s)`,
+    detail: { messages },
   });
   broadcastTo(id, { type: 'append', id, messages });
 });
@@ -1517,6 +1518,7 @@ function ensureSubscription(id) {
       source: session.kind === 'codex' ? 'codex-transcript' : 'transcript',
       kind: 'append',
       summary: `${msgs.length} message(s)`,
+      detail: { messages: msgs },
     });
     broadcastTo(id, { type: 'append', id, messages: msgs });
     // A sub-agent may have just spawned (poll for its files) or finished (its
