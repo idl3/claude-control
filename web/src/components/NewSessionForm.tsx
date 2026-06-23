@@ -5,6 +5,7 @@ import { FunnelIcon } from './icons';
 import type { SessionFilter } from './SessionRail';
 
 type CodexTransport = 'rpc' | 'tmux';
+type ClaudeTransport = 'tmux' | 'print';
 
 interface NewSessionFormProps {
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
@@ -33,6 +34,10 @@ export function normalizeCodexTransport(value: unknown): CodexTransport {
   return value === 'tmux' ? 'tmux' : 'rpc';
 }
 
+export function normalizeClaudeTransport(value: unknown): ClaudeTransport {
+  return value === 'print' ? 'print' : 'tmux';
+}
+
 /** Derive filter badge label for the funnel button. */
 export function filterTag(filter: SessionFilter): string | null {
   if (filter === 'claude') return 'CC';
@@ -52,6 +57,7 @@ export function filterTag(filter: SessionFilter): string | null {
 export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFormProps) {
   const [open, setOpen] = useState(false);
   const [agent, setAgent] = useState<'claude' | 'codex'>('claude');
+  const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState('');
@@ -69,11 +75,13 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     setName('');
     setCwd('');
     setAgent(defaultAgentForFilter(filter));
+    setClaudeTransport('tmux');
     setCodexTransport('rpc');
     setAgentInfos([]);
     fetchSpawnAgents()
       .then((infos) => {
         setAgentInfos(infos);
+        setClaudeTransport(normalizeClaudeTransport(infos.find((info) => info.id === 'claude')?.defaultTransport));
         setCodexTransport(normalizeCodexTransport(infos.find((info) => info.id === 'codex')?.defaultTransport));
       })
       .catch(() => {
@@ -106,6 +114,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
         name: resolvedName,
         cwd: resolvedCwd,
         agent,
+        claudeTransport: agent === 'claude' ? claudeTransport : undefined,
         codexTransport: agent === 'codex' ? codexTransport : undefined,
       });
       onToast(`Session created → ${result.name}`, 'ok');
@@ -115,7 +124,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     } finally {
       setCreating(false);
     }
-  }, [creating, agent, codexTransport, name, cwd, placeholder, onToast, close]);
+  }, [creating, agent, claudeTransport, codexTransport, name, cwd, placeholder, onToast, close]);
 
   // Helper: look up availability for an agent id.
   function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
@@ -188,6 +197,30 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
           );
         })}
       </div>
+
+      {agent === 'claude' ? (
+        <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
+          {([
+            ['tmux', 'Interactive'],
+            ['print', 'Print mode'],
+          ] as const).map(([id, label]) => {
+            const isActive = claudeTransport === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="rail-new-mode-seg-btn"
+                data-active={isActive ? 'true' : 'false'}
+                disabled={creating}
+                aria-pressed={isActive}
+                onClick={() => setClaudeTransport(id)}
+              >
+                <span className="rail-new-agent-seg-label">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {agent === 'codex' ? (
         <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
