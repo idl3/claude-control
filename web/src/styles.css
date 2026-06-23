@@ -18,9 +18,14 @@
   --green: oklch(72% 0.16 150);
   --user: oklch(0.24 0.03 249.98);
 
-  --txt-transcript: 13.5px;
-  --txt-meta: 11px;
-  --txt-composer: 16px; /* >=16px: stops iOS Safari auto-zoom on focus */
+  /* One global scale drives ALL text tokens, so the font-size setting bumps the
+     whole UI (base), not just the transcript. JS sets --ui-scale = chosen/13.5;
+     at 1 the tokens equal their original px exactly. Composer keeps a 16px floor
+     so it never drops below the iOS no-zoom threshold. */
+  --ui-scale: 1;
+  --txt-transcript: calc(13.5px * var(--ui-scale));
+  --txt-meta: calc(11px * var(--ui-scale));
+  --txt-composer: max(16px, calc(16px * var(--ui-scale))); /* >=16px: stops iOS auto-zoom */
 
   --hud-h: 34px;
   --radius: 10px;
@@ -41,9 +46,9 @@
    for a calmer input on desktop; iOS zoom guard is moot here anyway. */
 @media (min-width: 760px) {
   :root {
-    --txt-transcript: 14.5px;
-    --txt-meta: 12px;
-    --txt-composer: 16px;
+    --txt-transcript: calc(14.5px * var(--ui-scale));
+    --txt-meta: calc(12px * var(--ui-scale));
+    --txt-composer: max(16px, calc(16px * var(--ui-scale)));
     /* iPad / desktop: no Dynamic Island or home-indicator gap. */
     --safe-top: 0px;
     --safe-bottom: 0px;
@@ -1578,7 +1583,7 @@ body {
   gap: 8px;
   padding: 11px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   line-height: 1.4;
 }
 .sa-dot {
@@ -1639,18 +1644,18 @@ body {
   gap: 3px;
 }
 .sa-msg-role {
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale));
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-faint);
 }
 .sa-text {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-scale));
   white-space: pre-wrap;
   word-break: break-word;
 }
 .sa-think {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--text-dim);
 }
 .sa-think-body {
@@ -1658,7 +1663,7 @@ body {
   color: var(--text-faint);
 }
 .sa-tool {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   font-family: ui-monospace, monospace;
   color: var(--text-dim);
 }
@@ -1666,7 +1671,7 @@ body {
   color: var(--text-faint);
 }
 .sa-result {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   font-family: ui-monospace, monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1785,7 +1790,7 @@ body {
 .aui-md pre code {
   display: block;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.5;
   color: var(--text);
   padding: 8px 10px;
@@ -1795,7 +1800,7 @@ body {
 }
 .aui-md-code-lang {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale));
   text-transform: lowercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
@@ -1847,7 +1852,7 @@ body {
    shows a step count; while the session is actively generating this message it
    flashes multicolour, auto-opens, and rolls the latest reasoning line. */
 .block-cot {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--text-dim);
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1985,7 +1990,7 @@ body {
   gap: 6px;
   min-width: 0;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
   color: var(--text-dim);
   background: var(--bg-2);
   border-radius: 6px;
@@ -2043,7 +2048,7 @@ details.block-tool[open] > summary .tool-arrow,
 .block-tool-args {
   margin: 0;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--text-dim);
   background: var(--bg);
   border: 1px solid var(--line);
@@ -2057,7 +2062,7 @@ details.block-tool[open] > summary .tool-arrow,
 }
 .block-tool-result {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--text-dim);
   border-left: 2px solid var(--line);
   padding: 4px 8px;
@@ -6135,21 +6140,21 @@ select.config-input {
   border-top: 1px solid var(--line);
 }
 .ask-answered-header {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-faint, var(--text-dim));
 }
 .ask-answered-q {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   color: var(--text-dim);
 }
 .ask-answered-a {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--ui-scale));
   font-weight: 600;
   color: var(--text);
 }
@@ -6159,12 +6164,12 @@ select.config-input {
   flex: none;
 }
 .ask-answered-desc {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   color: var(--text-dim);
   padding-left: 18px;
 }
 .ask-answered-waiting {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-style: italic;
   color: var(--text-faint, var(--text-dim));
 }
