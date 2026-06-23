@@ -930,11 +930,22 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
+  // Briefly suppress the SCRAPE prompt after an answer. The TUI keeps rendering
+  // the picker for ~1s while it ingests the answer keystrokes, which would
+  // otherwise re-pop the inline component the instant it morphs out (a 1s flash).
+  // A genuine new structured `pending` is NOT suppressed.
+  const [promptSuppressedUntil, setPromptSuppressedUntil] = useState(0);
+  const markAnswered = useCallback(() => {
+    const until = Date.now() + 1800;
+    setPromptSuppressedUntil(until);
+    window.setTimeout(() => setPromptSuppressedUntil((v) => (v === until ? 0 : v)), 1850);
+  }, []);
+
   // Compute the single active prompt for the inline morph. Prefer structured
   // `pending` (AskUserQuestion) over the screen-scrape `prompt` (PanePrompt).
   const activePrompt = useMemo<ActivePrompt | null>(() => {
     if (cockpit.pending) return { kind: 'ask', pending: cockpit.pending };
-    if (cockpit.prompt) {
+    if (cockpit.prompt && Date.now() >= promptSuppressedUntil) {
       return {
         kind: 'prompt',
         prompt: cockpit.prompt,
@@ -944,7 +955,7 @@ function AppInner() {
     }
     return null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind]);
+  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind, promptSuppressedUntil]);
 
   const askActive = activePrompt !== null;
 
@@ -969,7 +980,8 @@ function AppInner() {
   const onInlineReply = useCallback((text: string) => {
     if (!text.trim()) return;
     cockpit.sendReply(text);
-  }, [cockpit]);
+    markAnswered();
+  }, [cockpit, markAnswered]);
 
   // Active session's sub-agent mode (default true for unseen sessions).
   const activeSubAgentMode: SubAgentMode =
@@ -1512,6 +1524,7 @@ function AppInner() {
                     onAnswer={(toolUseId, selections) => {
                       cockpit.sendAnswer(toolUseId, selections);
                       cockpit.clearCapture();
+                      markAnswered();
                       if (cockpit.selectedId) {
                         setAnswering({
                           sessionId: cockpit.selectedId,
@@ -1519,12 +1532,13 @@ function AppInner() {
                         });
                       }
                     }}
-                    onKey={(key) => cockpit.sendPromptKey(key)}
-                    onSelect={(labels) =>
-                      cockpit.selectedId
+                    onKey={(key) => { cockpit.sendPromptKey(key); markAnswered(); }}
+                    onSelect={(labels) => {
+                      markAnswered();
+                      return cockpit.selectedId
                         ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
-                        : false
-                    }
+                        : false;
+                    }}
                     onReply={onInlineReply}
                   />
                 </LiveThinkingContext.Provider>

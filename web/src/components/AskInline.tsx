@@ -275,7 +275,7 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
             onClick={submitFreeText}
           >
             {submitting ? (
-              <><span className="working-spinner" aria-hidden="true" /> sending…</>
+              <span className="working-spinner" aria-label="sending" />
             ) : (
               'Send'
             )}
@@ -409,7 +409,6 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
       })}
 
       <div className="ask-inline-foot">
-        {submitting ? <span className="prompt-status">submitting your answer…</span> : null}
         <button
           type="button"
           className="btn-primary"
@@ -417,7 +416,7 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
           onClick={submit}
         >
           {submitting ? (
-            <><span className="working-spinner" aria-hidden="true" /> sending…</>
+            <span className="working-spinner" aria-label="sending" />
           ) : (
             'Send Answer'
           )}
@@ -590,7 +589,7 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
             onClick={submitFreeText}
           >
             {freeTextSending ? (
-              <><span className="working-spinner" aria-hidden="true" /> sending…</>
+              <span className="working-spinner" aria-label="sending" />
             ) : (
               'Send'
             )}
@@ -675,8 +674,8 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
                 >
                   <span className="option-label">{opt.key}. {opt.label}</span>
                   {pendingKey === opt.key ? (
-                    <span className="option-sending" aria-live="polite">
-                      <span className="working-spinner" aria-hidden="true" /> sending…
+                    <span className="option-sending" aria-label="sending">
+                      <span className="working-spinner" aria-hidden="true" />
                     </span>
                   ) : null}
                 </button>
@@ -687,9 +686,6 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
       </div>
 
       <div className="ask-inline-foot">
-        {sending ? (
-          <span className="prompt-status">submitting your answer…</span>
-        ) : null}
         <button
           type="button"
           className="btn-primary"
@@ -697,7 +693,7 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
           onClick={isMulti ? confirmMulti : () => { if (selectedKey) submitSingle(selectedKey); }}
         >
           {sending ? (
-            <><span className="working-spinner" aria-hidden="true" /> sending…</>
+            <span className="working-spinner" aria-label="sending" />
           ) : (
             'Confirm'
           )}

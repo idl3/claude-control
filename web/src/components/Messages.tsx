@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { SlotText } from 'slot-text/react';
 import 'slot-text/style.css';
-import { TextPart, ToolPart, lastUpdateLine } from './MessageParts';
+import { TextPart, ToolPart, AskAnsweredPart, lastUpdateLine } from './MessageParts';
 import { useLiveThinkingId } from './ThinkingContext';
 
 function CopyIcon() {
@@ -119,7 +119,9 @@ function GroupedReasoning({ text }: ReasoningMessagePartProps) {
 const partComponents = {
   Text: TextPart,
   Reasoning: GroupedReasoning,
-  tools: { Fallback: ToolPart },
+  // AskUserQuestion renders as a clean Q&A card; everything else uses the
+  // generic expandable tool row.
+  tools: { by_name: { AskUserQuestion: AskAnsweredPart }, Fallback: ToolPart },
 } as const;
 
 /**
