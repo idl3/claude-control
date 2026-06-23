@@ -408,3 +408,64 @@ describe('convertMessages id dedupe', () => {
     expect(ids).toContain('dup'); // first occurrence keeps the original id
   });
 });
+
+describe('convertMessages — free-text answer linking (#41)', () => {
+  // The folded AskUserQuestion result is on the assistant tool-call part.
+  const askResult = (out: ReturnType<typeof convertMessages>): string => {
+    for (const m of out) {
+      for (const p of parts(m)) {
+        if (p.type === 'tool-call' && (p as { toolName?: string }).toolName === 'AskUserQuestion') {
+          return toolResult((p as { result?: unknown }).result)?.text ?? '';
+        }
+      }
+    }
+    return '';
+  };
+
+  const askMsgs = (resultText: string, replyText: string | null): Msg[] => {
+    const msgs: Msg[] = [
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ kind: 'tool_use', id: 't1', name: 'AskUserQuestion' }],
+      },
+      {
+        uuid: 'u2',
+        role: 'user',
+        blocks: [{ kind: 'tool_result', forId: 't1', text: resultText }],
+      },
+    ];
+    if (replyText !== null) {
+      msgs.push({ uuid: 'u3', role: 'user', blocks: [{ kind: 'text', text: replyText }] });
+    }
+    return msgs;
+  };
+
+  it('splices the typed reply into a "Type something" answer', () => {
+    const out = convertMessages(
+      askMsgs('Your questions have been answered: "Pick one"="Type something". Continue.', 'use the bento layout'),
+    );
+    expect(askResult(out)).toContain('"Pick one"="use the bento layout"');
+    expect(askResult(out)).not.toContain('Type something');
+  });
+
+  it('leaves a normal option answer untouched', () => {
+    const text = 'Your questions have been answered: "Pick one"="Option A". Continue.';
+    const out = convertMessages(askMsgs(text, 'some later unrelated message'));
+    expect(askResult(out)).toBe(text);
+  });
+
+  it('no-ops when there is no following reply', () => {
+    const text = 'Your questions have been answered: "Pick one"="Type something". Continue.';
+    const out = convertMessages(askMsgs(text, null));
+    expect(askResult(out)).toBe(text);
+  });
+
+  it('sanitizes double-quotes in the reply so the pair parse stays intact', () => {
+    const out = convertMessages(
+      askMsgs('Your questions have been answered: "Q"="Chat about this". Continue.', 'he said "hi"'),
+    );
+    // No raw double-quote leaks into the value (would break "Q"="A" parsing).
+    expect(askResult(out)).toContain('"Q"="he said ”hi”"');
+  });
+});
