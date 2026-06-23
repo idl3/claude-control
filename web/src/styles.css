@@ -88,7 +88,7 @@ body {
   font-family:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: var(--txt-transcript);
-  line-height: 1.45;
+  line-height: 1.55; /* a touch more leading for readable transcript prose */
   -webkit-font-smoothing: antialiased;
 }
 
@@ -202,8 +202,8 @@ body {
 
 @media (min-width: 760px) {
   .rail {
-    width: 300px;
-    flex: 0 0 300px;
+    width: min(46vw, calc(375px * var(--ui-scale)));
+    flex: 0 0 min(46vw, calc(375px * var(--ui-scale)));
     border-right: 1px solid var(--line);
   }
   .detail,
@@ -241,7 +241,7 @@ body {
   gap: 6px;
   width: 100%;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -270,7 +270,7 @@ body {
 }
 .session-group-count {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 999px;
@@ -289,7 +289,7 @@ body {
   align-items: baseline;
   gap: 6px;
   padding: 4px 6px 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 .session-window-head .window-idx {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -480,7 +480,7 @@ body {
 /* Interactive terminal-pane input bar (mirrors the composer input chrome). */
 .terminal-pane-input {
   width: 100%;
-  max-width: 880px;
+  max-width: calc(880px * var(--ui-scale));
   margin-inline: auto;
   padding: 8px;
   border: 1px solid var(--red);
@@ -524,7 +524,7 @@ body {
   gap: 7px;
 }
 .session-name {
-  font-size: 13px;
+  font-size: var(--txt-transcript);
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -558,6 +558,7 @@ body {
   align-items: center;
 }
 .meta-model {
+  font-size: var(--txt-transcript);
   color: var(--accent-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -813,7 +814,7 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 880px;
+  max-width: calc(880px * var(--ui-scale));
   margin-inline: auto;
   margin-bottom: 8px;
   /* Hug content (so the latest line sits flush above the composer), capped so a
@@ -980,10 +981,10 @@ body {
      the 12px gutter on mobile (where (100% - 800px)/2 is negative). The
      scrollbar stays at the pane edge. Extra bottom room so the last message
      isn't tight against the composer. */
-  padding: 12px max(12px, calc((100% - 800px) / 2)) 20px;
+  padding: 12px max(12px, calc((100% - 800px * var(--ui-scale)) / 2)) 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(16px * var(--ui-scale)); /* more breathing room between turns; scales with font */
   -webkit-overflow-scrolling: touch;
 }
 .thread-empty {
@@ -1125,7 +1126,7 @@ body {
 .msg-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(10px * var(--ui-scale));
   /* Default (assistant): no bubble — role is implied by left alignment. Only the
      user message keeps a tinted bubble. */
   background: transparent;
@@ -1186,7 +1187,7 @@ body {
   border-radius: 7px;
   background: transparent;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: calc(12.5px * var(--ui-scale));
   cursor: pointer;
   transition:
     background var(--ease) 0.15s,
@@ -1569,7 +1570,7 @@ body {
   gap: 12px;
   /* Mirror .thread-viewport centering: 800 px column with a 12 px gutter on
      mobile. Keeps the inline agent transcript aligned with the main chat. */
-  padding: 12px max(12px, calc((100% - 800px) / 2)) 20px;
+  padding: 12px max(12px, calc((100% - 800px * var(--ui-scale)) / 2)) 20px;
 }
 .sa-item {
   border: 1px solid var(--line);
@@ -1822,7 +1823,7 @@ body {
   width: max-content;
   max-width: none;
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale));
 }
 .aui-md th,
 .aui-md td {
@@ -2120,7 +2121,7 @@ body.is-external-display .composer {
   flex-direction: column;
   gap: 4px;
   width: calc(100% - 24px);
-  max-width: 880px;
+  max-width: calc(880px * var(--ui-scale));
   margin: 0 auto 8px;
 }
 /* Pill row — wraps when many agents are running */
@@ -2256,7 +2257,7 @@ body.is-external-display .composer {
   left: 12px;
   right: 12px;
   margin-inline: auto;
-  max-width: 880px;
+  max-width: calc(880px * var(--ui-scale));
   margin-bottom: 6px;
   display: flex;
   flex-direction: column;
@@ -2346,7 +2347,7 @@ body.is-external-display .composer {
    surface. The card itself is the only thing with a fill + border. */
 .composer-card {
   width: 100%;
-  max-width: 880px;
+  max-width: calc(880px * var(--ui-scale));
   margin-inline: auto;
   display: flex;
   flex-direction: column;
@@ -2748,7 +2749,7 @@ body.is-external-display .composer {
   color: var(--accent-2);
 }
 .q-text {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   font-weight: 600;
 }
 .q-hint {
@@ -2813,7 +2814,7 @@ body.is-external-display .composer {
   color: var(--accent);
 }
 .option-label {
-  font-size: 13px;
+  font-size: var(--txt-transcript);
   font-weight: 600;
 }
 .option-desc {
@@ -2894,7 +2895,7 @@ body.is-external-display .composer {
 /* Selection indicator (radio/checkbox glyph). */
 .ask-split-indicator {
   flex: 0 0 auto;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   line-height: 1.3;
   color: var(--text-dim);
 }
@@ -2947,7 +2948,7 @@ body.is-external-display .composer {
   margin: 0;
   padding: 6px 12px 12px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   line-height: 1.5;
   color: var(--text);
   white-space: pre;
@@ -3102,11 +3103,11 @@ body.is-external-display .composer {
   align-items: center;
   gap: 7px;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: calc(14.5px * var(--ui-scale));
 }
 .working-spinner {
-  width: 12px;
-  height: 12px;
+  width: calc(14px * var(--ui-scale));
+  height: calc(14px * var(--ui-scale));
   border: 2px solid var(--line);
   border-top-color: var(--accent-2, var(--text));
   border-radius: 50%;
@@ -3120,6 +3121,7 @@ body.is-external-display .composer {
   display: inline-flex;
 }
 .working-claude svg {
+  width: calc(20px * var(--ui-scale)) !important; height: calc(20px * var(--ui-scale)) !important;
   animation: pane-icon-bob 0.9s var(--ease) infinite;
 }
 @keyframes cockpit-spin {
@@ -3582,7 +3584,7 @@ body.is-external-display .composer {
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--bg-2);
-  font-size: 11.5px;
+  font-size: calc(12.5px * var(--ui-scale));
   color: var(--text);
   text-decoration: none;
   transition: border-color var(--ease) 150ms, background var(--ease) 150ms;
@@ -4965,6 +4967,7 @@ select.config-input {
 }
 /* Label text — truncates only when squeezed inline (desktop). */
 .composer-subagent-label {
+  font-size: calc(12.5px * var(--ui-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
@@ -5089,7 +5092,7 @@ select.config-input {
 }
 /* The chosen option, restyled from a button into a header above the textarea. */
 .ask-freetext-chosen {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   font-weight: 600;
   color: var(--text);
   padding: 2px 0;
