@@ -7,7 +7,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
-import type { Pending, PendingQuestion, PanePrompt } from '../lib/types';
+import type { Pending, PendingQuestion, PendingOption, PanePrompt } from '../lib/types';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,23 @@ export function questionHasPreview(q: PendingQuestion): boolean {
 /** True when the label indicates a "type something" / free-text option. */
 export function isFreeTextOption(label: string): boolean {
   return /type something|chat about this/i.test(label);
+}
+
+/**
+ * Claude's TUI always appends these two rows to an AskUserQuestion picker, but
+ * they are NOT in the structured tool input — so the structured render must add
+ * them to match what the TUI shows. Both route to the free-text flow. Labels
+ * mirror the TUI text so the answer navigation matches the live picker row.
+ */
+const SYNTHETIC_FREETEXT: PendingOption[] = [
+  { label: 'Type something' },
+  { label: 'Chat about this' },
+];
+
+/** Real options + the TUI's always-appended free-text rows (parity with the TUI,
+ *  which appends these to EVERY AskUserQuestion picker regardless of content). */
+function withFreeText(q: PendingQuestion): PendingOption[] {
+  return [...q.options, ...SYNTHETIC_FREETEXT];
 }
 
 /**
@@ -272,8 +289,9 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
     <>
       {pending.questions.map((q, qIdx) => {
         const hasSplit = questionHasPreview(q);
+        const dispOpts = withFreeText(q); // real options + TUI free-text rows
         const focused = focusedIdx[qIdx] ?? 0;
-        const focusedOpt = q.options[focused];
+        const focusedOpt = dispOpts[focused];
         const qSels = selections[qIdx];
 
         return (
@@ -290,7 +308,7 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
                   aria-multiselectable={!!q.multiSelect}
                   aria-label={q.question}
                 >
-                  {q.options.map((opt, oIdx) => {
+                  {dispOpts.map((opt, oIdx) => {
                     const selected = qSels?.has(opt.label);
                     const isFocused = oIdx === focused;
                     return (
@@ -320,10 +338,10 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
                         onKeyDown={(e) => {
                           if (e.key === 'ArrowDown') {
                             e.preventDefault();
-                            moveFocus(qIdx, 1, q.options.length);
+                            moveFocus(qIdx, 1, dispOpts.length);
                           } else if (e.key === 'ArrowUp') {
                             e.preventDefault();
-                            moveFocus(qIdx, -1, q.options.length);
+                            moveFocus(qIdx, -1, dispOpts.length);
                           } else if (e.key === ' ' || e.key === 'Enter') {
                             e.preventDefault();
                             toggle(qIdx, opt.label, !!q.multiSelect);
@@ -364,7 +382,7 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
               </div>
             ) : (
               <div className="q-options">
-                {q.options.map((opt) => {
+                {dispOpts.map((opt) => {
                   const on = qSels?.has(opt.label);
                   const isFree = isFreeTextOption(opt.label);
                   return (

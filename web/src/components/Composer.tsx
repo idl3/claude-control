@@ -1130,14 +1130,45 @@ export function Composer({
       if (askBody) gsap.set(askBody, { opacity: 0, y: -10 });
 
       const runPhase2Enter = () => {
+        // Re-query the foot at execution time — may have (re)mounted since
+        // the effect ran (e.g. new question with askActive still true).
+        const foot = askBody
+          ? askBody.querySelector<HTMLElement>('.ask-inline-foot')
+          : null;
+
         const phase2 = gsap.timeline({
           onComplete: () => {
             if (askBody) gsap.set(askBody, { clearProps: 'opacity,y' });
+            // Belt-and-suspenders: clear any stranded inline opacity/transform on
+            // the foot. gsap.from() with clearProps handles the normal-completion
+            // path, but if the tween was interrupted the onComplete here fires once
+            // the ENTER morph has fully settled — clear it now so the foot is never
+            // left invisible.
+            if (foot) gsap.set(foot, { clearProps: 'opacity,transform' });
             askMorphingRef.current = false;
           },
         });
         if (askBody) {
+          // Reveal the body content (everything except the foot) first.
           phase2.to(askBody, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase }, 0);
+        }
+        // Then slide+fade the foot in after a small offset (mirrors voice button
+        // stagger). Use gsap.from() so clearProps auto-fires on normal completion.
+        if (foot) {
+          // Ensure foot starts hidden before the from() tween sets up.
+          gsap.set(foot, { opacity: 0, y: 12 });
+          const bodyDuration = askBody ? T.fade * 0.5 : 0;
+          phase2.from(
+            foot,
+            {
+              opacity: 0,
+              y: 12,
+              duration: T.fade,
+              ease: T.enterEase,
+              clearProps: 'opacity,transform',
+            },
+            bodyDuration,
+          );
         }
         askAnimRef.current = phase2;
       };
@@ -1238,12 +1269,30 @@ export function Composer({
         askAnimRef.current = phase2;
       };
 
-      // Phase 1: fade ask body out.
+      // Phase 1: fade ask foot OUT first (slide down), then fade the body out.
+      // Mirrors voice EXIT: buttons out → top group out.
       const phase1 = gsap.timeline({
         onComplete: () => { gsap.delayedCall(T.gap, runPhase2Exit); },
       });
+      // Query the foot now (before the body fades). Clear any stranded enter
+      // opacity/transform from a prior interrupted enter so the exit starts clean.
+      const foot = askBody
+        ? askBody.querySelector<HTMLElement>('.ask-inline-foot')
+        : null;
+      if (foot) {
+        // Ensure the foot is fully visible at exit start (guard against a prior
+        // interrupted enter that left it with opacity:0).
+        gsap.set(foot, { clearProps: 'opacity,transform' });
+        phase1.to(
+          foot,
+          { opacity: 0, y: 8, duration: T.fade, ease: T.exitEase },
+          0,
+        );
+      }
       if (askBody) {
-        phase1.to(askBody, { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase }, 0);
+        // Body fades out slightly after the foot starts its exit.
+        const footDuration = foot ? T.fade * 0.5 : 0;
+        phase1.to(askBody, { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase }, footDuration);
       }
       askAnimRef.current = phase1;
     }
@@ -1380,6 +1429,10 @@ export function Composer({
         if (askActive) {
           askBody.style.display = 'flex';
           gsap.set(askBody, { clearProps: 'opacity,y' });
+          // Also clear the foot — our foot animation may have left inline
+          // opacity/transform if it was interrupted mid-flight.
+          const foot = askBody.querySelector<HTMLElement>('.ask-inline-foot');
+          if (foot) gsap.set(foot, { clearProps: 'opacity,transform' });
           if (inputWrap) gsap.set(inputWrap, { display: 'none' });
           if (toolbar)   gsap.set(toolbar,   { display: 'none' });
         } else {
