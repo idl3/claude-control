@@ -2723,18 +2723,74 @@ body.is-external-display .composer {
 
 /* ── Raw event log ───────────────────────────────────────────── */
 .raw-panel {
-  width: min(900px, calc(100vw - 28px));
-  max-width: 900px;
-  max-height: min(760px, calc(100dvh - 56px));
+  flex: 0 0 min(46vw, 560px);
+  min-width: min(380px, 44vw);
+  max-width: 620px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+}
+.raw-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  flex: 0 0 auto;
+}
+.raw-title {
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 700;
+}
+.raw-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.raw-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.raw-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.raw-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .raw-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 180px;
-  max-height: calc(min(760px, 100dvh - 56px) - 58px);
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
   padding: 12px;
+  overscroll-behavior: contain;
 }
 .raw-empty {
   margin: auto;
@@ -2784,16 +2840,10 @@ body.is-external-display .composer {
   font-size: var(--txt-body);
   line-height: 1.4;
 }
-.raw-detail summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: var(--txt-meta);
-  font-weight: 700;
-}
-.raw-detail pre {
-  max-height: 260px;
+.raw-detail {
+  max-height: 360px;
   overflow: auto;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2801,6 +2851,14 @@ body.is-external-display .composer {
   color: var(--text);
   font-size: 12px;
   line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .raw-panel {
+    flex-basis: min(52vw, 480px);
+    min-width: min(340px, 52vw);
+  }
 }
 /* Plan-review modal: wider, the plan renders as a full-width markdown doc that
    scrolls with the body, and the approval options sit at the very bottom. */
@@ -4477,6 +4535,10 @@ select.config-input {
   .detail-split > .artifact-panel {
     flex: 1 1 0;
     min-width: 0;
+  }
+  .detail-split > .raw-panel {
+    flex: 0 0 min(46vw, 560px);
+    min-width: min(380px, 44vw);
   }
 }
 

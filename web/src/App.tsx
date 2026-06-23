@@ -1580,6 +1580,12 @@ function AppInner() {
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ArtifactPanel />
+                {rawOpen ? (
+                  <RawEventPanel
+                    events={cockpit.rawEvents}
+                    onClose={() => setRawOpen(false)}
+                  />
+                ) : null}
                 <TranscriptSearch
                   open={searchOpen}
                   onClose={() => setSearchOpen(false)}
@@ -1624,13 +1630,6 @@ function AppInner() {
             history={cockpit.resourceHistory}
             onClose={() => setProcessOpen(false)}
             onToast={showToast}
-          />
-        ) : null}
-
-        {rawOpen ? (
-          <RawEventPanel
-            events={cockpit.rawEvents}
-            onClose={() => setRawOpen(false)}
           />
         ) : null}
 
