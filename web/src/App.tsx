@@ -29,6 +29,7 @@ import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import { ProcessPanel } from './components/ProcessPanel';
+import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
 import {
@@ -611,9 +612,11 @@ function AppInner() {
   // Inline agent transcript: set by clicking a pill, cleared on session switch or back.
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
   useEffect(() => {
     setPanelOpen(false);
     setViewingAgentId(null);
+    setRawOpen(false);
   }, [cockpit.selectedId]);
   // Pill click → show inline transcript; does NOT open the side panel.
   const openAgent = useCallback((agentId: string) => {
@@ -1518,6 +1521,20 @@ function AppInner() {
                     >
                       <SearchIcon />
                     </button>
+                    <button
+                      type="button"
+                      className="detail-action detail-action--count"
+                      aria-pressed={rawOpen}
+                      data-on={rawOpen ? 'true' : undefined}
+                      aria-label="Raw events"
+                      title="Raw events"
+                      onClick={() => setRawOpen((v) => !v)}
+                    >
+                      <ActivityIcon />
+                      {cockpit.rawEvents.length > 0 ? (
+                        <span className="detail-action-count">{Math.min(cockpit.rawEvents.length, 99)}</span>
+                      ) : null}
+                    </button>
                     {cockpit.subagents.length > 0 ? (
                       <button
                         type="button"
@@ -1621,6 +1638,12 @@ function AppInner() {
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ArtifactPanel />
+                {rawOpen ? (
+                  <RawEventPanel
+                    events={cockpit.rawEvents}
+                    onClose={() => setRawOpen(false)}
+                  />
+                ) : null}
                 <TranscriptSearch
                   open={searchOpen}
                   onClose={() => setSearchOpen(false)}

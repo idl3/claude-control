@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { Kbd } from './Kbd';
 import {
-  optimizePrompt,
+  optimizePrompt as optimizePromptApi,
   listSkills,
   listAgents,
   type OptimizeResult,
@@ -34,7 +34,7 @@ import { AskInline, type ActivePrompt } from './AskInline';
 const _skillsCache = new Map<string, SkillEntry[]>();
 const _skillsPromise = new Map<string, Promise<SkillEntry[]>>();
 
-function loadSkills(id?: string | null): Promise<SkillEntry[]> {
+function defaultLoadSkills(id?: string | null): Promise<SkillEntry[]> {
   const key = id ?? '';
   const hit = _skillsCache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -59,7 +59,7 @@ function loadSkills(id?: string | null): Promise<SkillEntry[]> {
 const _agentsCache = new Map<string, AgentEntry[]>();
 const _agentsPromise = new Map<string, Promise<AgentEntry[]>>();
 
-function loadAgents(id?: string | null): Promise<AgentEntry[]> {
+function defaultLoadAgents(id?: string | null): Promise<AgentEntry[]> {
   const key = id ?? '';
   const hit = _agentsCache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -116,7 +116,20 @@ interface ComposerProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  services?: Partial<ComposerServices>;
 }
+
+export interface ComposerServices {
+  optimizePrompt: (text: string) => Promise<OptimizeResult>;
+  loadSkills: (id?: string | null) => Promise<SkillEntry[]>;
+  loadAgents: (id?: string | null) => Promise<AgentEntry[]>;
+}
+
+const DEFAULT_SERVICES: ComposerServices = {
+  optimizePrompt: optimizePromptApi,
+  loadSkills: defaultLoadSkills,
+  loadAgents: defaultLoadAgents,
+};
 
 // Image preview for an image attachment that still carries its File (pending),
 // otherwise a placeholder. Object URLs are revoked on unmount.
@@ -222,9 +235,15 @@ export function Composer({
   onKey,
   onSelect,
   onReply,
+  services,
 }: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
+  const composerServices = useMemo<ComposerServices>(
+    () => ({ ...DEFAULT_SERVICES, ...(services ?? {}) }),
+    [services],
+  );
+  const customServices = services != null;
   const [empty, setEmpty] = useState(true);
   // NOTE: SkillBrowser now unreachable via UI (inline / typing replaced the
   // toolbar slash button). State + component kept to avoid risky dead-code removal.
@@ -328,10 +347,10 @@ export function Composer({
 
   // ── Inline skill + agent autocomplete ────────────────────────────────────
   const [skills, setSkills] = useState<SkillEntry[]>(
-    () => _skillsCache.get(sessionId ?? '') ?? [],
+    () => (customServices ? [] : _skillsCache.get(sessionId ?? '') ?? []),
   );
   const [agents, setAgents] = useState<AgentEntry[]>(
-    () => _agentsCache.get(sessionId ?? '') ?? [],
+    () => (customServices ? [] : _agentsCache.get(sessionId ?? '') ?? []),
   );
   const [text, setTextMirror] = useState('');     // mirror of composer text
   const [caret, setCaret] = useState(0);           // textarea selectionStart
@@ -342,11 +361,11 @@ export function Composer({
   // different project skills). The cache prevents redundant network calls.
   useEffect(() => {
     let alive = true;
-    const cached = _skillsCache.get(sessionId ?? '');
+    const cached = customServices ? null : _skillsCache.get(sessionId ?? '');
     if (cached) {
       setSkills(cached);
     } else {
-      loadSkills(sessionId)
+      composerServices.loadSkills(sessionId)
         .then((s) => {
           if (alive) setSkills(s);
         })
@@ -357,16 +376,16 @@ export function Composer({
         });
     }
     return () => { alive = false; };
-  }, [sessionId]);
+  }, [composerServices, customServices, sessionId]);
 
   // Re-fetch agents whenever the session changes (mirrors skills fetch above).
   useEffect(() => {
     let alive = true;
-    const cached = _agentsCache.get(sessionId ?? '');
+    const cached = customServices ? null : _agentsCache.get(sessionId ?? '');
     if (cached) {
       setAgents(cached);
     } else {
-      loadAgents(sessionId)
+      composerServices.loadAgents(sessionId)
         .then((a) => {
           if (alive) setAgents(a);
         })
@@ -375,7 +394,7 @@ export function Composer({
         });
     }
     return () => { alive = false; };
-  }, [sessionId]);
+  }, [composerServices, customServices, sessionId]);
 
   // Track composer text → drives both the empty flag and the slash detection.
   // ALSO refresh the caret here: this subscribe fires on every committed text
@@ -1469,14 +1488,14 @@ export function Composer({
     const sid = key; // the session this enhancement belongs to
     patchEnhance(sid, { optimizing: true });
     try {
-      const result = await optimizePrompt(original);
+      const result = await composerServices.optimizePrompt(original);
       // Store the review UNDER ITS SESSION — if the user switched away, it waits
       // there until they return; it never appears on the wrong session.
       patchEnhance(sid, { optimizing: false, review: { ...result, original } });
     } catch {
       patchEnhance(sid, { optimizing: false });
     }
-  }, [composer, disabled, optimizing, compacting, key, patchEnhance]);
+  }, [composer, composerServices, disabled, optimizing, compacting, key, patchEnhance]);
 
   // ⌘/Ctrl+Enter (optimise) and ⌘/Ctrl+Shift+Enter (send raw) from ANYWHERE —
   // window-level + capture phase so it fires even when focus is outside the
@@ -2355,4 +2374,3 @@ function SparkleIcon() {
     </svg>
   );
 }
-

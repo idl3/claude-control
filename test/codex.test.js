@@ -11,6 +11,8 @@ import {
   buildTranscriptIndex,
   readCodexTranscriptRecord,
   parseCodexRecord,
+  parseCodexSubagentNotification,
+  parseCodexSubagentNotificationRecord,
   detectPendingFromCapture,
   buildAnswerProgram,
   parseTuiStatus,
@@ -280,6 +282,25 @@ test('parseCodexRecord: reasoning with summary → thinking block shows the deco
   assert.equal(msg.rawType, 'reasoning');
 });
 
+test('parseCodexRecord: reasoning summary with multiple parts → joined thinking text', () => {
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'reasoning',
+      summary: [{ text: 'Checked the component layout.' }, { text: 'Next, validate spacing.' }],
+      encrypted_content: 'gAAAAABq...',
+    },
+    timestamp: '2026-06-21T06:27:31.667Z',
+  });
+  const msg = parseCodexRecord(line);
+  assert.notEqual(msg, null);
+  assert.equal(msg.role, 'assistant');
+  assert.equal(msg.blocks.length, 1);
+  assert.equal(msg.blocks[0].kind, 'thinking');
+  assert.equal(msg.blocks[0].text, 'Checked the component layout.\n\nNext, validate spacing.');
+  assert.equal(msg.rawType, 'reasoning');
+});
+
 test('parseCodexRecord: reasoning with no readable summary → null (block hidden)', () => {
   const line = JSON.stringify({
     type: 'response_item',
@@ -412,6 +433,128 @@ test('parseCodexRecord: session_meta → null', () => {
     payload: { id: 'abc', cwd: '/tmp' },
   });
   assert.equal(parseCodexRecord(line), null);
+});
+
+test('parseCodexSubagentNotification: completed status → normalized done update', () => {
+  const text = '<subagent_notification>\n'
+    + '{"agent_path":"019ef0af-cfbf-7891-abe5-53ccba4038dd","status":{"completed":"all done"}}\n'
+    + '</subagent_notification>';
+
+  const update = parseCodexSubagentNotification(text);
+  assert.notEqual(update, null);
+  assert.equal(update.agentId, '019ef0af-cfbf-7891-abe5-53ccba4038dd');
+  assert.equal(update.agentPath, '019ef0af-cfbf-7891-abe5-53ccba4038dd');
+  assert.equal(update.status, 'done');
+  assert.equal(update.state, 'completed');
+  assert.equal(update.statusKind, 'completed');
+  assert.equal(update.result, 'all done');
+  assert.equal(update.error, null);
+});
+
+test('parseCodexSubagentNotification: running status → normalized running update', () => {
+  const text = '<subagent_notification>{"agent_path":"parent/agent-running","status":{"running":true}}</subagent_notification>';
+
+  const update = parseCodexSubagentNotification(text);
+  assert.notEqual(update, null);
+  assert.equal(update.agentId, 'agent-running');
+  assert.equal(update.agentPath, 'parent/agent-running');
+  assert.equal(update.status, 'running');
+  assert.equal(update.state, 'running');
+  assert.equal(update.statusKind, 'running');
+  assert.equal(update.result, null);
+  assert.equal(update.error, null);
+});
+
+test('parseCodexSubagentNotification: failed status → normalized error update', () => {
+  const text = '<subagent_notification>{"agent_path":"agent-failed","status":{"failed":"boom"}}</subagent_notification>';
+
+  const update = parseCodexSubagentNotification(text);
+  assert.notEqual(update, null);
+  assert.equal(update.agentId, 'agent-failed');
+  assert.equal(update.status, 'done');
+  assert.equal(update.state, 'error');
+  assert.equal(update.statusKind, 'failed');
+  assert.equal(update.result, null);
+  assert.equal(update.error, 'boom');
+});
+
+test('parseCodexSubagentNotification: ordinary mention outside exact wrapper → null', () => {
+  const text = 'Codex emitted <subagent_notification>{"agent_path":"x","status":{"completed":"ok"}}</subagent_notification>';
+  assert.equal(parseCodexSubagentNotification(text), null);
+});
+
+test('parseCodexRecord: exact subagent_notification message → null', () => {
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: '<subagent_notification>\n{"agent_path":"agent-1","status":{"completed":"ok"}}\n</subagent_notification>',
+      }],
+    },
+  });
+
+  assert.equal(parseCodexRecord(line), null);
+});
+
+test('parseCodexRecord: exact assistant subagent_notification message → null', () => {
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{
+        type: 'output_text',
+        text: '<subagent_notification>{"agent_path":"agent-1","status":{"running":true}}</subagent_notification>',
+      }],
+    },
+  });
+
+  assert.equal(parseCodexRecord(line), null);
+});
+
+test('parseCodexRecord: assistant mention of subagent_notification outside exact wrapper stays text', () => {
+  const text = 'The literal <subagent_notification>{"agent_path":"agent-1","status":{"completed":"ok"}}</subagent_notification> tag was mentioned.';
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text }],
+    },
+  });
+
+  const msg = parseCodexRecord(line);
+  assert.notEqual(msg, null);
+  assert.equal(msg.role, 'assistant');
+  assert.equal(msg.blocks.length, 1);
+  assert.equal(msg.blocks[0].kind, 'text');
+  assert.equal(msg.blocks[0].text, text);
+});
+
+test('parseCodexSubagentNotificationRecord: extracts notification from message record', () => {
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{
+        type: 'output_text',
+        text: '<subagent_notification>{"agent_path":"agent-record","status":{"completed":"ok"}}</subagent_notification>',
+      }],
+    },
+    timestamp: '2026-06-23T06:00:00.000Z',
+  });
+
+  const update = parseCodexSubagentNotificationRecord(line);
+  assert.notEqual(update, null);
+  assert.equal(update.agentId, 'agent-record');
+  assert.equal(update.status, 'done');
+  assert.equal(update.result, 'ok');
+  assert.equal(update.role, 'assistant');
+  assert.equal(update.ts, '2026-06-23T06:00:00.000Z');
 });
 
 test('parseCodexRecord: call_id linkage — function_call id === function_call_output forId (fixture lines 12+14)', () => {
