@@ -72,6 +72,63 @@ function formatInput(args: unknown): string {
   }
 }
 
+// AskUserQuestion → a clean Q&A card (question + chosen answer) instead of the
+// raw tool-call row. The chosen answers live in the tool_result string:
+//   Your questions have been answered: "Q1"="A1", "Q2"="A2". You can now …
+// We parse those pairs and pair them with the structured questions/options from
+// the tool_use input.
+interface AskInputQuestion {
+  question: string;
+  header?: string;
+  options?: { label: string; description?: string }[];
+}
+
+export function parseAskAnswers(text: string): { question: string; answer: string }[] {
+  const out: { question: string; answer: string }[] = [];
+  const re = /"([^"]+)"="([^"]*)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) out.push({ question: m[1], answer: m[2] });
+  return out;
+}
+
+export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
+  const { args, result } = props;
+  const input = toolInput(args) as { questions?: AskInputQuestion[] } | null;
+  const questions = input?.questions ?? [];
+  const res = toolResult(result);
+  const answered = res != null && !res.isError;
+  const pairs = answered ? parseAskAnswers(res.text) : [];
+
+  // No structured questions to show → fall back to the generic tool row.
+  if (questions.length === 0) return <ToolPart {...props} />;
+
+  return (
+    <div className="ask-answered" data-answered={answered ? 'true' : 'false'}>
+      {questions.map((q, i) => {
+        const chosen = (pairs.find((p) => p.question === q.question) ?? pairs[i])?.answer ?? null;
+        const opt = q.options?.find((o) => o.label === chosen);
+        return (
+          <div className="ask-answered-row" key={i}>
+            {q.header ? <div className="ask-answered-header">{q.header}</div> : null}
+            <div className="ask-answered-q">{q.question}</div>
+            {answered ? (
+              <div className="ask-answered-a">
+                <span className="ask-answered-check" aria-hidden="true">✓</span>
+                <span className="ask-answered-label">{chosen ?? '—'}</span>
+              </div>
+            ) : (
+              <div className="ask-answered-waiting">awaiting your answer…</div>
+            )}
+            {answered && opt?.description ? (
+              <div className="ask-answered-desc">{opt.description}</div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // tool_use → controlled expandable row with a panel-open trigger on the name.
 //   ▸ <ToolName> — <one-line input summary>
 // A caret button toggles inline peek; clicking the name opens the artifact panel
