@@ -5,6 +5,7 @@ import type {
   Msg,
   PanePrompt,
   Pending,
+  RawEvent,
   ResourceSnapshot,
   Session,
   SubAgent,
@@ -22,6 +23,7 @@ export interface ResourcePoint {
   mem: number;
 }
 const RESOURCE_WINDOW_MS = 10 * 60_000; // keep the last 10 minutes
+const RAW_EVENT_CAP = 200;
 
 export interface CockpitStore {
   sessions: Session[];
@@ -39,6 +41,7 @@ export interface CockpitStore {
   resources: ResourceState;
   /** Rolling ~10min CPU%/Mem% history for the process-monitor chart. */
   resourceHistory: ResourcePoint[];
+  rawEvents: RawEvent[];
   capture: string | null;
   /** Live capture of the dedicated shell pane (composer terminal mode). */
   shellOutput: string | null;
@@ -100,6 +103,7 @@ export function useCockpit(): CockpitStore {
   const [subagentsById, setSubagentsById] = useState<
     Record<string, Record<string, SubAgent>>
   >({});
+  const [rawEventsById, setRawEventsById] = useState<Record<string, RawEvent[]>>({});
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
@@ -201,6 +205,18 @@ export function useCockpit(): CockpitStore {
             ...prev,
             [msg.id]: { ...(prev[msg.id] ?? {}), [msg.subagent.agentId]: msg.subagent },
           }));
+          break;
+        case 'raw-events':
+          setRawEventsById((prev) => ({
+            ...prev,
+            [msg.id]: (msg.events ?? []).slice(-RAW_EVENT_CAP),
+          }));
+          break;
+        case 'raw-event':
+          setRawEventsById((prev) => {
+            const next = [...(prev[msg.id] ?? []), msg.event].slice(-RAW_EVENT_CAP);
+            return { ...prev, [msg.id]: next };
+          });
           break;
         case 'ack':
           // Surfaced to the toast layer via the custom event below so the
@@ -349,6 +365,10 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
+  const rawEvents = useMemo(
+    () => (selectedId ? rawEventsById[selectedId] ?? [] : []),
+    [selectedId, rawEventsById],
+  );
   // Sub-agents for the selected session, newest first (by created-at).
   const subagents = useMemo<SubAgent[]>(() => {
     const map = selectedId ? subagentsById[selectedId] : null;
@@ -380,6 +400,7 @@ export function useCockpit(): CockpitStore {
     conn,
     resources,
     resourceHistory,
+    rawEvents,
     capture,
     shellOutput,
     select,
