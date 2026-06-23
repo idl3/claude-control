@@ -49,6 +49,13 @@ export function isFreeTextOption(label: string): boolean {
   return /type something|chat about this/i.test(label);
 }
 
+/** Grow a textarea to fit its content (capped by the CSS max-height → scrolls). */
+function autoGrow(el: HTMLTextAreaElement | null): void {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 /**
  * Claude's TUI always appends these two rows to an AskUserQuestion picker, but
  * they are NOT in the structured tool input — so the structured render must add
@@ -172,10 +179,13 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
     setSubmitting(false);
   }, [pending]);
 
-  // When entering free-text mode, focus the textarea.
+  // When entering free-text mode, focus the textarea and size it to any content.
   useEffect(() => {
     if (freeTextQIdx !== null) {
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        autoGrow(textareaRef.current);
+      });
     }
   }, [freeTextQIdx]);
 
@@ -255,7 +265,10 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
           rows={3}
           value={freeTextValue}
           disabled={submitting}
-          onChange={(e) => setFreeTextValue(e.target.value)}
+          onChange={(e) => {
+            setFreeTextValue(e.target.value);
+            autoGrow(e.target);
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               e.preventDefault();
@@ -487,7 +500,10 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
 
   useEffect(() => {
     if (freeTextKey !== null) {
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        autoGrow(textareaRef.current);
+      });
     }
   }, [freeTextKey]);
 
@@ -564,7 +580,10 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
           rows={3}
           value={freeTextValue}
           disabled={freeTextSending}
-          onChange={(e) => setFreeTextValue(e.target.value)}
+          onChange={(e) => {
+            setFreeTextValue(e.target.value);
+            autoGrow(e.target);
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               e.preventDefault();

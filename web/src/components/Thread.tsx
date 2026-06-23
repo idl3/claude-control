@@ -41,6 +41,8 @@ interface ThreadProps {
   onCloseAgent?: () => void;
   /** True while Claude is actively generating — flips the send button to STOP. */
   working?: boolean;
+  /** True while Claude is compacting the conversation — blocks sends + shows progress. */
+  compacting?: boolean;
   /** Cancel in-flight generation (send Escape to the Claude pane). */
   onStop?: () => void;
   /** Inline prompt morph props — forwarded to Composer. */
@@ -145,6 +147,7 @@ export function Thread({
   viewingAgent = null,
   onCloseAgent,
   working,
+  compacting,
   onStop,
   askActive,
   activePrompt,
@@ -247,6 +250,7 @@ export function Thread({
         onSubAgentModeChange={onSubAgentModeChange}
         onTerminalModeChange={onTerminalModeChange}
         working={working}
+        compacting={compacting}
         onStop={onStop}
         askActive={askActive}
         activePrompt={activePrompt}

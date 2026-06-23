@@ -219,6 +219,15 @@ body {
   }
 }
 
+/* On a large external display there's room to spare — give the rail a fixed
+   ~460px (NOT multiplied by --ui-scale; the font scale was pushing it to ~590).
+   The sidebar's text still scales within this width. Higher specificity than the
+   760px rule above, so it wins when body.is-external-display is set. */
+body.is-external-display .rail {
+  width: min(50vw, 460px);
+  flex: 0 0 min(50vw, 460px);
+}
+
 /* ── Session rail ─────────────────────────────────────────────── */
 .session-list {
   list-style: none;
@@ -2545,7 +2554,8 @@ body.is-external-display .composer {
   width: 100%;
   resize: none;
   max-height: 40dvh;
-  min-height: 24px;
+  /* Default to ~2 lines of room before scrolling (2 × line-height + padding). */
+  min-height: calc(2 * 1.45em + 4px);
   padding: 2px;
   border: none;
   background: transparent;
@@ -3113,6 +3123,20 @@ body.is-external-display .composer {
   border-radius: 50%;
   animation: cockpit-spin 0.7s linear infinite;
   flex: none;
+}
+/* Compaction strip inside the composer — sends are paused while Claude compacts. */
+.composer-compacting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 2px 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--text);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
 }
 /* The optimistic "Working…" loader uses the SAME jumping Claude robot as the
    session activity icon (pane-icon-bob), so the two read as one signal. */
@@ -5531,8 +5555,15 @@ select.config-input {
   box-shadow: 0 0 6px var(--amber);
   animation: pulse 1.2s var(--ease) infinite;
 }
-.session-item[data-pending='true'] {
-  border-color: var(--accent);
+/* Pending (awaiting an answer) → amber border, matching the ASK badge + the
+   awaiting-answer box. Overrides the blue selected-border so the active session
+   in question mode is unmistakably the one that needs a reply. */
+.session-item[data-pending='true'],
+.session-item[data-pending='true'][data-selected='true'] {
+  border-color: var(--amber);
+}
+.session-item[data-pending='true'][data-selected='true'] {
+  box-shadow: 0 0 0 1px var(--amber), 0 0 12px -2px var(--amber);
 }
 @media (prefers-reduced-motion: reduce) {
   .thinking-dot { animation: none; }
@@ -6175,4 +6206,58 @@ select.config-input {
   font-size: calc(12px * var(--ui-scale));
   font-style: italic;
   color: var(--text-faint, var(--text-dim));
+}
+
+/* ── Answered = blue-themed, Awaiting = amber + flashing ──────────────────────
+   A resolved question reads BLUE (calm, no motion); a still-awaiting question
+   reads AMBER with the border + "awaiting…" line gently pulsing, so it's obvious
+   which sub-agent still needs you. Question + description stay fixed (legible). */
+
+/* Answered (resolved) → blue border + blue accent text. No animation. */
+.ask-answered[data-answered='true'] {
+  border-color: var(--accent);
+}
+.ask-answered[data-answered='true'] .ask-answered-q {
+  color: oklch(78% 0.09 250);
+}
+.ask-answered[data-answered='true'] .ask-answered-check,
+.ask-answered[data-answered='true'] .ask-answered-label {
+  color: var(--accent);
+}
+
+/* Awaiting (pending) → amber. Border pulses; only the "awaiting…" line shimmers;
+   the question + header sit in a calm fixed amber so they stay readable. */
+@keyframes ask-await-border {
+  0%, 100% { border-color: var(--amber-bg); box-shadow: 0 0 0 0 transparent; }
+  50%      { border-color: var(--amber); box-shadow: 0 0 10px -2px var(--amber); }
+}
+@keyframes ask-await-sweep {
+  to { background-position: 200% center; }
+}
+.ask-answered[data-answered='false'] {
+  border-color: var(--amber);
+  animation: ask-await-border 1.8s ease-in-out infinite;
+}
+.ask-answered[data-answered='false'] .ask-answered-header,
+.ask-answered[data-answered='false'] .ask-answered-q {
+  color: var(--amber); /* fixed amber, no flashing */
+}
+.ask-answered[data-answered='false'] .ask-answered-waiting {
+  background: linear-gradient(90deg, var(--amber) 0%, oklch(96% 0.07 95) 45%, var(--amber) 80%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ask-await-sweep 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-answered[data-answered='false'] {
+    animation: none;
+    border-color: var(--amber);
+  }
+  .ask-answered[data-answered='false'] .ask-answered-waiting {
+    animation: none;
+    background: none;
+    color: var(--amber);
+  }
 }
