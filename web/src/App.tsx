@@ -18,9 +18,7 @@ import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
-import { LivePane } from './components/LivePane';
 import { TerminalPane } from './components/TerminalPane';
-import { Composer } from './components/Composer';
 import { ShellContext } from './components/ShellContext';
 import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -31,8 +29,6 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
 import { PromptModal } from './components/PromptModal';
 import { SubAgentPanel } from './components/SubAgentPanel';
-import { SubAgentStrip } from './components/SubAgentStrip';
-import { SubAgentThread } from './components/SubAgentThread';
 import { ProcessPanel } from './components/ProcessPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
@@ -215,8 +211,8 @@ function AppInner() {
   );
 
   // Shell ops for the composer's terminal mode (>_), provided via context so the
-  // Composer (inside Thread, and standalone in the live-pane branch) can reach
-  // the server-owned shell pane without prop-drilling.
+  // Composer (inside Thread) can reach the server-owned shell pane without
+  // prop-drilling.
   const shellApi = useMemo(
     () => ({
       output: cockpit.shellOutput,
@@ -1470,88 +1466,13 @@ function AppInner() {
                 sendText={cockpit.sendPaneText}
                 sendKey={cockpit.sendPaneKey}
               />
-            ) : selectedSession && !selectedSession.transcriptPath ? (
-              // Claude pane with no matched transcript (e.g. a worktree cwd Claude
-              // records under a different path): show the live tmux pane so it
-              // isn't an empty "no messages yet". The composer still replies via
-              // tmux send-keys.
-              <div className="thread-root">
-                {(() => {
-                  const inlineAgent = viewingAgentId
-                    ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)
-                    : null;
-                  if (inlineAgent) {
-                    return (
-                      <div className="agent-inline-view">
-                        <div className="agent-inline-head">
-                          <button
-                            type="button"
-                            className="agent-inline-back"
-                            aria-label="Back to live pane"
-                            onClick={closeAgent}
-                          >
-                            ‹ back
-                          </button>
-                          <span className="agent-inline-title">
-                            <span className="sa-dot" data-status={inlineAgent.status} aria-hidden="true" />
-                            <span className="agent-inline-name">
-                              {inlineAgent.agentType || 'sub-agent'}
-                            </span>
-                            <span className="agent-inline-status">
-                              {inlineAgent.status === 'running' ? '· running' : '· done'}
-                            </span>
-                          </span>
-                        </div>
-                        <SubAgentThread messages={inlineAgent.messages} />
-                      </div>
-                    );
-                  }
-                  return (
-                    <>
-                      <LivePane
-                        sessionId={selectedSession.id}
-                        capture={cockpit.capture}
-                        requestCapture={cockpit.requestCapture}
-                        clearCapture={cockpit.clearCapture}
-                      />
-                      {/* No transcript thread here, so queued sends would otherwise be
-                          invisible (they only echo in the raw pane). Surface them as a
-                          compact strip so you can still see what you sent + that it's
-                          in flight. They clear via the same reconcile path. */}
-                      {selectedPending.length > 0 ? (
-                        <div className="live-pending" aria-label="Queued sends">
-                          {selectedPending.map((e) => (
-                            <div key={e.key} className="live-pending-bubble">
-                              <span className="live-pending-dot" aria-hidden="true" />
-                              {e.label}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
-                  );
-                })()}
-                <SubAgentStrip
-                  subagents={cockpit.subagents}
-                  onOpenAgent={openAgent}
-                  viewingAgentId={viewingAgentId}
-                />
-                <Composer
-                  disabled={false}
-                  sessionId={cockpit.selectedId}
-                  subAgentMode={activeSubAgentMode}
-                  onSubAgentModeChange={onActiveSubAgentModeChange}
-                  onTerminalModeChange={onTerminalModeChange}
-                  working={agentWorking}
-                  onStop={handleStop}
-                />
-              </div>
             ) : (
               <div className="detail-split">
                 <AgentKindContext.Provider value={selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   <Thread
                     hasSelection={!!cockpit.selectedId}
+                    agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
                     loading={!cockpit.messagesLoaded}
                     sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}

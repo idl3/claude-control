@@ -16,7 +16,7 @@ import os from 'node:os';
 import fsp from 'node:fs/promises';
 
 import { sanitizeName, shellQuoteName, defaultSessionName } from '../lib/tmux.js';
-import { buildSpawnCommand } from '../lib/codex.js';
+import { buildSpawnCommand, buildAppServerCommand } from '../lib/codex.js';
 
 // Mirror of server.js handleSessionNew's Codex launch construction EXACTLY:
 // buildSpawnCommand is the single source of truth for the flags, and the cwd
@@ -26,6 +26,11 @@ import { buildSpawnCommand } from '../lib/codex.js';
 function launchFor(config, cwd) {
   const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
   return `${bin} ${args.map((a) => (a === cwd ? shellQuoteName(cwd) : a)).join(' ')}`;
+}
+
+function appServerLaunchFor(config, endpoint) {
+  const { bin, args } = buildAppServerCommand({ endpoint, bin: config.codexLaunchCommand });
+  return `${bin} ${args.map((a) => (a === endpoint ? shellQuoteName(endpoint) : a)).join(' ')}`;
 }
 
 // ── Launch string construction ───────────────────────────────────────────────
@@ -123,6 +128,20 @@ describe('buildSpawnCommand from lib/codex.js', () => {
     const result = buildSpawnCommand({ cwd: '/my/project' });
     assert.equal(result.args[0], '-C');
     assert.equal(result.args[1], '/my/project');
+  });
+});
+
+describe('buildAppServerCommand from lib/codex.js', () => {
+  test('returns {bin, args:["app-server","--listen", endpoint]}', () => {
+    const endpoint = 'ws://127.0.0.1:43210';
+    const result = buildAppServerCommand({ endpoint, bin: 'yodex' });
+    assert.deepEqual(result, { bin: 'yodex', args: ['app-server', '--listen', endpoint] });
+  });
+
+  test('codex RPC launch appends app-server suffix to custom command', () => {
+    const endpoint = 'ws://127.0.0.1:43210';
+    const launch = appServerLaunchFor({ codexLaunchCommand: 'yodex' }, endpoint);
+    assert.equal(launch, `yodex app-server --listen 'ws://127.0.0.1:43210'`);
   });
 });
 

@@ -156,7 +156,7 @@ test('createWindow (existing session) emits new-window with correct argv', async
   const [cmd, ...argv] = calls[0];
   assert.equal(cmd, 'new-window', 'first call is new-window');
   assert.ok(argv.includes('-t'), '-t flag present');
-  assert.equal(argv[argv.indexOf('-t') + 1], 'work', 'targets first existing session');
+  assert.equal(argv[argv.indexOf('-t') + 1], 'work:', 'targets first existing session unambiguously');
   assert.ok(argv.includes('-P'), '-P (print) flag present');
   assert.ok(argv.includes('-F'), '-F flag present');
   assert.equal(argv[argv.indexOf('-F') + 1], '#{session_name}:#{window_index}', 'format string correct');
@@ -177,6 +177,16 @@ test('createWindow (existing session, no name) omits -n flag', async () => {
 
   const [, ...argv] = calls[0];
   assert.ok(!argv.includes('-n'), '-n must be absent when no name supplied');
+});
+
+test('createWindow (numeric session name) disambiguates session target with trailing colon', async () => {
+  const existingPanes = [{ sessionName: '0', target: '0:1.0', windowIndex: 1 }];
+  const { _run, _listPanes, calls } = makeStubs({ listCalls: [existingPanes] });
+
+  await createWindow({ cwd: os.tmpdir(), name: 'feat' }, { _run, _listPanes });
+
+  const [, ...argv] = calls[0];
+  assert.equal(argv[argv.indexOf('-t') + 1], '0:', 'numeric session name must not be parsed as window index 0');
 });
 
 test('createWindow rejects missing cwd without calling tmux', async () => {
