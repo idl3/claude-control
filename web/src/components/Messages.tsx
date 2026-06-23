@@ -141,9 +141,7 @@ function ChainOfThought({
 }) {
   const messageId = useMessage((m) => m.id);
   const liveId = useLiveThinkingId();
-  const live = !!liveId && messageId === liveId;
   const [userOpen, setUserOpen] = useState(false);
-  const open = live || userOpen;
 
   // Select the stable content ref (changes only when parts change) and compute
   // counts in the render body — avoids re-render thrash from a selector that
@@ -162,6 +160,17 @@ function ChainOfThought({
       tools += 1;
     }
   }
+
+  // Only the LATEST chain-of-thought group animates as "thinking". A message can
+  // hold several reasoning groups (thinking resumes after tool calls); without
+  // this, every group in the live message would shimmer at once — distracting.
+  let lastReasoningIdx = -1;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i]?.type === 'reasoning' && content[i]?.text?.trim()) lastReasoningIdx = i;
+  }
+  const isLatestThought = lastReasoningIdx >= 0 && indices.includes(lastReasoningIdx);
+  const live = !!liveId && messageId === liveId && isLatestThought;
+  const open = live || userOpen;
 
   const steps = reasoning + tools;
   const label =
