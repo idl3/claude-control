@@ -43,6 +43,23 @@ test('parsePanePrompt ignores numbered prose without an interactive signal', () 
   assert.equal(parsePanePrompt(PROSE), null);
 });
 
+// Numbered list in assistant prose while Claude is WORKING: the bottom footer is
+// "esc to interrupt" (the working spinner), NOT a selection prompt. No ❯ cursor.
+// This must NOT pop a prompt (regression for the false-positive where a text
+// answer that merely contained a numbered question rendered as "needs a choice").
+const PROSE_WHILE_WORKING = `\
+Here's how I'd sequence it:
+1. Yes let's force-terminate the dead session and link to their shipped PRs.
+2. We should also add the durable duo fix.
+3. Do not merge any PRs
+
+✻ Brewing… (esc to interrupt)
+`;
+
+test('parsePanePrompt ignores a numbered list under an "esc to interrupt" working footer', () => {
+  assert.equal(parsePanePrompt(PROSE_WHILE_WORKING), null);
+});
+
 // Long option descriptions push options 1–2 off the top of the capture, so only
 // 3,4,5,6 are visible. Detection must NOT require a "1." anchor — the bottom-most
 // consecutive run + cursor/Esc footer is enough. (Regression: a real question

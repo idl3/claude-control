@@ -7,6 +7,7 @@ import { SubAgentThread } from './SubAgentThread';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { SubAgent } from '../lib/types';
+import type { ActivePrompt } from './AskInline';
 
 interface ThreadProps {
   hasSelection: boolean;
@@ -42,6 +43,13 @@ interface ThreadProps {
   working?: boolean;
   /** Cancel in-flight generation (send Escape to the Claude pane). */
   onStop?: () => void;
+  /** Inline prompt morph props — forwarded to Composer. */
+  askActive?: boolean;
+  activePrompt?: ActivePrompt | null;
+  onAnswer?: (toolUseId: string, selections: string[][]) => void;
+  onKey?: (key: string) => void;
+  onSelect?: (labels: string[]) => void;
+  onReply?: (text: string) => void;
 }
 
 const messageComponents = {
@@ -138,6 +146,12 @@ export function Thread({
   onCloseAgent,
   working,
   onStop,
+  askActive,
+  activePrompt,
+  onAnswer,
+  onKey,
+  onSelect,
+  onReply,
 }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
@@ -234,6 +248,12 @@ export function Thread({
         onTerminalModeChange={onTerminalModeChange}
         working={working}
         onStop={onStop}
+        askActive={askActive}
+        activePrompt={activePrompt}
+        onAnswer={onAnswer}
+        onKey={onKey}
+        onSelect={onSelect}
+        onReply={onReply}
       />
     </ThreadPrimitive.Root>
   );

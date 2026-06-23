@@ -5018,6 +5018,107 @@ select.config-input {
   color: var(--text-faint);
   padding: 0 2px;
 }
+/* Ask inline body: same mounting strategy as .voice-inline-body — display:none
+   by default, revealed by the morph driver at runtime. max-height + overflow-y
+   so very long option lists don't blow out the composer card. */
+.ask-inline-body {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.ask-inline-body .question {
+  /* Compact the question layout inside the inline body. */
+  margin-bottom: 4px;
+}
+.ask-inline-body .q-options {
+  flex-wrap: wrap;
+}
+.ask-inline-body .option-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  min-height: 28px;
+}
+.ask-inline-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  /* Pin the submit action to the bottom of the card (the action-bar position),
+     not buried in the scrolling options. margin-top:auto pushes it down when the
+     content is short; sticky keeps it visible (over scrolled content) when tall. */
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding: 8px 0 2px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+}
+/* Free-text textarea inside the inline body. */
+.ask-inline-freetext {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The chosen option, restyled from a button into a header above the textarea. */
+.ask-freetext-chosen {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 2px 0;
+}
+/* Free-text view: the textarea + chosen header fade/slide in (the height resize
+   itself is the GSAP FLIP on .ask-inline-body). The options that were here fade
+   away as this replaces them. */
+.ask-freetext-view .ask-freetext-chosen,
+.ask-freetext-view .ask-inline-textarea {
+  animation: ask-freetext-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ask-freetext-view .ask-inline-textarea { animation-delay: 0.04s; }
+@keyframes ask-freetext-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-freetext-view .ask-freetext-chosen,
+  .ask-freetext-view .ask-inline-textarea { animation: none; }
+}
+.ask-inline-textarea {
+  width: 100%;
+  min-height: 48px;
+  max-height: 40dvh;
+  resize: none;
+  /* Borderless + transparent — it's already inside the composer card, so a
+     bordered box would read as a chat-box-in-a-chat-box. Match .composer-input. */
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--txt-composer);
+  box-sizing: border-box;
+}
+.ask-inline-textarea:focus {
+  outline: none;
+}
+.ask-inline-freetext-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+/* Back + Send: IDENTICAL boxes — fixed width/height override so the filled
+   primary and outlined secondary are pixel-for-pixel the same size. */
+.ask-inline-freetext-actions > button {
+  flex: 0 0 auto;
+  width: 88px;
+  height: 34px;
+  min-width: 0;
+  padding: 0;
+  justify-content: center;
+}
+
 /* Inline body: flex column inside .composer-card, fills the input area.
    Hidden by default so the idle composer's first paint is the normal
    (small) composer with zero voice-body height contribution. The morph
