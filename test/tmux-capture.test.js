@@ -66,6 +66,14 @@ test('capturePane passes the -S line-count arg', async () => {
   assert.equal(argv[sIdx + 1], '-77', '-S value must be negated line count');
 });
 
+test('capturePane visibleOnly OMITS -S (visible screen only, no scrollback)', async () => {
+  const { _run, calls } = makeStub();
+  await capturePane('0:1.1', 26, false, false, { _run, visibleOnly: true });
+  const argv = calls[0];
+  assert.equal(argv.indexOf('-S'), -1, 'visibleOnly must NOT pass -S (no scrollback)');
+  assert.ok(argv.includes('-p'), 'still captures the pane');
+});
+
 test('capturePane passes the target with -t', async () => {
   const { _run, calls } = makeStub();
   await capturePane('mysession:2.0', 40, false, false, { _run });
