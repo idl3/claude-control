@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { SubAgentsWatcher } from '../lib/subagents.js';
+import { SubAgentsWatcher, CodexSubAgentsWatcher } from '../lib/subagents.js';
 
 // ---------------------------------------------------------------------------
 // Helper: set up a minimal on-disk subagents dir with one agent fixture.
@@ -18,6 +18,43 @@ function writeAgentFiles(subagentsDir, agentId, { metaContent = null, jsonlConte
   fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.meta.json`), meta);
   fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.jsonl`), jsonlContent);
 }
+
+test('CodexSubAgentsWatcher ingests notifications as SubAgent entries', () => {
+  const watcher = new CodexSubAgentsWatcher();
+  const changes = [];
+  watcher.on('change', (entry) => changes.push(entry));
+
+  watcher.ingest({
+    agentId: 'codex-agent-1',
+    agentPath: 'parent/codex-agent-1',
+    status: 'running',
+    state: 'running',
+    result: null,
+    error: null,
+    rawStatus: { running: true },
+  });
+  watcher.ingest({
+    agentId: 'codex-agent-1',
+    agentPath: 'parent/codex-agent-1',
+    status: 'done',
+    state: 'completed',
+    result: 'Implemented the parser.',
+    error: null,
+    rawStatus: { completed: 'Implemented the parser.' },
+  });
+
+  const snap = watcher.snapshot();
+  assert.equal(changes.length, 2);
+  assert.equal(snap.length, 1);
+  assert.equal(snap[0].agentId, 'codex-agent-1');
+  assert.equal(snap[0].agentType, 'codex');
+  assert.equal(snap[0].description, 'parent/codex-agent-1');
+  assert.equal(snap[0].status, 'done');
+  assert.equal(snap[0].messages.length, 2);
+  assert.equal(snap[0].messages[1].blocks[0].text, 'Implemented the parser.');
+
+  watcher.stop();
+});
 
 // ---------------------------------------------------------------------------
 // RUNNING_WINDOW_MS behaviour (regression guard for the 45 s → 600 s fix).

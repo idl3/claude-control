@@ -167,6 +167,14 @@ export interface ProcessInfo {
   command: string;
 }
 
+export interface RawEvent {
+  ts: number;
+  source: string;
+  kind: string;
+  summary: string;
+  detail?: unknown;
+}
+
 // Server -> client WebSocket frames.
 export type ServerMessage =
   | { type: 'sessions'; sessions: Session[] }
@@ -178,6 +186,8 @@ export type ServerMessage =
   | { type: 'prompt'; id: string; prompt: PanePrompt | null }
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
+  | { type: 'raw-events'; id: string; events: RawEvent[] }
+  | { type: 'raw-event'; id: string; event: RawEvent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
   | { type: 'shell-output'; text: string; id?: string }
   | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string };
