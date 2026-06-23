@@ -190,10 +190,21 @@ function AppInner() {
       })
       .catch(() => { /* non-fatal — keep CSS defaults */ });
 
+    // Live update when the font size is saved in Settings (no reload needed).
+    const onFontSize = (e: Event) => {
+      const d = (e as CustomEvent<{ transcriptFontSize?: number; externalFontSize?: number }>).detail;
+      if (!d) return;
+      basePx = d.transcriptFontSize ?? 0;
+      extPx = d.externalFontSize ?? 0;
+      apply();
+    };
+
     window.addEventListener('resize', apply);
+    window.addEventListener('cockpit:fontsize', onFontSize);
     return () => {
       alive = false;
       window.removeEventListener('resize', apply);
+      window.removeEventListener('cockpit:fontsize', onFontSize);
     };
   }, []);
 
