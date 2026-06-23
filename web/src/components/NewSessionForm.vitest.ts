@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { filterTag } from './NewSessionForm';
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
+import { filterTag, NewSessionForm, normalizeCodexTransport } from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
 
 // ── filterTag ────────────────────────────────────────────────────────────────
@@ -70,5 +73,84 @@ describe('SpawnAgentInfo type contract', () => {
     const info: SpawnAgentInfo = { id: 'codex', available: false, reason: 'not found' };
     expect(info.available).toBe(false);
     expect(info.reason).toBe('not found');
+  });
+
+  it('codex entry may advertise per-session transports', () => {
+    const info: SpawnAgentInfo = {
+      id: 'codex',
+      available: true,
+      defaultTransport: 'rpc',
+      transports: ['rpc', 'tmux'],
+    };
+    expect(info.defaultTransport).toBe('rpc');
+    expect(info.transports).toEqual(['rpc', 'tmux']);
+  });
+});
+
+describe('normalizeCodexTransport', () => {
+  it('keeps tmux when requested', () => {
+    expect(normalizeCodexTransport('tmux')).toBe('tmux');
+  });
+
+  it('defaults every other value to rpc', () => {
+    expect(normalizeCodexTransport('rpc')).toBe('rpc');
+    expect(normalizeCodexTransport(undefined)).toBe('rpc');
+    expect(normalizeCodexTransport('other')).toBe('rpc');
+  });
+});
+
+describe('NewSessionForm agent and Codex mode controls', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps unavailable agent options selectable and shows RPC/TUI for Codex', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/spawn-agents')) {
+        return new Response(JSON.stringify({
+          agents: [
+            { id: 'claude', available: false, reason: 'claude missing' },
+            {
+              id: 'codex',
+              available: false,
+              reason: 'codex missing',
+              defaultTransport: 'tmux',
+              transports: ['rpc', 'tmux'],
+            },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config')) {
+        return new Response(JSON.stringify({ defaultCwd: '/workspace' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404 });
+    }));
+
+    render(createElement(NewSessionForm, {
+      onToast: () => {},
+      filter: 'all',
+      onCycleFilter: () => {},
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New session' }));
+
+    const claudeButton = await screen.findByRole('button', { name: 'Claude' });
+    const codexButton = await screen.findByRole('button', { name: 'Codex' });
+    expect((claudeButton as HTMLButtonElement).disabled).toBe(false);
+    expect((codexButton as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(codexButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: 'Codex mode' })).toBeTruthy();
+    });
+    const rpcButton = screen.getByRole('button', { name: 'RPC' }) as HTMLButtonElement;
+    const tuiButton = screen.getByRole('button', { name: 'TUI' }) as HTMLButtonElement;
+    expect(rpcButton.disabled).toBe(false);
+    expect(tuiButton.disabled).toBe(false);
+    expect(tuiButton.getAttribute('aria-pressed')).toBe('true');
   });
 });

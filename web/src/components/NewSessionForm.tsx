@@ -4,6 +4,8 @@ import type { SpawnAgentInfo } from '../lib/api';
 import { FunnelIcon } from './icons';
 import type { SessionFilter } from './SessionRail';
 
+type CodexTransport = 'rpc' | 'tmux';
+
 interface NewSessionFormProps {
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
   /** Rail filter state + cycle (all → claude → codex → terminal). */
@@ -27,6 +29,10 @@ function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' {
   return filter === 'codex' ? 'codex' : 'claude';
 }
 
+export function normalizeCodexTransport(value: unknown): CodexTransport {
+  return value === 'tmux' ? 'tmux' : 'rpc';
+}
+
 /** Derive filter badge label for the funnel button. */
 export function filterTag(filter: SessionFilter): string | null {
   if (filter === 'claude') return 'CC';
@@ -46,6 +52,7 @@ export function filterTag(filter: SessionFilter): string | null {
 export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFormProps) {
   const [open, setOpen] = useState(false);
   const [agent, setAgent] = useState<'claude' | 'codex'>('claude');
+  const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState('');
   const [creating, setCreating] = useState(false);
@@ -62,9 +69,13 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     setName('');
     setCwd('');
     setAgent(defaultAgentForFilter(filter));
+    setCodexTransport('rpc');
     setAgentInfos([]);
     fetchSpawnAgents()
-      .then(setAgentInfos)
+      .then((infos) => {
+        setAgentInfos(infos);
+        setCodexTransport(normalizeCodexTransport(infos.find((info) => info.id === 'codex')?.defaultTransport));
+      })
       .catch(() => {
         // Non-fatal: form still works, agents just won't show disabled state.
       });
@@ -95,6 +106,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
         name: resolvedName,
         cwd: resolvedCwd,
         agent,
+        codexTransport: agent === 'codex' ? codexTransport : undefined,
       });
       onToast(`Session created → ${result.name}`, 'ok');
       close();
@@ -103,7 +115,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     } finally {
       setCreating(false);
     }
-  }, [creating, agent, name, cwd, placeholder, onToast, close]);
+  }, [creating, agent, codexTransport, name, cwd, placeholder, onToast, close]);
 
   // Helper: look up availability for an agent id.
   function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
@@ -161,7 +173,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
               className="rail-new-agent-seg-btn"
               data-active={isActive ? 'true' : 'false'}
               data-unavailable={unavailable ? 'true' : 'false'}
-              disabled={creating || !!unavailable}
+              disabled={creating}
               title={unavailable ? info?.reason : undefined}
               aria-pressed={isActive}
               onClick={() => setAgent(id)}
@@ -176,6 +188,30 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
           );
         })}
       </div>
+
+      {agent === 'codex' ? (
+        <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
+          {([
+            ['rpc', 'RPC'],
+            ['tmux', 'TUI'],
+          ] as const).map(([id, label]) => {
+            const isActive = codexTransport === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="rail-new-mode-seg-btn"
+                data-active={isActive ? 'true' : 'false'}
+                disabled={creating}
+                aria-pressed={isActive}
+                onClick={() => setCodexTransport(id)}
+              >
+                <span className="rail-new-agent-seg-label">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* Name field — Claude only; Codex has no --name flag */}
       {agent === 'claude' ? (
