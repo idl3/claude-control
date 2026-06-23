@@ -390,6 +390,8 @@ const _handler = (req, res) => {
           {
             id: 'codex',
             available: codexResult.available,
+            defaultTransport: CONFIG.codexTransport,
+            transports: ['rpc', 'tmux'],
             ...(codexResult.available ? {} : { reason: codexResult.reason }),
           },
         ],
@@ -803,6 +805,10 @@ async function handleSessionNew(req, res) {
 
   // agent ∈ {'claude','codex'}, default 'claude'.
   const agent = body.agent === 'codex' ? 'codex' : 'claude';
+  const codexTransport =
+    body.codexTransport === 'tmux' || body.codexTransport === 'rpc'
+      ? body.codexTransport
+      : CONFIG.codexTransport;
 
   // Name is required-with-default: sanitize the requested name, falling back to
   // `session-<short-ts>` so a session is ALWAYS named (the rail reads the tmux
@@ -843,7 +849,7 @@ async function handleSessionNew(req, res) {
     let codexRpcEndpoint = null;
     if (agent === 'codex') {
       const codexCommand = config.codexBin || config.codexLaunchCommand;
-      if (CONFIG.codexTransport === 'rpc') {
+      if (codexTransport === 'rpc') {
         codexRpcEndpoint = await codexRpc.prepareEndpoint(target);
         const { bin, args } = buildAppServerCommand({ endpoint: codexRpcEndpoint, bin: codexCommand });
         launch = `${bin} ${args.map((a) => (a === codexRpcEndpoint ? tmux.shellQuoteName(a) : a)).join(' ')}`;
@@ -876,7 +882,7 @@ async function handleSessionNew(req, res) {
       target,
       name,
       agent,
-      transport: agent === 'codex' ? CONFIG.codexTransport : 'tmux',
+      transport: agent === 'codex' ? codexTransport : 'tmux',
     });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });

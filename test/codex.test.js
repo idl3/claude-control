@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   matchesProcess,
+  processMatchKind,
   buildTranscriptIndex,
   readCodexTranscriptRecord,
   parseCodexRecord,
@@ -27,6 +28,17 @@ const FIX = path.join(__dirname, 'fixtures', 'codex');
 
 test('matchesProcess: true for codex', () => {
   assert.equal(matchesProcess('codex'), true);
+});
+
+test('processMatchKind: direct for native codex executable', () => {
+  assert.equal(processMatchKind('/Users/me/.codex/vendor/codex/codex resume abc'), 'direct');
+});
+
+test('processMatchKind: node-wrapper for node-launched codex shim', () => {
+  assert.equal(
+    processMatchKind('node /Users/me/.nvm/versions/node/v25.9.0/bin/codex resume abc'),
+    'node-wrapper',
+  );
 });
 
 test('matchesProcess: true for /usr/local/bin/codex', () => {
@@ -109,6 +121,25 @@ function writeRollout(dir, name, cwd, sessionId, mtimeDate) {
   fs.utimesSync(file, mtimeDate, mtimeDate);
   return file;
 }
+
+test('discovery: retains multiple active rollouts for the same cwd by path', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-test-'));
+  const now = new Date('2026-06-23T12:00:00');
+  const dir = path.join(temp, '2026', '06', '23');
+  const olderTime = new Date(now.getTime() - 60_000);
+  const newerTime = now;
+  const older = writeRollout(dir, 'rollout-older.jsonl', '/work/shared', 'older-session', olderTime);
+  const newer = writeRollout(dir, 'rollout-newer.jsonl', '/work/shared', 'newer-session', newerTime);
+
+  try {
+    const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
+    assert.equal(index.byPath.has(older), true);
+    assert.equal(index.byPath.has(newer), true);
+    assert.equal(index.byCwd.get('/work/shared')?.sessionId, 'newer-session');
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
 
 test('discovery window: active session in an old date dir is indexed; stale one is skipped', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-test-'));

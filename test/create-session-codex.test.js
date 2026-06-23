@@ -8,7 +8,7 @@
 //   - Codex launch string is `codex -C '<cwd>'` (shell-quoted, no raw input)
 //   - Claude launch string is BYTE-IDENTICAL to pre-Phase-D
 //   - Bad cwd → fsp.stat throws (gate that produces 400 before window creation)
-//   - /api/spawn-agents response shape (id, available, optional reason)
+//   - /api/spawn-agents response shape (id, available, optional reason, Codex transports)
 //   - cwd flows via -C flag to codex, NOT a shell cd command
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,6 +31,12 @@ function launchFor(config, cwd) {
 function appServerLaunchFor(config, endpoint) {
   const { bin, args } = buildAppServerCommand({ endpoint, bin: config.codexLaunchCommand });
   return `${bin} ${args.map((a) => (a === endpoint ? shellQuoteName(endpoint) : a)).join(' ')}`;
+}
+
+function selectCodexTransport(body, configuredTransport = 'rpc') {
+  return body.codexTransport === 'tmux' || body.codexTransport === 'rpc'
+    ? body.codexTransport
+    : configuredTransport;
 }
 
 // ── Launch string construction ───────────────────────────────────────────────
@@ -145,6 +151,28 @@ describe('buildAppServerCommand from lib/codex.js', () => {
   });
 });
 
+describe('handleSessionNew codex transport selection', () => {
+  test('request body can force tmux/TUI even when server default is rpc', () => {
+    const transport = selectCodexTransport({ codexTransport: 'tmux' }, 'rpc');
+    assert.equal(transport, 'tmux');
+    assert.equal(launchFor({ codexLaunchCommand: 'yodex' }, '/workspace'), `yodex -C '/workspace'`);
+  });
+
+  test('request body can force rpc even when server default is tmux', () => {
+    const transport = selectCodexTransport({ codexTransport: 'rpc' }, 'tmux');
+    assert.equal(transport, 'rpc');
+    assert.equal(
+      appServerLaunchFor({ codexLaunchCommand: 'yodex' }, 'ws://127.0.0.1:43210'),
+      `yodex app-server --listen 'ws://127.0.0.1:43210'`,
+    );
+  });
+
+  test('missing or invalid transport falls back to configured default', () => {
+    assert.equal(selectCodexTransport({}, 'rpc'), 'rpc');
+    assert.equal(selectCodexTransport({ codexTransport: 'bad' }, 'tmux'), 'tmux');
+  });
+});
+
 // ── cwd validation: bad path produces 400, no window created ─────────────────
 //
 // The server's pre-validation uses fsp.stat BEFORE calling createWindow.
@@ -221,6 +249,8 @@ describe('/api/spawn-agents response shape', () => {
       {
         id: 'codex',
         available: codexResult.available,
+        defaultTransport: 'rpc',
+        transports: ['rpc', 'tmux'],
         ...(codexResult.available ? {} : { reason: codexResult.reason }),
       },
     ];
@@ -229,16 +259,19 @@ describe('/api/spawn-agents response shape', () => {
     assert.ok(agents[0].available);
     assert.ok(!agents[1].available);
     assert.equal(agents[1].reason, 'codex not found on PATH');
+    assert.equal(agents[1].defaultTransport, 'rpc');
+    assert.deepEqual(agents[1].transports, ['rpc', 'tmux']);
     assert.ok(!('reason' in agents[0]), 'no reason key when available');
   });
 
   test('both agents available: neither has a reason key', () => {
     const agents = [
       { id: 'claude', available: true },
-      { id: 'codex', available: true },
+      { id: 'codex', available: true, defaultTransport: 'rpc', transports: ['rpc', 'tmux'] },
     ];
     assert.ok(!('reason' in agents[0]));
     assert.ok(!('reason' in agents[1]));
+    assert.deepEqual(agents[1].transports, ['rpc', 'tmux']);
   });
 
   test('both agents unavailable: both have reason strings', () => {
@@ -246,10 +279,17 @@ describe('/api/spawn-agents response shape', () => {
     const codexResult = { available: false, reason: 'codex not found on PATH' };
     const agents = [
       { id: 'claude', available: claudeResult.available, ...(claudeResult.available ? {} : { reason: claudeResult.reason }) },
-      { id: 'codex', available: codexResult.available, ...(codexResult.available ? {} : { reason: codexResult.reason }) },
+      {
+        id: 'codex',
+        available: codexResult.available,
+        defaultTransport: 'rpc',
+        transports: ['rpc', 'tmux'],
+        ...(codexResult.available ? {} : { reason: codexResult.reason }),
+      },
     ];
     assert.equal(typeof agents[0].reason, 'string');
     assert.equal(typeof agents[1].reason, 'string');
+    assert.deepEqual(agents[1].transports, ['rpc', 'tmux']);
   });
 });
 
