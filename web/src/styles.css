@@ -3427,10 +3427,10 @@ body.is-external-display .composer {
   opacity: 0.6;
 }
 
-/* Agent segmented control — pill-shaped track containing two equal segments.
-   The ACTIVE segment is filled with the accent colour; inactive is ghost.
-   Disabled/unavailable segments are faded with a "unavailable" micro-label. */
-.rail-new-agent-seg {
+/* Agent/mode segmented controls. Unavailable agents stay selectable because
+   availability is advisory; submit still performs the authoritative server check. */
+.rail-new-agent-seg,
+.rail-new-mode-seg {
   display: flex;
   align-items: stretch;
   height: 34px;
@@ -3440,7 +3440,11 @@ body.is-external-display .composer {
   border: 1px solid var(--line);
   border-radius: 10px;
 }
-.rail-new-agent-seg-btn {
+.rail-new-mode-seg {
+  margin-top: -2px;
+}
+.rail-new-agent-seg-btn,
+.rail-new-mode-seg-btn {
   flex: 1 1 0;
   display: inline-flex;
   align-items: center;
@@ -3464,28 +3468,38 @@ body.is-external-display .composer {
   user-select: none;
   -webkit-user-select: none;
 }
+.rail-new-mode-seg-btn {
+  font-size: 11px;
+}
 /* ACTIVE — filled segment: accent bg, dark text, inner glow */
-.rail-new-agent-seg-btn[data-active='true'] {
+.rail-new-agent-seg-btn[data-active='true'],
+.rail-new-mode-seg-btn[data-active='true'] {
   background: var(--accent);
   color: oklch(16% 0.012 260);
   border-color: transparent;
   box-shadow: 0 1px 3px oklch(0% 0 0 / 0.25);
 }
 /* HOVER on inactive segment */
-.rail-new-agent-seg-btn:not([data-active='true']):hover:not(:disabled) {
+.rail-new-agent-seg-btn:not([data-active='true']):hover:not(:disabled),
+.rail-new-mode-seg-btn:not([data-active='true']):hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
   border-color: var(--line);
 }
 /* FOCUS ring — visible on inactive AND active */
-.rail-new-agent-seg-btn:focus-visible {
+.rail-new-agent-seg-btn:focus-visible,
+.rail-new-mode-seg-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* DISABLED / UNAVAILABLE — faded, not clickable */
-.rail-new-agent-seg-btn:disabled {
+/* DISABLED — faded, not clickable */
+.rail-new-agent-seg-btn:disabled,
+.rail-new-mode-seg-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+.rail-new-agent-seg-btn[data-unavailable='true']:not(:disabled) {
+  color: var(--text-faint);
 }
 .rail-new-agent-seg-label {
   line-height: 1;

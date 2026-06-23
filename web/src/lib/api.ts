@@ -379,6 +379,8 @@ export interface CreateSessionResult {
   name: string;
   /** Agent type used to spawn the session ('claude' | 'codex'). */
   agent?: 'claude' | 'codex';
+  /** Transport used for the spawned pane. Claude is always tmux. */
+  transport?: 'tmux' | 'rpc';
 }
 
 /**
@@ -392,6 +394,8 @@ export async function createSession(opts?: {
   name?: string;
   /** Agent type to spawn. Defaults to 'claude' on the server when absent. */
   agent?: 'claude' | 'codex';
+  /** Codex-only transport. Defaults to the server's configured transport. */
+  codexTransport?: 'tmux' | 'rpc';
 }): Promise<CreateSessionResult> {
   const res = await authFetch('/api/session/new', {
     method: 'POST',
@@ -414,6 +418,10 @@ export interface SpawnAgentInfo {
   available: boolean;
   /** Present when available is false. */
   reason?: string;
+  /** Codex-only: server default for new sessions. */
+  defaultTransport?: 'tmux' | 'rpc';
+  /** Codex-only: transports this UI may request per session. */
+  transports?: Array<'tmux' | 'rpc'>;
 }
 
 /**
