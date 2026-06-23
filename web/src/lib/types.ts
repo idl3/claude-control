@@ -28,6 +28,10 @@ export interface Session {
   isClaude?: boolean;
   /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal). */
   kind?: 'claude' | 'codex' | 'terminal';
+  /** Per-session control transport. */
+  transport?: 'tmux' | 'rpc' | 'print' | null;
+  /** Local structured transport endpoint, when the server exposes one. */
+  endpoint?: string | null;
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */
   ccShell?: boolean;
   model?: string | null;

@@ -34,8 +34,10 @@ import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { parseCodexRecord, parseCodexPrompt, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
+import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import * as mlx from './lib/mlx.js';
+import { resolveClaudeBin } from './lib/claude-cli.js';
 import {
   MLX_MODELS,
   CLAUDE_MODELS,
@@ -89,6 +91,9 @@ const CONFIG = {
   // pane as a visible process pin, but replies/approvals move over JSON-RPC.
   // Set CLAUDE_CONTROL_CODEX_TRANSPORT=tmux to force the legacy TUI-key path.
   codexTransport: String(env('CODEX_TRANSPORT') || '').toLowerCase() === 'tmux' ? 'tmux' : 'rpc',
+  // Experimental Claude print-mode transport. New Claude sessions default to the
+  // interactive TUI unless CLAUDE_CONTROL_CLAUDE_TRANSPORT=print is set.
+  claudeTransport: String(env('CLAUDE_TRANSPORT') || '').toLowerCase() === 'print' ? 'print' : 'tmux',
   // 768MB: a long-running Node server (WS + transcript tailing + the bundled
   // web app) baselines ~300-450MB of V8 heap + RSS, so the old 350MB budget
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
@@ -147,6 +152,7 @@ const IMAGE_MIME = {
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 const codexRpc = new CodexRpcManager();
+const claudePrint = new ClaudePrintManager();
 
 // Manual transcript pins (windowId.paneIndex -> transcript path). Loaded at boot,
 // applied to the registry, and editable via /api/pins.
@@ -385,6 +391,8 @@ const _handler = (req, res) => {
           {
             id: 'claude',
             available: claudeResult.available,
+            defaultTransport: CONFIG.claudeTransport,
+            transports: ['tmux', 'print'],
             ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
           },
           {
@@ -787,6 +795,18 @@ async function resolveBin(bin) {
   }
 }
 
+async function resolvePaneTarget(target) {
+  if (String(target || '').includes('.')) return target;
+  try {
+    const panes = await tmux.listPanes();
+    const pane = panes.find((p) => p.target === target) ||
+      panes.find((p) => p.target.startsWith(`${target}.`));
+    return pane?.target || target;
+  } catch {
+    return target;
+  }
+}
+
 // POST /api/session/new — create a new tmux window in the configured (or
 // body-overridden) cwd, then type the launch command into it via send-keys so
 // the interactive shell resolves aliases. Security: the command is operator
@@ -805,6 +825,10 @@ async function handleSessionNew(req, res) {
 
   // agent ∈ {'claude','codex'}, default 'claude'.
   const agent = body.agent === 'codex' ? 'codex' : 'claude';
+  const claudeTransport =
+    body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
+      ? body.claudeTransport
+      : CONFIG.claudeTransport;
   const codexTransport =
     body.codexTransport === 'tmux' || body.codexTransport === 'rpc'
       ? body.codexTransport
@@ -820,15 +844,17 @@ async function handleSessionNew(req, res) {
   // (i) Resolve the agent binary and return 400 if unavailable.
   const agentBin = agent === 'codex'
     ? (config.codexBin || config.codexLaunchCommand)
-    : (config.claudeBin || config.launchCommand);
+    : (agent === 'claude' && claudeTransport === 'print'
+      ? (resolveClaudeBin() || 'claude')
+      : (config.claudeBin || config.launchCommand));
   const binCheck = await resolveBin(agentBin);
   if (!binCheck.available) {
     return endJson(res, 400, { error: `agent binary unavailable: ${binCheck.reason}` });
   }
 
-  // (ii) For codex: pre-validate cwd exists and is a directory BEFORE createWindow,
-  //      so a bad request creates NO window (400 not 500, window-leak prevention).
-  if (agent === 'codex') {
+  // (ii) For structured transports: pre-validate cwd exists and is a directory
+  //      BEFORE createWindow, so a bad request creates NO window.
+  if (agent === 'codex' || (agent === 'claude' && claudeTransport === 'print')) {
     try {
       const st = await fsp.stat(cwd);
       if (!st.isDirectory()) {
@@ -847,6 +873,8 @@ async function handleSessionNew(req, res) {
 
     let launch;
     let codexRpcEndpoint = null;
+    let printPaneTarget = target;
+    let printClient = null;
     if (agent === 'codex') {
       const codexCommand = config.codexBin || config.codexLaunchCommand;
       if (codexTransport === 'rpc') {
@@ -862,6 +890,24 @@ async function handleSessionNew(req, res) {
         const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
         launch = `${bin} ${args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a)).join(' ')}`;
       }
+    } else if (claudeTransport === 'print') {
+      printPaneTarget = await resolvePaneTarget(target);
+      const socketPath = claudePrint.endpointFor(printPaneTarget);
+      printClient = await claudePrint.attach({ target: printPaneTarget, socketPath, cwd });
+      await tmux.setPaneOption(printPaneTarget, '@cc_agent', 'claude');
+      await tmux.setPaneOption(printPaneTarget, '@cc_transport', 'print');
+      await tmux.setPaneOption(printPaneTarget, '@cc_endpoint', socketPath);
+      const bridgePath = path.join(__dirname, 'bin', 'claude-print-bridge.mjs');
+      const claudeBin = binCheck.path || resolveClaudeBin() || commandHead(agentBin);
+      launch = buildBridgeCommand({
+        bridgePath,
+        socketPath,
+        cwd,
+        claudeBin,
+        name,
+        permissionMode: 'acceptEdits',
+        quote: tmux.shellQuoteName,
+      });
     } else {
       // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation.
       // (2) Claude's own session title: `claude --help` exposes `-n/--name`
@@ -874,15 +920,18 @@ async function handleSessionNew(req, res) {
     }
 
     await tmux.sendText(target, launch);
+    if (printClient) {
+      await printClient.waitForBridge();
+    }
     if (agent === 'codex' && codexRpcEndpoint) {
       await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd });
     }
     return endJson(res, 200, {
       ok: true,
-      target,
+      target: printPaneTarget,
       name,
       agent,
-      transport: agent === 'codex' ? codexTransport : 'tmux',
+      transport: agent === 'codex' ? codexTransport : claudeTransport,
     });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
@@ -1365,6 +1414,47 @@ codexRpc.on('close', (id) => {
   broadcastTo(id, { type: 'prompt', id, prompt: null });
 });
 
+claudePrint.on('thread', (id, thread) => {
+  const transcriptPath = thread?.transcriptPath ?? null;
+  registry.setTranscriptHint(id, {
+    transcriptPath,
+    sessionId: thread?.sessionId ?? null,
+  });
+  if (transcriptPath) {
+    (async () => {
+      const panes = await tmux.listPanes();
+      const pane = panes.find((p) => p.target === id) ||
+        panes.find((p) => p.target.startsWith(`${id}.`));
+      if (!pane?.paneId) return;
+      await writePaneRegistryRecord({
+        paneId: pane.paneId,
+        sessionId: thread?.sessionId ?? null,
+        transcriptPath,
+        cwd: pane.cwd ?? null,
+      });
+    })().catch(() => {});
+  }
+});
+claudePrint.on('messages', (id, messages) => {
+  const sub = subscriptions.get(id);
+  if (sub?.tailer) return;
+  broadcastTo(id, { type: 'append', id, messages });
+});
+claudePrint.on('status', (id, status) => {
+  registry.setThinking(id, status === 'active');
+});
+claudePrint.on('error', (id, err) => {
+  broadcastTo(id, {
+    type: 'ack',
+    op: 'claude-print',
+    ok: false,
+    error: String(err?.message || err),
+  });
+});
+claudePrint.on('close', (id) => {
+  registry.setThinking(id, false);
+});
+
 function ensureSubscription(id) {
   let sub = subscriptions.get(id);
   if (sub) {
@@ -1391,7 +1481,7 @@ function ensureSubscription(id) {
   if (!session.transcriptPath) {
     sub = { tailer: null, clients: new Set(), pending: null, ready: Promise.resolve() };
     subscriptions.set(id, sub);
-    if (!codexRpc.has(id)) startPromptPoller(id, sub);
+    if (!codexRpc.has(id) && session.transport !== 'print') startPromptPoller(id, sub);
     return sub;
   }
 
@@ -1441,17 +1531,21 @@ function ensureSubscription(id) {
     if (doneIds.size) subagents.markDone(doneIds);
   });
   sub.ready.catch(() => {}); // errors surface via the per-subscribe await below
-  if (!codexRpc.has(id)) startPromptPoller(id, sub);
+  if (!codexRpc.has(id) && session.transport !== 'print') startPromptPoller(id, sub);
   return sub;
 }
 
 function sendSubscriptionSnapshot(ws, id, sub) {
+  const liveMessages = claudePrint.has(id)
+    ? claudePrint.messages(id)
+    : codexRpc.messages(id);
   send(ws, {
     type: 'messages',
     id,
     // Tailer-less RPC-backed Codex subscriptions keep an in-memory message
-    // buffer fed by app-server notifications.
-    messages: sub.tailer ? sub.tailer.getMessages() : codexRpc.messages(id),
+    // buffer fed by app-server notifications. Claude print mode does the same
+    // through its bridge until a real transcript tailer is available.
+    messages: sub.tailer ? sub.tailer.getMessages() : liveMessages,
     pending: sub.tailer ? sub.tailer.getPending() : null,
   });
   const rpcPrompt = codexRpc.prompt(id);
@@ -1514,6 +1608,20 @@ async function ensureCodexRpcForSession(session) {
     resumeThreadId: session.sessionId,
     transcriptPath: session.transcriptPath,
   });
+}
+
+async function ensureClaudePrintForSession(session) {
+  if (session.kind !== 'claude' || session.transport !== 'print') return null;
+  const existing = claudePrint.get(session.target);
+  if (existing) return existing;
+  const socketPath = session.endpoint || claudePrint.endpointFor(session.target);
+  const client = await claudePrint.attach({
+    target: session.target,
+    socketPath,
+    cwd: session.cwd,
+  });
+  await client.waitForBridge();
+  return client;
 }
 
 // Poll the live pane for a TUI selection prompt (permission/trust/numbered menu).
@@ -1619,6 +1727,18 @@ async function handleClientMessage(ws, msg) {
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const replyText = String(msg.text ?? '');
       return runSerial(session.target, async () => {
+        if (session.kind === 'claude' && session.transport === 'print') {
+          await ensureClaudePrintForSession(session);
+          registry.setThinking(session.target, true);
+          try {
+            claudePrint.submit(session.target, replyText);
+          } catch (err) {
+            registry.setThinking(session.target, false);
+            throw err;
+          }
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'claude-print' });
+          return;
+        }
         if (session.kind === 'codex') {
           const codexClient = await ensureCodexRpcForSession(session);
           if (codexClient) {
@@ -1905,6 +2025,14 @@ async function handleClientMessage(ws, msg) {
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
       const promptKey = msg.key;
       return runSerial(session.target, async () => {
+        if (session.kind === 'claude' && session.transport === 'print') {
+          if (promptKey !== 'Escape') throw new Error('key not allowed for Claude print mode');
+          await ensureClaudePrintForSession(session);
+          claudePrint.cancel(session.target);
+          registry.setThinking(session.target, false);
+          send(ws, { type: 'ack', op: 'promptkey', ok: true, transport: 'claude-print' });
+          return;
+        }
         if (session.kind === 'codex') {
           const codexClient = await ensureCodexRpcForSession(session);
           if (codexClient && codexRpc.prompt(session.target)) {
@@ -2081,6 +2209,7 @@ function firePushForChange(sessions) {
 
 registry.on('change', (sessions) => {
   codexRpc.sweep(sessions.map((s) => s.id));
+  claudePrint.sweep(sessions.map((s) => s.id));
   for (const s of sessions) upgradeSubscriptionIfTranscriptReady(s.id);
   firePushForChange(sessions);
   broadcast({ type: 'sessions', sessions });
