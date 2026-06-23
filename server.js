@@ -21,7 +21,7 @@ import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
-import { SubAgentsWatcher, listAgents } from './lib/subagents.js';
+import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
@@ -32,7 +32,7 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
-import { parseCodexRecord, parseCodexPrompt, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
+import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import * as mlx from './lib/mlx.js';
@@ -154,6 +154,8 @@ let pins = loadPins(CONFIG.pinsFile);
 
 /** id -> { tailer, clients:Set<ws>, pending } */
 const subscriptions = new Map();
+const RAW_EVENT_LIMIT = 200;
+const rawEventsById = new Map();
 
 function sessionById(id) {
   return registry.getSessions().find((s) => s.id === id) || null;
@@ -1313,9 +1315,40 @@ function broadcastTo(id, obj) {
   for (const ws of sub.clients) if (ws.readyState === ws.OPEN) ws.send(msg);
 }
 
+function rawSummary(value, max = 240) {
+  const text = typeof value === 'string'
+    ? value
+    : (() => {
+        try { return JSON.stringify(value); } catch { return String(value); }
+      })();
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > max ? compact.slice(0, max - 1) + '…' : compact;
+}
+
+function emitRawEvent(id, event) {
+  if (!id) return;
+  const entry = {
+    ts: Date.now(),
+    source: event.source || 'server',
+    kind: event.kind || 'event',
+    summary: rawSummary(event.summary ?? ''),
+    detail: event.detail ?? null,
+  };
+  const prev = rawEventsById.get(id) ?? [];
+  const next = [...prev, entry];
+  rawEventsById.set(id, next.length > RAW_EVENT_LIMIT ? next.slice(next.length - RAW_EVENT_LIMIT) : next);
+  broadcastTo(id, { type: 'raw-event', id, event: entry });
+}
+
 codexRpc.on('thread', (id, opened) => {
   const thread = opened?.thread || {};
   const transcriptPath = thread.path ?? null;
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'thread',
+    summary: `thread ${thread.id || '(unknown)'} ${transcriptPath || ''}`,
+    detail: { threadId: thread.id ?? null, transcriptPath },
+  });
   registry.setTranscriptHint(id, {
     transcriptPath,
     sessionId: thread.id ?? null,
@@ -1338,19 +1371,64 @@ codexRpc.on('thread', (id, opened) => {
 codexRpc.on('messages', (id, messages) => {
   const sub = subscriptions.get(id);
   if (sub?.tailer) return;
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'messages',
+    summary: `${messages?.length ?? 0} message(s)`,
+  });
   broadcastTo(id, { type: 'append', id, messages });
 });
 codexRpc.on('prompt', (id, prompt) => {
   registry.setPrompt(id, prompt);
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'prompt',
+    summary: prompt ? prompt.question : 'cleared',
+    detail: prompt,
+  });
   broadcastTo(id, { type: 'prompt', id, prompt });
 });
 codexRpc.on('pending', (id, pending) => {
   registry.setPending(id, !!pending);
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'pending',
+    summary: pending ? 'pending true' : 'pending false',
+  });
 });
 codexRpc.on('status', (id, status) => {
   registry.setThinking(id, isCodexActiveStatus(status));
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'status',
+    summary: status ?? 'null',
+    detail: status,
+  });
+});
+codexRpc.on('subagent', (id, update) => {
+  const sub = subscriptions.get(id);
+  sub?.subagents?.ingest?.(update);
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'subagent',
+    summary: `${update.agentId} ${update.state}`,
+    detail: update,
+  });
+});
+codexRpc.on('raw', (id, event) => {
+  emitRawEvent(id, {
+    source: event.source || 'codex-rpc',
+    kind: event.kind || 'rpc',
+    summary: event.summary || event.method || '',
+    detail: event,
+  });
 });
 codexRpc.on('error', (id, err) => {
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'error',
+    summary: String(err?.message || err),
+  });
   broadcastTo(id, {
     type: 'ack',
     op: 'codex-rpc',
@@ -1362,6 +1440,11 @@ codexRpc.on('close', (id) => {
   registry.setPending(id, false);
   registry.setPrompt(id, null);
   registry.setThinking(id, false);
+  emitRawEvent(id, {
+    source: 'codex-rpc',
+    kind: 'close',
+    summary: 'closed',
+  });
   broadcastTo(id, { type: 'prompt', id, prompt: null });
 });
 
@@ -1389,16 +1472,39 @@ function ensureSubscription(id) {
   // `capture` and accepts `reply`, and a later refresh that matches the
   // transcript upgrades the subscription (see the tailer-null branch above).
   if (!session.transcriptPath) {
-    sub = { tailer: null, clients: new Set(), pending: null, ready: Promise.resolve() };
+    const subagents = session.kind === 'codex' ? new CodexSubAgentsWatcher() : null;
+    sub = { tailer: null, subagents, clients: new Set(), pending: null, ready: Promise.resolve() };
     subscriptions.set(id, sub);
+    if (subagents) {
+      subagents.on('change', (entry) =>
+        broadcastTo(id, { type: 'subagent', id, subagent: entry }),
+      );
+    }
     if (!codexRpc.has(id)) startPromptPoller(id, sub);
     return sub;
   }
 
-  const tailer = new TranscriptTailer(session.transcriptPath, { maxBuffer: CONFIG.maxBuffer, parser: session.kind === 'codex' ? parseCodexRecord : undefined });
   // Watch this session's sub-agent transcripts (Task/Agent). Discovery is polled
   // when the parent transcript grows (when sub-agents spawn) + once at subscribe.
-  const subagents = new SubAgentsWatcher(session.transcriptPath);
+  const subagents = session.kind === 'codex'
+    ? new CodexSubAgentsWatcher()
+    : new SubAgentsWatcher(session.transcriptPath);
+  const parser = session.kind === 'codex'
+    ? (line) => {
+        const update = parseCodexSubagentNotificationRecord(line);
+        if (update) {
+          subagents.ingest(update);
+          emitRawEvent(id, {
+            source: 'codex-transcript',
+            kind: 'subagent',
+            summary: `${update.agentId} ${update.state}`,
+            detail: update,
+          });
+        }
+        return parseCodexRecord(line);
+      }
+    : undefined;
+  const tailer = new TranscriptTailer(session.transcriptPath, { maxBuffer: CONFIG.maxBuffer, parser });
   sub = { tailer, subagents, clients: new Set(), pending: null };
   subscriptions.set(id, sub);
 
@@ -1407,6 +1513,11 @@ function ensureSubscription(id) {
   );
 
   tailer.on('append', (msgs) => {
+    emitRawEvent(id, {
+      source: session.kind === 'codex' ? 'codex-transcript' : 'transcript',
+      kind: 'append',
+      summary: `${msgs.length} message(s)`,
+    });
     broadcastTo(id, { type: 'append', id, messages: msgs });
     // A sub-agent may have just spawned (poll for its files) or finished (its
     // Task tool-call produced a tool_result → mark it done).
@@ -1420,6 +1531,12 @@ function ensureSubscription(id) {
   tailer.on('pending', (pending) => {
     sub.pending = pending;
     registry.setPending(id, !!pending);
+    emitRawEvent(id, {
+      source: 'transcript',
+      kind: 'pending',
+      summary: pending ? pending.questions?.[0]?.question || 'pending true' : 'pending false',
+      detail: pending,
+    });
     broadcastTo(id, { type: 'pending', id, pending });
   });
   tailer.on('error', (err) => broadcastTo(id, { type: 'ack', op: 'tail', ok: false, error: String(err?.message || err) }));
@@ -1459,6 +1576,8 @@ function sendSubscriptionSnapshot(ws, id, sub) {
   // Snapshot any already-running sub-agents for this session.
   const subs = sub.subagents ? sub.subagents.snapshot() : [];
   if (subs.length) send(ws, { type: 'subagents', id, subagents: subs });
+  const rawEvents = rawEventsById.get(id) ?? [];
+  if (rawEvents.length) send(ws, { type: 'raw-events', id, events: rawEvents });
 }
 
 function upgradeSubscriptionIfTranscriptReady(id) {
@@ -1541,6 +1660,12 @@ function startPromptPoller(id, sub) {
       const json = prompt ? JSON.stringify(prompt) : null;
       if (json !== sub._lastPrompt) {
         sub._lastPrompt = json;
+        emitRawEvent(id, {
+          source: session.kind === 'codex' ? 'codex-tui' : 'tui',
+          kind: 'prompt',
+          summary: prompt ? prompt.question : 'cleared',
+          detail: prompt,
+        });
         broadcastTo(id, { type: 'prompt', id, prompt });
       }
     } finally {

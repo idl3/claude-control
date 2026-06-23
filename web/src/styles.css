@@ -2720,6 +2720,88 @@ body.is-external-display .composer {
   flex-direction: column;
   gap: 18px;
 }
+
+/* ── Raw event log ───────────────────────────────────────────── */
+.raw-panel {
+  width: min(900px, calc(100vw - 28px));
+  max-width: 900px;
+  max-height: min(760px, calc(100dvh - 56px));
+}
+.raw-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+  max-height: calc(min(760px, 100dvh - 56px) - 58px);
+  overflow: auto;
+  padding: 12px;
+}
+.raw-empty {
+  margin: auto;
+  color: var(--muted);
+  font-size: var(--txt-body);
+}
+.raw-event {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.raw-event-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.raw-time {
+  color: var(--muted);
+  font-size: var(--txt-meta);
+  font-variant-numeric: tabular-nums;
+}
+.raw-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-1);
+  color: var(--text);
+  font-size: var(--txt-meta);
+  font-weight: 700;
+}
+.raw-chip-kind {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--line));
+}
+.raw-summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--txt-body);
+  line-height: 1.4;
+}
+.raw-detail summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--txt-meta);
+  font-weight: 700;
+}
+.raw-detail pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
 /* Plan-review modal: wider, the plan renders as a full-width markdown doc that
    scrolls with the body, and the approval options sit at the very bottom. */
 .modal-plan {
