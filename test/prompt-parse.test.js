@@ -67,6 +67,52 @@ test('parsePanePrompt detects a picker whose option 1 scrolled off-screen', () =
   assert.equal(r.options.find((o) => o.key === '4')?.selected, true);
 });
 
+// A TALL AskUserQuestion — question + 5 options each with a multi-line
+// description + footer, preceded by prose — exceeds the OLD 26-line window, so
+// the question + options 1–2 used to scroll out (modal showed only 3,4,5 and a
+// description fragment as the "question"). With the larger window the whole
+// picker is in view: all 5 options survive and the real question is recovered.
+const TALL_PICKER = `\
+recovery did an unscoped git add that swept vendor/bundle (gem caches + vendored
+.rb) into the commit. Greptile refuses to review it (500-file cap), so the loop
+can never touch it. A guard (git reset -- vendor/bundle) already exists for new
+runs; #5711 is a pre-guard artifact. It needs a human call:
+filler line a
+filler line b
+filler line c
+filler line d
+filler line e
+filler line f
+filler line g
+filler line h
+filler line i
+filler line j
+filler line k
+
+#5711 (linear-agent: finalize stranded edits) is a runaway — 3.16M additions / 3000+ files from an unscoped git add that swept vendor/bundle. Greptile won't review it (500-file cap), so the loop can't converge it. What do you want?
+
+❯ 1. Close it
+     Abandon #5711 — it's a pre-guard artifact polluted with 3M lines of vendored gems.
+  2. Rescope + salvage
+     Have the agent reset vendor/bundle out of the branch, keep only the real edits.
+  3. Leave for manual review
+     Don't touch it from the loop. Flag it for a human to inspect the 3M-line diff.
+  4. Type something.
+  5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+test('parsePanePrompt: tall picker keeps ALL 5 options and the real question', () => {
+  assert.ok(TALL_PICKER.split('\n').length > 26, 'fixture must exceed the old window');
+  const r = parsePanePrompt(TALL_PICKER);
+  assert.ok(r, 'expected the tall picker to be detected');
+  assert.deepEqual(r.options.map((o) => o.key), ['1', '2', '3', '4', '5'], 'all 5 options survive');
+  assert.equal(r.options[0].label, 'Close it');
+  assert.equal(r.options[0].selected, true, '❯ cursor on option 1');
+  assert.match(r.question, /#5711.*runaway/, 'question is the real question, not a description fragment');
+  assert.doesNotMatch(r.question, /vendor\/bundle out of the branch/, 'question must NOT be an option description');
+});
+
 // ── Multi-select checkbox detection ──────────────────────────────────────────
 
 // Realistic capture of a multi-select AskUserQuestion picker ([ ]/[x] markers).
