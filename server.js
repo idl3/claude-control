@@ -1314,7 +1314,9 @@ function startPromptPoller(id, sub) {
       if (!session || !tmux.isValidTarget(session.target)) return;
       let prompt = null;
       try {
-        const cap = await tmux.capturePane(session.target, 40);
+        // 80 lines so a tall AskUserQuestion (question + 5 multi-line options +
+        // footer) fits the parser window (parsePanePrompt BOTTOM_REGION).
+        const cap = await tmux.capturePane(session.target, 80);
         prompt = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
       } catch {
         return;
