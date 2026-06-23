@@ -25,6 +25,7 @@ import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import { StopIcon } from './icons';
+import { AskInline, type ActivePrompt } from './AskInline';
 
 // Module-level per-session cache so the skill list (live, session-discovered
 // via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
@@ -103,6 +104,14 @@ interface ComposerProps {
   /** Called when the user clicks the STOP button (or presses Esc from App).
    *  Should send Escape to the session's Claude pane. */
   onStop?: () => void;
+  /** Active inline prompt (AskUserQuestion or PanePrompt). When non-null the
+   *  composer morphs to show the inline prompt body instead of the input. */
+  askActive?: boolean;
+  activePrompt?: ActivePrompt | null;
+  onAnswer?: (toolUseId: string, selections: string[][]) => void;
+  onKey?: (key: string) => void;
+  onSelect?: (labels: string[]) => void;
+  onReply?: (text: string) => void;
 }
 
 // Image preview for an image attachment that still carries its File (pending),
@@ -202,6 +211,12 @@ export function Composer({
   onTerminalModeChange,
   working = false,
   onStop,
+  askActive = false,
+  activePrompt = null,
+  onAnswer,
+  onKey,
+  onSelect,
+  onReply,
 }: ComposerProps) {
   const composer = useComposerRuntime();
   const shell = useShell();
@@ -483,10 +498,19 @@ export function Composer({
   // The ref starts false; it's set to true on the first real voice=true run.
   const voiceMorphHasRunRef = useRef<boolean>(false);
 
+  // ── Ask-inline morph refs (mirrors voice morph) ────────────────────────────
+  const askAnimRef = useRef<gsap.core.Timeline | null>(null);
+  const askBodyRef = useRef<HTMLDivElement>(null);
+  const askMorphHasRunRef = useRef<boolean>(false);
+  // True while the main composer↔ask morph is running, so the height-follow
+  // ResizeObserver below doesn't fight it.
+  const askMorphingRef = useRef<boolean>(false);
+
   const openVoice = useCallback(() => {
     if (disabled) return;
+    if (askActive) return; // inline prompt has priority
     setVoice(true);
-  }, [disabled]);
+  }, [disabled, askActive]);
 
   const exitVoice = useCallback(() => {
     // FIX A: Pin the card to its current rendered height BEFORE flipping voice
@@ -1044,6 +1068,198 @@ export function Composer({
     }
   }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Ask-inline morph: mirrors the voice morph pattern ──────────────────────
+  // ENTER (composer → ask): stagger toolbar + fade input out, tween height, reveal ask body.
+  // EXIT (ask → composer): fade ask body out, tween height back, reveal input + toolbar.
+  useLayoutEffect(() => {
+    const card = composerCardRef.current;
+    if (!card) return;
+
+    // Skip on initial mount and any false run before a true ENTER has happened.
+    if (!askActive && !askMorphHasRunRef.current) return;
+    if (askActive) askMorphHasRunRef.current = true;
+
+    askAnimRef.current?.kill();
+    askAnimRef.current = null;
+    askMorphingRef.current = true;
+
+    const askBody   = askBodyRef.current;
+    const toolbar   = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
+    const inputWrap = card.querySelector<HTMLElement>('.composer-input-wrap');
+
+    if (askActive) {
+      // ── ENTER ──────────────────────────────────────────────────────────────
+      if (prefersReducedMotion()) {
+        if (askBody) askBody.style.display = 'flex';
+        if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+        if (toolbar)   gsap.set(toolbar,   { display: 'none' });
+        askMorphingRef.current = false;
+        return;
+      }
+
+      const heightFrom = card.offsetHeight;
+      card.style.height = `${heightFrom}px`;
+      if (askBody) askBody.style.display = 'flex';
+
+      // Clear any leftover position/visibility from a prior cycle.
+      if (askBody) {
+        askBody.querySelectorAll<HTMLElement>('*').forEach((el) => {
+          if (el.style.position)   el.style.position   = '';
+          if (el.style.visibility) el.style.visibility = '';
+        });
+      }
+
+      // Measure TO by floating composer elements out.
+      if (inputWrap) { inputWrap.style.position = 'absolute'; inputWrap.style.visibility = 'hidden'; }
+      if (toolbar)   { toolbar.style.position   = 'absolute'; toolbar.style.visibility   = 'hidden'; }
+      card.style.height = '';
+      const rawHeightTo = card.offsetHeight;
+      const heightTo = Math.max(rawHeightTo, COMPOSER_MIN_HEIGHT);
+      card.style.height = `${heightFrom}px`;
+      if (inputWrap) { inputWrap.style.position = ''; inputWrap.style.visibility = ''; }
+      if (toolbar)   { toolbar.style.position   = ''; toolbar.style.visibility   = ''; }
+
+      void card.offsetHeight;
+
+      const toolbarBtns = toolbar
+        ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
+        : [];
+
+      if (inputWrap) gsap.set(inputWrap, { clearProps: 'display,position,visibility', opacity: 1, y: 0 });
+      // Pre-hide ask body content so Phase 2 reveals it.
+      if (askBody) gsap.set(askBody, { opacity: 0, y: -10 });
+
+      const runPhase2Enter = () => {
+        const phase2 = gsap.timeline({
+          onComplete: () => {
+            if (askBody) gsap.set(askBody, { clearProps: 'opacity,y' });
+            askMorphingRef.current = false;
+          },
+        });
+        if (askBody) {
+          phase2.to(askBody, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase }, 0);
+        }
+        askAnimRef.current = phase2;
+      };
+
+      const runPhase1b = () => {
+        card.style.overflow = 'hidden';
+        void card.offsetHeight;
+
+        const phase1b = gsap.timeline({
+          onComplete: () => {
+            card.style.height   = '';
+            card.style.overflow = '';
+            // Take the normal composer chrome fully out of flow so it can't sit
+            // below the ask body as an empty action bar. The ask body has its own
+            // (sticky) action bar.
+            if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+            if (toolbar)   gsap.set(toolbar,   { display: 'none', clearProps: 'opacity,y' });
+            gsap.delayedCall(T.gap, runPhase2Enter);
+          },
+        });
+        phase1b.to(card, { height: heightTo, duration: T.height, ease: T.exitEase }, 0);
+        askAnimRef.current = phase1b;
+      };
+
+      const phase1a = gsap.timeline({ onComplete: runPhase1b });
+      if (toolbarBtns.length) {
+        phase1a.to(toolbarBtns, { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase, stagger: T.btnStagger }, 0);
+      } else if (toolbar) {
+        phase1a.to(toolbar, { opacity: 0, y: 4, duration: T.fade, ease: T.exitEase }, 0);
+      }
+      if (inputWrap) {
+        phase1a.to(inputWrap, { opacity: 0, y: 6, duration: T.fade, ease: T.exitEase }, 0);
+      }
+      askAnimRef.current = phase1a;
+
+    } else {
+      // ── EXIT ───────────────────────────────────────────────────────────────
+      if (prefersReducedMotion()) {
+        if (askBody) askBody.style.display = 'none';
+        if (inputWrap) gsap.set(inputWrap, { clearProps: 'all' });
+        if (toolbar)   gsap.set(toolbar,   { clearProps: 'all' });
+        askMorphingRef.current = false;
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
+        });
+        return;
+      }
+
+      const heightFrom = card.offsetHeight;
+      card.style.height = '';
+
+      if (inputWrap) { inputWrap.style.display = ''; inputWrap.style.opacity = '0'; }
+      if (askBody)   { askBody.style.position = 'absolute'; askBody.style.visibility = 'hidden'; }
+      const rawExitHeightTo = card.offsetHeight;
+      const heightTo = Math.max(rawExitHeightTo, COMPOSER_MIN_HEIGHT);
+      if (askBody)   { askBody.style.position = ''; askBody.style.visibility = ''; }
+      if (inputWrap) { inputWrap.style.display = 'none'; inputWrap.style.opacity = ''; }
+
+      card.style.height   = `${heightFrom}px`;
+      card.style.overflow = 'hidden';
+
+      // Restore the normal chrome to flow (it was display:none'd on enter) so the
+      // exit can fade it back in.
+      if (inputWrap) gsap.set(inputWrap, { display: '', opacity: 0, y: 6 });
+      if (toolbar)   gsap.set(toolbar,   { display: '', opacity: 0, y: 4 });
+      const toolbarBtns = toolbar
+        ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
+        : [];
+      if (toolbarBtns.length) gsap.set(toolbarBtns, { opacity: 0, y: 4 });
+
+      void card.offsetHeight;
+
+      const runPhase2Exit = () => {
+        if (askBody) askBody.style.display = 'none';
+        card.style.height   = `${heightFrom}px`;
+        card.style.overflow = '';
+
+        const phase2 = gsap.timeline({
+          onComplete: () => {
+            card.style.height = '';
+            if (inputWrap)          gsap.set(inputWrap,   { clearProps: 'all' });
+            if (toolbar)            gsap.set(toolbar,      { clearProps: 'all' });
+            if (toolbarBtns.length) gsap.set(toolbarBtns, { clearProps: 'all' });
+            askMorphingRef.current = false;
+            document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
+          },
+        });
+        phase2.to(card, { height: heightTo, duration: T.fade, ease: T.enterEase }, 0);
+        if (inputWrap) {
+          phase2.to(inputWrap, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase }, 0);
+        }
+        if (toolbarBtns.length) {
+          const bodyDuration = inputWrap ? T.fade * 0.4 : 0;
+          phase2.to(toolbarBtns, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase, stagger: T.btnStagger }, bodyDuration);
+        } else if (toolbar) {
+          phase2.to(toolbar, { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase }, 0);
+        }
+        askAnimRef.current = phase2;
+      };
+
+      // Phase 1: fade ask body out.
+      const phase1 = gsap.timeline({
+        onComplete: () => { gsap.delayedCall(T.gap, runPhase2Exit); },
+      });
+      if (askBody) {
+        phase1.to(askBody, { opacity: 0, y: -8, duration: T.fade, ease: T.exitEase }, 0);
+      }
+      askAnimRef.current = phase1;
+    }
+  }, [askActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Kill any in-flight ask timeline on unmount.
+  useEffect(() => {
+    return () => { askAnimRef.current?.kill(); };
+  }, []);
+
+  // (Height changes WITHIN the open ask body — e.g. options ↔ free-text — are
+  // animated by AskInline itself via a FLIP on .ask-inline-body, which the
+  // auto-height card follows. A ResizeObserver can't drive that: by the time it
+  // fires the DOM has already snapped to the new height, so there's no "before"
+  // to animate from.)
+
   // Kill any in-flight voice timeline on unmount to avoid post-unmount callbacks.
   useEffect(() => {
     return () => {
@@ -1127,6 +1343,11 @@ export function Composer({
     voiceMorphHasRunRef.current = false;
     phase2DoneRef.current = false;
 
+    // Reset ask morph guard.
+    askAnimRef.current?.kill();
+    askAnimRef.current = null;
+    askMorphHasRunRef.current = false;
+
     // Clear any GSAP inline styles left by an interrupted animation so the
     // composer always renders at its correct natural (un-animated) state.
     const card = composerCardRef.current;
@@ -1145,9 +1366,27 @@ export function Composer({
         : [];
       if (toolbarBtns.length) gsap.set(toolbarBtns, { clearProps: 'all' });
 
-      // Hide the voice body (in case the session switch happened while it was shown).
+      // Hide the voice body (voice is internal state, always reset on switch).
       const voiceBody = voiceBodyRef.current;
       if (voiceBody) voiceBody.style.display = 'none';
+
+      // The ask prompt is SERVER-driven and persists across session switches — so
+      // snap the ask body to the NEW session's state instantly (no morph): if that
+      // session has an active prompt, show it and take the normal chrome out of
+      // flow; otherwise hide it. (Bug: this used to unconditionally hide, so a
+      // pending question vanished when you switched away and came back.)
+      const askBody = askBodyRef.current;
+      if (askBody) {
+        if (askActive) {
+          askBody.style.display = 'flex';
+          gsap.set(askBody, { clearProps: 'opacity,y' });
+          if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+          if (toolbar)   gsap.set(toolbar,   { display: 'none' });
+        } else {
+          askBody.style.display = 'none';
+        }
+      }
+      askMorphHasRunRef.current = askActive;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -1443,6 +1682,16 @@ export function Composer({
           onClose={exitVoice}
           stopRef={voiceStopRef}
           phase2DoneRef={phase2DoneRef}
+        />
+        {/* Ask inline body: always mounted, display:none when idle. The ask morph
+            driver sets display:'' on ENTER and display:none on EXIT. */}
+        <AskInline
+          activePrompt={activePrompt}
+          bodyRef={askBodyRef}
+          onAnswer={onAnswer ?? (() => {})}
+          onKey={onKey ?? (() => {})}
+          onSelect={onSelect ?? (() => {})}
+          onReply={onReply ?? (() => {})}
         />
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
