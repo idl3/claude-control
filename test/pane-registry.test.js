@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readPaneRegistry, gcPaneRegistry } from '../lib/pane-registry.js';
+import { readPaneRegistry, writePaneRegistryRecord, gcPaneRegistry, _resetGcStateForTest } from '../lib/pane-registry.js';
 
 async function tmpDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'pane-reg-'));
@@ -40,6 +40,25 @@ test('reads valid pane records keyed by paneId', async () => {
   const map = await readPaneRegistry(dir);
   assert.equal(map.size, 1);
   assert.equal(map.get('%5').transcriptPath, transcript);
+});
+
+test('writePaneRegistryRecord persists a readable exact pane binding', async () => {
+  const dir = await tmpDir();
+  const transcript = path.join(dir, 'codex-rollout.jsonl');
+  await fs.writeFile(transcript, '{}');
+
+  await writePaneRegistryRecord({
+    paneId: '%42',
+    sessionId: 'thread-42',
+    transcriptPath: transcript,
+    cwd: '/workspace',
+  }, dir);
+
+  const map = await readPaneRegistry(dir);
+  assert.equal(map.size, 1);
+  assert.equal(map.get('%42').sessionId, 'thread-42');
+  assert.equal(map.get('%42').transcriptPath, transcript);
+  assert.equal(map.get('%42').cwd, '/workspace');
 });
 
 test('drops records whose transcript no longer exists (stale)', async () => {

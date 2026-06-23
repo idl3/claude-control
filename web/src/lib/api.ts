@@ -136,6 +136,10 @@ export async function listTranscripts(): Promise<TranscriptInfo[]> {
 
 export interface VersionInfo {
   current: string;
+  root?: string;
+  branch?: string | null;
+  commit?: string | null;
+  dirty?: boolean | null;
   latest: string | null;
   behind?: number;
   updateAvailable: boolean;
@@ -235,8 +239,6 @@ export type OptimizeBackend = 'mlx' | 'claude' | 'rules';
 
 export interface ControlConfig {
   launchCommand: string;
-  defaultCwd: string;
-  optimizeModel: string;
   claudeBin: string;
   /**
    * Command typed into a new pane to launch Codex. May be a shell alias
@@ -247,8 +249,10 @@ export interface ControlConfig {
    * Optional absolute path to the codex binary used for availability checks.
    * Blank = resolve from PATH. When codexLaunchCommand is a shell alias, set
    * this to the real binary path so availability checks pass.
-   */
+  */
   codexBin: string;
+  defaultCwd: string;
+  optimizeModel: string;
   /** Prompt-enhancer backend: local MLX model, claude -p, or deterministic rules. */
   optimizeBackend: OptimizeBackend;
   /** HuggingFace/MLX model id used when optimizeBackend === 'mlx'. */

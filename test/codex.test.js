@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   matchesProcess,
   buildTranscriptIndex,
+  readCodexTranscriptRecord,
   parseCodexRecord,
   detectPendingFromCapture,
   buildAnswerProgram,
@@ -36,8 +37,19 @@ test('matchesProcess: true for codex --foo', () => {
   assert.equal(matchesProcess('codex --foo'), true);
 });
 
+test('matchesProcess: true for node-launched codex app-server', () => {
+  assert.equal(
+    matchesProcess('node /Users/me/.nvm/versions/node/v25.9.0/bin/codex app-server --listen ws://127.0.0.1:60036'),
+    true,
+  );
+});
+
 test('matchesProcess: false for codex-control', () => {
   assert.equal(matchesProcess('codex-control'), false);
+});
+
+test('matchesProcess: false for a generic command with codex as an argument', () => {
+  assert.equal(matchesProcess('rg codex'), false);
 });
 
 test('matchesProcess: false for 2.1.162', () => {
@@ -76,6 +88,8 @@ test('discovery: indexes sample-rollout.jsonl by cwd, sets agentType=codex', asy
     const rec = index.byCwd.get('/private/tmp/codex-spike');
     assert.equal(rec.agentType, 'codex');
     assert.equal(rec.sessionId, '019ee8dc-bd3a-7140-a6fa-43829d915da3');
+    assert.equal(index.byPath.get(destFile)?.sessionId, rec.sessionId);
+    assert.equal(index.bySessionId.get(rec.sessionId)?.transcriptPath, destFile);
     assert.equal(index.byDir, undefined);
   } finally {
     fs.rmSync(temp, { recursive: true });
@@ -110,6 +124,22 @@ test('discovery window: active session in an old date dir is indexed; stale one 
     const index = await buildTranscriptIndex({ codexSessionsRoot: temp }, now);
     assert.equal(index.byCwd.has('/work/phone-suite'), true, 'active old-dir session must be indexed');
     assert.equal(index.byCwd.has('/work/dead'), false, 'stale session must be skipped');
+  } finally {
+    fs.rmSync(temp, { recursive: true });
+  }
+});
+
+test('readCodexTranscriptRecord: reads an exact rollout path outside the date index window', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-exact-test-'));
+  const destFile = path.join(temp, 'rollout-exact.jsonl');
+  fs.copyFileSync(path.join(FIX, 'sample-rollout.jsonl'), destFile);
+
+  try {
+    const rec = await readCodexTranscriptRecord(destFile);
+    assert.notEqual(rec, null);
+    assert.equal(rec.transcriptPath, destFile);
+    assert.equal(rec.cwd, '/private/tmp/codex-spike');
+    assert.equal(rec.sessionId, '019ee8dc-bd3a-7140-a6fa-43829d915da3');
   } finally {
     fs.rmSync(temp, { recursive: true });
   }

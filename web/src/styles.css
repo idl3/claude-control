@@ -3785,8 +3785,13 @@ select.config-input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  max-width: min(100%, 620px);
   font-size: 11px;
   color: var(--text-faint);
+}
+.config-version-copy {
+  overflow-wrap: anywhere;
 }
 .config-version-update {
   color: var(--accent, #3b82f6);

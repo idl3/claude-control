@@ -25,13 +25,15 @@ import { SubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
+import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
 import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
-import { parseCodexRecord, parseCodexPrompt, buildSpawnCommand } from './lib/codex.js';
+import { parseCodexRecord, parseCodexPrompt, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
+import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
 import * as mlx from './lib/mlx.js';
 import {
@@ -83,6 +85,10 @@ const CONFIG = {
     env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
   codexSessionsRoot:
     env('CODEX_SESSIONS') || path.join(os.homedir(), '.codex', 'sessions'),
+  // Experimental Codex app-server transport. New Codex sessions use a tmux
+  // pane as a visible process pin, but replies/approvals move over JSON-RPC.
+  // Set CLAUDE_CONTROL_CODEX_TRANSPORT=tmux to force the legacy TUI-key path.
+  codexTransport: String(env('CODEX_TRANSPORT') || '').toLowerCase() === 'tmux' ? 'tmux' : 'rpc',
   // 768MB: a long-running Node server (WS + transcript tailing + the bundled
   // web app) baselines ~300-450MB of V8 heap + RSS, so the old 350MB budget
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
@@ -95,6 +101,8 @@ const CONFIG = {
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
+  presentDir:
+    env('PRESENT') || path.join(os.homedir(), '.claude-control', 'present'),
   uploadTtlHours: Number(env('UPLOAD_TTL_HOURS')) || 24,
   pinsFile:
     env('PINS') || path.join(os.homedir(), '.claude-control', 'pins.json'),
@@ -113,6 +121,12 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
@@ -132,6 +146,7 @@ const IMAGE_MIME = {
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
+const codexRpc = new CodexRpcManager();
 
 // Manual transcript pins (windowId.paneIndex -> transcript path). Loaded at boot,
 // applied to the registry, and editable via /api/pins.
@@ -424,6 +439,14 @@ const _handler = (req, res) => {
     return proxyTerminalHttp(req, res, u);
   }
 
+  // Public presentation artifacts (screenshots, videos, one-off demos) live
+  // under ~/.claude-control/present and are intentionally iframe-friendly.
+  // This is a confined static surface: no directory listing, no writes, and no
+  // filesystem paths outside presentDir.
+  if (u.pathname === '/present' || u.pathname.startsWith('/present/')) {
+    return servePresent(u.pathname, res);
+  }
+
   // Unknown /api/* path: return JSON 404 instead of falling through to the SPA.
   if (u.pathname.startsWith('/api/')) return endJson(res, 404, { error: 'not found' });
 
@@ -707,19 +730,27 @@ function handleTranscribe(req, res, u) {
 }
 
 // ---------------------------------------------------------------------------
-// resolveBin — async PATH lookup for a binary name or absolute path.
+function commandHead(command) {
+  const text = String(command || '').trim();
+  const m = /^(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(text);
+  return m ? (m[1] || m[2] || m[3] || '') : '';
+}
+
+// resolveBin — async lookup for a configured launch command.
 //
-// If `bin` is an absolute path, checks it is executable directly.
-// Otherwise runs `which <bin>` on PATH.
+// If the first command word is an absolute path, checks it is executable
+// directly. Otherwise resolves it via PATH and then the user's login shell so
+// aliases/functions such as `yodex` are treated the same way as the tmux pane
+// that will receive the typed command.
 //
 // Returns { available: true, path } on success, { available: false, reason }
 // on failure. Never throws.
 // ---------------------------------------------------------------------------
 async function resolveBin(bin) {
-  if (!bin || typeof bin !== 'string' || !bin.trim()) {
+  const b = commandHead(bin);
+  if (!b) {
     return { available: false, reason: 'no binary configured' };
   }
-  const b = bin.trim();
   // Absolute path: check existence + execute permission directly.
   if (b.startsWith('/')) {
     try {
@@ -736,7 +767,21 @@ async function resolveBin(bin) {
     if (resolved) return { available: true, path: resolved };
     return { available: false, reason: `${b} not found on PATH` };
   } catch {
-    return { available: false, reason: `${b} not found on PATH` };
+    // Fall through to the user's login shell; aliases/functions are only visible
+    // there, but the lookup script itself is fixed and receives `b` as argv.
+  }
+  try {
+    const shell = process.env.SHELL || '/bin/zsh';
+    const { stdout } = await _execFile(
+      shell,
+      ['-lic', 'command -v -- "$1"', 'claude-control-resolve', b],
+      { timeout: 5000 },
+    );
+    const resolved = stdout.trim();
+    if (resolved) return { available: true, path: resolved };
+    return { available: false, reason: `${b} not found in login shell` };
+  } catch {
+    return { available: false, reason: `${b} not found in login shell` };
   }
 }
 
@@ -795,16 +840,22 @@ async function handleSessionNew(req, res) {
     const target = await tmux.createWindow({ cwd, name });
 
     let launch;
+    let codexRpcEndpoint = null;
     if (agent === 'codex') {
-      // Codex path: uses -C <cwd> (its own cwd flag). No --name flag — Codex
-      // has none. The tmux window is still named (above) so the rail shows it.
-      // buildSpawnCommand is the single source of truth for Codex's launch
-      // shape; the cwd arg is shell-quoted since the command is typed into an
-      // interactive shell via sendText. The executed command is
-      // config.codexLaunchCommand (may be a shell alias), validated above via
-      // codexBin||codexLaunchCommand — same pattern as the Claude branch.
-      const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
-      launch = `${bin} ${args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a)).join(' ')}`;
+      const codexCommand = config.codexBin || config.codexLaunchCommand;
+      if (CONFIG.codexTransport === 'rpc') {
+        codexRpcEndpoint = await codexRpc.prepareEndpoint(target);
+        const { bin, args } = buildAppServerCommand({ endpoint: codexRpcEndpoint, bin: codexCommand });
+        launch = `${bin} ${args.map((a) => (a === codexRpcEndpoint ? tmux.shellQuoteName(a) : a)).join(' ')}`;
+      } else {
+        // Legacy Codex path: uses -C <cwd> (its own cwd flag). No --name flag —
+        // Codex has none. The tmux window is still named (above) so the rail
+        // shows it. buildSpawnCommand is the single source of truth for Codex's
+        // launch shape; the cwd arg is shell-quoted since the command is typed
+        // into an interactive shell via sendText.
+        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
+        launch = `${bin} ${args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a)).join(' ')}`;
+      }
     } else {
       // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation.
       // (2) Claude's own session title: `claude --help` exposes `-n/--name`
@@ -817,7 +868,16 @@ async function handleSessionNew(req, res) {
     }
 
     await tmux.sendText(target, launch);
-    return endJson(res, 200, { ok: true, target, name, agent });
+    if (agent === 'codex' && codexRpcEndpoint) {
+      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd });
+    }
+    return endJson(res, 200, {
+      ok: true,
+      target,
+      name,
+      agent,
+      transport: agent === 'codex' ? CONFIG.codexTransport : 'tmux',
+    });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
@@ -1066,6 +1126,34 @@ function serveStatic(pathname, res) {
   });
 }
 
+function servePresent(pathname, res) {
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname.replace(/^\/present\/?/, ''));
+  } catch {
+    res.writeHead(400); return res.end('bad request');
+  }
+  if (!rel || rel.endsWith('/')) rel = path.join(rel, 'index.html');
+  const root = path.resolve(CONFIG.presentDir);
+  const full = path.resolve(root, rel);
+  if (full !== root && !full.startsWith(root + path.sep)) {
+    res.writeHead(403); return res.end('forbidden');
+  }
+  fs.readFile(full, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      return res.end('not found');
+    }
+    const ext = path.extname(full).toLowerCase();
+    res.writeHead(200, {
+      'content-type': MIME[ext] || 'application/octet-stream',
+      'cache-control': 'no-store, must-revalidate',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(data);
+  });
+}
+
 // Serve the SPA shell (index.html) for client-side routes.
 function serveIndexHtml(res) {
   fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (err, data) => {
@@ -1219,6 +1307,58 @@ function broadcastTo(id, obj) {
   for (const ws of sub.clients) if (ws.readyState === ws.OPEN) ws.send(msg);
 }
 
+codexRpc.on('thread', (id, opened) => {
+  const thread = opened?.thread || {};
+  const transcriptPath = thread.path ?? null;
+  registry.setTranscriptHint(id, {
+    transcriptPath,
+    sessionId: thread.id ?? null,
+  });
+  if (transcriptPath) {
+    (async () => {
+      const panes = await tmux.listPanes();
+      const pane = panes.find((p) => p.target === id) ||
+        panes.find((p) => p.target.startsWith(`${id}.`));
+      if (!pane?.paneId) return;
+      await writePaneRegistryRecord({
+        paneId: pane.paneId,
+        sessionId: thread.id ?? null,
+        transcriptPath,
+        cwd: pane.cwd ?? null,
+      });
+    })().catch(() => {});
+  }
+});
+codexRpc.on('messages', (id, messages) => {
+  const sub = subscriptions.get(id);
+  if (sub?.tailer) return;
+  broadcastTo(id, { type: 'append', id, messages });
+});
+codexRpc.on('prompt', (id, prompt) => {
+  registry.setPrompt(id, prompt);
+  broadcastTo(id, { type: 'prompt', id, prompt });
+});
+codexRpc.on('pending', (id, pending) => {
+  registry.setPending(id, !!pending);
+});
+codexRpc.on('status', (id, status) => {
+  registry.setThinking(id, isCodexActiveStatus(status));
+});
+codexRpc.on('error', (id, err) => {
+  broadcastTo(id, {
+    type: 'ack',
+    op: 'codex-rpc',
+    ok: false,
+    error: String(err?.message || err),
+  });
+});
+codexRpc.on('close', (id) => {
+  registry.setPending(id, false);
+  registry.setPrompt(id, null);
+  registry.setThinking(id, false);
+  broadcastTo(id, { type: 'prompt', id, prompt: null });
+});
+
 function ensureSubscription(id) {
   let sub = subscriptions.get(id);
   if (sub) {
@@ -1245,7 +1385,7 @@ function ensureSubscription(id) {
   if (!session.transcriptPath) {
     sub = { tailer: null, clients: new Set(), pending: null, ready: Promise.resolve() };
     subscriptions.set(id, sub);
-    startPromptPoller(id, sub);
+    if (!codexRpc.has(id)) startPromptPoller(id, sub);
     return sub;
   }
 
@@ -1295,8 +1435,79 @@ function ensureSubscription(id) {
     if (doneIds.size) subagents.markDone(doneIds);
   });
   sub.ready.catch(() => {}); // errors surface via the per-subscribe await below
-  startPromptPoller(id, sub);
+  if (!codexRpc.has(id)) startPromptPoller(id, sub);
   return sub;
+}
+
+function sendSubscriptionSnapshot(ws, id, sub) {
+  send(ws, {
+    type: 'messages',
+    id,
+    // Tailer-less RPC-backed Codex subscriptions keep an in-memory message
+    // buffer fed by app-server notifications.
+    messages: sub.tailer ? sub.tailer.getMessages() : codexRpc.messages(id),
+    pending: sub.tailer ? sub.tailer.getPending() : null,
+  });
+  const rpcPrompt = codexRpc.prompt(id);
+  if (rpcPrompt) send(ws, { type: 'prompt', id, prompt: rpcPrompt });
+  // Snapshot any already-running sub-agents for this session.
+  const subs = sub.subagents ? sub.subagents.snapshot() : [];
+  if (subs.length) send(ws, { type: 'subagents', id, subagents: subs });
+}
+
+function upgradeSubscriptionIfTranscriptReady(id) {
+  const old = subscriptions.get(id);
+  if (!old || old.tailer) return;
+  const session = sessionById(id);
+  if (!session?.transcriptPath) return;
+
+  const clients = new Set(old.clients);
+  if (old.promptTimer) clearInterval(old.promptTimer);
+  subscriptions.delete(id);
+
+  const next = ensureSubscription(id);
+  if (!next) return;
+  for (const ws of clients) next.clients.add(ws);
+
+  next.ready.then(() => {
+    for (const ws of clients) {
+      if (ws.readyState === ws.OPEN && next.clients.has(ws)) {
+        sendSubscriptionSnapshot(ws, id, next);
+      }
+    }
+  }).catch((err) => {
+    for (const ws of clients) {
+      send(ws, { type: 'ack', op: 'subscribe', ok: false, error: String(err?.message || err) });
+    }
+  });
+}
+
+async function ensureCodexRpcForSession(session) {
+  if (session.kind !== 'codex') return null;
+  const existing = codexRpc.get(session.target);
+  if (existing) return existing;
+
+  let capture = '';
+  try {
+    capture = await tmux.capturePane(session.target, 200, false, true);
+  } catch {
+    return null;
+  }
+  const endpoint = parseCodexAppServerEndpoint(capture);
+  if (!endpoint) {
+    if (isCodexAppServerCapture(capture)) {
+      throw new Error('Codex RPC app-server endpoint unavailable; refusing to type prompt into tmux pane');
+    }
+    return null;
+  }
+
+  return codexRpc.ensureAttached({
+    target: session.target,
+    endpoint,
+    cwd: session.cwd,
+    resumeThreadId: session.sessionId,
+    transcriptPath: session.transcriptPath,
+  });
 }
 
 // Poll the live pane for a TUI selection prompt (permission/trust/numbered menu).
@@ -1388,16 +1599,7 @@ async function handleClientMessage(ws, msg) {
       }
       // Client may have unsubscribed/closed while we awaited.
       if (!sub.clients.has(ws)) return;
-      send(ws, {
-        type: 'messages',
-        id: msg.id,
-        // Tailer-less subscription (no matched transcript): no history to send.
-        messages: sub.tailer ? sub.tailer.getMessages() : [],
-        pending: sub.tailer ? sub.tailer.getPending() : null,
-      });
-      // Snapshot any already-running sub-agents for this session.
-      const subs = sub.subagents ? sub.subagents.snapshot() : [];
-      if (subs.length) send(ws, { type: 'subagents', id: msg.id, subagents: subs });
+      sendSubscriptionSnapshot(ws, msg.id, sub);
       return;
     }
     case 'unsubscribe': {
@@ -1411,6 +1613,23 @@ async function handleClientMessage(ws, msg) {
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const replyText = String(msg.text ?? '');
       return runSerial(session.target, async () => {
+        if (session.kind === 'codex') {
+          const codexClient = await ensureCodexRpcForSession(session);
+          if (codexClient) {
+            registry.setThinking(session.target, true);
+            try {
+              await codexRpc.submit(session.target, replyText, { cwd: session.cwd });
+            } catch (err) {
+              registry.setThinking(session.target, false);
+              throw err;
+            }
+            send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'codex-rpc' });
+            return;
+          }
+          // Codex TUI compatibility: only non-app-server Codex panes may use
+          // tmux keystrokes. RPC app-server panes must never receive prompt text
+          // in their terminal buffer.
+        }
         await tmux.sendText(session.target, replyText);
         send(ws, { type: 'ack', op: 'reply', ok: true });
       });
@@ -1680,10 +1899,20 @@ async function handleClientMessage(ws, msg) {
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
       const promptKey = msg.key;
       return runSerial(session.target, async () => {
-        // Codex confirms a numbered choice with <digit> THEN Enter ("Press enter
-        // to confirm"); the digit alone only moves the highlight, so without the
-        // Enter the modal hangs on "submitting…". Claude's numbered menus act on
-        // the digit alone, so only Codex needs the trailing Enter.
+        if (session.kind === 'codex') {
+          const codexClient = await ensureCodexRpcForSession(session);
+          if (codexClient && codexRpc.prompt(session.target)) {
+            codexRpc.answerPrompt(session.target, promptKey);
+            const sub = subscriptions.get(msg.id);
+            if (sub) sub._lastPrompt = '__force__';
+            send(ws, { type: 'ack', op: 'promptkey', ok: true, transport: 'codex-rpc' });
+            return;
+          }
+          // Codex TUI compatibility only; app-server panes are rejected inside
+          // ensureCodexRpcForSession when an RPC endpoint cannot be attached.
+        }
+        // Codex TUI confirms a numbered choice with <digit> THEN Enter ("Press
+        // enter to confirm"); the digit alone only moves the highlight.
         const isDigit = /^[1-9]$/.test(promptKey);
         if (session.kind === 'codex' && isDigit) {
           await tmux.sendRawKeysSequenced(session.target, [promptKey, 'Enter'], 120);
@@ -1845,6 +2074,8 @@ function firePushForChange(sessions) {
 }
 
 registry.on('change', (sessions) => {
+  codexRpc.sweep(sessions.map((s) => s.id));
+  for (const s of sessions) upgradeSubscriptionIfTranscriptReady(s.id);
   firePushForChange(sessions);
   broadcast({ type: 'sessions', sessions });
 });
