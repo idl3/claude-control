@@ -263,20 +263,26 @@ test('parseCodexRecord: developer message → null (system injection filtered)',
   assert.equal(parseCodexRecord(line), null);
 });
 
-test('parseCodexRecord: encrypted reasoning with no summary → null', () => {
+test('parseCodexRecord: reasoning with summary → thinking block shows the decoded text', () => {
   const line = JSON.stringify({
     type: 'response_item',
     payload: {
       type: 'reasoning',
-      summary: [],
+      summary: [{ type: 'summary_text', text: 'Considering the edge cases first.' }],
       encrypted_content: 'gAAAAABq...',
     },
     timestamp: '2026-06-21T06:27:31.667Z',
   });
-  assert.equal(parseCodexRecord(line), null);
+  const msg = parseCodexRecord(line);
+  assert.notEqual(msg, null);
+  assert.equal(msg.role, 'assistant');
+  assert.equal(msg.blocks.length, 1);
+  assert.equal(msg.blocks[0].kind, 'thinking');
+  assert.equal(msg.blocks[0].text, 'Considering the edge cases first.');
+  assert.equal(msg.rawType, 'reasoning');
 });
 
-test('parseCodexRecord: reasoning summary → role assistant, thinking block', () => {
+test('parseCodexRecord: reasoning summary with multiple parts → joined thinking text', () => {
   const line = JSON.stringify({
     type: 'response_item',
     payload: {
@@ -291,8 +297,21 @@ test('parseCodexRecord: reasoning summary → role assistant, thinking block', (
   assert.equal(msg.role, 'assistant');
   assert.equal(msg.blocks.length, 1);
   assert.equal(msg.blocks[0].kind, 'thinking');
-  assert.equal(msg.blocks[0].text, 'Checked the component layout.\nNext, validate spacing.');
+  assert.equal(msg.blocks[0].text, 'Checked the component layout.\n\nNext, validate spacing.');
   assert.equal(msg.rawType, 'reasoning');
+});
+
+test('parseCodexRecord: reasoning with no readable summary → null (block hidden)', () => {
+  const line = JSON.stringify({
+    type: 'response_item',
+    payload: {
+      type: 'reasoning',
+      summary: [],
+      encrypted_content: 'gAAAAABq...',
+    },
+    timestamp: '2026-06-21T06:27:31.667Z',
+  });
+  assert.equal(parseCodexRecord(line), null);
 });
 
 test('parseCodexRecord: function_call → tool_use block with id, name, input, inputSummary', () => {

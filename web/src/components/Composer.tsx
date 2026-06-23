@@ -101,6 +101,10 @@ interface ComposerProps {
   /** True while the selected Claude session is actively generating/thinking.
    *  Flips the primary send button into a STOP button. Ignored in terminal mode. */
   working?: boolean;
+  /** True while the selected Claude session is compacting its conversation. The
+   *  composer blocks sends and shows a "Compacting…" progress strip so it never
+   *  looks hung. */
+  compacting?: boolean;
   /** Called when the user clicks the STOP button (or presses Esc from App).
    *  Should send Escape to the session's Claude pane. */
   onStop?: () => void;
@@ -223,6 +227,7 @@ export function Composer({
   onSubAgentModeChange,
   onTerminalModeChange,
   working = false,
+  compacting = false,
   onStop,
   askActive = false,
   activePrompt = null,
@@ -1477,7 +1482,7 @@ export function Composer({
   );
 
   const runEnhance = useCallback(async () => {
-    if (disabled || optimizing) return;
+    if (disabled || optimizing || compacting) return;
     const original = composer.getState().text ?? '';
     if (!original.trim()) return;
     const sid = key; // the session this enhancement belongs to
@@ -1490,7 +1495,7 @@ export function Composer({
     } catch {
       patchEnhance(sid, { optimizing: false });
     }
-  }, [composer, composerServices, disabled, optimizing, key, patchEnhance]);
+  }, [composer, composerServices, disabled, optimizing, compacting, key, patchEnhance]);
 
   // ⌘/Ctrl+Enter (optimise) and ⌘/Ctrl+Shift+Enter (send raw) from ANYWHERE —
   // window-level + capture phase so it fires even when focus is outside the
@@ -1765,6 +1770,14 @@ export function Composer({
           onSelect={onSelect ?? (() => {})}
           onReply={onReply ?? (() => {})}
         />
+        {/* Compaction strip: Claude is compacting context — sends are blocked
+            (the TUI ignores input) and this shows it's progressing, not hung. */}
+        {compacting && !terminal && !voice && !askActive ? (
+          <div className="composer-compacting" role="status" aria-live="polite">
+            <span className="working-spinner" aria-hidden="true" />
+            <span>Compacting conversation… sending is paused</span>
+          </div>
+        ) : null}
         {/* Placeholder needs the Kbd component, but a native placeholder is
             text-only — so use a space placeholder (keeps :placeholder-shown
             working + invisible) and overlay a hint shown only while empty. */}
@@ -2035,7 +2048,7 @@ export function Composer({
               className="composer-enhance composer-bypass"
               aria-label="Send without optimising"
               title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
-              disabled={disabled || optimizing || empty}
+              disabled={disabled || optimizing || empty || compacting}
               onClick={() => {
                 composer.send();
                 refocusComposer();
@@ -2082,7 +2095,7 @@ export function Composer({
                   data-queue={working ? 'true' : undefined}
                   aria-label="Optimise and send"
                   title="Optimise & send (⌘/Ctrl+↵)"
-                  disabled={disabled || optimizing || empty}
+                  disabled={disabled || optimizing || empty || compacting}
                   data-hotkey="⌘↵"
                   onClick={() => void runEnhance()}
                 >

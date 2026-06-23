@@ -10,7 +10,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig } from './lib/api';
+import { renameSession, createSession, getConfig, resetBinding, rematchAll } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -40,6 +40,7 @@ import {
   SettingsIcon,
   ActivityIcon,
   SearchIcon,
+  RefreshIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Msg, ServerMessage } from './lib/types';
@@ -291,6 +292,12 @@ function AppInner() {
       // Apply the sub-agent prefix when: mode is on for this session AND the
       // composer is NOT in >_ terminal mode (that would corrupt shell commands).
       const sid = cockpit.selectedId;
+      // Block sends while Claude is compacting — the TUI ignores input during
+      // compaction, so a send would silently vanish and look like a hang.
+      if (cockpit.sessions.find((s) => s.id === sid)?.compacting) {
+        showToast('Compacting conversation… hold on', 'error');
+        return;
+      }
       const mode = sid != null ? (subAgentModesRef.current[sid] ?? true) : false;
       const inTerminal = composerTerminalRef.current;
       const prefixedTyped =
@@ -731,9 +738,30 @@ function AppInner() {
       gsap.set(rail, { clearProps: 'width,flexBasis,opacity' });
       return;
     }
-    const target = railCollapsed
-      ? { width: 0, flexBasis: 0, opacity: 0 }
-      : { width: 300, flexBasis: 300, opacity: 1 };
+    // COLLAPSED → width 0. EXPANDED → the rail width is CSS-driven (responsive +
+    // ~460px on an external display), so we must NEVER pin an inline width on
+    // expand — that overrides the CSS (the old `width:300` bug). Instead clear
+    // inline width/flex and let CSS govern; animate up to the CSS width, then
+    // clear again so future responsive/external changes apply.
+    if (!railCollapsed) {
+      if (prefersReducedMotion() || !railAnimatedRef.current) {
+        gsap.set(rail, { clearProps: 'width,flexBasis', opacity: 1 });
+        railAnimatedRef.current = true;
+        return;
+      }
+      gsap.set(rail, { clearProps: 'width,flexBasis' });
+      const targetW = rail.offsetWidth; // the CSS-defined width to animate up to
+      gsap.fromTo(
+        rail,
+        { width: 0, flexBasis: 0, opacity: 0 },
+        {
+          width: targetW, flexBasis: targetW, opacity: 1, duration: 0.3, ease: 'power3.out',
+          onComplete: () => gsap.set(rail, { clearProps: 'width,flexBasis' }),
+        },
+      );
+      return;
+    }
+    const target = { width: 0, flexBasis: 0, opacity: 0 };
     if (prefersReducedMotion() || !railAnimatedRef.current) {
       gsap.set(rail, target); // instant on first paint / reduced motion
       railAnimatedRef.current = true;
@@ -1263,6 +1291,18 @@ function AppInner() {
         run: () => toggleRail(),
       },
       {
+        id: 'act:rematch-all',
+        label: 'Re-match all windows (clear stale pins)',
+        group: 'Actions',
+        keywords: 'rebind pin transcript stale stuck old conversation rematch',
+        run: () => {
+          showToast('Re-matching all windows…');
+          rematchAll()
+            .then(() => showToast('All windows re-matched →', 'ok'))
+            .catch((err) => showToast(`Re-match failed: ${(err as Error).message}`, 'error'));
+        },
+      },
+      {
         id: 'act:reload',
         label: 'Reload app',
         group: 'Actions',
@@ -1443,6 +1483,23 @@ function AppInner() {
                     <button
                       type="button"
                       className="detail-action"
+                      aria-label="Reset transcript binding"
+                      title="Reset binding — re-match this window to its current transcript (after /clear or a new session)"
+                      onClick={async () => {
+                        const id = selectedSession.id;
+                        try {
+                          await resetBinding(id);
+                          showToast('Re-matching transcript →', 'ok');
+                        } catch (err) {
+                          showToast(`Reset failed: ${(err as Error).message}`, 'error');
+                        }
+                      }}
+                    >
+                      <RefreshIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-action"
                       aria-label="Open raw terminal"
                       title="Raw terminal (⌘J)"
                       data-hotkey="⌘J"
@@ -1554,6 +1611,7 @@ function AppInner() {
                     }
                     onCloseAgent={closeAgent}
                     working={agentWorking}
+                    compacting={!!selectedSession?.compacting}
                     onStop={handleStop}
                     askActive={askActive}
                     activePrompt={activePrompt}
