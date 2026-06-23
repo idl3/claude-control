@@ -20,14 +20,13 @@ import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
-import { AskModal } from './components/AskModal';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
-import { PromptModal } from './components/PromptModal';
+import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import { ProcessPanel } from './components/ProcessPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
@@ -519,11 +518,6 @@ function AppInner() {
     }
   }, [cockpit.selectedId, runtime]);
 
-  // Locally dismissed AskUserQuestion (keyed by toolUseId). The modal is driven
-  // by server-pushed `pending`; dismissing hides it until a *new* question (new
-  // toolUseId) arrives, without needing the server to clear pending first.
-  const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
-
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -591,7 +585,6 @@ function AppInner() {
   // Inline agent transcript: set by clicking a pill, cleared on session switch or back.
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
-  const [dismissedPrompt, setDismissedPrompt] = useState<string | null>(null);
   useEffect(() => {
     setPanelOpen(false);
     setViewingAgentId(null);
@@ -937,6 +930,24 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
+  // Compute the single active prompt for the inline morph. Prefer structured
+  // `pending` (AskUserQuestion) over the screen-scrape `prompt` (PanePrompt).
+  const activePrompt = useMemo<ActivePrompt | null>(() => {
+    if (cockpit.pending) return { kind: 'ask', pending: cockpit.pending };
+    if (cockpit.prompt) {
+      return {
+        kind: 'prompt',
+        prompt: cockpit.prompt,
+        planMarkdown,
+        agentName: selectedSession?.kind === 'codex' ? 'Codex' : 'Claude',
+      };
+    }
+    return null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind]);
+
+  const askActive = activePrompt !== null;
+
   // True while the selected Claude session is actively generating/thinking,
   // OR while a just-sent message is still unconfirmed (bridges the ~2-4s poll
   // gap so the working indicator fires immediately on send). Capped at 20s so a
@@ -953,6 +964,12 @@ function AppInner() {
     cockpit.sendPromptKey('Escape');
     showToast('Canceled →');
   }, [cockpit, showToast]);
+
+  // Free-text reply from the inline prompt: same path as a normal composer send.
+  const onInlineReply = useCallback((text: string) => {
+    if (!text.trim()) return;
+    cockpit.sendReply(text);
+  }, [cockpit]);
 
   // Active session's sub-agent mode (default true for unseen sessions).
   const activeSubAgentMode: SubAgentMode =
@@ -1490,6 +1507,25 @@ function AppInner() {
                     onCloseAgent={closeAgent}
                     working={agentWorking}
                     onStop={handleStop}
+                    askActive={askActive}
+                    activePrompt={activePrompt}
+                    onAnswer={(toolUseId, selections) => {
+                      cockpit.sendAnswer(toolUseId, selections);
+                      cockpit.clearCapture();
+                      if (cockpit.selectedId) {
+                        setAnswering({
+                          sessionId: cockpit.selectedId,
+                          baseCount: cockpit.messages.length,
+                        });
+                      }
+                    }}
+                    onKey={(key) => cockpit.sendPromptKey(key)}
+                    onSelect={(labels) =>
+                      cockpit.selectedId
+                        ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
+                        : false
+                    }
+                    onReply={onInlineReply}
                   />
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
@@ -1504,34 +1540,6 @@ function AppInner() {
             </div>
           </main>
         </div>
-
-        {cockpit.pending &&
-        cockpit.pending.toolUseId !== dismissedAsk ? (
-          <AskModal
-            key={cockpit.pending.toolUseId}
-            pending={cockpit.pending}
-            capture={cockpit.capture}
-            onAnswer={(toolUseId, selections) => {
-              cockpit.sendAnswer(toolUseId, selections);
-              setDismissedAsk(toolUseId);
-              cockpit.clearCapture();
-              // Show a working indicator after answering (no user echo — the
-              // choice is shown in the AskUserQuestion widget), cleared when the
-              // agent's transcript activity arrives.
-              if (cockpit.selectedId) {
-                setAnswering({
-                  sessionId: cockpit.selectedId,
-                  baseCount: cockpit.messages.length,
-                });
-              }
-            }}
-            onCapture={cockpit.requestCapture}
-            onClose={() => {
-              setDismissedAsk(cockpit.pending?.toolUseId ?? null);
-              cockpit.clearCapture();
-            }}
-          />
-        ) : null}
 
         {configOpen ? (
           <ConfigModal
@@ -1571,23 +1579,6 @@ function AppInner() {
 
         {paletteOpen ? (
           <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
-        ) : null}
-
-        {cockpit.prompt &&
-        !cockpit.pending &&
-        JSON.stringify(cockpit.prompt) !== dismissedPrompt ? (
-          <PromptModal
-            prompt={cockpit.prompt}
-            agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
-            planMarkdown={planMarkdown}
-            onKey={(key) => cockpit.sendPromptKey(key)}
-            onSelect={(labels) =>
-              cockpit.selectedId
-                ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
-                : false
-            }
-            onClose={() => setDismissedPrompt(JSON.stringify(cockpit.prompt))}
-          />
         ) : null}
 
         <HotkeyHints />

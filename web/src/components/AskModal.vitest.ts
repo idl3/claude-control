@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { questionHasPreview } from './AskModal';
+import { questionHasPreview } from './AskInline';
 import type { PendingQuestion, Pending } from '../lib/types';
 
 // Helper builders
