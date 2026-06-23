@@ -142,7 +142,11 @@ function AppInner() {
       const isIPad =
         /iPad/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      const isExternal = isIPad && (window.screen.width > 1200 || window.innerWidth > 1200);
+      // External-display sizing should fire ONLY on a genuinely large (≥2K)
+      // display, never on the iPad's own screen (≤1366 logical px). A 2K+ monitor
+      // — whether a desktop or an iPad driving an external display — reports a
+      // ≥2000px viewport; the iPad panel never does. Resolution gate, not isIPad.
+      const isExternal = window.matchMedia('(min-width: 2000px)').matches;
       document.body.classList.toggle('is-ipad', isIPad);
       document.body.classList.toggle('is-external-display', isExternal);
     };
@@ -162,14 +166,18 @@ function AppInner() {
     let extPx = 0;
     let alive = true;
 
+    // The chosen px is the transcript size; we express it as a GLOBAL scale
+    // (relative to the 13.5px mobile baseline) so every text token — transcript,
+    // meta, composer — scales together off the one setting.
+    const BASELINE_PX = 13.5;
     const apply = () => {
       if (!alive) return;
       const isExternal = document.body.classList.contains('is-external-display');
       const chosen = isExternal && extPx > 0 ? extPx : basePx > 0 ? basePx : 0;
       if (chosen > 0) {
-        document.documentElement.style.setProperty('--txt-transcript', `${chosen}px`);
+        document.documentElement.style.setProperty('--ui-scale', String(chosen / BASELINE_PX));
       } else {
-        document.documentElement.style.removeProperty('--txt-transcript');
+        document.documentElement.style.removeProperty('--ui-scale');
       }
     };
 

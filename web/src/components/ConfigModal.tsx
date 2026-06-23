@@ -398,7 +398,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
               ))}
             </select>
             <span className="config-hint">
-              Base transcript size (iPad + desktop). Default uses the built-in CSS token.
+              Base UI text size — scales the whole interface (transcript, meta, composer).
+              Default uses the built-in CSS token.
             </span>
           </label>
 
@@ -416,7 +417,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
               ))}
             </select>
             <span className="config-hint">
-              Applies only when iPad drives an external monitor. Overrides base size on that display.
+              Applies only on a large external display (≥2K / ≥2000px wide), never on the
+              iPad's own screen. Overrides the base size there.
             </span>
           </label>
 
