@@ -1131,6 +1131,21 @@ async function handleSetPin(req, res) {
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }
+  // Global "re-match all windows": drop every manual pin so every pane falls
+  // back to the SessionStart-hook binding (the accurate, current transcript).
+  // Used by the "Re-match all" command to recover from stale pins in bulk.
+  if (body?.all === true) {
+    pins = {};
+    try {
+      savePins(CONFIG.pinsFile, pins);
+    } catch (err) {
+      return endJson(res, 500, { error: String(err?.message || err) });
+    }
+    registry.setPins(pins);
+    await registry.refresh().catch(() => {});
+    return endJson(res, 200, { ok: true, pins });
+  }
+
   const id = typeof body?.id === 'string' ? body.id : '';
   const session = sessionById(id);
   if (!session) return endJson(res, 404, { error: 'unknown session' });
@@ -1150,6 +1165,9 @@ async function handleSetPin(req, res) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }
   registry.setPins(pins);
+  // Re-run the matcher NOW so clearing/setting a pin re-binds immediately
+  // (otherwise the change only lands on the next 4 s refresh tick).
+  await registry.refresh().catch(() => {});
   return endJson(res, 200, { ok: true, pins });
 }
 
