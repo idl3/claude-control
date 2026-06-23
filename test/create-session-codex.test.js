@@ -17,6 +17,7 @@ import fsp from 'node:fs/promises';
 
 import { sanitizeName, shellQuoteName, defaultSessionName } from '../lib/tmux.js';
 import { buildSpawnCommand, buildAppServerCommand } from '../lib/codex.js';
+import { buildBridgeCommand } from '../lib/claude-print.js';
 
 // Mirror of server.js handleSessionNew's Codex launch construction EXACTLY:
 // buildSpawnCommand is the single source of truth for the flags, and the cwd
@@ -114,6 +115,23 @@ describe('handleSessionNew claude launch string (byte-identical regression)', ()
     const launch = `${config.launchCommand} --name ${shellQuoteName(name)}`;
     assert.ok(launch.includes('--name'), 'claude launch has --name');
     assert.ok(!launch.includes(' -C '), 'claude launch must not have codex -C flag');
+  });
+
+  test('claude print bridge launch uses node bridge and quoted args', () => {
+    const launch = buildBridgeCommand({
+      nodeBin: '/usr/local/bin/node',
+      bridgePath: '/app/bin/claude-print-bridge.mjs',
+      socketPath: '/tmp/cc.sock',
+      cwd: '/workspace',
+      claudeBin: '/usr/local/bin/claude',
+      name: 'my session',
+      permissionMode: 'acceptEdits',
+      quote: shellQuoteName,
+    });
+    assert.equal(
+      launch,
+      "'/usr/local/bin/node' '/app/bin/claude-print-bridge.mjs' --socket '/tmp/cc.sock' --cwd '/workspace' --bin '/usr/local/bin/claude' --permission-mode 'acceptEdits' --name 'my session'",
+    );
   });
 });
 
@@ -241,11 +259,13 @@ describe('/api/spawn-agents response shape', () => {
     const claudeResult = { available: true, path: '/usr/bin/claude' };
     const codexResult = { available: false, reason: 'codex not found on PATH' };
     const agents = [
-      {
-        id: 'claude',
-        available: claudeResult.available,
-        ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
-      },
+          {
+            id: 'claude',
+            available: claudeResult.available,
+            defaultTransport: 'tmux',
+            transports: ['tmux', 'print'],
+            ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+          },
       {
         id: 'codex',
         available: codexResult.available,
@@ -261,24 +281,33 @@ describe('/api/spawn-agents response shape', () => {
     assert.equal(agents[1].reason, 'codex not found on PATH');
     assert.equal(agents[1].defaultTransport, 'rpc');
     assert.deepEqual(agents[1].transports, ['rpc', 'tmux']);
+    assert.equal(agents[0].defaultTransport, 'tmux');
+    assert.deepEqual(agents[0].transports, ['tmux', 'print']);
     assert.ok(!('reason' in agents[0]), 'no reason key when available');
   });
 
   test('both agents available: neither has a reason key', () => {
     const agents = [
-      { id: 'claude', available: true },
+      { id: 'claude', available: true, defaultTransport: 'tmux', transports: ['tmux', 'print'] },
       { id: 'codex', available: true, defaultTransport: 'rpc', transports: ['rpc', 'tmux'] },
     ];
     assert.ok(!('reason' in agents[0]));
     assert.ok(!('reason' in agents[1]));
     assert.deepEqual(agents[1].transports, ['rpc', 'tmux']);
+    assert.deepEqual(agents[0].transports, ['tmux', 'print']);
   });
 
   test('both agents unavailable: both have reason strings', () => {
     const claudeResult = { available: false, reason: 'claude not found on PATH' };
     const codexResult = { available: false, reason: 'codex not found on PATH' };
     const agents = [
-      { id: 'claude', available: claudeResult.available, ...(claudeResult.available ? {} : { reason: claudeResult.reason }) },
+      {
+        id: 'claude',
+        available: claudeResult.available,
+        defaultTransport: 'tmux',
+        transports: ['tmux', 'print'],
+        ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+      },
       {
         id: 'codex',
         available: codexResult.available,

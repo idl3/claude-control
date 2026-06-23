@@ -28,12 +28,18 @@ export interface Session {
   isClaude?: boolean;
   /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal). */
   kind?: 'claude' | 'codex' | 'terminal';
+  /** Per-session control transport. */
+  transport?: 'tmux' | 'rpc' | 'print' | null;
+  /** Local structured transport endpoint, when the server exposes one. */
+  endpoint?: string | null;
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */
   ccShell?: boolean;
   model?: string | null;
   ctxPct?: number | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
   thinking?: boolean;
+  /** true while Claude is compacting the conversation (TUI "Compacting conversation…") */
+  compacting?: boolean;
   /** Codex-only: primary rate-limit used_percent (0–100). null for Claude sessions. */
   usagePct?: number | null;
   /** Codex-only: primary rate-limit window in minutes (e.g. 300 = 5h, 10080 = 7d). */

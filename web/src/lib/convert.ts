@@ -57,6 +57,66 @@ export function toolResult(result: unknown): CockpitToolResult | null {
   return null;
 }
 
+// AskUserQuestion answered-result signature + the free-text option labels Claude
+// records when the user picks "type something" (the literal label, NOT the typed
+// text — see #41). The typed text rides in a following reply message.
+const ANSWERED_SIG = 'have been answered';
+const FREE_TEXT_ANSWER_RE = /="(?:type something|chat about this)"/i;
+// Only scan a few messages ahead for the reply so a stray later user turn can't
+// be mistaken for the free-text answer.
+const REPLY_LOOKAHEAD = 4;
+
+/** Join a message's text blocks into one trimmed string ('' when none). */
+function messageText(msg: Msg): string {
+  return (msg.blocks ?? [])
+    .filter((b): b is { kind: 'text'; text: string } => b.kind === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+}
+
+/**
+ * Rewrite AskUserQuestion results that recorded a free-text option label so the
+ * answer shows the user's actual typed reply (the next user text message). Pure
+ * display fix: the underlying transcript is untouched; only the in-memory result
+ * the card reads is rewritten. No-op unless the result is an answered
+ * AskUserQuestion with a free-text label AND a following user reply exists.
+ */
+function linkFreeTextReplies(
+  messages: Msg[],
+  resultsById: Map<string, CockpitToolResult>,
+): void {
+  messages.forEach((msg, i) => {
+    for (const block of msg.blocks ?? []) {
+      if (block.kind !== 'tool_result') continue;
+      const res = resultsById.get(block.forId);
+      if (!res || res.isError) continue;
+      if (!res.text.includes(ANSWERED_SIG) || !FREE_TEXT_ANSWER_RE.test(res.text)) continue;
+
+      // Find the typed reply: the first following user message that carries text.
+      let reply = '';
+      for (let j = i + 1; j < messages.length && j <= i + REPLY_LOOKAHEAD; j++) {
+        if (messages[j].role !== 'user') continue;
+        const t = messageText(messages[j]);
+        if (t) {
+          reply = t;
+          break;
+        }
+      }
+      if (!reply) continue;
+
+      // The answered string is parsed as "Q"="A" pairs (split on quotes), so a
+      // quote in the reply would corrupt the parse — swap to a typographic quote.
+      const safe = reply.replace(/"/g, '”');
+      const rewritten = res.text.replace(
+        /(=")(?:type something|chat about this)(")/gi,
+        (_m, lead: string, tail: string) => `${lead}${safe}${tail}`,
+      );
+      resultsById.set(block.forId, { ...res, text: rewritten });
+    }
+  });
+}
+
 /**
  * Convert our transcript Msg[] into assistant-ui ThreadMessageLike[].
  *
@@ -84,6 +144,13 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
       }
     }
   }
+
+  // Pass 1b: AskUserQuestion answered via the inline "Type something" flow records
+  // only the literal option label as the answer; the user's typed text is a
+  // SEPARATE reply message that follows. Splice that typed reply into the result
+  // so the answered card shows what was actually typed instead of the stock
+  // free-text placeholder (#41).
+  linkFreeTextReplies(messages, resultsById);
 
   // Pass 2: build messages. Drop messages that contain only tool_result
   // blocks (their content is folded into the originating tool-call part).
