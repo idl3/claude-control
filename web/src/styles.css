@@ -558,7 +558,7 @@ body {
   align-items: center;
 }
 .meta-model {
-  font-size: var(--txt-transcript);
+  font-size: var(--txt-meta);
   color: var(--accent-2);
   overflow: hidden;
   text-overflow: ellipsis;
