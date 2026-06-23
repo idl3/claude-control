@@ -157,6 +157,15 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       setMlxModel(saved.mlxModel ?? '');
       setTranscriptFontSize(saved.transcriptFontSize ?? 0);
       setExternalFontSize(saved.externalFontSize ?? 0);
+      // Apply the new font size LIVE (no reload): App's font effect listens.
+      window.dispatchEvent(
+        new CustomEvent('cockpit:fontsize', {
+          detail: {
+            transcriptFontSize: saved.transcriptFontSize ?? 0,
+            externalFontSize: saved.externalFontSize ?? 0,
+          },
+        }),
+      );
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);

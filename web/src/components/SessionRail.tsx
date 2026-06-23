@@ -206,11 +206,11 @@ function PaneRow({
           }
         >
           {isTerminal ? (
-            <TerminalSquareIcon size={15} />
+            <TerminalSquareIcon size={18} />
           ) : isCodex ? (
-            <CodexIcon size={12} />
+            <CodexIcon size={15} />
           ) : (
-            <ClaudeRobotIcon size={14} />
+            <ClaudeRobotIcon size={17} />
           )}
           {claudeState === 'ask' ? (
             <span className="pane-icon-badge pane-icon-ask" aria-hidden="true">?</span>
