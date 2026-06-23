@@ -39,6 +39,10 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState<{
     current: string;
+    root?: string;
+    branch?: string | null;
+    commit?: string | null;
+    dirty?: boolean | null;
     latest: string | null;
     updateAvailable: boolean;
   } | null>(null);
@@ -169,6 +173,18 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     }
   };
 
+  const versionMeta = version
+    ? [
+        version.branch && version.commit
+          ? `${version.branch}@${version.commit}`
+          : version.commit || null,
+        version.dirty === true ? 'dirty' : version.dirty === false ? 'clean' : null,
+        version.root || null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+
   return (
     <div
       className="config-overlay"
@@ -257,8 +273,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 spellCheck={false}
               />
               <span className="config-hint">
-                What gets typed to launch the agent — may be a shell alias (e.g.{' '}
-                <code>yodex</code>).
+                What gets typed to launch Codex — may be a shell alias (e.g.{' '}
+                <code>yodex</code>). RPC mode appends <code>app-server --listen</code>.
               </span>
             </label>
             <label className="config-field config-field--wide">
@@ -451,6 +467,11 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
           {version ? (
             <>
               <span>claude-control v{version.current}</span>
+              {versionMeta ? (
+                <span className="config-version-copy" title={version.root || undefined}>
+                  {versionMeta}
+                </span>
+              ) : null}
               {version.updateAvailable && version.latest ? (
                 <span className="config-version-update">
                   · update available: v{version.latest}

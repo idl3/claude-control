@@ -174,7 +174,7 @@ export type ServerMessage =
   | { type: 'subagent'; id: string; subagent: SubAgent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
   | { type: 'shell-output'; text: string; id?: string }
-  | { type: 'ack'; op: string; ok: boolean; error?: string };
+  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string };
 
 // Client -> server WebSocket frames.
 export type ClientMessage =

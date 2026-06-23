@@ -10,6 +10,8 @@ import type { SubAgent } from '../lib/types';
 
 interface ThreadProps {
   hasSelection: boolean;
+  /** Human-readable agent name used in the empty-state copy. */
+  agentName?: string;
   /**
    * While true, the transcript for the selected session is still loading from
    * the server. Show a tasteful loader instead of the welcome screen.
@@ -122,6 +124,7 @@ function WelcomeChips() {
 
 export function Thread({
   hasSelection,
+  agentName = 'Claude',
   loading = false,
   sessionId,
   hiddenCount,
@@ -180,7 +183,7 @@ export function Thread({
                   <div className="thread-welcome">
                     <h1 className="thread-welcome-heading">What are we shipping today?</h1>
                     <p className="thread-welcome-subtitle">
-                      Talk to Claude — type a prompt, or use a skill&nbsp;/ agent.
+                      Talk to {agentName} — type a prompt, or use a skill&nbsp;/ agent.
                     </p>
                     <WelcomeChips />
                   </div>

@@ -23,6 +23,10 @@ function defaultName(now: number = Date.now()): string {
   return `session-${now.toString(36).slice(-6)}`;
 }
 
+function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' {
+  return filter === 'codex' ? 'codex' : 'claude';
+}
+
 /** Derive filter badge label for the funnel button. */
 export function filterTag(filter: SessionFilter): string | null {
   if (filter === 'claude') return 'CC';
@@ -57,7 +61,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     setPlaceholder(defaultName());
     setName('');
     setCwd('');
-    setAgent('claude');
+    setAgent(defaultAgentForFilter(filter));
     setAgentInfos([]);
     fetchSpawnAgents()
       .then(setAgentInfos)
@@ -71,7 +75,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
       });
     // Focus the name field after a tick (form mount).
     setTimeout(() => nameInputRef.current?.focus(), 0);
-  }, [open]);
+  }, [open, filter]);
 
   const close = useCallback(() => {
     setOpen(false);
