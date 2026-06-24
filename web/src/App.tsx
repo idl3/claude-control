@@ -22,6 +22,7 @@ import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
+import { PermissionBanner } from './components/PermissionBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { TerminalPanel } from './components/TerminalPanel';
@@ -1413,6 +1414,7 @@ function AppInner() {
           push={push}
         />
         <UpdateBanner />
+        <PermissionBanner show={cockpit.sessions.some((s) => s.permIssue)} />
         {showIosHint ? (
           <div className="ios-push-hint" role="note">
             On iPhone/iPad, add this site to your Home Screen to receive push

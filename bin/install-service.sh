@@ -113,3 +113,15 @@ if [ -n "$TOKEN" ]; then
 else
   echo "  auth:  TOKENLESS (tailnet-only)"
 fi
+
+# macOS only: a launchd service has no Full Disk Access, so panes get
+# "Operation not permitted" on ~/Documents etc. Remind the user to grant it.
+if [ "$(uname)" = "Darwin" ]; then
+  echo ""
+  echo "⚠ macOS Full Disk Access: panes spawned by the service can't read"
+  echo "  ~/Documents, ~/Desktop, ~/Downloads until you grant Full Disk Access to:"
+  echo "      $NODE_BIN"
+  echo "  System Settings → Privacy & Security → Full Disk Access → + (⌘⇧G to paste"
+  echo "  the path) → enable it, then restart the service + run 'tmux kill-server'."
+  echo "  Details: https://github.com/idl3/claude-control#macos-full-disk-access"
+fi
