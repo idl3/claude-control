@@ -140,7 +140,7 @@ function PaneRow({
     ? null
     : s.pending
       ? 'ask'
-      : hasRunningSubagents
+      : hasRunningSubagents || s.subAgentActive
         ? 'cloning'
         : claudeWorking(s) || s.id === workingOverrideId
           ? 'working'
