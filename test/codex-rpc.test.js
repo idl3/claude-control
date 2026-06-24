@@ -121,3 +121,89 @@ test('CodexRpcClient _openThread retries resume without path for older app-serve
     threadId: 'thread-1',
   });
 });
+
+test('CodexRpcClient item/completed appends displayable app-server messages', () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  const batches = [];
+  const rawEvents = [];
+  client.on('messages', (messages) => batches.push(messages));
+  client.on('raw', (event) => rawEvents.push(event));
+
+  client._onMessage({
+    method: 'item/completed',
+    params: {
+      completedAtMs: 123,
+      item: {
+        id: 'user-1',
+        type: 'userMessage',
+        content: [{ type: 'text', text: 'Please inspect the event stream.' }],
+      },
+    },
+  });
+  client._onMessage({
+    method: 'item/completed',
+    params: {
+      completedAtMs: 124,
+      item: {
+        id: 'agent-1',
+        type: 'agentMessage',
+        text: 'The stream is separated from transcript rendering.',
+      },
+    },
+  });
+
+  assert.equal(batches.length, 2);
+  assert.equal(client.messages.length, 2);
+  assert.equal(client.messages[0].role, 'user');
+  assert.equal(client.messages[0].blocks[0].text, 'Please inspect the event stream.');
+  assert.equal(client.messages[1].role, 'assistant');
+  assert.equal(client.messages[1].blocks[0].text, 'The stream is separated from transcript rendering.');
+  assert.equal(rawEvents.length, 2);
+});
+
+test('CodexRpcClient keeps raw/status/unknown app-server events out of transcript messages', () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  const batches = [];
+  const rawEvents = [];
+  const statuses = [];
+  client.on('messages', (messages) => batches.push(messages));
+  client.on('raw', (event) => rawEvents.push(event));
+  client.on('status', (status) => statuses.push(status));
+
+  client._onMessage({
+    method: 'thread/status/changed',
+    params: { status: { type: 'active' } },
+  });
+  client._onMessage({
+    method: 'item/completed',
+    params: {
+      completedAtMs: 125,
+      item: {
+        id: 'reasoning-1',
+        type: 'reasoning',
+        summary: [{ text: 'Internal reasoning summary' }],
+      },
+    },
+  });
+  client._onMessage({
+    method: 'some/new/rawNotification',
+    params: { payload: { debug: true } },
+  });
+
+  assert.deepEqual(batches, []);
+  assert.deepEqual(client.messages, []);
+  assert.deepEqual(statuses, [{ type: 'active' }]);
+  assert.equal(rawEvents.length, 3);
+  assert.equal(rawEvents[0].kind, 'request-or-notification');
+  assert.equal(rawEvents[0].method, 'thread/status/changed');
+  assert.equal(rawEvents[1].method, 'item/completed');
+  assert.equal(rawEvents[2].method, 'some/new/rawNotification');
+});
