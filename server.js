@@ -1734,12 +1734,15 @@ async function ensureCodexRpcForSession(session) {
   if (existing) return existing;
 
   let capture = '';
-  try {
-    capture = await tmux.capturePane(session.target, 200, false, true);
-  } catch {
-    return null;
+  let endpoint = session.endpoint || null;
+  if (!endpoint) {
+    try {
+      capture = await tmux.capturePane(session.target, 200, false, true);
+    } catch {
+      return null;
+    }
+    endpoint = parseCodexAppServerEndpoint(capture);
   }
-  const endpoint = parseCodexAppServerEndpoint(capture);
   if (!endpoint) {
     if (isCodexAppServerCapture(capture)) {
       throw new Error('Codex RPC app-server endpoint unavailable; refusing to type prompt into tmux pane');

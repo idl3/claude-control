@@ -45,7 +45,13 @@ function makePane({
   };
 }
 
-function makeRegistry({ pane, capture, codexSessionsRoot, appServer = false }) {
+function makeRegistry({
+  pane,
+  capture,
+  codexSessionsRoot,
+  appServer = false,
+  appServerEndpoint = null,
+}) {
   const reg = new SessionRegistry({
     projectsRoot: path.join(os.tmpdir(), 'no-claude-projects'),
     codexSessionsRoot,
@@ -63,12 +69,13 @@ function makeRegistry({ pane, capture, codexSessionsRoot, appServer = false }) {
       startMs: Date.now() - 5_000,
       pid: 12345,
       appServer,
+      appServerEndpoint,
     }],
   ]);
   return reg;
 }
 
-test('Codex app-server pane without exact rollout hint is not bound to stale cwd fallback', async () => {
+test('Codex app-server pane without marker is rpc and not bound to stale cwd fallback', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-appserver-session-'));
   const cwd = '/work/repo';
   writeRollout(path.join(temp, '2026', '06', '23'), cwd, 'stale-session', new Date());
@@ -77,6 +84,7 @@ test('Codex app-server pane without exact rollout hint is not bound to stale cwd
     pane,
     codexSessionsRoot: temp,
     appServer: true,
+    appServerEndpoint: 'ws://127.0.0.1:60606',
     capture: [
       'codex app-server (WebSockets)',
       '  listening on: ws://127.0.0.1:60606',
@@ -88,9 +96,35 @@ test('Codex app-server pane without exact rollout hint is not bound to stale cwd
     const sessions = await reg.refresh();
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0].kind, 'codex');
-    assert.equal(sessions[0].transport, 'tmux');
+    assert.equal(sessions[0].transport, 'rpc');
+    assert.equal(sessions[0].endpoint, 'ws://127.0.0.1:60606');
     assert.equal(sessions[0].transcriptPath, null);
     assert.equal(sessions[0].sessionId, null);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('Codex process endpoint is enough to classify rpc even if appServer flag is absent', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-appserver-endpoint-'));
+  const cwd = '/work/repo';
+  writeRollout(path.join(temp, '2026', '06', '23'), cwd, 'stale-session', new Date());
+  const pane = makePane({ cwd, target: 'test:4.1', paneId: '%codexendpoint' });
+  const reg = makeRegistry({
+    pane,
+    codexSessionsRoot: temp,
+    appServer: false,
+    appServerEndpoint: 'ws://127.0.0.1:60606',
+    capture: 'ordinary scrollback that does not mention app-server',
+  });
+
+  try {
+    const sessions = await reg.refresh();
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].kind, 'codex');
+    assert.equal(sessions[0].transport, 'rpc');
+    assert.equal(sessions[0].endpoint, 'ws://127.0.0.1:60606');
+    assert.equal(sessions[0].transcriptPath, null);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
