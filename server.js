@@ -921,6 +921,12 @@ async function handleSessionNew(req, res) {
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
     }
 
+    if (agent === 'codex') {
+      await tmux.setPaneOption(target, '@cc_agent', 'codex');
+      await tmux.setPaneOption(target, '@cc_transport', codexTransport);
+      if (codexRpcEndpoint) await tmux.setPaneOption(target, '@cc_endpoint', codexRpcEndpoint);
+    }
+
     await tmux.sendText(target, launch);
     if (printClient) {
       await printClient.waitForBridge();
@@ -1723,6 +1729,7 @@ function upgradeSubscriptionIfTranscriptReady(id) {
 
 async function ensureCodexRpcForSession(session) {
   if (session.kind !== 'codex') return null;
+  if (session.transport !== 'rpc') return null;
   const existing = codexRpc.get(session.target);
   if (existing) return existing;
 
