@@ -5,7 +5,7 @@ import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { TerminalSquareIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 
-export type SessionFilter = 'all' | 'claude' | 'codex' | 'terminal';
+export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -272,6 +272,7 @@ export function SessionRail({
   const groups = useMemo(() => {
     const visible = sessions.filter((s) => {
       if (filter === 'all') return true;
+      if (filter === 'agents') return s.kind !== 'terminal'; // claude + codex, no shells
       if (filter === 'terminal') return s.kind === 'terminal';
       if (filter === 'codex') return s.kind === 'codex';
       // 'claude' filter: show claude panes (kind === 'claude' or kind unset, but not terminal/codex)

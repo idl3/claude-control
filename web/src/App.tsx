@@ -698,7 +698,12 @@ function AppInner() {
   });
   const cycleFilter = useCallback(() => {
     setSessionFilter((f) => {
-      const next: SessionFilter = f === 'all' ? 'claude' : f === 'claude' ? 'codex' : f === 'codex' ? 'terminal' : 'all';
+      const next: SessionFilter =
+        f === 'all' ? 'agents'
+        : f === 'agents' ? 'claude'
+        : f === 'claude' ? 'codex'
+        : f === 'codex' ? 'terminal'
+        : 'all';
       try {
         localStorage.setItem('cc:sessionFilter', next);
       } catch {
@@ -1151,7 +1156,32 @@ function AppInner() {
             .querySelector<HTMLElement>('.session-item[data-selected="true"]')
             ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
-        return () => cancelAnimationFrame(rafId);
+        // Focus guard: the voice/ask composer morph-exit handlers call
+        // .composer-input.focus() from a GSAP onComplete (~200ms after this
+        // switch flips askActive/voice off), which lands AFTER the rAF above and
+        // steals focus into the textarea — popping the iOS keyboard and making
+        // single-key hotkeys bail. So for a short window after the switch, blur
+        // any text input that grabs focus and park focus on .detail-body, so the
+        // session is immediately ready for hotkeys (the user's explicit ask:
+        // "after every session change … unfocus from everything").
+        const guards = [60, 180, 320, 460].map((ms) =>
+          window.setTimeout(() => {
+            const a = document.activeElement as HTMLElement | null;
+            if (
+              a &&
+              (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.isContentEditable)
+            ) {
+              a.blur();
+              const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+              host.setAttribute('tabindex', '-1');
+              host.focus({ preventScroll: true });
+            }
+          }, ms),
+        );
+        return () => {
+          cancelAnimationFrame(rafId);
+          guards.forEach(clearTimeout);
+        };
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -1343,6 +1373,28 @@ function AppInner() {
   // Holding ⌘/Ctrl reveals hotkey affordances (incl. the scroll-to-bottom
   // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
   const cmdHeld = useModifierHeld(500);
+
+  // Focus-steal guard: warm/hidden ttyd panels keep their <iframe> loaded, and
+  // ttyd/xterm INSIDE the iframe calls .focus() on itself (on load + on poll).
+  // `inert` + delayed `visibility:hidden` don't reliably stop an iframe's own
+  // document from grabbing focus, so a hidden terminal can silently steal it —
+  // popping the keyboard and eating every hotkey. Catch focus landing on any
+  // term iframe whose overlay isn't currently visible and bounce it back out.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || t.tagName !== 'IFRAME' || !t.classList.contains('term-frame')) return;
+      const overlay = t.closest('.term-overlay');
+      if (overlay && overlay.getAttribute('data-visible') === 'true') return; // legit, visible
+      (t as HTMLIFrameElement).blur();
+      const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+      host.setAttribute('tabindex', '-1');
+      host.focus({ preventScroll: true });
+    };
+    document.addEventListener('focusin', onFocusIn, true);
+    return () => document.removeEventListener('focusin', onFocusIn, true);
+  }, []);
+
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
