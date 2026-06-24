@@ -40,6 +40,9 @@ export interface Session {
   thinking?: boolean;
   /** true while Claude is compacting the conversation (TUI "Compacting conversation…") */
   compacting?: boolean;
+  /** true when this session has a sub-agent actively running (server-side dir probe;
+   *  works for ALL sessions, unlike runningSubagentCountById which is subscription-scoped) */
+  subAgentActive?: boolean;
   /** Codex-only: primary rate-limit used_percent (0–100). null for Claude sessions. */
   usagePct?: number | null;
   /** Codex-only: primary rate-limit window in minutes (e.g. 300 = 5h, 10080 = 7d). */
