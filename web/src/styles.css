@@ -552,6 +552,18 @@ body.is-external-display .rail {
   color: var(--amber);
   animation: pulse 1.6s var(--ease) infinite;
 }
+/* API-error / stall badge — red sibling of .ask-badge. */
+.error-badge {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: oklch(40% 0.12 25);
+  color: oklch(82% 0.17 25);
+  animation: pulse 1.6s var(--ease) infinite;
+}
 @keyframes pulse {
   50% {
     opacity: 0.55;
@@ -3278,6 +3290,36 @@ body.is-external-display .composer {
   font-size: calc(12.5px * var(--ui-scale));
   font-weight: 600;
 }
+/* Error strip — the agent stalled on an API error; offer a Retry. */
+.composer-errored {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 2px 6px;
+  padding: 7px 10px;
+  border: 1px solid oklch(55% 0.16 25);
+  border-radius: 8px;
+  background: oklch(40% 0.12 25 / 0.18);
+  color: var(--text);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+}
+.composer-errored-msg {
+  flex: 1 1 auto;
+  color: oklch(82% 0.17 25);
+}
+.composer-retry {
+  flex: 0 0 auto;
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: none;
+  background: oklch(62% 0.18 25);
+  color: oklch(20% 0.02 25);
+  font-weight: 700;
+  font-size: calc(12.5px * var(--ui-scale));
+  cursor: pointer;
+}
+.composer-retry:hover { background: oklch(68% 0.18 25); }
 /* The optimistic "Working…" loader uses the SAME jumping Claude robot as the
    session activity icon (pane-icon-bob), so the two read as one signal. */
 .working-claude {

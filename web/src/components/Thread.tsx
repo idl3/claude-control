@@ -43,6 +43,10 @@ interface ThreadProps {
   working?: boolean;
   /** True while Claude is compacting the conversation — blocks sends + shows progress. */
   compacting?: boolean;
+  /** True when the session hit an API error and stalled — shows a Retry strip. */
+  errored?: boolean;
+  /** Retry handler for the error strip (sends "Continue"). */
+  onRetry?: () => void;
   /** Cancel in-flight generation (send Escape to the Claude pane). */
   onStop?: () => void;
   /** Inline prompt morph props — forwarded to Composer. */
@@ -148,6 +152,8 @@ export function Thread({
   onCloseAgent,
   working,
   compacting,
+  errored,
+  onRetry,
   onStop,
   askActive,
   activePrompt,
@@ -251,6 +257,8 @@ export function Thread({
         onTerminalModeChange={onTerminalModeChange}
         working={working}
         compacting={compacting}
+        errored={errored}
+        onRetry={onRetry}
         onStop={onStop}
         askActive={askActive}
         activePrompt={activePrompt}
