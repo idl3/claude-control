@@ -22,7 +22,7 @@ import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
-import { parsePanePrompt } from './lib/prompt.js';
+import { parsePanePrompt, isSystemPrompt } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
@@ -1788,10 +1788,19 @@ function startPromptPoller(id, sub) {
       if (!session || !tmux.isValidTarget(session.target)) return;
       let prompt = null;
       try {
-        // 80 lines so a tall AskUserQuestion (question + 5 multi-line options +
-        // footer) fits the parser window (parsePanePrompt BOTTOM_REGION).
-        const cap = await tmux.capturePane(session.target, 80);
-        prompt = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
+        // Visible pane only (no scrollback) — an answered picker frozen in
+        // history must not re-fire. The live prompt is always on screen.
+        const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
+        if (session.kind === 'codex') {
+          prompt = parseCodexPrompt(cap);
+        } else {
+          // Claude: only surface RECOGNIZED system prompts (permission / trust /
+          // plan-review). Custom agent/skill pickers and prose questions are NOT
+          // shown — a real AskUserQuestion flows through the structured transcript
+          // path (pending), not this scrape.
+          const parsed = parsePanePrompt(cap);
+          prompt = isSystemPrompt(parsed) ? parsed : null;
+        }
       } catch {
         return;
       }

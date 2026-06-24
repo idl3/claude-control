@@ -1074,7 +1074,8 @@ function AppInner() {
   }, []);
 
   // Detail-head shortcuts (these mirror the header icon buttons + their reveal
-  // badges): ⌘E rename · ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar.
+  // badges): ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar. (Rename has
+  // NO shortcut — ⌘/Ctrl+E is left free; Ctrl+E is end-of-line in the shell.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -1082,9 +1083,6 @@ function AppInner() {
       if (k === 'b') {
         e.preventDefault();
         toggleRail();
-      } else if (k === 'e' && selectedSession) {
-        e.preventDefault();
-        setRenaming(selectedSession.name ?? selectedSession.id);
       } else if (k === 'j' && selectedSession) {
         e.preventDefault();
         toggleTerminal();
@@ -1523,9 +1521,7 @@ function AppInner() {
                       type="button"
                       className="detail-action"
                       aria-label="Rename session"
-                      title="Rename session (⌘E)"
-                      data-hotkey="⌘E"
-                      data-hotkey-dir="down"
+                      title="Rename session"
                       onClick={() => setRenaming(selectedSession.name ?? selectedSession.id)}
                     >
                       <PencilIcon />
