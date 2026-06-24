@@ -658,6 +658,9 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
                   onClick={() => toggleMulti(opt.label)}
                 >
                   <span className="option-label">{opt.key}. {opt.label}</span>
+                  {opt.description ? (
+                    <span className="option-desc">{opt.description}</span>
+                  ) : null}
                 </button>
               );
             })}
@@ -692,6 +695,9 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
                   onClick={() => setSelectedKey(opt.key)}
                 >
                   <span className="option-label">{opt.key}. {opt.label}</span>
+                  {opt.description ? (
+                    <span className="option-desc">{opt.description}</span>
+                  ) : null}
                   {pendingKey === opt.key ? (
                     <span className="option-sending" aria-label="sending">
                       <span className="working-spinner" aria-hidden="true" />
