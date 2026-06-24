@@ -889,7 +889,16 @@ function AppInner() {
       const root = vp.closest<HTMLElement>('.thread-root');
       const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
       if (root && composer && 'ResizeObserver' in window) {
-        const setH = () => root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+        const setH = () => {
+          root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+          // When the composer GROWS — most notably the AskInline morph opening a
+          // pending question — the viewport shrinks and the latest message (the
+          // assistant's reasoning leading up to the question) would be hidden
+          // behind the taller composer. Re-tail so that context stays visible
+          // just above the question while answering. Respects the pinned guard,
+          // so a user who scrolled up to read isn't yanked back down.
+          tail();
+        };
         setH();
         ro = new ResizeObserver(setH);
         ro.observe(composer);
