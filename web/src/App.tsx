@@ -1612,6 +1612,11 @@ function AppInner() {
                     onCloseAgent={closeAgent}
                     working={agentWorking}
                     compacting={!!selectedSession?.compacting}
+                    errored={!!selectedSession?.errored}
+                    onRetry={() => {
+                      const ok = cockpit.sendReply('Continue');
+                      showToast(ok ? 'Retry → Continue' : 'Not connected', ok ? 'ok' : 'error');
+                    }}
                     onStop={handleStop}
                     askActive={askActive}
                     activePrompt={activePrompt}
