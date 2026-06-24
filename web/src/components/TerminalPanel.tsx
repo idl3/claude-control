@@ -22,6 +22,18 @@ interface TerminalPanelProps {
 export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPanelProps) {
   const url = terminalUrl(sessionId);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // A warm/hidden panel must be COMPLETELY untargetable — its ttyd iframe can't
+  // be focused or receive keystrokes when off-screen (the bug: Cmd+1-9 session
+  // switches were landing focus in a background terminal). `inert` removes the
+  // whole subtree from the tab order + focus + pointer/keyboard interaction.
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el) return;
+    if (visible) el.removeAttribute('inert');
+    else el.setAttribute('inert', '');
+  }, [visible]);
 
   // Esc closes — only while visible (the panel stays mounted but hidden when
   // warm/preloaded, and a hidden panel must not swallow Escape).
@@ -96,6 +108,7 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
 
   return (
     <div
+      ref={overlayRef}
       className="term-overlay"
       data-visible={visible ? 'true' : 'false'}
       role="dialog"
