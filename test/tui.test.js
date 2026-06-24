@@ -134,3 +134,32 @@ test('prettyModel shortens transcript model ids', () => {
   assert.equal(prettyModel(null), null);
   assert.equal(prettyModel('weird-id'), 'weird-id');
 });
+
+test('parseTuiStatus flags errored on an API error while idle', () => {
+  const cap = [
+    'Some earlier output.',
+    '',
+    'API Error: Server is temporarily limiting requests (not your usage limit) · Type 2b rate limited. Please try again later.',
+    '',
+    '> ',
+  ].join('\n');
+  const r = parseTuiStatus(cap);
+  assert.equal(r.errored, true);
+  assert.equal(r.thinking, false);
+});
+
+test('parseTuiStatus does NOT flag errored while the agent is still working', () => {
+  // An error string scrolling by mid-generation must not trip the stall flag.
+  const cap = [
+    'thinking about API Error handling in the code',
+    '✛ Working… (12s · esc to interrupt)',
+  ].join('\n');
+  const r = parseTuiStatus(cap);
+  assert.equal(r.thinking, true);
+  assert.equal(r.errored, false);
+});
+
+test('parseTuiStatus: ordinary prose mentioning errors does not trip errored', () => {
+  const r = parseTuiStatus('Here is how to handle an error gracefully in your code.');
+  assert.equal(r.errored, false);
+});

@@ -224,6 +224,11 @@ function PaneRow({
         {!isTerminal && claudeState === 'working' ? (
           <span className="thinking-dot" aria-label="working" title="Working…" />
         ) : null}
+        {s.errored ? (
+          <span className="error-badge" aria-label="API error — needs retry">
+            ERROR
+          </span>
+        ) : null}
         {s.pending ? (
           <span className="ask-badge" aria-label="pending question">
             ASK

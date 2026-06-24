@@ -40,6 +40,8 @@ export interface Session {
   thinking?: boolean;
   /** true while Claude is compacting the conversation (TUI "Compacting conversation…") */
   compacting?: boolean;
+  /** true when the agent hit an API error and stalled (rate limit / overload / 5xx) */
+  errored?: boolean;
   /** true when this session has a sub-agent actively running (server-side dir probe;
    *  works for ALL sessions, unlike runningSubagentCountById which is subscription-scoped) */
   subAgentActive?: boolean;

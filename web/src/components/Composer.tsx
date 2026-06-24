@@ -105,6 +105,10 @@ interface ComposerProps {
    *  composer blocks sends and shows a "Compacting…" progress strip so it never
    *  looks hung. */
   compacting?: boolean;
+  /** True when the selected session hit an API error and stalled — shows a Retry strip. */
+  errored?: boolean;
+  /** Called when the user clicks Retry on the error strip (sends "Continue"). */
+  onRetry?: () => void;
   /** Called when the user clicks the STOP button (or presses Esc from App).
    *  Should send Escape to the session's Claude pane. */
   onStop?: () => void;
@@ -228,6 +232,8 @@ export function Composer({
   onTerminalModeChange,
   working = false,
   compacting = false,
+  errored = false,
+  onRetry,
   onStop,
   askActive = false,
   activePrompt = null,
@@ -1776,6 +1782,20 @@ export function Composer({
           <div className="composer-compacting" role="status" aria-live="polite">
             <span className="working-spinner" aria-hidden="true" />
             <span>Compacting conversation… sending is paused</span>
+          </div>
+        ) : null}
+        {/* Error strip: the agent hit an API error and stalled — offer a Retry
+            that sends "Continue" to nudge it back into the turn. */}
+        {errored && !terminal && !voice && !askActive ? (
+          <div className="composer-errored" role="alert">
+            <span className="composer-errored-msg">⚠ API error — the agent stalled</span>
+            <button
+              type="button"
+              className="composer-retry"
+              onClick={() => onRetry?.()}
+            >
+              Retry
+            </button>
           </div>
         ) : null}
         {/* Placeholder needs the Kbd component, but a native placeholder is
