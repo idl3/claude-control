@@ -33,6 +33,7 @@ import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
+import { WebViewer } from './components/WebViewer';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -549,6 +550,34 @@ function AppInner() {
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // In-app web viewer: opens http(s) links from transcript (.aui-md) in an
+  // iframe overlay instead of a new tab. ⌘/Ctrl/Shift/middle-click still opens
+  // a regular new tab (delegated click handler bails for those).
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+
+  // Delegated capture-phase click handler: intercepts http(s) link clicks that
+  // originate inside transcript markdown (.aui-md) and opens the WebViewer
+  // overlay instead of a new browser tab. Falls through for modifier-key clicks
+  // (Cmd/Ctrl/Shift) and middle-mouse so power users still get native tab behavior.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      // Ignore non-primary clicks and modifier-key clicks (open in new tab).
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const a = target.closest('a');
+      if (!a) return;
+      const href = a.getAttribute('href') ?? '';
+      // Only intercept http(s) links inside transcript markdown.
+      if (!/^https?:\/\//i.test(href)) return;
+      if (!a.closest('.aui-md')) return;
+      e.preventDefault();
+      setViewerUrl(href);
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, []);
 
   // In-transcript search (⌘/).
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1747,6 +1776,9 @@ function AppInner() {
         ) : null}
 
         <HotkeyHints />
+        {viewerUrl ? (
+          <WebViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
+        ) : null}
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>
