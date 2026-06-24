@@ -5300,6 +5300,84 @@ select.config-input {
   /* Compact the question layout inside the inline body. */
   margin-bottom: 4px;
 }
+
+/* ── Minimize / maximize ──────────────────────────────────────────────────
+   The whole question collapses to a single amber bar so the transcript is fully
+   visible. [_] button sits top-right of the expanded question. */
+.ask-inline-full {
+  position: relative;
+}
+/* Keep the first question's header clear of the [_] button in the corner. */
+.ask-inline-full .question:first-child .q-header,
+.ask-inline-full .question:first-child .q-text {
+  padding-right: 30px;
+}
+.ask-min-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.ask-min-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+/* The [_] glyph: a short bottom bar (window-minimize). */
+.ask-min-btn span {
+  display: block;
+  width: 11px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+/* Minimized state: a single amber bar — question header + Maximise. */
+.ask-min-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  background: var(--amber-bg);
+  cursor: pointer;
+}
+.ask-min-bar:hover {
+  background: color-mix(in oklch, var(--amber-bg) 80%, var(--amber));
+}
+.ask-min-q {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--amber);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-min-action {
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: oklch(20% 0.02 80);
+  background: var(--amber);
+  padding: 3px 10px;
+  border-radius: 6px;
+}
 .ask-inline-body .q-options {
   flex-wrap: wrap;
 }
