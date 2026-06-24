@@ -3402,6 +3402,17 @@ body.is-external-display .composer {
   border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
+/* Permission (Full Disk Access) banner — red variant of the update banner. */
+.perm-banner {
+  background: oklch(40% 0.12 25 / 0.22);
+  color: oklch(86% 0.12 25);
+}
+.perm-banner .update-dismiss { color: oklch(86% 0.12 25); }
+.perm-banner .update-now {
+  background: oklch(62% 0.18 25);
+  color: oklch(20% 0.02 25);
+  text-decoration: none;
+}
 .update-banner code {
   background: var(--bg-hover);
   color: var(--text);
