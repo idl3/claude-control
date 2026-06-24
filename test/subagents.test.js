@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { SubAgentsWatcher, CodexSubAgentsWatcher } from '../lib/subagents.js';
+import { SubAgentsWatcher, CodexSubAgentsWatcher, hasActiveSubAgents } from '../lib/subagents.js';
 
 // ---------------------------------------------------------------------------
 // Helper: set up a minimal on-disk subagents dir with one agent fixture.
@@ -241,4 +241,44 @@ test('poll discovers new agent file added after construction', async () => {
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// hasActiveSubAgents — cheap per-session probe used by the rail (bug 3)
+// ---------------------------------------------------------------------------
+
+test('hasActiveSubAgents: true when an agent jsonl was written recently', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'sess.jsonl');
+  fs.writeFileSync(parentPath, '');
+  writeAgentFiles(path.join(tmp, 'sess', 'subagents'), 'a1', { jsonlContent: '{}\n' });
+  assert.equal(hasActiveSubAgents(parentPath), true);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('hasActiveSubAgents: false when the jsonl is stale (> window)', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'sess.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const dir = path.join(tmp, 'sess', 'subagents');
+  writeAgentFiles(dir, 'a1', { jsonlContent: '{}\n' });
+  const old = Date.now() / 1000 - 120; // 120 s ago
+  fs.utimesSync(path.join(dir, 'agent-a1.jsonl'), old, old);
+  assert.equal(hasActiveSubAgents(parentPath), false);
+  // ...but a generous window still counts it.
+  assert.equal(hasActiveSubAgents(parentPath, 200_000), true);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('hasActiveSubAgents: false when no subagents dir exists', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'sess.jsonl');
+  fs.writeFileSync(parentPath, '');
+  assert.equal(hasActiveSubAgents(parentPath), false);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('hasActiveSubAgents: false for empty/missing transcript path', () => {
+  assert.equal(hasActiveSubAgents(''), false);
+  assert.equal(hasActiveSubAgents(null), false);
 });
