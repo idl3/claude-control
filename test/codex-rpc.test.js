@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CodexRpcClient,
+  CodexRpcManager,
   isCodexActiveStatus,
   isCodexAppServerCapture,
   parseCodexAppServerEndpoint,
@@ -206,4 +207,106 @@ test('CodexRpcClient keeps raw/status/unknown app-server events out of transcrip
   assert.equal(rawEvents[0].method, 'thread/status/changed');
   assert.equal(rawEvents[1].method, 'item/completed');
   assert.equal(rawEvents[2].method, 'some/new/rawNotification');
+});
+
+test('CodexRpcClient surfaces every JSON-RPC server request and queues prompts', () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  const prompts = [];
+  const pending = [];
+  const sent = [];
+  client.ws = {
+    readyState: 1,
+    send: (payload) => sent.push(JSON.parse(payload)),
+  };
+  client._closed = false;
+  client.on('prompt', (prompt) => prompts.push(prompt));
+  client.on('pending', (value) => pending.push(value));
+
+  client._onMessage({
+    id: 41,
+    method: 'item/commandExecution/requestApproval',
+    params: { cwd: '/workspace', command: 'npm test' },
+  });
+  client._onMessage({
+    id: 42,
+    method: 'item/someFutureRequest',
+    params: { reason: 'new app-server request shape' },
+  });
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].question, /Run command/);
+  assert.deepEqual(pending, [true]);
+
+  client.answerPrompt('1');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], { id: 41, result: { decision: 'accept' } });
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1].question, /Codex request: item\/someFutureRequest/);
+  assert.deepEqual(pending, [true, true]);
+
+  client.answerPrompt('1');
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1], { id: 42, result: {} });
+  assert.equal(prompts.length, 3);
+  assert.equal(prompts[2], null);
+  assert.deepEqual(pending, [true, true, false]);
+});
+
+test('CodexRpcClient rejects pending calls immediately when the socket closes', async () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  client.ws = { readyState: 1, send: () => {} };
+  client._closed = false;
+
+  const pending = client.request('turn/start', { threadId: 'thread-1' });
+  client._handleClose(client.ws);
+
+  await assert.rejects(pending, /WebSocket closed/);
+  assert.equal(client.isOpen(), false);
+});
+
+test('CodexRpcManager replaces stale or endpoint-changed clients on ensureAttached', async () => {
+  const manager = new CodexRpcManager();
+  const stale = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  stale.ws = { readyState: 3, close: () => {}, terminate: () => {} };
+  stale._closed = true;
+  manager.clients.set('s:0.0', stale);
+
+  let attached = null;
+  manager.attach = async (args) => {
+    attached = args;
+    const fresh = new CodexRpcClient(args);
+    fresh.ws = { readyState: 1, close: () => {}, terminate: () => {}, send: () => {} };
+    fresh._closed = false;
+    manager.clients.set(args.target, fresh);
+    return fresh;
+  };
+
+  const result = await manager.ensureAttached({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:2',
+    cwd: '/workspace',
+    resumeThreadId: 'thread-1',
+    transcriptPath: '/tmp/rollout.jsonl',
+  });
+
+  assert.equal(result.endpoint, 'ws://127.0.0.1:2');
+  assert.deepEqual(attached, {
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:2',
+    cwd: '/workspace',
+    resumeThreadId: 'thread-1',
+    transcriptPath: '/tmp/rollout.jsonl',
+  });
 });
