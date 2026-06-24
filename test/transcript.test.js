@@ -422,3 +422,56 @@ test('TranscriptTailer: append event fires for new records', { timeout: 5000 }, 
   tailer.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('TranscriptTailer: poll fallback emits append when fs.watch is unavailable', { timeout: 5000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-poll-append-'));
+  const filePath = path.join(dir, 'transcript.jsonl');
+
+  const initial = JSON.stringify({
+    type: 'user',
+    uuid: 'poll-1',
+    timestamp: '2024-01-01T00:00:00Z',
+    sessionId: 'sess-poll',
+    cwd: '/home/user',
+    message: { content: 'initial' },
+  });
+  fs.writeFileSync(filePath, initial + '\n', 'utf8');
+
+  const tailer = new TranscriptTailer(filePath, {
+    maxBuffer: 100,
+    debounceMs: 10_000,
+    pollMs: 25,
+    watch: false,
+  });
+
+  try {
+    await tailer.start();
+    const appended = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout waiting for poll append')), 3000);
+      tailer.once('append', (msgs) => {
+        clearTimeout(timer);
+        resolve(msgs);
+      });
+    });
+
+    const newRecord = JSON.stringify({
+      type: 'assistant',
+      uuid: 'poll-2',
+      timestamp: '2024-01-01T00:01:00Z',
+      sessionId: 'sess-poll',
+      cwd: '/home/user',
+      message: {
+        content: [{ type: 'text', text: 'poll fallback response' }],
+      },
+    });
+    fs.appendFileSync(filePath, newRecord + '\n', 'utf8');
+
+    const msgs = await appended;
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0].role, 'assistant');
+    assert.equal(msgs[0].blocks[0].text, 'poll fallback response');
+  } finally {
+    tailer.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
