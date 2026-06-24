@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useModifierHeld } from '../hooks/useModifierHeld';
+import { prefersReducedMotion } from '../lib/anim';
 
 interface HintPosition {
   key: string;
@@ -102,10 +103,14 @@ export function HotkeyHints(): JSX.Element | null {
       return;
     }
 
-    // Initial compute
-    setHints(computePositions());
+    // Compute positions only AFTER the rail's Cmd-hold condense animation settles
+    // (rows move during the collapse, so an immediate measure would mis-place the
+    // badges). The badges then fade in sequentially (stagger applied per-badge in
+    // render). Reduced-motion has no condense transition → measure immediately.
+    const COLLAPSE_SETTLE_MS = prefersReducedMotion() ? 0 : 260;
+    const t = setTimeout(() => setHints(computePositions()), COLLAPSE_SETTLE_MS);
 
-    // Recompute on scroll / resize while held
+    // Recompute on scroll / resize while held (immediate — already revealed).
     function recompute(): void {
       setHints(computePositions());
     }
@@ -114,6 +119,7 @@ export function HotkeyHints(): JSX.Element | null {
     window.addEventListener('resize', recompute, { passive: true });
 
     return () => {
+      clearTimeout(t);
       window.removeEventListener('scroll', recompute, { capture: true });
       window.removeEventListener('resize', recompute);
     };
@@ -123,7 +129,7 @@ export function HotkeyHints(): JSX.Element | null {
 
   return createPortal(
     <>
-      {hints.map((h) => (
+      {hints.map((h, idx) => (
         <div
           key={h.key}
           className="hotkey-hint"
@@ -133,6 +139,8 @@ export function HotkeyHints(): JSX.Element | null {
             top: h.top,
             left: h.left,
             pointerEvents: 'none',
+            // Sequential, quick reveal in DOM (top-to-bottom) order.
+            animationDelay: `${idx * 28}ms`,
           }}
           aria-hidden="true"
         >
