@@ -5815,6 +5815,12 @@ select.config-input {
   display: flex;
   flex-direction: column;
 }
+/* The detail body is only ever a programmatic focus-park target (tabindex=-1),
+   never a real control — so never paint a focus ring on it. */
+.detail-body:focus,
+.detail-body:focus-visible {
+  outline: none;
+}
 /* Focus-mode toggle lives in the detail header; desktop-only (mirror of back-btn). */
 .focus-toggle {
   display: none;

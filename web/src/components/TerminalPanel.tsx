@@ -101,9 +101,14 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
     if (visibleRef.current) return; // visible → legit focus, leave it
     const doc = frameRef.current?.contentDocument;
     (doc?.activeElement as HTMLElement | null)?.blur?.();
-    const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-    host.setAttribute('tabindex', '-1');
-    host.focus({ preventScroll: true });
+    // Land in the composer (ready to type) rather than parking on the body.
+    const ci = document.querySelector<HTMLTextAreaElement>('.composer-input');
+    if (ci) ci.focus({ preventScroll: true });
+    else {
+      const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+      host.setAttribute('tabindex', '-1');
+      host.focus({ preventScroll: true });
+    }
   });
   const attachFrameKeys = () => {
     const win = frameRef.current?.contentWindow;

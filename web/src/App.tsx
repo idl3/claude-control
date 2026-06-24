@@ -1128,59 +1128,37 @@ function AppInner() {
       if (target) {
         e.preventDefault();
         e.stopPropagation();
-        // If focus is currently inside a ttyd iframe, blur it first (the iframe
-        // swallows keydowns in its own document so the window-level listener
-        // never fires while it holds focus).
+        // Release a stuck ttyd iframe first (it swallows keydowns in its own
+        // document, so the window listener wouldn't fire while it holds focus).
         const ae = document.activeElement as HTMLElement | null;
         if (ae && ae.tagName === 'IFRAME') ae.blur();
-        const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-        host.setAttribute('tabindex', '-1');
-        host.focus({ preventScroll: true });
-        // Close any open ttyd overlay BEFORE calling select() so both state
-        // updates are batched by React into a single render. Without this,
-        // the TerminalPanel for the NEW session can briefly see visible=true
-        // (terminalShown is still true from the previous session) and call
-        // frameRef.focus() in its post-commit effect — stealing focus into
-        // the iframe and swallowing the NEXT ⌘1-9 press.
+        // Close any open ttyd overlay BEFORE select() so React batches both state
+        // updates — otherwise the new session's TerminalPanel can briefly see
+        // visible=true and steal focus into its iframe.
         setTerminalShown(false);
         select(target.id);
-        // Re-grab focus after React has committed and post-commit effects have
-        // run (defense-in-depth: catches any other component that calls
-        // focus() in a useEffect on mount/update after the session switch).
+        // Land focus in the composer so you can type immediately (the default on
+        // every switch). For terminal sessions there's no .composer-input, so the
+        // visible terminal pane keeps its own focus. The hidden-terminal focus
+        // steal is handled separately (TerminalPanel's in-iframe guard).
+        const focusComposer = () => {
+          document
+            .querySelector<HTMLTextAreaElement>('.composer-input')
+            ?.focus({ preventScroll: true });
+        };
         const rafId = requestAnimationFrame(() => {
-          const fresh = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-          fresh.setAttribute('tabindex', '-1');
-          fresh.focus({ preventScroll: true });
+          focusComposer();
           // Bring the just-selected session into view in the rail on every switch.
           document
             .querySelector<HTMLElement>('.session-item[data-selected="true"]')
             ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
-        // Focus guard: the voice/ask composer morph-exit handlers call
-        // .composer-input.focus() from a GSAP onComplete (~200ms after this
-        // switch flips askActive/voice off), which lands AFTER the rAF above and
-        // steals focus into the textarea — popping the iOS keyboard and making
-        // single-key hotkeys bail. So for a short window after the switch, blur
-        // any text input that grabs focus and park focus on .detail-body, so the
-        // session is immediately ready for hotkeys (the user's explicit ask:
-        // "after every session change … unfocus from everything").
-        const guards = [60, 180, 320, 460].map((ms) =>
-          window.setTimeout(() => {
-            const a = document.activeElement as HTMLElement | null;
-            if (
-              a &&
-              (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.isContentEditable)
-            ) {
-              a.blur();
-              const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-              host.setAttribute('tabindex', '-1');
-              host.focus({ preventScroll: true });
-            }
-          }, ms),
-        );
+        // The ask/voice morph-exit also focuses the composer ~200ms later; re-assert
+        // once past that so the composer reliably ends up focused across the morph.
+        const reassert = window.setTimeout(focusComposer, 320);
         return () => {
           cancelAnimationFrame(rafId);
-          guards.forEach(clearTimeout);
+          clearTimeout(reassert);
         };
       }
     };
@@ -1387,9 +1365,14 @@ function AppInner() {
       const overlay = t.closest('.term-overlay');
       if (overlay && overlay.getAttribute('data-visible') === 'true') return; // legit, visible
       (t as HTMLIFrameElement).blur();
-      const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-      host.setAttribute('tabindex', '-1');
-      host.focus({ preventScroll: true });
+      // Land in the composer (ready to type) rather than parking on the body.
+      const ci = document.querySelector<HTMLTextAreaElement>('.composer-input');
+      if (ci) ci.focus({ preventScroll: true });
+      else {
+        const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+        host.setAttribute('tabindex', '-1');
+        host.focus({ preventScroll: true });
+      }
     };
     document.addEventListener('focusin', onFocusIn, true);
     return () => document.removeEventListener('focusin', onFocusIn, true);
