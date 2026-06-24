@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { shouldScrapePane } from '../lib/sessions.js';
+import { shouldScrapePane, paneHasPermIssue } from '../lib/sessions.js';
 
 const NOW = 1_000_000;
 const WIN = 20_000;
@@ -28,4 +28,12 @@ test('shouldScrapePane: recent lastActivityMs backstop → scrape', () => {
 test('shouldScrapePane: idle (no flags, stale watch + stale activity) → skip', () => {
   const idle = { transcriptPath: '/p/s.jsonl', lastActivityMs: NOW - 60_000 };
   assert.equal(shouldScrapePane(idle, NOW - 1, NOW, WIN), false);
+});
+
+test('paneHasPermIssue: detects macOS Full-Disk-Access denial', () => {
+  assert.equal(paneHasPermIssue('ls: .: Operation not permitted'), true);
+  assert.equal(paneHasPermIssue('OPERATION NOT PERMITTED'), true);
+  assert.equal(paneHasPermIssue('normal shell output, all good'), false);
+  assert.equal(paneHasPermIssue(''), false);
+  assert.equal(paneHasPermIssue(null), false);
 });

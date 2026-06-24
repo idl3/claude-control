@@ -103,6 +103,41 @@ matching transcript under `~/.claude/projects/`.
 
 ---
 
+## macOS Full Disk Access
+
+If panes show **`Operation not permitted`** when reading `~/Documents`,
+`~/Desktop`, or `~/Downloads` — even though the same commands work in your normal
+terminal — it's macOS privacy protection (**TCC**), not a bug. claude-control runs
+as a **launchd** service, and the tmux server it starts inherits that context,
+which has **no Full Disk Access**. Your terminal app (iTerm/Terminal) already has
+the grant, which is why it works there.
+
+**Fix — grant Full Disk Access to the `node` that runs the service:**
+
+1. Find the node path the service uses:
+   ```bash
+   grep -A2 ProgramArguments ~/Library/LaunchAgents/com.*claude-control*.plist
+   ```
+   (e.g. `~/.nvm/versions/node/vXX/bin/node`, or `which node` → `/opt/homebrew/bin/node`)
+2. **System Settings → Privacy & Security → Full Disk Access → `+`**. In the file
+   picker press **⌘⇧G**, paste that node path (the `~/.nvm` dir is hidden, so the
+   typed path is the only way in), add it, and **toggle it on**.
+3. Restart the service so node relaunches with the grant:
+   ```bash
+   launchctl kickstart -k gui/$(id -u)/com.<your-service-name>
+   ```
+4. Kill the stale (permission-less) tmux server so new panes start under the
+   granted node — this ends the claude-control tmux sessions; the service recreates
+   them:
+   ```bash
+   tmux kill-server
+   ```
+
+Verify in a fresh pane: `ls ~/Documents` should work (no `Operation not permitted`).
+Grant it to **your own** node path, not someone else's.
+
+---
+
 ## Updating & restarting
 
 How you update depends on **how you installed** — pick your row. Check your
