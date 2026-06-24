@@ -130,6 +130,8 @@ export interface PanePromptOption {
   key: string;
   label: string;
   selected?: boolean;
+  /** Wrapped sub-text the TUI renders under the label (scraped from the pane). */
+  description?: string;
   /** True when this checkbox option is already checked in the TUI. */
   checked?: boolean;
 }

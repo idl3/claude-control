@@ -30,6 +30,16 @@ test('parsePanePrompt stitches multi-line AskUserQuestion options into a menu', 
   assert.match(r.question, /sequence this 5-service build/);
 });
 
+test('parsePanePrompt captures each option\'s wrapped description', () => {
+  const r = parsePanePrompt(MULTILINE);
+  assert.ok(r, 'expected a prompt to be detected');
+  assert.equal(r.options[0].description, 'I build the genuinely-new build first — biggest value, no config dep.');
+  assert.equal(r.options[1].description, 'Start with the unmanaged side, add webhooks after.');
+  assert.equal(r.options[2].description, 'Wire the gateway glue + secrets, then reconfigure.');
+  // "4. Type something" has no description line → undefined.
+  assert.equal(r.options[3].description, undefined);
+});
+
 // Plain numbered prose (no ❯ cursor, no Esc footer) must NOT pop a modal.
 const PROSE = `\
 Here is my plan:
