@@ -32,28 +32,36 @@ describe('filterTag', () => {
 
 function cycleFilter(f: SessionFilter): SessionFilter {
   return f === 'all'
-    ? 'claude'
-    : f === 'claude'
-      ? 'codex'
-      : f === 'codex'
-        ? 'terminal'
-        : 'all';
+    ? 'agents'
+    : f === 'agents'
+      ? 'claude'
+      : f === 'claude'
+        ? 'codex'
+        : f === 'codex'
+          ? 'terminal'
+          : 'all';
 }
 
-describe('filter cycle (all → claude → codex → terminal → all)', () => {
-  it('all → claude', () => expect(cycleFilter('all')).toBe('claude'));
+describe('filter cycle (all → agents → claude → codex → terminal → all)', () => {
+  it('all → agents', () => expect(cycleFilter('all')).toBe('agents'));
+  it('agents → claude', () => expect(cycleFilter('agents')).toBe('claude'));
   it('claude → codex', () => expect(cycleFilter('claude')).toBe('codex'));
   it('codex → terminal', () => expect(cycleFilter('codex')).toBe('terminal'));
   it('terminal → all', () => expect(cycleFilter('terminal')).toBe('all'));
 
   it('full cycle returns to all', () => {
     let f: SessionFilter = 'all';
+    f = cycleFilter(f); // agents
     f = cycleFilter(f); // claude
     f = cycleFilter(f); // codex
     f = cycleFilter(f); // terminal
     f = cycleFilter(f); // all
     expect(f).toBe('all');
   });
+});
+
+describe('filterTag includes agents', () => {
+  it('agents → AI', () => expect(filterTag('agents')).toBe('AI'));
 });
 
 // ── Agent availability types ───────────────────────────────────────────────

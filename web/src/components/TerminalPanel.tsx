@@ -23,6 +23,9 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
   const url = terminalUrl(sessionId);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  // Live `visible` for handlers attached inside the iframe document.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   // A warm/hidden panel must be COMPLETELY untargetable — its ttyd iframe can't
   // be focused or receive keystrokes when off-screen (the bug: Cmd+1-9 session
@@ -87,12 +90,29 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
       onCloseRef.current();
     }
   });
+  // ttyd/xterm auto-focuses its terminal on load + on reconnect. When the panel
+  // is HIDDEN (warm/preloaded) that silently steals focus into the iframe —
+  // popping the keyboard and eating hotkeys — and a parent focusin listener
+  // can't see it (focus moving into an iframe's own document fires no event in
+  // the parent). Since ttyd is same-origin, catch the focus INSIDE the iframe
+  // and immediately blur it whenever the panel isn't visible. (We focus the
+  // frame deliberately on reveal via focusFrame.)
+  const frameFocusGuard = useRef(() => {
+    if (visibleRef.current) return; // visible → legit focus, leave it
+    const doc = frameRef.current?.contentDocument;
+    (doc?.activeElement as HTMLElement | null)?.blur?.();
+    const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
+    host.setAttribute('tabindex', '-1');
+    host.focus({ preventScroll: true });
+  });
   const attachFrameKeys = () => {
     const win = frameRef.current?.contentWindow;
     if (!win) return;
     try {
       win.removeEventListener('keydown', frameKeyHandler.current, true);
       win.addEventListener('keydown', frameKeyHandler.current, true);
+      win.removeEventListener('focusin', frameFocusGuard.current, true);
+      win.addEventListener('focusin', frameFocusGuard.current, true);
     } catch {
       /* cross-origin or detached frame — ignore */
     }
@@ -100,6 +120,9 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
   const onFrameLoad = () => {
     focusFrame();
     attachFrameKeys();
+    // ttyd auto-focuses the terminal on load — if we're warm/hidden, bounce that
+    // focus straight back out (the guard no-ops when visible).
+    frameFocusGuard.current();
   };
   useEffect(() => {
     attachFrameKeys();

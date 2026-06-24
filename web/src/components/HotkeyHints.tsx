@@ -91,17 +91,34 @@ export function HotkeyHints(): JSX.Element | null {
   // Only reveal after a deliberate ~500ms hold, not on a quick ⌘-combo tap.
   const held = useModifierHeld(500);
   const [hints, setHints] = useState<HintPosition[]>([]);
+  // Once a hotkey is actually USED (any non-modifier key pressed while held), the
+  // hints have served their purpose — hide them so they don't linger on screen
+  // while ⌘ stays down. Cleared when the modifier is released (held → false).
+  const [used, setUsed] = useState(false);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!held) {
       setHints([]);
+      setUsed(false);
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
       return;
     }
+    if (used) {
+      setHints([]); // a hotkey was used — stay hidden until ⌘ is released
+      return;
+    }
+
+    // Dismiss the hints the moment a real hotkey fires (a non-modifier keydown
+    // while held). Capture-phase so it runs regardless of focus / other handlers.
+    const onHotkey = (e: KeyboardEvent) => {
+      if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt') return;
+      setUsed(true);
+    };
+    window.addEventListener('keydown', onHotkey, true);
 
     // Compute positions only AFTER the rail's Cmd-hold condense animation settles
     // (rows move during the collapse, so an immediate measure would mis-place the
@@ -120,12 +137,13 @@ export function HotkeyHints(): JSX.Element | null {
 
     return () => {
       clearTimeout(t);
+      window.removeEventListener('keydown', onHotkey, true);
       window.removeEventListener('scroll', recompute, { capture: true });
       window.removeEventListener('resize', recompute);
     };
-  }, [held]);
+  }, [held, used]);
 
-  if (!held || hints.length === 0) return null;
+  if (!held || used || hints.length === 0) return null;
 
   return createPortal(
     <>

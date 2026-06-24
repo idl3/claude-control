@@ -15,7 +15,8 @@ interface NewSessionFormProps {
 }
 
 const FILTER_TITLE: Record<SessionFilter, string> = {
-  all: 'Showing all panes — tap to show only Claude',
+  all: 'Showing all panes — tap to show agents (Claude + Codex)',
+  agents: 'Showing agents (Claude + Codex) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
   codex: 'Showing Codex sessions — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
@@ -40,6 +41,7 @@ export function normalizeClaudeTransport(value: unknown): ClaudeTransport {
 
 /** Derive filter badge label for the funnel button. */
 export function filterTag(filter: SessionFilter): string | null {
+  if (filter === 'agents') return 'AI';
   if (filter === 'claude') return 'CC';
   if (filter === 'codex') return 'CX';
   if (filter === 'terminal') return '>_';
