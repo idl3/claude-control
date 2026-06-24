@@ -147,7 +147,7 @@ export function HotkeyHints(): JSX.Element | null {
 
   return createPortal(
     <>
-      {hints.map((h, idx) => (
+      {hints.map((h) => (
         <div
           key={h.key}
           className="hotkey-hint"
@@ -157,8 +157,6 @@ export function HotkeyHints(): JSX.Element | null {
             top: h.top,
             left: h.left,
             pointerEvents: 'none',
-            // Sequential, quick reveal in DOM (top-to-bottom) order.
-            animationDelay: `${idx * 28}ms`,
           }}
           aria-hidden="true"
         >
