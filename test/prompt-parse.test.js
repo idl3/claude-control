@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePanePrompt } from '../lib/prompt.js';
+import { parsePanePrompt, isSystemPrompt } from '../lib/prompt.js';
 
 // The AskUserQuestion picker renders each option as a header line PLUS a wrapped
 // description line, so the numbered options are NOT contiguous. Detection must
@@ -203,4 +203,18 @@ test('parsePanePrompt single-select unchanged: no multiSelect field, labels as-i
   assert.equal(r.options[1].label, 'Skill-routing (P3) first');
   // No checked field on single-select options.
   assert.equal(r.options[0].checked, undefined);
+});
+
+test('isSystemPrompt: recognizes permission / trust / plan-review prompts', () => {
+  assert.equal(isSystemPrompt({ question: 'Do you want to proceed?', options: [{ label: 'Yes' }, { label: "No, and tell Claude what to do differently" }] }), true);
+  assert.equal(isSystemPrompt({ question: 'Ready to code?', options: [{ label: 'Yes, and auto-accept edits' }, { label: 'No, keep planning' }] }), true);
+  assert.equal(isSystemPrompt({ question: 'Do you trust the files in this folder?', options: [{ label: 'Yes, proceed' }, { label: 'No, exit' }] }), true);
+  assert.equal(isSystemPrompt({ question: 'Run this?', options: [{ label: 'Yes' }, { label: "Yes, and don't ask again for git commands" }] }), true);
+});
+
+test('isSystemPrompt: rejects custom agent pickers + prose questions', () => {
+  // The reported rogue picker — a skill's own elicitation, not AskUserQuestion.
+  assert.equal(isSystemPrompt({ question: 'Approval card options — Approve / Adjust?', options: [{ label: 'Approve/Adjust feels correct' }, { label: 'Yes implement and deploy both' }] }), false);
+  assert.equal(isSystemPrompt({ question: 'How should I sequence this build?', options: [{ label: 'Build all phases now' }, { label: 'Skill-routing first' }] }), false);
+  assert.equal(isSystemPrompt(null), false);
 });
