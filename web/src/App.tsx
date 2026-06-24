@@ -1146,6 +1146,10 @@ function AppInner() {
           const fresh = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
           fresh.setAttribute('tabindex', '-1');
           fresh.focus({ preventScroll: true });
+          // Bring the just-selected session into view in the rail on every switch.
+          document
+            .querySelector<HTMLElement>('.session-item[data-selected="true"]')
+            ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
         return () => cancelAnimationFrame(rafId);
       }

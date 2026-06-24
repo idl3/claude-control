@@ -512,9 +512,17 @@ body.is-external-display .rail {
   border: 1px solid transparent;
   cursor: pointer;
   background: var(--bg-1);
+  /* max-height base lets the Cmd-hold overview collapse shell rows to 0 height
+     with a transition (animating from `none` wouldn't tween). 200px clears any
+     real row height without clipping. */
+  max-height: 200px;
+  overflow: hidden;
   transition:
     background var(--ease) 0.15s,
-    border-color var(--ease) 0.15s;
+    border-color var(--ease) 0.15s,
+    max-height 0.22s var(--ease),
+    opacity 0.16s var(--ease),
+    padding 0.22s var(--ease);
 }
 .session-item:hover {
   background: var(--bg-hover);
@@ -577,6 +585,33 @@ body.is-external-display .rail {
   font-size: var(--txt-meta);
   color: var(--text-dim);
   align-items: center;
+  /* Collapsible for the Cmd-hold overview (condense each row to its first line). */
+  max-height: 40px;
+  overflow: hidden;
+  transition: max-height 0.18s var(--ease), opacity 0.14s var(--ease), margin-top 0.18s var(--ease);
+}
+
+/* ── Cmd-hold overview ────────────────────────────────────────────────────
+   While ⌘ is held, condense every session to its first row (name + state icon +
+   badge — drop model/ctx) and hide shell rows entirely, for a clean glanceable
+   list. Hotkey badges fade in (sequentially) only AFTER this settles — see
+   HotkeyHints. */
+.app[data-cmd-held='true'] .session-meta {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+.app[data-cmd-held='true'] .session-item[data-kind='terminal'] {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-width: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-item, .session-meta { transition: none; }
 }
 .meta-model {
   font-size: var(--txt-meta);
