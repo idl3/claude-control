@@ -736,6 +736,18 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
  * (kind='ask') or a PanePrompt (kind='prompt'). Non-dismissible: no Esc, no ✕.
  * Cleared only when the server nulls pending/prompt.
  */
+/** Short header shown on the minimized yellow bar. */
+export function promptHeader(p: ActivePrompt | null): string {
+  if (p?.kind === 'ask') {
+    const q = p.pending.questions[0];
+    return q?.header || q?.question || 'Question';
+  }
+  if (p?.kind === 'prompt') {
+    return p.prompt.question || `${p.agentName} needs a choice`;
+  }
+  return '';
+}
+
 export function AskInline({
   activePrompt,
   bodyRef,
@@ -744,27 +756,69 @@ export function AskInline({
   onSelect,
   onReply,
 }: AskInlineProps) {
+  // Minimize: collapse the whole question to a single yellow bar so the
+  // transcript is fully visible while you process the context. Reset whenever a
+  // new prompt arrives so a fresh question always opens expanded.
+  const [minimized, setMinimized] = useState(false);
+  const flipHeight = useHeightFlip(bodyRef, minimized);
+  const promptKey =
+    activePrompt?.kind === 'ask'
+      ? activePrompt.pending.toolUseId
+      : activePrompt?.kind === 'prompt'
+        ? JSON.stringify(activePrompt.prompt)
+        : null;
+  useEffect(() => {
+    setMinimized(false);
+  }, [promptKey]);
+
+  const minimize = () => {
+    flipHeight();
+    setMinimized(true);
+  };
+  const maximize = () => {
+    flipHeight();
+    setMinimized(false);
+  };
+
   return (
     <div className="ask-inline-body" ref={bodyRef}>
-      {activePrompt?.kind === 'ask' ? (
-        <AskBody
-          key={activePrompt.pending.toolUseId}
-          pending={activePrompt.pending}
-          bodyRef={bodyRef}
-          onAnswer={onAnswer}
-          onReply={onReply}
-        />
-      ) : activePrompt?.kind === 'prompt' ? (
-        <PromptBody
-          key={JSON.stringify(activePrompt.prompt)}
-          prompt={activePrompt.prompt}
-          planMarkdown={activePrompt.planMarkdown}
-          agentName={activePrompt.agentName}
-          bodyRef={bodyRef}
-          onKey={onKey}
-          onSelect={onSelect}
-          onReply={onReply}
-        />
+      {activePrompt && minimized ? (
+        <button type="button" className="ask-min-bar" onClick={maximize} aria-label="Maximise question">
+          <span className="ask-min-q">{promptHeader(activePrompt)}</span>
+          <span className="ask-min-action">Maximise</span>
+        </button>
+      ) : activePrompt ? (
+        <div className="ask-inline-full">
+          <button
+            type="button"
+            className="ask-min-btn"
+            aria-label="Minimise question"
+            title="Minimise"
+            onClick={minimize}
+          >
+            <span aria-hidden="true" />
+          </button>
+          {activePrompt.kind === 'ask' ? (
+            <AskBody
+              key={activePrompt.pending.toolUseId}
+              pending={activePrompt.pending}
+              bodyRef={bodyRef}
+              onAnswer={onAnswer}
+              onReply={onReply}
+            />
+          ) : (
+            <PromptBody
+              key={JSON.stringify(activePrompt.prompt)}
+              prompt={activePrompt.prompt}
+              planMarkdown={activePrompt.planMarkdown}
+              agentName={activePrompt.agentName}
+              bodyRef={bodyRef}
+              onKey={onKey}
+              onSelect={onSelect}
+              onReply={onReply}
+            />
+          )}
+        </div>
       ) : null}
     </div>
   );

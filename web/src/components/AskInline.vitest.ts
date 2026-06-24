@@ -4,8 +4,26 @@
  * providing clear regression coverage for all prompt-type behaviours.
  */
 import { describe, it, expect } from 'vitest';
-import { questionHasPreview, isFreeTextOption } from './AskInline';
+import { questionHasPreview, isFreeTextOption, promptHeader } from './AskInline';
 import type { PendingQuestion, Pending, PanePrompt } from '../lib/types';
+
+describe('promptHeader (minimized bar label)', () => {
+  it('prefers the structured question header, falls back to the question text', () => {
+    const withHeader: Pending = { toolUseId: 't', questions: [{ header: 'PIVOT', question: 'Proceed?', options: [] }] };
+    expect(promptHeader({ kind: 'ask', pending: withHeader })).toBe('PIVOT');
+    const noHeader: Pending = { toolUseId: 't', questions: [{ question: 'Proceed?', options: [] }] };
+    expect(promptHeader({ kind: 'ask', pending: noHeader })).toBe('Proceed?');
+  });
+  it('uses the prompt question, or the agent fallback, for scrape prompts', () => {
+    const prompt: PanePrompt = { question: 'How to proceed?', options: [] };
+    expect(promptHeader({ kind: 'prompt', prompt, planMarkdown: null, agentName: 'Claude' })).toBe('How to proceed?');
+    const bare: PanePrompt = { question: '', options: [] };
+    expect(promptHeader({ kind: 'prompt', prompt: bare, planMarkdown: null, agentName: 'Codex' })).toBe('Codex needs a choice');
+  });
+  it('returns empty for no prompt', () => {
+    expect(promptHeader(null)).toBe('');
+  });
+});
 
 // ── Builders ──────────────────────────────────────────────────────────────────
 
