@@ -1,6 +1,6 @@
 {
   "name": "@idl3/claude-control",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "Local web UI to watch and drive your Claude Code sessions running in tmux — live transcripts, reply, answer AskUserQuestion, attach files, from a browser or phone.",
   "keywords": [
