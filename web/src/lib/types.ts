@@ -74,6 +74,10 @@ export interface Msg {
   ts?: number;
   blocks: Block[];
   rawType?: string;
+  // True when derived from a Claude Code `queued_command` attachment (a message
+  // typed while the agent was busy). Rendered as a user bubble, but dropped by
+  // convert if the same text later lands as a real type=user message.
+  queued?: boolean;
 }
 
 export interface PendingOption {
@@ -200,13 +204,13 @@ export type ServerMessage =
   | { type: 'raw-event'; id: string; event: RawEvent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
   | { type: 'shell-output'; text: string; id?: string }
-  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string };
+  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string };
 
 // Client -> server WebSocket frames.
 export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
-  | { type: 'reply'; id: string; text: string }
+  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }

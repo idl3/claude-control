@@ -44,6 +44,35 @@ describe('convertMessages — role mapping', () => {
   });
 });
 
+describe('convertMessages — queued_command dedup', () => {
+  it('renders a queued message that never got a real type=user echo', () => {
+    const msgs: Msg[] = [
+      { uuid: 'q1', role: 'user', queued: true, blocks: [{ kind: 'text', text: 'Yeah Baby!' }] },
+    ];
+    const out = convertMessages(msgs);
+    expect(out).toHaveLength(1);
+    expect(parts(out[0])).toEqual([{ type: 'text', text: 'Yeah Baby!' }]);
+  });
+
+  it('drops the queued placeholder once the same text lands as a real user message', () => {
+    const msgs: Msg[] = [
+      { uuid: 'q1', role: 'user', queued: true, blocks: [{ kind: 'text', text: 'do the thing' }] },
+      { uuid: 'r1', role: 'user', blocks: [{ kind: 'text', text: 'do the thing' }] },
+    ];
+    const out = convertMessages(msgs);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('r1');
+  });
+
+  it('whitespace differences still dedupe', () => {
+    const msgs: Msg[] = [
+      { uuid: 'q1', role: 'user', queued: true, blocks: [{ kind: 'text', text: 'a   b' }] },
+      { uuid: 'r1', role: 'user', blocks: [{ kind: 'text', text: 'a b' }] },
+    ];
+    expect(convertMessages(msgs)).toHaveLength(1);
+  });
+});
+
 describe('convertMessages — block kinds', () => {
   it('maps thinking blocks to reasoning parts', () => {
     const msgs: Msg[] = [

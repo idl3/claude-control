@@ -152,6 +152,18 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
   // free-text placeholder (#41).
   linkFreeTextReplies(messages, resultsById);
 
+  // Pass 1c: a queued_command bubble (msg.queued) is a placeholder for a message
+  // typed while the agent was busy. If the SAME text later lands as a genuine
+  // type=user record, drop the queued placeholder so it isn't shown twice. Index
+  // the real user texts first; the queued ones are skipped against this set below.
+  const realUserText = new Set<string>();
+  const normText = (s: string) => s.replace(/\s+/g, ' ').trim();
+  for (const msg of messages) {
+    if (msg.role !== 'user' || msg.queued) continue;
+    const t = normText((msg.blocks ?? []).map((b) => ('text' in b ? b.text ?? '' : '')).join(' '));
+    if (t) realUserText.add(t);
+  }
+
   // Pass 2: build messages. Drop messages that contain only tool_result
   // blocks (their content is folded into the originating tool-call part).
   const out: ThreadMessageLike[] = [];
@@ -160,6 +172,11 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
   // dedupe defensively: suffix any repeat with its index (always unique).
   const seenIds = new Set<string>();
   messages.forEach((msg, i) => {
+    // Skip a queued placeholder whose text already exists as a real user message.
+    if (msg.queued) {
+      const t = normText((msg.blocks ?? []).map((b) => ('text' in b ? b.text ?? '' : '')).join(' '));
+      if (t && realUserText.has(t)) return;
+    }
     const parts = buildParts(msg.blocks ?? [], resultsById, msg.role === 'user');
     if (parts.length === 0) return;
 

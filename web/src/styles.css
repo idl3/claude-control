@@ -1029,6 +1029,10 @@ body.is-external-display .rail {
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The sticky-tail effect owns scroll position while pinned. Browser scroll
+     anchoring would also shift scrollTop on content growth, racing our tail and
+     leaving the view a few rows above the latest line — disable it. */
+  overflow-anchor: none;
   /* Never let the whole transcript scroll sideways: a wide child (code block,
      table) must scroll WITHIN its own bubble, not push the page off-screen.
      Pairs with min-width:0 on the message flex chain below. */
@@ -1214,13 +1218,51 @@ body.is-external-display .rail {
   color: var(--text-dim);
   padding: 8px 10px;
 }
-/* Queued send: not yet echoed by the transcript — dimmed + dashed until confirmed. */
-.msg-row[data-queued='true'] {
-  opacity: 0.62;
-}
-.msg-row[data-queued='true'] .msg-body {
+/* Optimistic (un-echoed) send. State comes from the server ack via data-send:
+   queued = awaiting ack (pulsing), sent = ack'd/awaiting echo, failed = never landed. */
+.msg-row[data-optimistic='true'] .msg-body {
   border: 1px dashed var(--line);
   background: transparent;
+}
+.msg-row[data-send='queued'] {
+  opacity: 0.8;
+}
+.msg-row[data-send='failed'] .msg-body {
+  border: 1px solid var(--danger, #e5484d);
+  border-style: solid;
+  background: color-mix(in oklch, var(--danger, #e5484d) 12%, transparent);
+}
+
+/* Send-state tag — lives in the actions row (bottom-right, where Copy sits) and
+   matches the Copy label's size via the shared --ui-scale font rule. */
+.send-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: calc(12.5px * var(--ui-scale));
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+.send-status[data-send='queued'] {
+  color: var(--accent);
+}
+.send-status[data-send='failed'] {
+  color: var(--danger, #e5484d);
+  font-weight: 600;
+}
+/* Gentle pulse on the queued clock so it reads as "still pending". */
+.send-status[data-send='queued'] .act-ico {
+  animation: send-pulse 1.6s ease-in-out infinite;
+}
+@keyframes send-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .send-status[data-send='queued'] .act-ico {
+    animation: none;
+  }
 }
 
 /* Copy action bar — always visible at the end of each message (not a hover
@@ -1248,6 +1290,13 @@ body.is-external-display .rail {
   transition:
     background var(--ease) 0.15s,
     color var(--ease) 0.15s;
+}
+/* Icon scales WITH the label (em), so the font-size bump on external displays /
+   iPad grows the glyph too instead of leaving a tiny icon beside large text. */
+.act-ico {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
 }
 .act-btn:hover {
   background: var(--bg-1);
