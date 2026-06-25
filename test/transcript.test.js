@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { parseRecord, TranscriptTailer } from '../lib/transcript.js';
+import { parseCodexRecord } from '../lib/codex.js';
 
 // ── parseRecord unit tests ───────────────────────────────────────────────────
 
@@ -421,6 +422,57 @@ test('TranscriptTailer: append event fires for new records', { timeout: 5000 }, 
 
   tailer.stop();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('TranscriptTailer: emits complete Codex JSON records before trailing newline arrives', { timeout: 5000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-codex-eof-'));
+  const filePath = path.join(dir, 'rollout.jsonl');
+  fs.writeFileSync(filePath, '', 'utf8');
+
+  const tailer = new TranscriptTailer(filePath, {
+    maxBuffer: 100,
+    debounceMs: 5,
+    pollMs: 20,
+    watch: false,
+    parser: parseCodexRecord,
+  });
+
+  try {
+    await tailer.start();
+
+    const assistant = JSON.stringify({
+      timestamp: '2026-06-21T06:30:20.418Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'Live Codex response' }],
+      },
+    });
+
+    const appended = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout waiting for append')), 3000);
+      tailer.once('append', (msgs) => {
+        clearTimeout(timer);
+        resolve(msgs);
+      });
+    });
+
+    fs.appendFileSync(filePath, assistant, 'utf8');
+
+    const msgs = await appended;
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0].role, 'assistant');
+    assert.equal(msgs[0].blocks[0].text, 'Live Codex response');
+
+    fs.appendFileSync(filePath, '\n', 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    assert.equal(tailer.getMessages().length, 1, 'later newline should not duplicate the EOF record');
+  } finally {
+    tailer.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('TranscriptTailer: poll fallback emits append when fs.watch is unavailable', { timeout: 5000 }, async () => {
