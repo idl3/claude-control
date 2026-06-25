@@ -46,6 +46,15 @@ export interface CockpitStore {
   /** Live capture of the dedicated shell pane (composer terminal mode). */
   shellOutput: string | null;
   /**
+   * True when a TUI picker (AskUserQuestion / permission / trust / plan / custom menu)
+   * is currently ON SCREEN in the selected session's pane.  This is the fastest
+   * send-guard signal — broadcast by the server the moment a picker renders
+   * (screen-truth, arrives earlier than the structured `pending` transcript signal).
+   */
+  pickerOpen: boolean;
+  /** Per-session picker state map — exposed for debugging / advanced callers. */
+  pickerOpenById: Record<string, boolean>;
+  /**
    * True once the server has sent the `messages` frame for the selected session.
    * False while the session is selected but the transcript tail is still loading.
    * Used to show a loader instead of the empty-state welcome during the load window.
@@ -105,6 +114,8 @@ export function useCockpit(): CockpitStore {
   >({});
   const [rawEventsById, setRawEventsById] = useState<Record<string, RawEvent[]>>({});
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
+  // Pane-scrape picker signal: open:true means a TUI picker is on screen right now.
+  const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -190,6 +201,9 @@ export function useCockpit(): CockpitStore {
           break;
         case 'prompt':
           setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
+          break;
+        case 'picker':
+          setPickerOpenById((prev) => ({ ...prev, [msg.id]: msg.open }));
           break;
         case 'subagents':
           // Snapshot: replace this session's sub-agent map.
@@ -379,6 +393,12 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
+  // True when a TUI picker is on screen for the selected session right now —
+  // the fastest/most-authoritative send-guard signal (screen-truth).
+  const pickerOpen = useMemo(
+    () => (selectedId ? (pickerOpenById[selectedId] ?? false) : false),
+    [selectedId, pickerOpenById],
+  );
   const rawEvents = useMemo(
     () => (selectedId ? rawEventsById[selectedId] ?? [] : []),
     [selectedId, rawEventsById],
@@ -417,6 +437,8 @@ export function useCockpit(): CockpitStore {
     rawEvents,
     capture,
     shellOutput,
+    pickerOpen,
+    pickerOpenById,
     select,
     resubscribe,
     sendReply,

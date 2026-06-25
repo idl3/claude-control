@@ -21,4 +21,16 @@ describe('hasOpenQuestion', () => {
     // Session object may not carry pendingQuestion at all (older server).
     expect(hasOpenQuestion(null, undefined)).toBe(false);
   });
+
+  it('blocks when only paneScrapePickerOpen is true (screen-truth signal)', () => {
+    // The pane-scrape picker signal is the fastest/most authoritative source;
+    // it must block even when the structured and session signals have not arrived yet.
+    expect(hasOpenQuestion(null, false, true)).toBe(true);
+  });
+
+  it('allows send when paneScrapePickerOpen is omitted with other signals falsy (backward-compat)', () => {
+    // Third param is optional — callers that have not yet been updated must not break.
+    expect(hasOpenQuestion(null, false)).toBe(false);
+    expect(hasOpenQuestion(null, undefined, undefined)).toBe(false);
+  });
 });
