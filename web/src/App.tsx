@@ -67,6 +67,36 @@ function msgText(msg: Msg): string {
 // bubble must bridge that gap rather than vanish. This is only a last-resort
 // cleanup for sends whose echo never arrives at all.
 const PENDING_SEND_TTL_MS = 1_800_000;
+// Optimistic sends are persisted here so a page reload doesn't drop an un-echoed
+// message — on load they rehydrate and the transcript reconcile resolves them.
+const PENDING_SENDS_LS_KEY = 'cc:pendingSends';
+
+type PendingSend = {
+  key: number;
+  reqId: string;
+  sessionId: string;
+  text: string;
+  label: string;
+  at: number;
+  status: 'queued' | 'sent' | 'failed';
+};
+
+function loadPendingSends(): PendingSend[] {
+  try {
+    const raw = localStorage.getItem(PENDING_SENDS_LS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const cutoff = Date.now() - PENDING_SEND_TTL_MS;
+    // Prune stale entries on load; keep failed ones (loud until acknowledged).
+    return arr.filter(
+      (e): e is PendingSend =>
+        e && typeof e.at === 'number' && (e.status === 'failed' || e.at >= cutoff),
+    );
+  } catch {
+    return [];
+  }
+}
 
 // Per-session composer drafts (staged prompt text), persisted across reloads.
 const DRAFTS_KEY = 'cc_drafts';
@@ -268,9 +298,20 @@ function AppInner() {
   // user bubble until ITS OWN echo (matched by text) lands in the transcript —
   // so unrelated chunks arriving in the meantime no longer make it vanish.
   // `text` = what was sent (for matching); `label` = what we display.
-  const [pendingSends, setPendingSends] = useState<
-    { key: number; sessionId: string; text: string; label: string; at: number }[]
-  >([]);
+  // `status` is the delivery-assurance signal, driven by the server ack (NOT by
+  // WS-write): 'queued' = handed to the socket, awaiting the server's ack that
+  // tmux accepted it; 'sent' = ack confirmed, awaiting the transcript echo;
+  // 'failed' = the server reported the send never landed (loud red, no TTL).
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>(loadPendingSends);
+
+  // Persist optimistic sends so a reload doesn't lose an un-echoed message.
+  useEffect(() => {
+    try {
+      localStorage.setItem(PENDING_SENDS_LS_KEY, JSON.stringify(pendingSends));
+    } catch {
+      /* quota / private mode — non-fatal, in-memory state still works */
+    }
+  }, [pendingSends]);
   const sendSeq = useRef(0);
   // Tracks whether the Composer's >_ terminal mode is active — updated by the
   // Composer via onTerminalModeChange. Used to gate the sub-agent prefix.
@@ -306,9 +347,17 @@ function AppInner() {
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
       const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
-      const ok = cockpit.sendReply(text);
-      showToast(ok ? 'Sent →' : 'Not connected — reconnecting…', ok ? 'ok' : 'error');
-      if (ok && sid) {
+      const reqId = cockpit.sendReply(text, paths.length);
+      if (!reqId) {
+        // The socket couldn't even write the frame — nothing was dispatched, so
+        // show NO optimistic bubble (the old code's danger: a bubble that lied).
+        showToast('Not connected — reconnecting…', 'error');
+        return;
+      }
+      // Deliberately "Queued", not "Sent": delivery is only confirmed when the
+      // server's ack for this reqId arrives (handled below).
+      showToast('Queued →', 'ok');
+      if (sid) {
         // The displayed label mirrors what was sent so the bubble matches reality.
         const label =
           prefixedTyped || (paths.length ? `📎 ${paths.length} attachment(s)` : text);
@@ -316,10 +365,12 @@ function AppInner() {
           ...q,
           {
             key: ++sendSeq.current,
+            reqId,
             sessionId: sid,
             text,
             label,
             at: Date.now(),
+            status: 'queued',
           },
         ]);
       }
@@ -327,62 +378,80 @@ function AppInner() {
     [cockpit, showToast],
   );
 
-  // Reconcile queued sends: as new user messages arrive for the selected
-  // session, drop the oldest queued send whose sent text matches (so multiple
-  // queued messages clear one-by-one, in order). Per-session "processed length"
-  // so transcript history is never re-matched.
-  const processedRef = useRef<Record<string, number>>({});
+  // Delivery assurance: the server echoes each reply's reqId in its ack once
+  // tmux has actually accepted (or rejected) the send. Flip the matching queued
+  // bubble to 'sent' (delivered — now awaiting the transcript echo) or 'failed'
+  // (loud: the send did NOT land, so the user is never misled that it did).
+  useEffect(() => {
+    const onAck = (ev: Event) => {
+      const d = (ev as CustomEvent).detail as {
+        op?: string;
+        ok?: boolean;
+        reqId?: string;
+        error?: string;
+      };
+      if (d?.op !== 'reply' || !d.reqId) return;
+      setPendingSends((q) =>
+        q.map((e) =>
+          e.reqId === d.reqId ? { ...e, status: d.ok ? 'sent' : 'failed' } : e,
+        ),
+      );
+      if (!d.ok) showToast(`Send failed: ${d.error ?? 'not delivered'}`, 'error');
+    };
+    window.addEventListener('cockpit:ack', onAck);
+    return () => window.removeEventListener('cockpit:ack', onAck);
+  }, [showToast]);
+
+  // Reconcile optimistic sends against the transcript. A pending clears when a
+  // user message matches its text AND lands at/after the send time (ts ≥ at − skew)
+  // — the timestamp guard stops an identical OLDER message in history from clearing
+  // a fresh send. Each transcript echo is claimed once, so multiple same-text sends
+  // resolve one-for-one in FIFO order. Scanning the FULL transcript (not just newly
+  // arrived messages) is what lets a pending rehydrated from localStorage after a
+  // page reload resolve against history that was already loaded.
   useEffect(() => {
     const sid = cockpit.selectedId;
-    if (!sid) return;
-    const msgs = cockpit.messages;
-    const prev = processedRef.current[sid];
-    const start = prev == null ? msgs.length : Math.min(prev, msgs.length);
-    if (msgs.length > start) {
-      const echoes: string[] = [];
-      for (let i = start; i < msgs.length; i++) {
-        if (msgs[i].role !== 'user') continue;
-        const t = msgText(msgs[i]).trim();
-        if (t) echoes.push(t);
-      }
-      if (echoes.length) {
-        // Whitespace-insensitive matching. The transcript echo can differ from
-        // the exact sent string (collapsed whitespace, attachment paths stored
-        // as separate blocks so the typed text is a prefix, an optimiser rewrite,
-        // etc.). Try precise/prefix matches first; if none, fall back to clearing
-        // the OLDEST pending for the session (FIFO) so a stray-format echo can't
-        // strand a duplicate bubble forever.
-        const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
-        setPendingSends((q) => {
-          const next = [...q];
-          for (const raw of echoes) {
-            const t = norm(raw);
-            const sescit = next
-              .map((e, i) => ({ e, i }))
-              .filter(({ e }) => e.sessionId === sid);
-            if (sescit.length === 0) continue;
-            const match =
-              sescit.find(({ e }) => {
-                const text = norm(e.text);
-                const label = norm(e.label);
-                return text === t || label === t || t.startsWith(label) || text.startsWith(t);
-              }) ?? sescit[0]; // fallback: oldest pending for this session
-            next.splice(match.i, 1);
-          }
-          return next;
-        });
-      }
-    }
-    processedRef.current[sid] = msgs.length;
-  }, [cockpit.selectedId, cockpit.messages]);
+    if (!sid || !pendingSends.some((e) => e.sessionId === sid)) return;
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const toMs = (ts: unknown) =>
+      typeof ts === 'number' ? ts : typeof ts === 'string' ? Date.parse(ts) || 0 : 0;
+    const SKEW = 5000; // clock-skew tolerance between send time and transcript ts
+    const echoes = cockpit.messages
+      .filter((m) => m.role === 'user')
+      .map((m) => ({ t: norm(msgText(m)), ts: toMs(m.ts) }))
+      .filter((e) => e.t);
+    setPendingSends((q) => {
+      const claimed = new Set<number>();
+      const next = q.filter((e) => {
+        if (e.sessionId !== sid) return true; // leave other sessions untouched
+        const text = norm(e.text);
+        const label = norm(e.label);
+        const idx = echoes.findIndex(
+          (ec, i) =>
+            !claimed.has(i) &&
+            ec.ts >= e.at - SKEW &&
+            (ec.t === text || ec.t === label || ec.t.startsWith(label) || text.startsWith(ec.t)),
+        );
+        if (idx >= 0) {
+          claimed.add(idx);
+          return false; // matched a real transcript bubble → drop the optimistic one
+        }
+        return true; // still pending
+      });
+      return next.length === q.length ? q : next;
+    });
+  }, [cockpit.selectedId, cockpit.messages, pendingSends]);
 
-  // TTL backstop for queued sends whose echo never arrived.
+  // TTL backstop for queued/sent bubbles whose transcript echo never arrived.
+  // FAILED sends are exempt — they must stay loud until the user sees them.
   useEffect(() => {
     if (pendingSends.length === 0) return;
     const t = setInterval(() => {
       const cutoff = Date.now() - PENDING_SEND_TTL_MS;
       setPendingSends((q) =>
-        q.some((e) => e.at < cutoff) ? q.filter((e) => e.at >= cutoff) : q,
+        q.some((e) => e.status !== 'failed' && e.at < cutoff)
+          ? q.filter((e) => e.status === 'failed' || e.at >= cutoff)
+          : q,
       );
     }, 5_000);
     return () => clearInterval(t);
@@ -443,27 +512,21 @@ function AppInner() {
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
-    // Each still-unmatched queued send shows as a user bubble, INTERLEAVED by its
-    // send time — inserted before the first transcript message that's newer — so
-    // a message sent while the agent was mid-reply lands chronologically (even if
-    // that splits the agent's turn) rather than all piling at the bottom.
+    // Pending sends pin to the BOTTOM (near the composer), FIFO, NOT interleaved
+    // by time. While a send is un-echoed it isn't really in the transcript yet,
+    // so floating it up among the agent's streaming reply reads as "my message
+    // moved / the transcript isn't updating" (the reported confusion). Keeping it
+    // anchored + clearly tagged (queued/sent/failed) makes its state unambiguous;
+    // once the real transcript echo lands, this bubble is removed and the genuine
+    // message already sits in its correct chronological place.
     for (const e of selectedPending) {
-      const bubble = {
+      base.push({
         role: 'user',
         id: `queued-${e.key}`,
         createdAt: new Date(e.at),
         content: [{ type: 'text', text: e.label }],
-        metadata: { custom: { cockpitRole: 'user', optimistic: true } },
-      } as ThreadMessageLike;
-      let idx = base.length;
-      for (let i = 0; i < base.length; i++) {
-        const c = base[i].createdAt;
-        if (c instanceof Date && c.getTime() > e.at) {
-          idx = i;
-          break;
-        }
-      }
-      base.splice(idx, 0, bubble);
+        metadata: { custom: { cockpitRole: 'user', optimistic: true, sendStatus: e.status } },
+      } as ThreadMessageLike);
     }
     // The "Working…" loader mirrors the session activity icon: same claudeWorking
     // signal (thinking / recent activity), so the two never disagree. A freshly
@@ -831,112 +894,97 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Sticky conversations: tail new/streaming content while pinned to the bottom;
-  // scrolling up detaches (and shows the ↓ button); returning to the bottom (or
-  // tapping ↓) re-attaches. The KEY safety vs the earlier freeze: tailing is
-  // SUPPRESSED while the user is actively touching/scrolling, so a streaming
-  // session can never yank the viewport out from under a swipe. tail() is also
-  // rAF-coalesced so bursty streams cost one scroll write per frame.
+  // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
+  // streaming, OR reflowing message scrolls to the latest — no Ctrl+. needed.
+  // `pinned` is simply "are we at the bottom?", recomputed on every scroll: a
+  // programmatic tail lands at the bottom → stays pinned; a user scroll-UP off
+  // the bottom → detached; scrolling back to the bottom → re-attached. A
+  // ResizeObserver tails through late image/code reflow so entering a session
+  // (and content that grows after mount) settles AT the bottom instead of
+  // latching detached. The programmatic tail is suppressed during an active
+  // finger drag / fresh wheel so it never fights the user's gesture.
   useEffect(() => {
     if (!cockpit.selectedId) return;
     let vp: HTMLElement | null = null;
     let btn: HTMLElement | null = null;
     let mo: MutationObserver | null = null;
     let ro: ResizeObserver | null = null;
+    let composerRo: ResizeObserver | null = null;
     let raf = 0;
     let tailRaf = 0;
-    let settle = 0;
     let tries = 0;
     let pinned = true;
-    let interacting = false;
-    // Entering a session must land at the latest message. The transcript mounts
-    // its messages AFTER this effect attaches, so a single scroll-to-bottom gets
-    // undone when late content (markdown, code, images) grows the viewport and
-    // fires a scroll that recomputes pinned→false. While `initial`, we keep
-    // forcing the bottom and never auto-unpin — cleared by the first real user
-    // gesture or a short settle window, after which normal sticky logic resumes.
-    let initial = true;
-    let initTimer = 0;
+    let touching = false;
+    let wheelUntil = 0; // suppress programmatic tail briefly after a wheel
+    const THRESHOLD = 80; // px from true bottom that still counts as "at bottom"
 
-    const atBottom = () => !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < 80;
+    const atBottom = () => !!vp && vp.scrollHeight - vp.scrollTop - vp.clientHeight < THRESHOLD;
+    const busy = () => touching || Date.now() < wheelUntil;
     const updateBtn = () => {
       if (btn) btn.dataset.show = vp && !atBottom() ? 'true' : '';
     };
     const tail = () => {
-      if (tailRaf) return;
+      if (!pinned || busy() || tailRaf) return;
       tailRaf = requestAnimationFrame(() => {
         tailRaf = 0;
-        if (vp && (pinned || initial) && !interacting) vp.scrollTop = vp.scrollHeight;
+        if (vp && pinned && !busy()) vp.scrollTop = vp.scrollHeight;
       });
     };
-    const endInitial = () => {
-      if (!initial) return;
-      initial = false;
-      clearTimeout(initTimer);
+    // pinned tracks the bottom on every scroll (programmatic tail → bottom →
+    // stays pinned; user scroll-up → unpinned). Skipped mid-drag (touchend
+    // recomputes it) so an in-flight momentum frame can't transiently unpin.
+    const onScroll = () => {
+      if (!touching) pinned = atBottom();
+      updateBtn();
+    };
+    const onWheel = () => { wheelUntil = Date.now() + 250; };
+    const onTouchStart = () => { touching = true; };
+    const onTouchEnd = () => {
+      touching = false;
       pinned = atBottom();
       updateBtn();
-    };
-    const onScroll = () => {
-      if (!interacting && !initial) pinned = atBottom();
-      updateBtn();
-    };
-    const beginInteract = () => {
-      interacting = true;
-      endInitial(); // a real gesture takes over from the enter-at-bottom hold
-      clearTimeout(settle);
-    };
-    const endInteract = () => {
-      clearTimeout(settle);
-      settle = window.setTimeout(() => {
-        interacting = false;
-        pinned = atBottom();
-        updateBtn();
-      }, 160);
-    };
-    const onWheel = () => {
-      beginInteract();
-      endInteract();
     };
 
     const attach = () => {
       vp = document.querySelector('.thread-viewport');
       btn = document.querySelector('.scroll-to-bottom');
       if (!vp) {
-        if (tries++ < 40) raf = requestAnimationFrame(attach);
+        if (tries++ < 60) raf = requestAnimationFrame(attach);
         return;
       }
       pinned = true;
-      initial = true;
       vp.scrollTop = vp.scrollHeight;
       updateBtn();
-      // Hold "enter at bottom" until content stops settling (or the user acts).
-      clearTimeout(initTimer);
-      initTimer = window.setTimeout(endInitial, 600);
       vp.addEventListener('scroll', onScroll, { passive: true });
-      vp.addEventListener('touchstart', beginInteract, { passive: true });
-      vp.addEventListener('touchend', endInteract, { passive: true });
-      vp.addEventListener('touchcancel', endInteract, { passive: true });
+      vp.addEventListener('touchstart', onTouchStart, { passive: true });
+      vp.addEventListener('touchend', onTouchEnd, { passive: true });
+      vp.addEventListener('touchcancel', onTouchEnd, { passive: true });
       vp.addEventListener('wheel', onWheel, { passive: true });
+      // New / streaming messages (DOM changes) → tail.
       mo = new MutationObserver(tail);
       mo.observe(vp, { childList: true, subtree: true, characterData: true });
+      // Size/reflow changes — image + code-highlight loads grow height with NO
+      // DOM mutation — also tail, so a freshly-entered (or settling) transcript
+      // lands AT the bottom instead of latching detached just above it.
+      if ('ResizeObserver' in window) {
+        ro = new ResizeObserver(tail);
+        const content = vp.firstElementChild;
+        if (content) ro.observe(content);
+      }
 
-      // Keep the ↓ button above the composer at any composer height.
+      // Keep the ↓ button + transcript viewport above the composer at any height,
+      // and re-tail when the composer grows (e.g. the AskInline morph) so the
+      // latest context stays visible. (Respects the pinned guard.)
       const root = vp.closest<HTMLElement>('.thread-root');
       const composer = root?.querySelector<HTMLElement>('.composer') ?? null;
       if (root && composer && 'ResizeObserver' in window) {
         const setH = () => {
           root.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
-          // When the composer GROWS — most notably the AskInline morph opening a
-          // pending question — the viewport shrinks and the latest message (the
-          // assistant's reasoning leading up to the question) would be hidden
-          // behind the taller composer. Re-tail so that context stays visible
-          // just above the question while answering. Respects the pinned guard,
-          // so a user who scrolled up to read isn't yanked back down.
           tail();
         };
         setH();
-        ro = new ResizeObserver(setH);
-        ro.observe(composer);
+        composerRo = new ResizeObserver(setH);
+        composerRo.observe(composer);
       }
     };
     raf = requestAnimationFrame(attach);
@@ -944,17 +992,16 @@ function AppInner() {
     return () => {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(tailRaf);
-      clearTimeout(settle);
-      clearTimeout(initTimer);
       if (vp) {
         vp.removeEventListener('scroll', onScroll);
-        vp.removeEventListener('touchstart', beginInteract);
-        vp.removeEventListener('touchend', endInteract);
-        vp.removeEventListener('touchcancel', endInteract);
+        vp.removeEventListener('touchstart', onTouchStart);
+        vp.removeEventListener('touchend', onTouchEnd);
+        vp.removeEventListener('touchcancel', onTouchEnd);
         vp.removeEventListener('wheel', onWheel);
       }
       if (mo) mo.disconnect();
       if (ro) ro.disconnect();
+      if (composerRo) composerRo.disconnect();
     };
   }, [cockpit.selectedId]);
   const select = useCallback(

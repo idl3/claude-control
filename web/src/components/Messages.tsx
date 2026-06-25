@@ -10,9 +10,11 @@ import 'slot-text/style.css';
 import { TextPart, ToolPart, AskAnsweredPart, lastUpdateLine } from './MessageParts';
 import { useLiveThinkingId } from './ThinkingContext';
 
+// width/height come from CSS (.act-ico, sized in em) so the icon scales WITH the
+// label's font-size on external displays / iPad (both driven by --ui-scale).
 function CopyIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
       <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
@@ -20,8 +22,28 @@ function CopyIcon() {
 }
 function CheckIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M5 12l5 5L19 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+// Clock = "queued, not yet in the transcript". A true send is a reconciled
+// transcript bubble (this optimistic row is gone by then), so we never show a
+// "sent" tick here — that would imply it's in the conversation when it isn't.
+function ClockIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 7v5l3.5 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function WarnIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3l9 16H3l9-16z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M12 10v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="17" r="1.1" fill="currentColor" />
     </svg>
   );
 }
@@ -219,14 +241,53 @@ function GroupedBody() {
 }
 
 // User transcript message: right-aligned bubble. (Plain text — no work grouping
-// — but keep the copy bar.)
+// — but keep the copy bar.) Optimistic (not-yet-echoed) sends carry a sendStatus
+// so the bubble shows its delivery state: queued (pulsing, awaiting server ack),
+// sent (ack confirmed, awaiting transcript echo), or failed (loud — never landed).
 export function UserMessage() {
+  const optimistic = useMessage((m) => m.metadata?.custom?.optimistic) as
+    | boolean
+    | undefined;
+  const sendStatus = useMessage((m) => m.metadata?.custom?.sendStatus) as
+    | 'queued'
+    | 'sent'
+    | 'failed'
+    | undefined;
+  // Until a send is reconciled into a real transcript bubble it is "Queued",
+  // whether or not the server has ack'd it (ack only proves tmux accepted it, not
+  // that it's in the conversation). So 'queued' and 'sent' collapse to one blue
+  // "Queued" state; only a delivery FAILURE diverges.
+  const failed = sendStatus === 'failed';
+  const display = failed ? 'failed' : 'queued';
   return (
-    <MessagePrimitive.Root className="msg-row" data-role="user">
+    <MessagePrimitive.Root
+      className="msg-row"
+      data-role="user"
+      data-optimistic={optimistic ? 'true' : undefined}
+      data-send={optimistic ? display : undefined}
+    >
       <div className="msg-body">
         <MessagePrimitive.Parts components={partComponents} />
       </div>
-      <MessageActions />
+      {optimistic ? (
+        // Send state lives in the actions row (bottom-right, where Copy sits) — out
+        // of the bubble — and matches the Copy label's size via the shared font rule.
+        <div className="msg-actions">
+          <span className="send-status" data-send={display}>
+            {failed ? (
+              <>
+                <WarnIcon /> Not delivered
+              </>
+            ) : (
+              <>
+                <ClockIcon /> Queued
+              </>
+            )}
+          </span>
+        </div>
+      ) : (
+        <MessageActions />
+      )}
     </MessagePrimitive.Root>
   );
 }

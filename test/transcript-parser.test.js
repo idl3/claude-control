@@ -53,6 +53,48 @@ test('TranscriptTailer: default parser handles Claude JSONL', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1b. queued_command attachments (messages typed while the agent was busy) are
+//     surfaced as user messages — Claude Code does NOT write a type=user record
+//     for them, so without this the cockpit never renders/reconciles the send.
+// ---------------------------------------------------------------------------
+
+test('parseRecord: human queued_command becomes a user message (queued:true)', () => {
+  const rec = JSON.stringify({
+    type: 'attachment',
+    uuid: 'q-1',
+    timestamp: '2026-06-24T10:30:49.336Z',
+    attachment: {
+      type: 'queued_command',
+      prompt: 'Yeah Baby!',
+      commandMode: 'prompt',
+      origin: { kind: 'human' },
+    },
+  });
+  const msg = parseRecord(rec);
+  assert.ok(msg, 'queued_command yields a message');
+  assert.equal(msg.role, 'user');
+  assert.equal(msg.queued, true);
+  assert.equal(msg.rawType, 'queued_command');
+  assert.equal(msg.blocks[0].kind, 'text');
+  assert.equal(msg.blocks[0].text, 'Yeah Baby!');
+});
+
+test('parseRecord: non-human / non-prompt queued_command is ignored', () => {
+  const agentQueued = JSON.stringify({
+    type: 'attachment',
+    uuid: 'q-2',
+    attachment: { type: 'queued_command', prompt: 'x', commandMode: 'prompt', origin: { kind: 'agent' } },
+  });
+  const blankPrompt = JSON.stringify({
+    type: 'attachment',
+    uuid: 'q-3',
+    attachment: { type: 'queued_command', prompt: '   ', commandMode: 'prompt', origin: { kind: 'human' } },
+  });
+  assert.equal(parseRecord(agentQueued), null, 'agent-origin queue ignored');
+  assert.equal(parseRecord(blankPrompt), null, 'blank prompt ignored');
+});
+
+// ---------------------------------------------------------------------------
 // 2. Custom parser (parseCodexRecord) routes codex lines correctly.
 // ---------------------------------------------------------------------------
 
