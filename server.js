@@ -46,6 +46,7 @@ import {
   recommendClaudeModel,
 } from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
+import { replyShouldBlock } from './lib/reply-guard.js';
 import { listSkills, readSkill } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
@@ -1889,6 +1890,23 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      // SAFETY: never send a raw reply (paste+Enter) into a pane with an OPEN
+      // picker (AskUserQuestion OR a pane-scrape permission/trust/plan/numbered
+      // menu) — the Enter would select an option, silently answering it. The
+      // client must answer via the structured 'answer'/'promptkey'/'promptselect'
+      // path. Refuse raw replies here as defense-in-depth (covers stale/racey
+      // clients). EXCEPTION: a reply flagged `viaAnswer` is the trailing free-text
+      // of a DELIBERATE answer the inline component sends AFTER it has already
+      // navigated the picker — that IS the answer, so it must pass through.
+      if (!msg.viaAnswer) {
+        const replySub = subscriptions.get(msg.id);
+        const tailerPending = replySub?.tailer ? replySub.tailer.getPending() : null;
+        const flagPending = !!session.pending;
+        if (replyShouldBlock(tailerPending, flagPending)) {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId: msg.reqId, error: 'A question is open — answer it via the question component' });
+          return;
+        }
+      }
       const replyText = String(msg.text ?? '');
       const reqId = msg.reqId; // correlation id: echoed in the ack so the client
                                // marks THIS send delivered (not just WS-written).
