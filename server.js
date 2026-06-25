@@ -46,6 +46,8 @@ import {
   recommendClaudeModel,
 } from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
+import { replyShouldBlock } from './lib/reply-guard.js';
+import { shouldRefuseSendForPicker } from './lib/picker-send-guard.js';
 import { listSkills, readSkill } from './lib/skills.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
@@ -1779,6 +1781,7 @@ async function ensureClaudePrintForSession(session) {
 function startPromptPoller(id, sub) {
   if (sub.promptTimer) return;
   sub._lastPrompt = undefined;
+  sub._lastPickerOpen = undefined; // tracks last-broadcast picker state for Item 2
   sub._promptTicking = false;
   const tick = async () => {
     if (sub._promptTicking) return;
@@ -1787,12 +1790,14 @@ function startPromptPoller(id, sub) {
       const session = sessionById(id);
       if (!session || !tmux.isValidTarget(session.target)) return;
       let prompt = null;
+      let pickerOpen = false;
       try {
         // Visible pane only (no scrollback) — an answered picker frozen in
         // history must not re-fire. The live prompt is always on screen.
         const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
         if (session.kind === 'codex') {
           prompt = parseCodexPrompt(cap);
+          pickerOpen = !!prompt; // for codex, pickerOpen tracks the same parsed prompt
         } else {
           // Claude: only surface RECOGNIZED system prompts (permission / trust /
           // plan-review). Custom agent/skill pickers and prose questions are NOT
@@ -1800,6 +1805,10 @@ function startPromptPoller(id, sub) {
           // path (pending), not this scrape.
           const parsed = parsePanePrompt(cap);
           prompt = isSystemPrompt(parsed) ? parsed : null;
+          // pickerOpen is broader than prompt: ANY numbered picker with cursor/footer
+          // qualifies (not just the narrower isSystemPrompt subset). This reuses the
+          // SAME capture already taken — zero new tmux execs.
+          pickerOpen = !!parsed;
         }
       } catch {
         return;
@@ -1814,6 +1823,13 @@ function startPromptPoller(id, sub) {
           detail: prompt,
         });
         broadcastTo(id, { type: 'prompt', id, prompt });
+      }
+      // Broadcast picker awareness separately from the narrower prompt rendering.
+      // pickerOpen=true for ANY parsePanePrompt hit (not just isSystemPrompt) so
+      // clients can disable free-text send without waiting for the next poll cycle.
+      if (pickerOpen !== sub._lastPickerOpen) {
+        sub._lastPickerOpen = pickerOpen;
+        broadcastTo(id, { type: 'picker', id, open: pickerOpen });
       }
     } finally {
       sub._promptTicking = false;
@@ -1889,6 +1905,23 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      // SAFETY: never send a raw reply (paste+Enter) into a pane with an OPEN
+      // picker (AskUserQuestion OR a pane-scrape permission/trust/plan/numbered
+      // menu) — the Enter would select an option, silently answering it. The
+      // client must answer via the structured 'answer'/'promptkey'/'promptselect'
+      // path. Refuse raw replies here as defense-in-depth (covers stale/racey
+      // clients). EXCEPTION: a reply flagged `viaAnswer` is the trailing free-text
+      // of a DELIBERATE answer the inline component sends AFTER it has already
+      // navigated the picker — that IS the answer, so it must pass through.
+      if (!msg.viaAnswer) {
+        const replySub = subscriptions.get(msg.id);
+        const tailerPending = replySub?.tailer ? replySub.tailer.getPending() : null;
+        const flagPending = !!session.pending;
+        if (replyShouldBlock(tailerPending, flagPending)) {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId: msg.reqId, error: 'A question is open — answer it via the question component' });
+          return;
+        }
+      }
       const replyText = String(msg.text ?? '');
       const reqId = msg.reqId; // correlation id: echoed in the ack so the client
                                // marks THIS send delivered (not just WS-written).
@@ -1930,6 +1963,32 @@ async function handleClientMessage(ws, msg) {
           // Codex TUI compatibility: only non-app-server Codex panes may use
           // tmux keystrokes. RPC app-server panes must never receive prompt text
           // in their terminal buffer.
+        }
+        // ── Synchronous send-time picker guard ─────────────────────────────
+        // This is the race-free authority: it checks the ACTUAL current screen
+        // at send-time, independent of poll cadence, the 64KB flag window, and
+        // tailer state. The replyShouldBlock flag-check above (lines ~1901-1909)
+        // stays as cheap defense-in-depth that can short-circuit before we even
+        // get here. viaAnswer replies bypass BOTH guards (they are the answer).
+        //
+        // Gate: keystroke-TUI panes (claude AND codex-TUI). Print transport has no
+        // keystroke TUI to guard against, and codex-rpc panes already returned above
+        // (so any codex pane reaching here fell through to tmux sendText). The parser
+        // is chosen by kind — parsePanePrompt for claude, parseCodexPrompt for codex —
+        // because the two TUIs scrape pickers differently; the pure predicate then
+        // decides on the boolean presence of a parsed picker, identical for both.
+        if (!msg.viaAnswer && (session.kind === 'claude' || session.kind === 'codex') && session.transport !== 'print') {
+          try {
+            const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
+            const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
+            if (shouldRefuseSendForPicker({ viaAnswer: msg.viaAnswer, kind: session.kind, transport: session.transport, parsedPicker })) {
+              send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: 'A question/picker is open in this pane — answer it via the question UI, not a free-text reply.' });
+              return;
+            }
+          } catch {
+            // Capture failed: do NOT block. The replyShouldBlock flag-check above
+            // is the fallback. Better to allow a send than to stall on a tmux error.
+          }
         }
         await tmux.sendText(session.target, replyText, { settleMs });
         send(ws, { type: 'ack', op: 'reply', ok: true, reqId });

@@ -46,6 +46,15 @@ export interface CockpitStore {
   /** Live capture of the dedicated shell pane (composer terminal mode). */
   shellOutput: string | null;
   /**
+   * True when a TUI picker (AskUserQuestion / permission / trust / plan / custom menu)
+   * is currently ON SCREEN in the selected session's pane.  This is the fastest
+   * send-guard signal — broadcast by the server the moment a picker renders
+   * (screen-truth, arrives earlier than the structured `pending` transcript signal).
+   */
+  pickerOpen: boolean;
+  /** Per-session picker state map — exposed for debugging / advanced callers. */
+  pickerOpenById: Record<string, boolean>;
+  /**
    * True once the server has sent the `messages` frame for the selected session.
    * False while the session is selected but the transcript tail is still loading.
    * Used to show a loader instead of the empty-state welcome during the load window.
@@ -53,7 +62,7 @@ export interface CockpitStore {
   messagesLoaded: boolean;
   select: (id: string) => void;
   resubscribe: () => void;
-  sendReply: (text: string, attachments?: number) => string | null;
+  sendReply: (text: string, attachments?: number, viaAnswer?: boolean) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
@@ -105,6 +114,8 @@ export function useCockpit(): CockpitStore {
   >({});
   const [rawEventsById, setRawEventsById] = useState<Record<string, RawEvent[]>>({});
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
+  // Pane-scrape picker signal: open:true means a TUI picker is on screen right now.
+  const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -191,6 +202,9 @@ export function useCockpit(): CockpitStore {
         case 'prompt':
           setPromptById((prev) => ({ ...prev, [msg.id]: msg.prompt }));
           break;
+        case 'picker':
+          setPickerOpenById((prev) => ({ ...prev, [msg.id]: msg.open }));
+          break;
         case 'subagents':
           // Snapshot: replace this session's sub-agent map.
           setSubagentsById((prev) => ({
@@ -256,13 +270,18 @@ export function useCockpit(): CockpitStore {
   // success alone is NOT delivery. Null means the frame couldn't even be sent
   // (socket closed): nothing was dispatched, show no optimistic bubble.
   const sendReply = useCallback(
-    (text: string, attachments = 0): string | null => {
+    (text: string, attachments = 0, viaAnswer = false): string | null => {
       const id = selectedRef.current;
       if (!id || !text.trim()) return null;
       const reqId = `r${Date.now().toString(36)}${(replySeq.current++).toString(36)}`;
       // attachments → server scales the paste→Enter settle so image-laden sends
       // actually submit (the TUI ingests each pasted path asynchronously).
-      const ok = socket.send({ type: 'reply', id, text, reqId, attachments });
+      // viaAnswer marks a reply that the inline question/prompt component sends as
+      // the trailing free-text of a DELIBERATE answer (it has already navigated the
+      // picker via promptkey/answer first). The server's open-question reply guard
+      // refuses raw composer replies into an open picker, but must let these
+      // through — they ARE the answer, not an accidental keystroke.
+      const ok = socket.send({ type: 'reply', id, text, reqId, attachments, viaAnswer });
       return ok ? reqId : null;
     },
     [socket],
@@ -374,6 +393,12 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
+  // True when a TUI picker is on screen for the selected session right now —
+  // the fastest/most-authoritative send-guard signal (screen-truth).
+  const pickerOpen = useMemo(
+    () => (selectedId ? (pickerOpenById[selectedId] ?? false) : false),
+    [selectedId, pickerOpenById],
+  );
   const rawEvents = useMemo(
     () => (selectedId ? rawEventsById[selectedId] ?? [] : []),
     [selectedId, rawEventsById],
@@ -412,6 +437,8 @@ export function useCockpit(): CockpitStore {
     rawEvents,
     capture,
     shellOutput,
+    pickerOpen,
+    pickerOpenById,
     select,
     resubscribe,
     sendReply,
