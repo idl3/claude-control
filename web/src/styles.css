@@ -1303,11 +1303,18 @@ body.is-external-display .rail {
   color: var(--text);
 }
 /* Toggle copy ↔ copied via the data-copied attribute assistant-ui sets. */
+.act-copy-idle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  text-transform: capitalize;
+}
 .act-copy-done {
   display: none;
   align-items: center;
   gap: 4px;
   color: var(--green);
+  text-transform: capitalize;
 }
 .act-btn[data-copied] .act-copy-idle {
   display: none;
