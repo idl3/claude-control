@@ -204,13 +204,17 @@ export type ServerMessage =
   | { type: 'raw-event'; id: string; event: RawEvent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
   | { type: 'shell-output'; text: string; id?: string }
+  // Pane-scrape picker signal: any numbered TUI picker (AskUserQuestion /
+  // permission / trust / plan / custom menu) appearing or disappearing on
+  // the Claude pane's visible screen.  open:true = picker is ON SCREEN right now.
+  | { type: 'picker'; id: string; open: boolean }
   | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string };
 
 // Client -> server WebSocket frames.
 export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
-  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number }
+  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }
