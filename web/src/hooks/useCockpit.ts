@@ -53,7 +53,7 @@ export interface CockpitStore {
   messagesLoaded: boolean;
   select: (id: string) => void;
   resubscribe: () => void;
-  sendReply: (text: string) => boolean;
+  sendReply: (text: string, attachments?: number) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
@@ -108,6 +108,7 @@ export function useCockpit(): CockpitStore {
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
+  const replySeq = useRef(0); // monotonic suffix for reply correlation ids
   selectedRef.current = selectedId;
   // sessions in a ref so shell ops can resolve the selected session's cwd.
   const sessionsRef = useRef<Session[]>([]);
@@ -250,11 +251,19 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
+  // Returns a correlation id (reqId) the caller tracks until the server's
+  // `ack` for that reqId confirms tmux actually accepted the send — WS-write
+  // success alone is NOT delivery. Null means the frame couldn't even be sent
+  // (socket closed): nothing was dispatched, show no optimistic bubble.
   const sendReply = useCallback(
-    (text: string): boolean => {
+    (text: string, attachments = 0): string | null => {
       const id = selectedRef.current;
-      if (!id || !text.trim()) return false;
-      return socket.send({ type: 'reply', id, text });
+      if (!id || !text.trim()) return null;
+      const reqId = `r${Date.now().toString(36)}${(replySeq.current++).toString(36)}`;
+      // attachments → server scales the paste→Enter settle so image-laden sends
+      // actually submit (the TUI ingests each pasted path asynchronously).
+      const ok = socket.send({ type: 'reply', id, text, reqId, attachments });
+      return ok ? reqId : null;
     },
     [socket],
   );

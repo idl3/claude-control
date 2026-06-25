@@ -1848,7 +1848,7 @@ wss.on('connection', (ws) => {
     try {
       await handleClientMessage(ws, msg);
     } catch (err) {
-      send(ws, { type: 'ack', op: msg?.type || 'unknown', ok: false, error: String(err?.message || err) });
+      send(ws, { type: 'ack', op: msg?.type || 'unknown', ok: false, error: String(err?.message || err), reqId: msg?.reqId });
     }
   });
 
@@ -1890,6 +1890,17 @@ async function handleClientMessage(ws, msg) {
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const replyText = String(msg.text ?? '');
+      const reqId = msg.reqId; // correlation id: echoed in the ack so the client
+                               // marks THIS send delivered (not just WS-written).
+      // Per-attachment settle: each pasted image path is ingested asynchronously
+      // by the TUI (read + validate/encode), and a too-early Enter lands before
+      // that finishes, leaving the message unsent in the box. Scale the paste→Enter
+      // gap by the attachment count (capped) so the Enter always submits.
+      const attachments = Math.max(0, Number(msg.attachments) || 0);
+      // sendText polls for the TUI's "Pasting…" to clear before Enter; settleMs is
+      // the MAX it waits (a ceiling, not a fixed cost — it exits as soon as the
+      // paste finishes). Budget generously per image so even a slow read fits.
+      const settleMs = Math.min(20000, 1500 + attachments * 3000);
       return runSerial(session.target, async () => {
         if (session.kind === 'claude' && session.transport === 'print') {
           await ensureClaudePrintForSession(session);
@@ -1900,7 +1911,7 @@ async function handleClientMessage(ws, msg) {
             registry.setThinking(session.target, false);
             throw err;
           }
-          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'claude-print' });
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'claude-print', reqId });
           return;
         }
         if (session.kind === 'codex') {
@@ -1913,15 +1924,15 @@ async function handleClientMessage(ws, msg) {
               registry.setThinking(session.target, false);
               throw err;
             }
-            send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'codex-rpc' });
+            send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'codex-rpc', reqId });
             return;
           }
           // Codex TUI compatibility: only non-app-server Codex panes may use
           // tmux keystrokes. RPC app-server panes must never receive prompt text
           // in their terminal buffer.
         }
-        await tmux.sendText(session.target, replyText);
-        send(ws, { type: 'ack', op: 'reply', ok: true });
+        await tmux.sendText(session.target, replyText, { settleMs });
+        send(ws, { type: 'ack', op: 'reply', ok: true, reqId });
       });
     }
     case 'answer': {
