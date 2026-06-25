@@ -2,6 +2,7 @@ import type { ConnState } from '../lib/ws';
 import type { ResourceState } from '../hooks/useCockpit';
 import type { PushController } from '../hooks/usePushNotifications';
 import { NotifyBell } from './NotifyBell';
+import { FullscreenButton } from './FullscreenButton';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { BatteryIcon } from './icons';
 
@@ -64,6 +65,7 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
         <span className="hud-warn-text">{resources.warning || 'over limit'}</span>
       ) : null}
       <span className="hud-spacer" />
+      <FullscreenButton />
       <NotifyBell push={push} />
     </div>
   );

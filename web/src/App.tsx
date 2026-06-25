@@ -173,14 +173,29 @@ function AppInner() {
   // snippet re-added it on every call → listener leak).
   useEffect(() => {
     const detect = () => {
-      const isIPad =
+      // Apple tablets: iPadOS UA or MacIntel+touch (iPadOS desktop-mode UA).
+      const isAppleTablet =
         /iPad/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      // External-display sizing should fire ONLY on a genuinely large (≥2K)
-      // display, never on the iPad's own screen (≤1366 logical px). A 2K+ monitor
-      // — whether a desktop or an iPad driving an external display — reports a
-      // ≥2000px viewport; the iPad panel never does. Resolution gate, not isIPad.
-      const isExternal = window.matchMedia('(min-width: 2000px)').matches;
+      // Non-Apple touch tablets (e.g. Android): coarse primary pointer + no
+      // hover + at least one touch point. Real external monitors are driven by
+      // desktops with a fine pointer / hover capability, so they won't match.
+      const isTouchTablet =
+        navigator.maxTouchPoints > 0 &&
+        window.matchMedia('(pointer: coarse)').matches &&
+        window.matchMedia('(hover: none)').matches;
+      // Keep is-ipad iOS-only: that class governs iOS home-indicator safe-area
+      // padding which Android tablets don't have.
+      const isIPad = isAppleTablet;
+      // External-display sizing fires on ≥2K viewports but NOT on non-Apple
+      // touch tablets (e.g. a 2560px Nxtpaper whose own screen is large).
+      // A desktop driving a 2K monitor has a fine pointer so isTouchTablet is
+      // false → still classified as external. An iPad driving an external 2K
+      // monitor has isAppleTablet true so the exclusion doesn't apply → still
+      // classified as external.
+      const isExternal =
+        window.matchMedia('(min-width: 2000px)').matches &&
+        !(isTouchTablet && !isAppleTablet);
       document.body.classList.toggle('is-ipad', isIPad);
       document.body.classList.toggle('is-external-display', isExternal);
     };
