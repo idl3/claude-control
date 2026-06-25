@@ -1971,12 +1971,16 @@ async function handleClientMessage(ws, msg) {
         // stays as cheap defense-in-depth that can short-circuit before we even
         // get here. viaAnswer replies bypass BOTH guards (they are the answer).
         //
-        // Gate: claude tmux panes only (codex TUI uses parseCodexPrompt, not
-        // parsePanePrompt; print transport has no keystroke TUI to guard against).
-        if (!msg.viaAnswer && session.kind === 'claude' && session.transport !== 'print') {
+        // Gate: keystroke-TUI panes (claude AND codex-TUI). Print transport has no
+        // keystroke TUI to guard against, and codex-rpc panes already returned above
+        // (so any codex pane reaching here fell through to tmux sendText). The parser
+        // is chosen by kind — parsePanePrompt for claude, parseCodexPrompt for codex —
+        // because the two TUIs scrape pickers differently; the pure predicate then
+        // decides on the boolean presence of a parsed picker, identical for both.
+        if (!msg.viaAnswer && (session.kind === 'claude' || session.kind === 'codex') && session.transport !== 'print') {
           try {
             const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
-            const parsedPicker = parsePanePrompt(cap);
+            const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
             if (shouldRefuseSendForPicker({ viaAnswer: msg.viaAnswer, kind: session.kind, transport: session.transport, parsedPicker })) {
               send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: 'A question/picker is open in this pane — answer it via the question UI, not a free-text reply.' });
               return;
