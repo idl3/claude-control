@@ -210,7 +210,7 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
-  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number }
+  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }

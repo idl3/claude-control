@@ -45,11 +45,18 @@ import {
   RefreshIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { Msg, ServerMessage } from './lib/types';
+import type { Msg, Pending, ServerMessage } from './lib/types';
+import { hasOpenQuestion } from './lib/askGuard';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
+
+// Sentinel toolUseId used when the inline AskBody is synthesized from the
+// session's boolean `pending` flag rather than a full structured Pending object
+// (tailer-less sessions only carry the flag). The server will not recognise this
+// id, which is acceptable — the goal is to never leave the user blind.
+const FLAG_PENDING_TOOL_USE_ID = '__flag__';
 
 // Concatenate a transcript message's text blocks (to match a real user echo
 // against a queued send).
@@ -352,8 +359,18 @@ function AppInner() {
       const sid = cockpit.selectedId;
       // Block sends while Claude is compacting — the TUI ignores input during
       // compaction, so a send would silently vanish and look like a hang.
-      if (cockpit.sessions.find((s) => s.id === sid)?.compacting) {
+      const sess = cockpit.sessions.find((s) => s.id === sid);
+      if (sess?.compacting) {
         showToast('Compacting conversation… hold on', 'error');
+        return;
+      }
+      // A normal composer reply must NEVER be sent as raw keystrokes while an
+      // AskUserQuestion picker is open — Enter would select an option rather than
+      // type a reply. Block it and direct the user to the inline question component.
+      if (hasOpenQuestion(cockpit.pending, sess?.pending)) {
+        showToast('A question is open — answer it above (or pick "Type something")', 'error');
+        // Expand the minimised ask bar so the user can see the question.
+        document.querySelector<HTMLElement>('.ask-min-bar')?.click();
         return;
       }
       const mode = sid != null ? (subAgentModesRef.current[sid] ?? true) : false;
@@ -1101,6 +1118,33 @@ function AppInner() {
   // `pending` (AskUserQuestion) over the screen-scrape `prompt` (PanePrompt).
   const activePrompt = useMemo<ActivePrompt | null>(() => {
     if (cockpit.pending) return { kind: 'ask', pending: cockpit.pending };
+    // Fallback: the session's boolean flag is set but no tailer-supplied Pending
+    // object is available (tailer-less sessions). Synthesize a minimal Pending so
+    // AskBody renders and the user is never left unable to answer. The FLAG sentinel
+    // id is intentional — onAnswer will fail silently server-side, and onReply
+    // routes the typed text normally. AskBody appends free-text rows itself.
+    //
+    // GUARD: `selectedSession.pending` is the MERGED registry flag — it is also
+    // true for pane-scrape pickers (permission / trust / plan / numbered menus),
+    // which MUST render via the structured `kind:'prompt'` branch below, not this
+    // free-text ask fallback. So only synthesize when there is NO scrape prompt
+    // (`!cockpit.prompt`). That isolates the real gap: an AskUserQuestion flagged
+    // open on a tailer-less session, where neither `cockpit.pending` nor a scrape
+    // `cockpit.prompt` is available — exactly the blind state we're fixing.
+    if (
+      !cockpit.prompt &&
+      selectedSession?.pending === true &&
+      Date.now() >= promptSuppressedUntil
+    ) {
+      const flagQuestion = (
+        selectedSession.pendingQuestion || 'Claude is asking a question'
+      ).trim();
+      const synthesized: Pending = {
+        toolUseId: FLAG_PENDING_TOOL_USE_ID,
+        questions: [{ question: flagQuestion, options: [] }],
+      };
+      return { kind: 'ask', pending: synthesized };
+    }
     if (cockpit.prompt && Date.now() >= promptSuppressedUntil) {
       return {
         kind: 'prompt',
@@ -1111,7 +1155,7 @@ function AppInner() {
     }
     return null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind, promptSuppressedUntil]);
+  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind, selectedSession?.pending, selectedSession?.pendingQuestion, promptSuppressedUntil]);
 
   const askActive = activePrompt !== null;
 
@@ -1135,7 +1179,10 @@ function AppInner() {
   // Free-text reply from the inline prompt: same path as a normal composer send.
   const onInlineReply = useCallback((text: string) => {
     if (!text.trim()) return;
-    cockpit.sendReply(text);
+    // viaAnswer=true: this is the trailing free-text of a deliberate answer routed
+    // through the inline component (which already navigated the picker), so the
+    // server's open-question reply guard must allow it through.
+    cockpit.sendReply(text, 0, true);
     markAnswered();
   }, [cockpit, markAnswered]);
 
