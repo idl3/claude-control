@@ -367,7 +367,7 @@ function AppInner() {
       // A normal composer reply must NEVER be sent as raw keystrokes while an
       // AskUserQuestion picker is open — Enter would select an option rather than
       // type a reply. Block it and direct the user to the inline question component.
-      if (hasOpenQuestion(cockpit.pending, sess?.pending)) {
+      if (hasOpenQuestion(cockpit.pending, sess?.pending, cockpit.pickerOpen)) {
         showToast('A question is open — answer it above (or pick "Type something")', 'error');
         // Expand the minimised ask bar so the user can see the question.
         document.querySelector<HTMLElement>('.ask-min-bar')?.click();
