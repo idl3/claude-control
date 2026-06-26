@@ -382,3 +382,13 @@ test('detectPanePicker: scout-multiselect fixture — no option label contains b
     assert.doesNotMatch(opt.label, /\bSubmit\b/, `option ${opt.key} label must not contain "Submit"`);
   }
 });
+
+test('detectPanePicker: footer survives trailing blank rows below the picker (live agentos fixture)', () => {
+  // The picker did not fill the pane height → ~16 blank rows rendered below the
+  // "Enter to select…" footer, pushing it out of a fixed last-N-physical window.
+  // Detection must trim trailing blanks first, else the question flaps/vanishes.
+  const cap = readFileSync(join(__dirname, 'fixtures-live-agentos-trailing-blanks.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'picker detected despite trailing blank rows');
+  assert.deepEqual(p.options.map((o) => o.key), ['1', '2', '3', '4', '5', '6']);
+});
