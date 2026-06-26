@@ -47,6 +47,7 @@ import {
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Msg, Pending, ServerMessage } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
+import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
@@ -1103,15 +1104,48 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
-  // Briefly suppress the SCRAPE prompt after an answer. The TUI keeps rendering
-  // the picker for ~1s while it ingests the answer keystrokes, which would
-  // otherwise re-pop the inline component the instant it morphs out (a 1s flash).
-  // A genuine new structured `pending` is NOT suppressed.
-  const [promptSuppressedUntil, setPromptSuppressedUntil] = useState(0);
+  // "Answer settling" state: suppresses the scrape prompt / synthesized-ask
+  // from reflashing after the user answers, until the TUI picker has visually
+  // disappeared. See web/src/lib/answerSettle.ts for design rationale.
+  //
+  // WHY NOT the old fixed-1800ms timer: the server re-scrapes every ~2000ms and
+  // re-broadcasts {type:'prompt'} while the picker is still on screen. Once
+  // 1800ms elapsed but the picker was still up, activePrompt re-opened → flash.
+  // This state is instead cleared by the AUTHORITATIVE pickerOpen=false signal.
+  const [answerSettling, setAnswerSettling] = useState(false);
+  const [settleDeadline, setSettleDeadline] = useState(0);
+
+  // Clear settling once BOTH signals confirm the answer is fully processed:
+  //   1. pickerOpen=false — {type:'picker', open:false} frame: picker is gone.
+  //   2. cockpit.prompt falsy — scrape prompt has cleared; no stale frame remains.
+  //
+  // WHY BOTH: the two frames are separate WebSocket messages with no ordering
+  // guarantee. If we clear answerSettling on pickerOpen=false alone, a stale
+  // scrape {type:'prompt'} frame that hasn't yet cleared will cause
+  // shouldShowPrompt to return true for one render (the frame-ordering flash).
+  // Waiting for both signals closes that window entirely. The safety cap in
+  // markAnswered() bounds the worst-case duration so this can never suppress
+  // indefinitely when the prompt never clears (e.g. server bug / new question).
+  useEffect(() => {
+    if (!cockpit.pickerOpen && !cockpit.prompt && answerSettling) {
+      setAnswerSettling(false);
+      setSettleDeadline(0);
+    }
+  // Re-run whenever either signal changes; answerSettling read via closure is fine.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cockpit.pickerOpen, cockpit.prompt]);
+
   const markAnswered = useCallback(() => {
-    const until = Date.now() + 1800;
-    setPromptSuppressedUntil(until);
-    window.setTimeout(() => setPromptSuppressedUntil((v) => (v === until ? 0 : v)), 1850);
+    const deadline = Date.now() + SETTLE_CAP_MS;
+    setAnswerSettling(true);
+    setSettleDeadline(deadline);
+    // Safety cap: release after SETTLE_CAP_MS even if pickerOpen never flips.
+    // Prevents permanent suppression if the server never sends picker=false.
+    // Extra 50ms skew avoids racing the exact deadline boundary.
+    window.setTimeout(() => {
+      setAnswerSettling(false);
+      setSettleDeadline(0);
+    }, SETTLE_CAP_MS + 50);
   }, []);
 
   // Compute the single active prompt for the inline morph. Prefer structured
@@ -1134,7 +1168,12 @@ function AppInner() {
     if (
       !cockpit.prompt &&
       selectedSession?.pending === true &&
-      Date.now() >= promptSuppressedUntil
+      shouldShowSynthesizedAsk({
+        pickerOpen: cockpit.pickerOpen,
+        answerSettling,
+        settleDeadline,
+        now: Date.now(),
+      })
     ) {
       const flagQuestion = (
         selectedSession.pendingQuestion || 'Claude is asking a question'
@@ -1145,17 +1184,25 @@ function AppInner() {
       };
       return { kind: 'ask', pending: synthesized };
     }
-    if (cockpit.prompt && Date.now() >= promptSuppressedUntil) {
+    if (
+      shouldShowPrompt({
+        hasPrompt: !!cockpit.prompt,
+        pickerOpen: cockpit.pickerOpen,
+        answerSettling,
+        settleDeadline,
+        now: Date.now(),
+      })
+    ) {
       return {
         kind: 'prompt',
-        prompt: cockpit.prompt,
+        prompt: cockpit.prompt!,
         planMarkdown,
         agentName: selectedSession?.kind === 'codex' ? 'Codex' : 'Claude',
       };
     }
     return null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cockpit.pending, cockpit.prompt, planMarkdown, selectedSession?.kind, selectedSession?.pending, selectedSession?.pendingQuestion, promptSuppressedUntil]);
+  }, [cockpit.pending, cockpit.prompt, cockpit.pickerOpen, planMarkdown, selectedSession?.kind, selectedSession?.pending, selectedSession?.pendingQuestion, answerSettling, settleDeadline]);
 
   const askActive = activePrompt !== null;
 

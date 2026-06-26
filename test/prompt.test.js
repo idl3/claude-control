@@ -103,7 +103,8 @@ test('detects a picker that starts mid-sequence (option 1 scrolled off-screen)',
 // ── detectPanePicker tests ────────────────────────────────────────────────────
 
 test('detectPanePicker: narrow-pane AskUserQuestion with wrapped footer and mid-word option wrap', () => {
-  // Footer split across 3 physical lines, option 3 label wrapped mid-word,
+  // Footer split across 3 physical lines, option 3 title "Deep-verify" with wrapped
+  // tail "the result" (becomes description under the marker-based rule),
   // option 5 without a dot separator, ❯ cursor on option 5.
   const cap = [
     'What should I do next?',
@@ -124,7 +125,9 @@ test('detectPanePicker: narrow-pane AskUserQuestion with wrapped footer and mid-
   assert.ok(p, 'expected non-null result');
   assert.equal(p.options.length, 4, 'expected 4 options');
   assert.deepEqual(p.options.map((o) => o.key), ['3', '4', '5', '6']);
-  assert.equal(p.options[0].label, 'Deep-verify the result', 'option 3 label should be rejoined');
+  // Under the marker-based rule the wrapped title tail becomes description, not label.
+  assert.equal(p.options[0].label, 'Deep-verify', 'option 3 label is the title line only under marker-based rule');
+  assert.equal(p.options[0].description, 'the result', 'option 3 wrapped title tail is description under marker-based rule');
   assert.equal(p.options[2].selected, true, 'option 5 (❯ cursor) should be selected');
   assert.equal(p.options[0].selected, false);
 });
@@ -304,4 +307,78 @@ test('detectPanePicker: 1979 fixture — "Chat about this" label is clean with n
   const chatOpt = p.options.find((o) => /^Chat about this/i.test(o.label));
   assert.ok(chatOpt, '"Chat about this" option must be present');
   assert.equal(chatOpt.description, undefined, '"Chat about this" must have no description');
+});
+
+// ── scout-multiselect fixture: live AskUserQuestion with multi-line descriptions ─
+
+test('detectPanePicker: scout-multiselect fixture — detected as picker with multiSelect true', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-scout-multiselect.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null, 'expected non-null — scout fixture must be detected as a picker');
+  assert.equal(p.multiSelect, true, 'expected multiSelect true (checkboxes present)');
+});
+
+test('detectPanePicker: scout-multiselect fixture — option 1 label is clean title, description has Diagnose text', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-scout-multiselect.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const opt1 = p.options.find((o) => o.key === '1');
+  assert.ok(opt1, 'option 1 must be present');
+  assert.equal(opt1.label, 'Fix Pleri git-cred fault',
+    'option 1 label must be the title only, not the description text');
+  assert.ok(
+    !opt1.label.includes('Diagnose'),
+    'option 1 label must NOT contain "Diagnose" (that belongs in description)',
+  );
+  assert.ok(opt1.description, 'option 1 must have a description field');
+  assert.ok(
+    opt1.description.includes('Diagnose'),
+    `option 1 description must contain "Diagnose" — got: ${opt1.description}`,
+  );
+  assert.ok(
+    opt1.description.includes('missing git read credential'),
+    `option 1 description must contain "missing git read credential" — got: ${opt1.description}`,
+  );
+});
+
+test('detectPanePicker: scout-multiselect fixture — option 2 label is clean title, description has worker text', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-scout-multiselect.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const opt2 = p.options.find((o) => o.key === '2');
+  assert.ok(opt2, 'option 2 must be present');
+  assert.equal(opt2.label, 'Dig into atlas ATL-16657',
+    'option 2 label must be the title only');
+  assert.ok(opt2.description, 'option 2 must have a description field');
+  assert.ok(
+    opt2.description.includes('Tail the atlas-linear-agent worker'),
+    `option 2 description must contain "Tail the atlas-linear-agent worker" — got: ${opt2.description}`,
+  );
+});
+
+test('detectPanePicker: scout-multiselect fixture — has keys 1-4 as titled options plus type-something and chat', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-scout-multiselect.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const keys = p.options.map((o) => o.key);
+  assert.ok(keys.includes('1'), 'option key 1 must be present');
+  assert.ok(keys.includes('2'), 'option key 2 must be present');
+  assert.ok(keys.includes('3'), 'option key 3 must be present');
+  assert.ok(keys.includes('4'), 'option key 4 must be present');
+  const opt5 = p.options.find((o) => o.key === '5');
+  assert.ok(opt5, 'option key 5 must be present');
+  assert.ok(/Type something/i.test(opt5.label), 'option 5 must be the "Type something" option');
+  const opt6 = p.options.find((o) => o.key === '6');
+  assert.ok(opt6, 'option key 6 must be present');
+  assert.ok(/Chat about this/i.test(opt6.label), 'option 6 must be the "Chat about this" option');
+});
+
+test('detectPanePicker: scout-multiselect fixture — no option label contains box-drawing chars or Submit', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-scout-multiselect.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  for (const opt of p.options) {
+    assert.doesNotMatch(opt.label, /[─━—–═┤├┼┬┴┐┘└┌│┃╔╗╚╝╠╣╦╩╬]/, `option ${opt.key} label must not contain box-drawing chars`);
+    assert.doesNotMatch(opt.label, /\bSubmit\b/, `option ${opt.key} label must not contain "Submit"`);
+  }
 });

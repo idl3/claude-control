@@ -1,0 +1,71 @@
+  Here's what the chunks table actually reveals — and it changes
+  the picture:
+
+  What the Neon chunks show (Pleri substrate)
+
+  1. ATL-16657 (atlas) is invisible here. It runs on the atlas
+  olam-agent → atlas's own Neon (separate company account, not on
+  this MCP). The olam-pleri DB is the Pleri olam-agent's substrate.
+  Two delegation attempts, still no new agent-session thread on
+  the Linear side — and I can't see its reasoning from here. To
+  actually watch ATL-16657 I'd need atlas's chunks DB or the
+  atlas-linear-agent worker logs.
+
+  2. The Pleri olam-agent is active but blocked — two real faults:
+
+  - PLE-60 (GCP/Grafana hosted MCP), session 4a85c9be — produced a
+  plan and is parked at request_approval (pending since 03:46). But
+  it hit a provisioning fault: the sandbox had no git read
+  credential — git clone pleri/olam failed (could not read Username
+  for github.com), gh unauthenticated, and the KG snapshot
+  predates the obs-broker (obs-oauth/, observability-mcp.ts,
+  OBS_SENTRY_ORG_ALLOWLIST not indexed). It wrote a plan grounded
+  only in the issue spec, every code claim flagged
+  confirm-at-execution. It could not read its own source.
+  - A separate olam self-dev run (PR #1989, agent-exit telemetry),
+  sessions fe00ceda/4674e03e — timed out after 120 minutes without
+  reporting a result ("task may be too large… split into smaller
+  issues").
+
+  The master-trainer takeaway
+
+  The atlas olam-agent has working git creds (it shipped #523 +
+  #5772). The Pleri olam-agent — the one meant to build olam itself
+  — does not. That missing git credential caps it at spec-only
+  planning with zero code confirmation. That's the single
+  highest-leverage fix for "olam builds itself," and it's exactly
+  the kind of thing the chunks table just made visible.
+
+  The loop has been watching the right place for atlas (Linear) but
+  atlas isn't streaming, while the live substrate I can see shows
+  a Pleri blocker. Where do you want the effort:
+───────────────────────────────────────────────────────────────────
+←  ☐ Next focus  ✔ Submit  →
+
+The Neon chunks show ATL-16657 (atlas) isn't traceable here, but
+the Pleri olam-agent is blocked (no git creds + a 120-min timeout).
+Where should I point effort now?
+
+❯ 1. [ ] Fix Pleri git-cred fault
+  Diagnose + fix the missing git read credential in the Pleri
+  olam-agent sandbox so it can clone pleri/olam and confirm code at
+  execution. Highest-leverage for 'olam builds itself'.
+  2. [ ] Dig into atlas ATL-16657
+  Tail the atlas-linear-agent worker / locate atlas's chunks DB to
+  see why the ATL-16657 session isn't streaming a plan after two
+  re-delegations.
+  3. [ ] Stop on ATL-16657
+  Treat #523 + #5772 as the deliverable for Ernest's review; stop
+  spinning the agent on the remaining ATLAS-CORE-6XH trigger for
+  now.
+  4. [ ] Approve PLE-60 plan
+  The PLE-60 agent is parked at request_approval — approve it to
+  execute (caveat: it planned without reading source, so execution
+  may surface confirm-at-execution gaps).
+  5. [ ] Type something
+     Submit
+───────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
