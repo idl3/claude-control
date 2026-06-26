@@ -7,6 +7,22 @@ import { parsePicker, planStep } from '../lib/answer.js';
 // dispatch prompt. Whitespace is preserved exactly.
 // ---------------------------------------------------------------------------
 
+// FIXTURE_NON_FINAL — real TUI format with contiguous (no blank-line) descriptions.
+//
+// The real Claude Code TUI renders description lines IMMEDIATELY below their option,
+// indented but NOT separated by a blank line:
+//
+//   ❯ 1. Apple
+//        Crisp and classic.
+//   2. Banana
+//      Soft and sweet.
+//
+// reconstructOptionLines stitches those contiguous description lines into the option
+// label by design (blank line = stop; no blank = append). The answer path (planStep)
+// matches labels by exact equality — if question option labels are SHORT structured
+// forms ('Apple') they will NOT match stitched labels ('Apple Pick this one.') and
+// planStep returns null, which is the correct graceful-degradation signal that causes
+// the caller to fall back to the proven static buildAnswerProgram model.
 const FIXTURE_NON_FINAL = `\
 ←  ⊠ Fruits   □ Colors   ✔ Submit   →
 DEBUG TEST 1 — select MULTIPLE fruits (pick 2 or more)
@@ -66,14 +82,16 @@ test('parsePicker: non-final fixture — 7 navigable rows', () => {
   assert.equal(result.rows.length, 7);
 });
 
-test('parsePicker: non-final fixture — option rows in order', () => {
+test('parsePicker: non-final fixture — option rows in order (stitched labels)', () => {
+  // Description lines are contiguous (no blank separator) so reconstructOptionLines
+  // stitches them into the label. The parsed labels reflect the real stitched values.
   const { rows } = parsePicker(FIXTURE_NON_FINAL);
   const options = rows.filter((r) => r.kind === 'option');
   assert.equal(options.length, 4);
-  assert.equal(options[0].label, 'Apple');
-  assert.equal(options[1].label, 'Banana');
-  assert.equal(options[2].label, 'Cherry');
-  assert.equal(options[3].label, 'Date');
+  assert.equal(options[0].label, 'Apple Pick this one.');
+  assert.equal(options[1].label, 'Banana And this one — choosing 2+ is the whole point.');
+  assert.equal(options[2].label, 'Cherry Optionally this too.');
+  assert.equal(options[3].label, 'Date Optionally this too.');
 });
 
 test('parsePicker: non-final fixture — checked state matches render', () => {
@@ -210,31 +228,58 @@ test('parsePicker: strips ANSI escapes before parsing', () => {
 // ---------------------------------------------------------------------------
 
 test('planStep: select Cherry+Date on non-final (both unchecked, cursor on Apple)', () => {
-  // From FIXTURE_NON_FINAL: Apple=idx0(checked), Banana=idx1(checked),
-  // Cherry=idx2(unchecked), Date=idx3(unchecked).
-  // Navigable row order: Apple(0), Banana(1), Cherry(2), Date(3),
+  // From FIXTURE_NON_FINAL: parsed labels are stitched (description folded in).
+  // Navigable row order:
+  //   Apple Pick this one.(0,checked), Banana And this...(1,checked),
+  //   Cherry Optionally this too.(2,unchecked), Date Optionally this too.(3,unchecked),
   //   type-something(4), action/Next(5), chat(6).
   // Cursor at Apple (idx 0).
-  // Selections: Cherry (idx2), Date (idx3).
+  // Selections: Cherry Optionally this too.(idx2), Date Optionally this too.(idx3).
   // Keys expected:
-  //   Down,Down → Cherry (already unchecked → Space), cursor=2
-  //   Down → Date (already unchecked → Space), cursor=3
+  //   Down,Down → Cherry (unchecked → Space), cursor=2
+  //   Down → Date (unchecked → Space), cursor=3
   //   Down,Down → action(Next) at idx5, Enter
   const parsed = parsePicker(FIXTURE_NON_FINAL);
   const question = {
     multiSelect: true,
     options: [
-      { label: 'Apple' }, { label: 'Banana' }, { label: 'Cherry' }, { label: 'Date' },
+      { label: 'Apple Pick this one.' },
+      { label: 'Banana And this one — choosing 2+ is the whole point.' },
+      { label: 'Cherry Optionally this too.' },
+      { label: 'Date Optionally this too.' },
     ],
   };
-  const keys = planStep(parsed, question, ['Cherry', 'Date']);
+  const keys = planStep(parsed, question, ['Cherry Optionally this too.', 'Date Optionally this too.']);
   assert.ok(Array.isArray(keys), 'should return key array');
   assert.deepEqual(keys, ['Down', 'Down', 'Space', 'Down', 'Space', 'Down', 'Down', 'Enter']);
 });
 
 test('planStep: pre-checked options (Apple/Banana) skipped — no Space sent', () => {
   // Selecting Apple+Banana but they are already checked → no Space for either.
+  // Labels must be stitched to match what parsePicker produces from FIXTURE_NON_FINAL.
   // Cursor at Apple (idx0), navigate to action(Next) at idx5, Enter.
+  const parsed = parsePicker(FIXTURE_NON_FINAL);
+  const question = {
+    multiSelect: true,
+    options: [
+      { label: 'Apple Pick this one.' },
+      { label: 'Banana And this one — choosing 2+ is the whole point.' },
+      { label: 'Cherry Optionally this too.' },
+      { label: 'Date Optionally this too.' },
+    ],
+  };
+  const keys = planStep(parsed, question, ['Apple Pick this one.', 'Banana And this one — choosing 2+ is the whole point.']);
+  // Apple: idx0, cursor=0 → no Down, already checked so no Space, cursor stays 0
+  // Banana: idx1, cursor=0 → Down, already checked so no Space, cursor=1
+  // action at idx5: cursor=1 → Down,Down,Down,Down (4 Downs) to idx5, Enter
+  assert.deepEqual(keys, ['Down', 'Down', 'Down', 'Down', 'Down', 'Enter']);
+});
+
+test('planStep: non-final — short structured labels (not stitched) → null (graceful fallback)', () => {
+  // When question.options carry the SHORT structured label ('Cherry') and the parsed
+  // picker has STITCHED labels ('Cherry Optionally this too.'), exact-match fails and
+  // planStep returns null. This is the intended graceful-degradation contract: the
+  // caller falls back to the proven static buildAnswerProgram model.
   const parsed = parsePicker(FIXTURE_NON_FINAL);
   const question = {
     multiSelect: true,
@@ -242,11 +287,8 @@ test('planStep: pre-checked options (Apple/Banana) skipped — no Space sent', (
       { label: 'Apple' }, { label: 'Banana' }, { label: 'Cherry' }, { label: 'Date' },
     ],
   };
-  const keys = planStep(parsed, question, ['Apple', 'Banana']);
-  // Apple: idx0, cursor=0 → no Down, already checked so no Space, cursor stays 0
-  // Banana: idx1, cursor=0 → Down, already checked so no Space, cursor=1
-  // action at idx5: cursor=1 → Down,Down,Down,Down (4 Downs) to idx5, Enter
-  assert.deepEqual(keys, ['Down', 'Down', 'Down', 'Down', 'Down', 'Enter']);
+  const keys = planStep(parsed, question, ['Cherry']);
+  assert.equal(keys, null, 'short label that does not match stitched parsed label must return null');
 });
 
 test('planStep: final fixture — select Red+Green', () => {
@@ -307,4 +349,108 @@ test('planStep: single-select — target already at cursor', () => {
   };
   const keys = planStep(parsed, question, ['Red']);
   assert.deepEqual(keys, ['Enter']);
+});
+
+// ---------------------------------------------------------------------------
+// Narrow-pane (~22-col) multi-select: wrapped option labels
+// ---------------------------------------------------------------------------
+//
+// On a ~22-col tmux pane, option labels that exceed the remaining column budget
+// hard-wrap onto the next physical line. The old parsePicker OPTION_RE:
+//   /^\d+\.\s+\[([✓x✗ ])\]\s*(.*)/
+// requires the FULL "N. [x] Label" sequence on a single physical line and has NO
+// continuation-line stitching, so it captures only the label fragment that fits
+// on the first line ("Ripe Mango") and loses the tail ("Smoothie").
+//
+// The new implementation uses reconstructOptionLines (shared with detectPanePicker)
+// which stitches continuation lines, so the full reconstructed label is correct.
+// This fixture is intentionally designed so that:
+//   (a) option 1 label wraps: "1. [✓] Ripe Mango" / "Smoothie" → "Ripe Mango Smoothie"
+//   (b) option 2 label wraps: "2. [ ] Fresh" / "Strawberry" → "Fresh Strawberry"
+// The old OPTION_RE would produce "Ripe Mango" and "Fresh" (wrong labels), causing
+// planStep to return null for the "Fresh Strawberry" selection → the fix is verified.
+//
+// Footer is hard-wrapped across 3 lines (as on a real 22-col narrow pane) to
+// confirm detectPanePicker's AQU-footer detection still fires (hasCursorGlyph also fires).
+
+const FIXTURE_NARROW_WRAPPED = `\
+› 1. [✓] Ripe Mango
+       Smoothie
+2. [ ] Fresh
+      Strawberry
+3. [ ] Type something
+Next
+4. Chat about this
+Enter to select · ↑/↓
+to navigate · Esc to
+cancel
+`;
+
+test('parsePicker: narrow-pane wrapped — reconstructs wrapped labels, full rows[], confidence ok', () => {
+  // Verifies that continuation-line stitching correctly assembles multi-physical-line
+  // labels. Old OPTION_RE (single-line) would produce "Ripe Mango" not "Ripe Mango Smoothie".
+  const result = parsePicker(FIXTURE_NARROW_WRAPPED);
+  assert.equal(result.confidence, 'ok');
+  assert.equal(result.isReview, false);
+
+  const { rows } = result;
+  // 2 options + type-something + action(Next) + chat = 5 navigable rows.
+  assert.equal(rows.length, 5, 'expected 5 navigable rows');
+
+  const options = rows.filter((r) => r.kind === 'option');
+  assert.equal(options.length, 2, 'expected 2 option rows');
+
+  // Labels must be fully reconstructed (fail against old OPTION_RE which yields "Ripe Mango" / "Fresh").
+  assert.equal(options[0].label, 'Ripe Mango Smoothie', 'option 1 label must join continuation line');
+  assert.equal(options[1].label, 'Fresh Strawberry',    'option 2 label must join continuation line');
+
+  // Checked states.
+  assert.equal(options[0].checked, true,  'option 1 should be checked (✓)');
+  assert.equal(options[1].checked, false, 'option 2 should be unchecked');
+
+  // Cursor is on option 1.
+  assert.equal(rows[0].cursor, true,  'option 1 has cursor (›)');
+  assert.equal(rows[1].cursor, false, 'option 2 has no cursor');
+
+  // Special rows present and in correct screen order.
+  const kinds = rows.map((r) => r.kind);
+  assert.ok(kinds.includes('type-something'), 'type-something row must be present');
+  assert.ok(kinds.includes('action'),         'action row must be present');
+  assert.ok(kinds.includes('chat'),           'chat row must be present');
+
+  // Screen order: option, option, type-something, action, chat.
+  assert.deepEqual(kinds, ['option', 'option', 'type-something', 'action', 'chat']);
+
+  // actionLabel.
+  assert.equal(result.actionLabel, 'Next');
+});
+
+test('planStep: narrow-pane wrapped — select Fresh Strawberry produces correct keystroke plan', () => {
+  // Navigable row layout (reconstructed):
+  //   idx0: option "Ripe Mango Smoothie" (checked, cursor here)
+  //   idx1: option "Fresh Strawberry"    (unchecked)
+  //   idx2: type-something
+  //   idx3: action/Next
+  //   idx4: chat
+  //
+  // Selecting "Fresh Strawberry" (idx1, unchecked):
+  //   cursor=0 → Down → idx1 → Space (toggle unchecked→checked) → cursor=1
+  //   idx1→idx3 (action): Down×2
+  //   Enter
+  //
+  // The OLD parsePicker with single-line OPTION_RE would parse option 2 as label
+  // "Fresh" (missing "Strawberry"), so planStep would receive label "Fresh Strawberry"
+  // from the question, fail to find a matching row, and return null. This test
+  // confirms the fix works end-to-end.
+  const parsed = parsePicker(FIXTURE_NARROW_WRAPPED);
+  const question = {
+    multiSelect: true,
+    options: [
+      { label: 'Ripe Mango Smoothie' },
+      { label: 'Fresh Strawberry' },
+    ],
+  };
+  const keys = planStep(parsed, question, ['Fresh Strawberry']);
+  assert.ok(Array.isArray(keys), 'planStep should return key array (not null)');
+  assert.deepEqual(keys, ['Down', 'Space', 'Down', 'Down', 'Enter']);
 });
