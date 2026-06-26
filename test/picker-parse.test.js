@@ -17,12 +17,12 @@ import { parsePicker, planStep } from '../lib/answer.js';
 //   2. Banana
 //      Soft and sweet.
 //
-// reconstructOptionLines stitches those contiguous description lines into the option
-// label by design (blank line = stop; no blank = append). The answer path (planStep)
-// matches labels by exact equality — if question option labels are SHORT structured
-// forms ('Apple') they will NOT match stitched labels ('Apple Pick this one.') and
-// planStep returns null, which is the correct graceful-degradation signal that causes
-// the caller to fall back to the proven static buildAnswerProgram model.
+// Under the marker-based reconstruction rule, continuation lines below a marker
+// become `description` (not part of `label`). So parsed rows have:
+//   label='Apple', description='Pick this one.'
+//   label='Banana', description='And this one — ...'
+// The answer-side labelMatches() helper checks both label and label+description,
+// so callers passing either 'Apple' or 'Apple Pick this one.' will match.
 const FIXTURE_NON_FINAL = `\
 ←  ⊠ Fruits   □ Colors   ✔ Submit   →
 DEBUG TEST 1 — select MULTIPLE fruits (pick 2 or more)
@@ -82,16 +82,20 @@ test('parsePicker: non-final fixture — 7 navigable rows', () => {
   assert.equal(result.rows.length, 7);
 });
 
-test('parsePicker: non-final fixture — option rows in order (stitched labels)', () => {
-  // Description lines are contiguous (no blank separator) so reconstructOptionLines
-  // stitches them into the label. The parsed labels reflect the real stitched values.
+test('parsePicker: non-final fixture — option rows in order (marker-based labels + descriptions)', () => {
+  // Under the marker-based rule, description lines become the `description` field;
+  // `label` is only the title text on the marker line.
   const { rows } = parsePicker(FIXTURE_NON_FINAL);
   const options = rows.filter((r) => r.kind === 'option');
   assert.equal(options.length, 4);
-  assert.equal(options[0].label, 'Apple Pick this one.');
-  assert.equal(options[1].label, 'Banana And this one — choosing 2+ is the whole point.');
-  assert.equal(options[2].label, 'Cherry Optionally this too.');
-  assert.equal(options[3].label, 'Date Optionally this too.');
+  assert.equal(options[0].label, 'Apple');
+  assert.equal(options[0].description, 'Pick this one.');
+  assert.equal(options[1].label, 'Banana');
+  assert.equal(options[1].description, 'And this one — choosing 2+ is the whole point.');
+  assert.equal(options[2].label, 'Cherry');
+  assert.equal(options[2].description, 'Optionally this too.');
+  assert.equal(options[3].label, 'Date');
+  assert.equal(options[3].description, 'Optionally this too.');
 });
 
 test('parsePicker: non-final fixture — checked state matches render', () => {
@@ -275,11 +279,11 @@ test('planStep: pre-checked options (Apple/Banana) skipped — no Space sent', (
   assert.deepEqual(keys, ['Down', 'Down', 'Down', 'Down', 'Down', 'Enter']);
 });
 
-test('planStep: non-final — short structured labels (not stitched) → null (graceful fallback)', () => {
-  // When question.options carry the SHORT structured label ('Cherry') and the parsed
-  // picker has STITCHED labels ('Cherry Optionally this too.'), exact-match fails and
-  // planStep returns null. This is the intended graceful-degradation contract: the
-  // caller falls back to the proven static buildAnswerProgram model.
+test('planStep: non-final — short title labels match via labelMatches (marker-based rule)', () => {
+  // Under the marker-based rule, parsed labels ARE the short title form ('Cherry'),
+  // and description ('Optionally this too.') is separate. Short structured labels
+  // like 'Cherry' now match directly (row.label === target). labelMatches also handles
+  // full-title callers: 'Cherry Optionally this too.' matches via label+description.
   const parsed = parsePicker(FIXTURE_NON_FINAL);
   const question = {
     multiSelect: true,
@@ -288,7 +292,10 @@ test('planStep: non-final — short structured labels (not stitched) → null (g
     ],
   };
   const keys = planStep(parsed, question, ['Cherry']);
-  assert.equal(keys, null, 'short label that does not match stitched parsed label must return null');
+  // Cherry is at idx2 (cursor at Apple=idx0 → Down,Down → Cherry → Space), then
+  // action at idx5 (Down,Down,Down) → Enter.
+  assert.ok(Array.isArray(keys), 'short label matching parsed title must resolve to a key array');
+  assert.deepEqual(keys, ['Down', 'Down', 'Space', 'Down', 'Down', 'Down', 'Enter']);
 });
 
 test('planStep: final fixture — select Red+Green', () => {
@@ -355,20 +362,18 @@ test('planStep: single-select — target already at cursor', () => {
 // Narrow-pane (~22-col) multi-select: wrapped option labels
 // ---------------------------------------------------------------------------
 //
-// On a ~22-col tmux pane, option labels that exceed the remaining column budget
-// hard-wrap onto the next physical line. The old parsePicker OPTION_RE:
-//   /^\d+\.\s+\[([✓x✗ ])\]\s*(.*)/
-// requires the FULL "N. [x] Label" sequence on a single physical line and has NO
-// continuation-line stitching, so it captures only the label fragment that fits
-// on the first line ("Ripe Mango") and loses the tail ("Smoothie").
+// On a ~22-col tmux pane, option titles that exceed the column budget hard-wrap
+// onto the next physical line. Under the marker-based reconstruction rule, any
+// continuation line below a marker line becomes `description` (not part of `label`).
+// So:
+//   (a) option 1: marker "1. [✓] Ripe Mango", continuation "Smoothie"
+//       → label="Ripe Mango", description="Smoothie"
+//   (b) option 2: marker "2. [ ] Fresh", continuation "Strawberry"
+//       → label="Fresh", description="Strawberry"
 //
-// The new implementation uses reconstructOptionLines (shared with detectPanePicker)
-// which stitches continuation lines, so the full reconstructed label is correct.
-// This fixture is intentionally designed so that:
-//   (a) option 1 label wraps: "1. [✓] Ripe Mango" / "Smoothie" → "Ripe Mango Smoothie"
-//   (b) option 2 label wraps: "2. [ ] Fresh" / "Strawberry" → "Fresh Strawberry"
-// The old OPTION_RE would produce "Ripe Mango" and "Fresh" (wrong labels), causing
-// planStep to return null for the "Fresh Strawberry" selection → the fix is verified.
+// The answer-side planStep matcher uses labelMatches(row, target) which checks
+// row.label === target OR (label + ' ' + description) === target, so a caller
+// passing "Fresh Strawberry" still resolves to option 2 correctly.
 //
 // Footer is hard-wrapped across 3 lines (as on a real 22-col narrow pane) to
 // confirm detectPanePicker's AQU-footer detection still fires (hasCursorGlyph also fires).
@@ -400,9 +405,12 @@ test('parsePicker: narrow-pane wrapped — reconstructs wrapped labels, full row
   const options = rows.filter((r) => r.kind === 'option');
   assert.equal(options.length, 2, 'expected 2 option rows');
 
-  // Labels must be fully reconstructed (fail against old OPTION_RE which yields "Ripe Mango" / "Fresh").
-  assert.equal(options[0].label, 'Ripe Mango Smoothie', 'option 1 label must join continuation line');
-  assert.equal(options[1].label, 'Fresh Strawberry',    'option 2 label must join continuation line');
+  // Under the marker-based rule: label is the title line only; wrapped tail is description.
+  // labelMatches() in answer.js reconstructs the full title for planning purposes.
+  assert.equal(options[0].label, 'Ripe Mango', 'option 1 label is marker-line title only');
+  assert.equal(options[0].description, 'Smoothie', 'option 1 wrapped tail is description');
+  assert.equal(options[1].label, 'Fresh',            'option 2 label is marker-line title only');
+  assert.equal(options[1].description, 'Strawberry', 'option 2 wrapped tail is description');
 
   // Checked states.
   assert.equal(options[0].checked, true,  'option 1 should be checked (✓)');
@@ -426,9 +434,9 @@ test('parsePicker: narrow-pane wrapped — reconstructs wrapped labels, full row
 });
 
 test('planStep: narrow-pane wrapped — select Fresh Strawberry produces correct keystroke plan', () => {
-  // Navigable row layout (reconstructed):
-  //   idx0: option "Ripe Mango Smoothie" (checked, cursor here)
-  //   idx1: option "Fresh Strawberry"    (unchecked)
+  // Navigable row layout (marker-based reconstruction):
+  //   idx0: option label="Ripe Mango" description="Smoothie" (checked, cursor here)
+  //   idx1: option label="Fresh"      description="Strawberry" (unchecked)
   //   idx2: type-something
   //   idx3: action/Next
   //   idx4: chat
@@ -438,10 +446,11 @@ test('planStep: narrow-pane wrapped — select Fresh Strawberry produces correct
   //   idx1→idx3 (action): Down×2
   //   Enter
   //
-  // The OLD parsePicker with single-line OPTION_RE would parse option 2 as label
-  // "Fresh" (missing "Strawberry"), so planStep would receive label "Fresh Strawberry"
-  // from the question, fail to find a matching row, and return null. This test
-  // confirms the fix works end-to-end.
+  // labelMatches(row, "Fresh Strawberry") checks:
+  //   row.label === "Fresh Strawberry" → false
+  //   ("Fresh" + " " + "Strawberry").trim() === "Fresh Strawberry" → TRUE
+  // So planStep resolves idx1 correctly and returns the right key sequence.
+  // This is the regression guard: do NOT change the question labels or expected keys.
   const parsed = parsePicker(FIXTURE_NARROW_WRAPPED);
   const question = {
     multiSelect: true,
