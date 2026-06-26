@@ -23,6 +23,7 @@ import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
+import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
@@ -1695,6 +1696,12 @@ function sendSubscriptionSnapshot(ws, id, sub) {
   });
   const rpcPrompt = codexRpc.prompt(id);
   if (rpcPrompt) send(ws, { type: 'prompt', id, prompt: rpcPrompt });
+  // Replay the last-known TUI-scrape prompt + picker state. The poller broadcasts
+  // these edge-triggered, so a reload / session-switch / late join that subscribes
+  // while a picker is already open would otherwise never receive it (the bug where
+  // an open question showed once then vanished on reload, or never surfaced when
+  // the session was opened after the question appeared).
+  for (const frame of buildSnapshotPromptFrames(sub, id)) send(ws, frame);
   // Snapshot any already-running sub-agents for this session.
   const subs = sub.subagents ? sub.subagents.snapshot() : [];
   if (subs.length) send(ws, { type: 'subagents', id, subagents: subs });
