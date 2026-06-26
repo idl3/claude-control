@@ -1,0 +1,38 @@
+     agent-verified.
+  3.Deep-verify each
+    first
+     I do a careful
+     per-issue code
+     read (not grep)
+     against main +
+     give you a
+     definitive
+     done/open list
+     with evidence,
+     before any more
+     runs or closes.
+  4.Process only the 2
+    least-certain
+     Redelegate just
+     PLE-35 + PLE-23
+     (the ones whose
+     'done' is least
+     certain) to
+     confirm via the
+     agent; report the
+     rest as done for
+     you to close.
+  5. Type something.
+──────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓
+to navigate · Esc to
+cancel
+
+  3 tasks (2 done, 1 
+  open)
+  ◻ B1: Add @opena…
+  ✔ B2: Fix codex …
+  ✔ D2: Wire codex…
+

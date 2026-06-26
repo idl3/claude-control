@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePanePrompt } from '../lib/prompt.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+import { parsePanePrompt, detectPanePicker } from '../lib/prompt.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test('parses a Claude Code permission prompt with selected option', () => {
   const cap = [
@@ -66,6 +71,23 @@ test('rejects a numbered list with no TUI signal', () => {
   assert.equal(parsePanePrompt('steps:\n 1. one\n 2. two\nmore prose'), null);
 });
 
+test('detectPanePicker: numbered prose + composer input ❯ is NOT a picker (live FP fixture)', () => {
+  // Real false positive: the assistant wrote "1. … 2. … 3. …" as prose and the
+  // composer input prompt line "❯ <queued text>" sits at the bottom. There is NO
+  // picker footer — a bare ❯ must never surface a phantom question.
+  const cap = readFileSync(join(__dirname, 'fixtures-fp-prose-input.txt'), 'utf8');
+  assert.equal(detectPanePicker(cap), null);
+});
+
+test('detectPanePicker: a real bottom-anchored AskUserQuestion footer IS a picker (live fixture)', () => {
+  // Counterpart guard: the genuine stuck-question capture must still detect, so
+  // the FP fix does not regress real pickers.
+  const cap = readFileSync(join(__dirname, 'fixtures-live-031.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'real picker detected');
+  assert.ok(p.options.length >= 2, 'options reconstructed');
+});
+
 test('rejects a pane with no numbered options', () => {
   assert.equal(parsePanePrompt('just some output\nno menu here'), null);
 });
@@ -76,4 +98,210 @@ test('detects a picker that starts mid-sequence (option 1 scrolled off-screen)',
   const r = parsePanePrompt('Would you like to proceed?\n 2. a\n 3. b\nEsc to cancel');
   assert.ok(r);
   assert.deepEqual(r.options.map((o) => o.key), ['2', '3']);
+});
+
+// ── detectPanePicker tests ────────────────────────────────────────────────────
+
+test('detectPanePicker: narrow-pane AskUserQuestion with wrapped footer and mid-word option wrap', () => {
+  // Footer split across 3 physical lines, option 3 label wrapped mid-word,
+  // option 5 without a dot separator, ❯ cursor on option 5.
+  const cap = [
+    'What should I do next?',
+    '',
+    '──────────────────',
+    ' 3 Deep-verify',
+    ' the result',
+    ' 4. Review the plan',
+    ' ❯ 5 Type something',
+    ' 6. Chat about this',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result');
+  assert.equal(p.options.length, 4, 'expected 4 options');
+  assert.deepEqual(p.options.map((o) => o.key), ['3', '4', '5', '6']);
+  assert.equal(p.options[0].label, 'Deep-verify the result', 'option 3 label should be rejoined');
+  assert.equal(p.options[2].selected, true, 'option 5 (❯ cursor) should be selected');
+  assert.equal(p.options[0].selected, false);
+});
+
+test('detectPanePicker: narrow picker starting at key 1 has non-empty question', () => {
+  const cap = [
+    'Pick a verification strategy:',
+    '',
+    ' 1. Run unit tests',
+    ' ❯ 2. Run all tests',
+    ' 3. Skip verification',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result');
+  assert.ok(p.question && p.question.length > 0, 'question should be non-empty');
+  assert.match(p.question, /Pick a verification strategy/);
+});
+
+test('detectPanePicker: plain numbered prose with no footer and no cursor returns null (false-positive guard)', () => {
+  // A numbered plan written in assistant prose. NO footer signature, NO ❯ cursor.
+  const cap = [
+    "Here's my plan:",
+    ' 1. Analyze the codebase',
+    ' 2. Identify bottlenecks',
+    ' 3. Propose refactoring',
+    '',
+    'Let me know if you want to proceed.',
+  ].join('\n');
+
+  assert.equal(detectPanePicker(cap), null, 'plain numbered prose must return null');
+});
+
+test('detectPanePicker: box-drawing separator line not present in any label or question', () => {
+  const cap = [
+    'What to do?',
+    '──────────────────',
+    ' ❯ 1. Option Alpha',
+    ' 2. Option Beta',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null');
+  // No label or question should contain box-drawing chars
+  const allText = [p.question || '', ...p.options.map((o) => o.label)].join(' ');
+  assert.doesNotMatch(allText, /[─━—–=_]{3,}/, 'box-drawing chars must not appear in parsed output');
+});
+
+test('detectPanePicker: existing wide-pane system prompt still parsed (parsePanePrompt compat)', () => {
+  // Confirm the existing parsePanePrompt tests are unaffected — wide-pane permission
+  // prompt with a proper OPTION_RE-format line and Esc footer.
+  const cap = [
+    'Do you want to proceed?',
+    ' 1. Yes',
+    ' ❯ 2. Yes, and don\'t ask again',
+    ' 3. No',
+    '',
+    'Esc to cancel · ctrl+e to explain',
+  ].join('\n');
+
+  const p = parsePanePrompt(cap);
+  assert.ok(p, 'parsePanePrompt wide-pane system prompt should still work');
+  assert.equal(p.question, 'Do you want to proceed?');
+  assert.equal(p.options.length, 3);
+});
+
+test('detectPanePicker: live fixture-031 — narrow pane with no-space-after-dot options and noise line', () => {
+  // Real capture from a stuck session: options 3 and 4 have "N.Label" (no space
+  // after dot) due to 22-col pane wrapping. Options 1 and 2 scrolled off.
+  // Line 33 "  3 tasks (2 done, 1" is noise below the footer that matches the
+  // option-start regex as key '3' — it must NOT corrupt the result.
+  const cap = readFileSync(join(__dirname, 'fixtures-live-031.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+
+  assert.ok(p, 'expected non-null result for live narrow-pane capture');
+  assert.equal(p.options.length, 4, 'expected exactly 4 options [3,4,5,6]');
+  assert.deepEqual(
+    p.options.map((o) => o.key),
+    ['3', '4', '5', '6'],
+    'keys must be [3,4,5,6] — options 1,2 scrolled off, noise key 3 is a singleton run',
+  );
+  // Labels must not contain the noise "tasks (2 done" text
+  const allLabels = p.options.map((o) => o.label).join(' ');
+  assert.doesNotMatch(allLabels, /tasks \(2 done/, 'noise line must not appear in any option label');
+  // Option 3 label should be reconstructed from wrapped lines
+  assert.match(p.options[0].label, /Deep-verify/, 'option 3 label should start with "Deep-verify"');
+  // All options should have selected:false (no ❯ cursor in this capture)
+  assert.ok(p.options.every((o) => o.selected === false), 'all options should be unselected');
+  // Run starts at key 3 (1,2 scrolled off) so question should be omitted
+  assert.equal(p.question, undefined, 'question should be undefined when run does not start at key 1');
+});
+
+test('detectPanePicker: live narrow permission picker — label/description split on deeper-indented continuation', () => {
+  // Real 22-col Claude permission picker captured live. Option 1 start is at col 2
+  // (markerIndent=2) and its continuation "browser" is at col 7 (deeper). Option 2
+  // start is at col 4 (markerIndent=4) with no space after dot ("2.No") and its
+  // continuation "tools off" is at col 6 (deeper). With the indent-based split rule,
+  // deeper-indented continuations go to `description` not `label` — this is the
+  // AskUserQuestion description pattern. Both label and description are rendered in
+  // the UI so the full text is still visible.
+  const cap = [
+    '  ❯ 1. Yes, use my',
+    '       browser',
+    '    2.No, keep browser',
+    '      tools off',
+    '',
+    '',
+    '  Enter to confirm \xb7',
+    '  Esc to keep',
+    '  browser tools off',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result for live narrow permission picker');
+  assert.equal(p.options.length, 2, 'expected 2 options');
+  assert.equal(p.options[0].key, '1');
+  // "browser" is deeper-indented (col 7) than the marker line (markerIndent=2) → description.
+  assert.equal(p.options[0].label, 'Yes, use my');
+  assert.equal(p.options[0].description, 'browser');
+  assert.equal(p.options[0].selected, true);
+  assert.equal(p.options[1].key, '2');
+  // "tools off" is deeper-indented (col 6) than the marker line (markerIndent=4) → description.
+  assert.equal(p.options[1].label, 'No, keep browser');
+  assert.equal(p.options[1].description, 'tools off');
+  assert.equal(p.options[1].selected, false);
+});
+
+// ── 1979 fixture: AskUserQuestion with multi-line descriptions ────────────────
+
+test('detectPanePicker: 1979 fixture — detected as picker', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null, 'expected non-null — 1979 fixture must be detected as a picker');
+  assert.ok(p.options.length >= 2, 'expected at least 2 options');
+});
+
+test('detectPanePicker: 1979 fixture — option 1 label is title only, description contains "Refactor"', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const opt1 = p.options.find((o) => o.key === '1');
+  assert.ok(opt1, 'option 1 must be present');
+  assert.equal(opt1.label, 'Continue to Phase B',
+    'option 1 label must be the title only, not the description text');
+  assert.ok(
+    !opt1.label.includes('Refactor'),
+    'option 1 label must NOT contain "Refactor" (that text belongs in description)',
+  );
+  assert.ok(opt1.description, 'option 1 must have a description field');
+  assert.ok(
+    opt1.description.includes("Refactor the cloud runner's buildSkillLaydown"),
+    `option 1 description must contain "Refactor the cloud runner's buildSkillLaydown" — got: ${opt1.description}`,
+  );
+});
+
+test('detectPanePicker: 1979 fixture — "Type something." label is clean with no description', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const typeOpt = p.options.find((o) => /^Type something/i.test(o.label));
+  assert.ok(typeOpt, '"Type something" option must be present');
+  assert.equal(typeOpt.description, undefined, '"Type something" must have no description');
+});
+
+test('detectPanePicker: 1979 fixture — "Chat about this" label is clean with no description', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const chatOpt = p.options.find((o) => /^Chat about this/i.test(o.label));
+  assert.ok(chatOpt, '"Chat about this" option must be present');
+  assert.equal(chatOpt.description, undefined, '"Chat about this" must have no description');
 });
