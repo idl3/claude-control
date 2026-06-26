@@ -71,6 +71,23 @@ test('rejects a numbered list with no TUI signal', () => {
   assert.equal(parsePanePrompt('steps:\n 1. one\n 2. two\nmore prose'), null);
 });
 
+test('detectPanePicker: numbered prose + composer input ❯ is NOT a picker (live FP fixture)', () => {
+  // Real false positive: the assistant wrote "1. … 2. … 3. …" as prose and the
+  // composer input prompt line "❯ <queued text>" sits at the bottom. There is NO
+  // picker footer — a bare ❯ must never surface a phantom question.
+  const cap = readFileSync(join(__dirname, 'fixtures-fp-prose-input.txt'), 'utf8');
+  assert.equal(detectPanePicker(cap), null);
+});
+
+test('detectPanePicker: a real bottom-anchored AskUserQuestion footer IS a picker (live fixture)', () => {
+  // Counterpart guard: the genuine stuck-question capture must still detect, so
+  // the FP fix does not regress real pickers.
+  const cap = readFileSync(join(__dirname, 'fixtures-live-031.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'real picker detected');
+  assert.ok(p.options.length >= 2, 'options reconstructed');
+});
+
 test('rejects a pane with no numbered options', () => {
   assert.equal(parsePanePrompt('just some output\nno menu here'), null);
 });
