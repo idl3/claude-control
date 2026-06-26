@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
 import { parsePanePrompt, detectPanePicker } from '../lib/prompt.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test('parses a Claude Code permission prompt with selected option', () => {
   const cap = [
@@ -175,4 +180,30 @@ test('detectPanePicker: existing wide-pane system prompt still parsed (parsePane
   assert.ok(p, 'parsePanePrompt wide-pane system prompt should still work');
   assert.equal(p.question, 'Do you want to proceed?');
   assert.equal(p.options.length, 3);
+});
+
+test('detectPanePicker: live fixture-031 — narrow pane with no-space-after-dot options and noise line', () => {
+  // Real capture from a stuck session: options 3 and 4 have "N.Label" (no space
+  // after dot) due to 22-col pane wrapping. Options 1 and 2 scrolled off.
+  // Line 33 "  3 tasks (2 done, 1" is noise below the footer that matches the
+  // option-start regex as key '3' — it must NOT corrupt the result.
+  const cap = readFileSync(join(__dirname, 'fixtures-live-031.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+
+  assert.ok(p, 'expected non-null result for live narrow-pane capture');
+  assert.equal(p.options.length, 4, 'expected exactly 4 options [3,4,5,6]');
+  assert.deepEqual(
+    p.options.map((o) => o.key),
+    ['3', '4', '5', '6'],
+    'keys must be [3,4,5,6] — options 1,2 scrolled off, noise key 3 is a singleton run',
+  );
+  // Labels must not contain the noise "tasks (2 done" text
+  const allLabels = p.options.map((o) => o.label).join(' ');
+  assert.doesNotMatch(allLabels, /tasks \(2 done/, 'noise line must not appear in any option label');
+  // Option 3 label should be reconstructed from wrapped lines
+  assert.match(p.options[0].label, /Deep-verify/, 'option 3 label should start with "Deep-verify"');
+  // All options should have selected:false (no ❯ cursor in this capture)
+  assert.ok(p.options.every((o) => o.selected === false), 'all options should be unselected');
+  // Run starts at key 3 (1,2 scrolled off) so question should be omitted
+  assert.equal(p.question, undefined, 'question should be undefined when run does not start at key 1');
 });
