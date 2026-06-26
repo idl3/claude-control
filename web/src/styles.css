@@ -715,6 +715,25 @@ body.is-external-display .rail {
   /* Clear breathing room from the title so the name truncates well before the
      icons rather than butting against them. */
   padding-left: 18px;
+  /* Collapsible: the ⋯ toggle animates the whole bar in/out. max-height covers
+     the bar even when it wraps to a second row on a narrow pane. */
+  overflow: hidden;
+  max-height: 88px;
+  transition:
+    max-height 0.28s var(--ease),
+    opacity 0.2s var(--ease),
+    transform 0.28s var(--ease);
+}
+.detail-actions[data-collapsed='true'] {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+  padding-left: 0;
+  pointer-events: none;
+}
+/* The ⋯ toggle stays accented while the bar is open so it reads as "expanded". */
+.detail-actions-toggle[data-on='true'] {
+  color: var(--text);
 }
 .detail-action {
   display: inline-flex;

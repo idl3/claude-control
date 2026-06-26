@@ -39,6 +39,7 @@ import {
   TerminalSquareIcon,
   BotIcon,
   PanelLeftIcon,
+  EllipsisIcon,
   SettingsIcon,
   ActivityIcon,
   SearchIcon,
@@ -739,6 +740,22 @@ function AppInner() {
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  // Show/hide the header action-button bar (rename/reset/terminal/search/…),
+  // toggled by the ⋯ button in the title row. Persisted so the choice sticks.
+  const [actionsOpen, setActionsOpen] = useState(() => {
+    try {
+      return localStorage.getItem('cc:actionsOpen') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('cc:actionsOpen', String(actionsOpen));
+    } catch {
+      /* private mode — non-fatal */
+    }
+  }, [actionsOpen]);
   useEffect(() => {
     setPanelOpen(false);
     setViewingAgentId(null);
@@ -1698,8 +1715,23 @@ function AppInner() {
                   </>
                 )}
               </div>
+              {/* ⋯ toggle: show/hide the action bar. Lives OUTSIDE .detail-actions
+                  (which collapses) so it stays visible to bring the bar back. */}
+              {selectedSession && renaming === null ? (
+                <button
+                  type="button"
+                  className="detail-action detail-actions-toggle"
+                  aria-pressed={actionsOpen}
+                  data-on={actionsOpen ? 'true' : undefined}
+                  aria-label={actionsOpen ? 'Hide actions' : 'Show actions'}
+                  title={actionsOpen ? 'Hide actions' : 'Show actions'}
+                  onClick={() => setActionsOpen((v) => !v)}
+                >
+                  <EllipsisIcon />
+                </button>
+              ) : null}
               {/* All actions live on the RIGHT, as uniform small icon buttons. */}
-              <div className="detail-actions">
+              <div className="detail-actions" data-collapsed={!actionsOpen ? 'true' : undefined}>
                 {selectedSession && renaming === null ? (
                   <>
                     <button
