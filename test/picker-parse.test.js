@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { parsePicker, planStep } from '../lib/answer.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Fixtures — taken verbatim from the real picker renders documented in the
@@ -462,4 +467,91 @@ test('planStep: narrow-pane wrapped — select Fresh Strawberry produces correct
   const keys = planStep(parsed, question, ['Fresh Strawberry']);
   assert.ok(Array.isArray(keys), 'planStep should return key array (not null)');
   assert.deepEqual(keys, ['Down', 'Space', 'Down', 'Down', 'Enter']);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: agent prose with a numbered list ABOVE the real multi-select
+// picker (the live scout fixture). The agent's reasoning contained
+// "1. ATL-16657 …" / "2. The Pleri olam-agent …" — those numbered prose lines
+// were mis-parsed as option rows, prepended to navigable rows[], poisoning the
+// Down-count math so Enter never landed on Submit (the reported bug). parsePicker
+// must keep ONLY the bottom-most consecutively-numbered run (the real checkbox
+// block) and drop the prose list entirely.
+// ---------------------------------------------------------------------------
+
+const SCOUT_FIXTURE = readFileSync(
+  join(__dirname, 'fixtures-live-scout-multiselect.txt'),
+  'utf8',
+);
+
+test('parsePicker: scout fixture — prose "1./2." list above picker is excluded', () => {
+  const { rows, confidence } = parsePicker(SCOUT_FIXTURE);
+  assert.equal(confidence, 'ok');
+  // 4 real options + type-something + action(Submit) + chat = 7 navigable rows.
+  // The two prose lines ("ATL-16657 …", "The Pleri olam-agent …") must NOT appear.
+  assert.equal(rows.length, 7, 'phantom prose rows must be dropped');
+  const options = rows.filter((r) => r.kind === 'option');
+  assert.equal(options.length, 4);
+  assert.equal(options[0].label, 'Fix Pleri git-cred fault');
+  assert.equal(options[1].label, 'Dig into atlas ATL-16657');
+  assert.equal(options[2].label, 'Stop on ATL-16657');
+  assert.equal(options[3].label, 'Approve PLE-60 plan');
+  // No row should be one of the prose-list fragments.
+  assert.ok(
+    !rows.some((r) => /^ATL-16657 \(atlas\) is invisible/.test(r.label)),
+    'prose fragment must not survive as a row',
+  );
+  assert.ok(
+    !rows.some((r) => /^The Pleri olam-agent is active/.test(r.label)),
+    'prose fragment must not survive as a row',
+  );
+});
+
+test('parsePicker: scout fixture — cursor on first real option, action row is Submit', () => {
+  const { rows, actionLabel } = parsePicker(SCOUT_FIXTURE);
+  assert.equal(rows[0].cursor, true, 'cursor on the first checkbox option');
+  assert.equal(rows[0].label, 'Fix Pleri git-cred fault');
+  assert.equal(actionLabel, 'Submit');
+  const action = rows.find((r) => r.kind === 'action');
+  assert.ok(action, 'Submit action row must exist');
+  assert.equal(action.label, 'Submit');
+  // Screen order matches the live picker.
+  assert.deepEqual(rows.map((r) => r.kind), [
+    'option', 'option', 'option', 'option', 'type-something', 'action', 'chat',
+  ]);
+});
+
+test('planStep: scout fixture — select 2 options toggles + navigates to Submit + Enter', () => {
+  const parsed = parsePicker(SCOUT_FIXTURE);
+  const question = {
+    multiSelect: true,
+    options: parsed.rows
+      .filter((r) => r.kind === 'option')
+      .map((r) => ({ label: r.label })),
+  };
+  // Navigable layout after the fix:
+  //   idx0 Fix(cursor,unchecked) idx1 Dig idx2 Stop idx3 Approve
+  //   idx4 type-something idx5 action/Submit idx6 chat
+  // Select Fix(idx0) + Approve(idx3):
+  //   Space(Fix); Down×3 → idx3; Space(Approve); Down×2 → Submit(idx5); Enter.
+  const keys = planStep(parsed, question, ['Fix Pleri git-cred fault', 'Approve PLE-60 plan']);
+  assert.deepEqual(keys, ['Space', 'Down', 'Down', 'Down', 'Space', 'Down', 'Down', 'Enter']);
+  // The final Enter must land on the action row, not a phantom row.
+  const navToEnter = keys.slice(0, -1).filter((k) => k === 'Down').length
+    - keys.slice(0, -1).filter((k) => k === 'Up').length;
+  // cursor 0 + net downs = final index = action row index (5).
+  assert.equal(navToEnter, 5, 'net navigation must land Enter on the Submit row (idx 5)');
+});
+
+test('planStep: scout fixture — single selection still lands Enter on Submit', () => {
+  const parsed = parsePicker(SCOUT_FIXTURE);
+  const question = {
+    multiSelect: true,
+    options: parsed.rows
+      .filter((r) => r.kind === 'option')
+      .map((r) => ({ label: r.label })),
+  };
+  // Select only Stop on ATL-16657 (idx2): Down×2, Space, Down×3 → Submit(idx5), Enter.
+  const keys = planStep(parsed, question, ['Stop on ATL-16657']);
+  assert.deepEqual(keys, ['Down', 'Down', 'Space', 'Down', 'Down', 'Down', 'Enter']);
 });
