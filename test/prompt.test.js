@@ -225,13 +225,14 @@ test('detectPanePicker: live fixture-031 — narrow pane with no-space-after-dot
   assert.equal(p.question, undefined, 'question should be undefined when run does not start at key 1');
 });
 
-test('detectPanePicker: live narrow permission picker — alignment-indented label wraps are stitched, not dropped', () => {
+test('detectPanePicker: live narrow permission picker — label/description split on deeper-indented continuation', () => {
   // Real 22-col Claude permission picker captured live. Option 1 start is at col 2
-  // and its continuation "browser" is at col 7. Option 2 start is at col 4 with no
-  // space after dot ("2.No") and its continuation "tools off" is at col 6. Both
-  // continuations are MORE-indented than their option-start line, which the
-  // indentation-guard regression incorrectly treated as AskUserQuestion description
-  // lines and dropped — producing truncated labels.
+  // (markerIndent=2) and its continuation "browser" is at col 7 (deeper). Option 2
+  // start is at col 4 (markerIndent=4) with no space after dot ("2.No") and its
+  // continuation "tools off" is at col 6 (deeper). With the indent-based split rule,
+  // deeper-indented continuations go to `description` not `label` — this is the
+  // AskUserQuestion description pattern. Both label and description are rendered in
+  // the UI so the full text is still visible.
   const cap = [
     '  ❯ 1. Yes, use my',
     '       browser',
@@ -248,9 +249,59 @@ test('detectPanePicker: live narrow permission picker — alignment-indented lab
   assert.ok(p, 'expected non-null result for live narrow permission picker');
   assert.equal(p.options.length, 2, 'expected 2 options');
   assert.equal(p.options[0].key, '1');
-  assert.equal(p.options[0].label, 'Yes, use my browser');
+  // "browser" is deeper-indented (col 7) than the marker line (markerIndent=2) → description.
+  assert.equal(p.options[0].label, 'Yes, use my');
+  assert.equal(p.options[0].description, 'browser');
   assert.equal(p.options[0].selected, true);
   assert.equal(p.options[1].key, '2');
-  assert.equal(p.options[1].label, 'No, keep browser tools off');
+  // "tools off" is deeper-indented (col 6) than the marker line (markerIndent=4) → description.
+  assert.equal(p.options[1].label, 'No, keep browser');
+  assert.equal(p.options[1].description, 'tools off');
   assert.equal(p.options[1].selected, false);
+});
+
+// ── 1979 fixture: AskUserQuestion with multi-line descriptions ────────────────
+
+test('detectPanePicker: 1979 fixture — detected as picker', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null, 'expected non-null — 1979 fixture must be detected as a picker');
+  assert.ok(p.options.length >= 2, 'expected at least 2 options');
+});
+
+test('detectPanePicker: 1979 fixture — option 1 label is title only, description contains "Refactor"', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const opt1 = p.options.find((o) => o.key === '1');
+  assert.ok(opt1, 'option 1 must be present');
+  assert.equal(opt1.label, 'Continue to Phase B',
+    'option 1 label must be the title only, not the description text');
+  assert.ok(
+    !opt1.label.includes('Refactor'),
+    'option 1 label must NOT contain "Refactor" (that text belongs in description)',
+  );
+  assert.ok(opt1.description, 'option 1 must have a description field');
+  assert.ok(
+    opt1.description.includes("Refactor the cloud runner's buildSkillLaydown"),
+    `option 1 description must contain "Refactor the cloud runner's buildSkillLaydown" — got: ${opt1.description}`,
+  );
+});
+
+test('detectPanePicker: 1979 fixture — "Type something." label is clean with no description', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const typeOpt = p.options.find((o) => /^Type something/i.test(o.label));
+  assert.ok(typeOpt, '"Type something" option must be present');
+  assert.equal(typeOpt.description, undefined, '"Type something" must have no description');
+});
+
+test('detectPanePicker: 1979 fixture — "Chat about this" label is clean with no description', () => {
+  const cap = readFileSync(join(__dirname, 'fixtures-live-1979-descriptions.txt'), 'utf8');
+  const p = detectPanePicker(cap);
+  assert.ok(p !== null);
+  const chatOpt = p.options.find((o) => /^Chat about this/i.test(o.label));
+  assert.ok(chatOpt, '"Chat about this" option must be present');
+  assert.equal(chatOpt.description, undefined, '"Chat about this" must have no description');
 });
