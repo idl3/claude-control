@@ -12,10 +12,12 @@ function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-test-'));
 }
 
-function writeAgentFiles(subagentsDir, agentId, { metaContent = null, jsonlContent = '' } = {}) {
+function writeAgentFiles(subagentsDir, agentId, { metaContent = null, jsonlContent = '', skipMeta = false } = {}) {
   fs.mkdirSync(subagentsDir, { recursive: true });
-  const meta = metaContent ?? JSON.stringify({ agentType: 'test-agent', description: 'test', toolUseId: `tu-${agentId}` });
-  fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.meta.json`), meta);
+  if (!skipMeta) {
+    const meta = metaContent ?? JSON.stringify({ agentType: 'test-agent', description: 'test', toolUseId: `tu-${agentId}` });
+    fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.meta.json`), meta);
+  }
   fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.jsonl`), jsonlContent);
 }
 
@@ -281,4 +283,85 @@ test('hasActiveSubAgents: false when no subagents dir exists', () => {
 test('hasActiveSubAgents: false for empty/missing transcript path', () => {
   assert.equal(hasActiveSubAgents(''), false);
   assert.equal(hasActiveSubAgents(null), false);
+});
+
+// ---------------------------------------------------------------------------
+// TEETH: jsonl-only (no .meta.json) — the actual bug fix.
+// Old code: poll() only found agents via META_RE → snapshot empty.
+// New code: poll() finds agents via SUBAGENT_JSONL_RE → snapshot has 1 entry.
+// ---------------------------------------------------------------------------
+
+test('TEETH — jsonl-only (no .meta.json): hasActiveSubAgents true AND snapshot length=1 with correct agentId', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'nometaagent1';
+
+  // Write ONLY the .jsonl — no .meta.json.
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n', skipMeta: true });
+
+  // hasActiveSubAgents must see it (rail signal).
+  assert.equal(hasActiveSubAgents(parentPath), true,
+    'hasActiveSubAgents should be true when jsonl exists and is fresh');
+
+  // SubAgentsWatcher must also discover it (transcript/toolbar signal).
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+
+  const snap = watcher.snapshot();
+  assert.equal(snap.length, 1, 'snapshot should contain 1 sub-agent even without .meta.json');
+  assert.equal(snap[0].agentId, agentId, 'agentId should match the discovered agent');
+  // Meta fields default to null when .meta.json is absent — that is correct.
+  assert.equal(snap[0].toolUseId, null, 'toolUseId should be null without meta');
+  assert.equal(snap[0].agentType, null, 'agentType should be null without meta');
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// Meta-late upgrade: jsonl first → meta arrives on next poll.
+// ---------------------------------------------------------------------------
+
+test('meta-late upgrade: toolUseId/agentType null on first poll, populated after .meta.json arrives', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'metalateagent';
+
+  // First: only the jsonl exists.
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n', skipMeta: true });
+
+  const changes = [];
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.on('change', (entry) => changes.push(entry));
+  watcher.poll();
+
+  let snap = watcher.snapshot();
+  assert.equal(snap.length, 1, 'should discover agent from jsonl alone');
+  assert.equal(snap[0].toolUseId, null, 'toolUseId should be null before meta arrives');
+  assert.equal(snap[0].agentType, null, 'agentType should be null before meta arrives');
+
+  // Now the .meta.json arrives (as it does in practice a beat after the jsonl).
+  const meta = JSON.stringify({ agentType: 'test-agent', description: 'doing work', toolUseId: `tu-${agentId}` });
+  fs.writeFileSync(path.join(subDir, `agent-${agentId}.meta.json`), meta);
+
+  watcher.poll(); // upgrade pass
+
+  snap = watcher.snapshot();
+  assert.equal(snap.length, 1, 'still 1 agent after meta upgrade (no duplicate)');
+  assert.equal(snap[0].toolUseId, `tu-${agentId}`, 'toolUseId should be populated after meta upgrade');
+  assert.equal(snap[0].agentType, 'test-agent', 'agentType should be populated after meta upgrade');
+  assert.equal(snap[0].description, 'doing work', 'description should be populated after meta upgrade');
+
+  // A 'change' event must have been emitted for the upgrade.
+  const upgradedChanges = changes.filter((e) => e.toolUseId !== null);
+  assert.ok(upgradedChanges.length >= 1, 'should emit a change event when meta fields are upgraded');
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
