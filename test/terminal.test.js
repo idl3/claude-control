@@ -29,6 +29,10 @@ test('ensureTerminal: concurrent cold hits spawn exactly ONE ttyd (no stampede)'
     findFreePort: async () => 40000 + spawnCount,
     // Resolve on the next tick so all concurrent callers are in-flight together.
     waitForPort: async (port) => { await Promise.resolve(); return port; },
+    // Stub tmux entirely — CI has no tmux binary (these would otherwise throw).
+    resolveTmuxBin: async () => '/usr/bin/tmux',
+    getSocketPath: async () => '/tmp/tmux-test/default',
+    setWindowSizeLargest: async () => {},
   };
 
   try {
@@ -54,6 +58,9 @@ test('ensureTerminal: a later request reuses the live terminal (no respawn)', as
     spawn: () => { spawnCount += 1; return makeFakeProc(); },
     findFreePort: async () => 41000,
     waitForPort: async (port) => port,
+    resolveTmuxBin: async () => '/usr/bin/tmux',
+    getSocketPath: async () => '/tmp/tmux-test/default',
+    setWindowSizeLargest: async () => {},
   };
   try {
     await ensureTerminal(id, '0:1.1', deps);
