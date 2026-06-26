@@ -207,3 +207,33 @@ test('detectPanePicker: live fixture-031 — narrow pane with no-space-after-dot
   // Run starts at key 3 (1,2 scrolled off) so question should be omitted
   assert.equal(p.question, undefined, 'question should be undefined when run does not start at key 1');
 });
+
+test('detectPanePicker: live narrow permission picker — alignment-indented label wraps are stitched, not dropped', () => {
+  // Real 22-col Claude permission picker captured live. Option 1 start is at col 2
+  // and its continuation "browser" is at col 7. Option 2 start is at col 4 with no
+  // space after dot ("2.No") and its continuation "tools off" is at col 6. Both
+  // continuations are MORE-indented than their option-start line, which the
+  // indentation-guard regression incorrectly treated as AskUserQuestion description
+  // lines and dropped — producing truncated labels.
+  const cap = [
+    '  ❯ 1. Yes, use my',
+    '       browser',
+    '    2.No, keep browser',
+    '      tools off',
+    '',
+    '',
+    '  Enter to confirm \xb7',
+    '  Esc to keep',
+    '  browser tools off',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result for live narrow permission picker');
+  assert.equal(p.options.length, 2, 'expected 2 options');
+  assert.equal(p.options[0].key, '1');
+  assert.equal(p.options[0].label, 'Yes, use my browser');
+  assert.equal(p.options[0].selected, true);
+  assert.equal(p.options[1].key, '2');
+  assert.equal(p.options[1].label, 'No, keep browser tools off');
+  assert.equal(p.options[1].selected, false);
+});
