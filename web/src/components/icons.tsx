@@ -95,6 +95,16 @@ export function ActivityIcon(p: IconProps) {
   );
 }
 
+export function EllipsisIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+    </Svg>
+  );
+}
+
 export function XIcon(p: IconProps) {
   return (
     <Svg {...p}>
