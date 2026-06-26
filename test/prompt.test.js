@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePanePrompt } from '../lib/prompt.js';
+import { parsePanePrompt, detectPanePicker } from '../lib/prompt.js';
 
 test('parses a Claude Code permission prompt with selected option', () => {
   const cap = [
@@ -76,4 +76,103 @@ test('detects a picker that starts mid-sequence (option 1 scrolled off-screen)',
   const r = parsePanePrompt('Would you like to proceed?\n 2. a\n 3. b\nEsc to cancel');
   assert.ok(r);
   assert.deepEqual(r.options.map((o) => o.key), ['2', '3']);
+});
+
+// ── detectPanePicker tests ────────────────────────────────────────────────────
+
+test('detectPanePicker: narrow-pane AskUserQuestion with wrapped footer and mid-word option wrap', () => {
+  // Footer split across 3 physical lines, option 3 label wrapped mid-word,
+  // option 5 without a dot separator, ❯ cursor on option 5.
+  const cap = [
+    'What should I do next?',
+    '',
+    '──────────────────',
+    ' 3 Deep-verify',
+    ' the result',
+    ' 4. Review the plan',
+    ' ❯ 5 Type something',
+    ' 6. Chat about this',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result');
+  assert.equal(p.options.length, 4, 'expected 4 options');
+  assert.deepEqual(p.options.map((o) => o.key), ['3', '4', '5', '6']);
+  assert.equal(p.options[0].label, 'Deep-verify the result', 'option 3 label should be rejoined');
+  assert.equal(p.options[2].selected, true, 'option 5 (❯ cursor) should be selected');
+  assert.equal(p.options[0].selected, false);
+});
+
+test('detectPanePicker: narrow picker starting at key 1 has non-empty question', () => {
+  const cap = [
+    'Pick a verification strategy:',
+    '',
+    ' 1. Run unit tests',
+    ' ❯ 2. Run all tests',
+    ' 3. Skip verification',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null result');
+  assert.ok(p.question && p.question.length > 0, 'question should be non-empty');
+  assert.match(p.question, /Pick a verification strategy/);
+});
+
+test('detectPanePicker: plain numbered prose with no footer and no cursor returns null (false-positive guard)', () => {
+  // A numbered plan written in assistant prose. NO footer signature, NO ❯ cursor.
+  const cap = [
+    "Here's my plan:",
+    ' 1. Analyze the codebase',
+    ' 2. Identify bottlenecks',
+    ' 3. Propose refactoring',
+    '',
+    'Let me know if you want to proceed.',
+  ].join('\n');
+
+  assert.equal(detectPanePicker(cap), null, 'plain numbered prose must return null');
+});
+
+test('detectPanePicker: box-drawing separator line not present in any label or question', () => {
+  const cap = [
+    'What to do?',
+    '──────────────────',
+    ' ❯ 1. Option Alpha',
+    ' 2. Option Beta',
+    '',
+    'Enter to select · ↑/↓',
+    'to navigate · Esc to',
+    'cancel',
+  ].join('\n');
+
+  const p = detectPanePicker(cap);
+  assert.ok(p, 'expected non-null');
+  // No label or question should contain box-drawing chars
+  const allText = [p.question || '', ...p.options.map((o) => o.label)].join(' ');
+  assert.doesNotMatch(allText, /[─━—–=_]{3,}/, 'box-drawing chars must not appear in parsed output');
+});
+
+test('detectPanePicker: existing wide-pane system prompt still parsed (parsePanePrompt compat)', () => {
+  // Confirm the existing parsePanePrompt tests are unaffected — wide-pane permission
+  // prompt with a proper OPTION_RE-format line and Esc footer.
+  const cap = [
+    'Do you want to proceed?',
+    ' 1. Yes',
+    ' ❯ 2. Yes, and don\'t ask again',
+    ' 3. No',
+    '',
+    'Esc to cancel · ctrl+e to explain',
+  ].join('\n');
+
+  const p = parsePanePrompt(cap);
+  assert.ok(p, 'parsePanePrompt wide-pane system prompt should still work');
+  assert.equal(p.question, 'Do you want to proceed?');
+  assert.equal(p.options.length, 3);
 });
