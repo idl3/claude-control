@@ -674,7 +674,10 @@ body.is-external-display .rail {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
+  /* basis 0 (not auto): the title shrinks + ellipsizes instead of claiming its
+     full content width, so the ⋯ toggle always fits on the title row rather than
+     being pushed onto its own line by a long name. */
+  flex: 1 1 0;
 }
 /* Mobile: stack name over the cwd chip, and drop the action cluster onto its own
    full-width second row so a long title never collides with / hides the icons. */
@@ -687,8 +690,9 @@ body.is-external-display .rail {
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;
-    /* Actions moved to their own row → the title can use the full width. */
-    flex: 1 1 auto;
+    /* basis 0 so a long title truncates and the ⋯ toggle stays on the title row
+       (the action bar still wraps to its own row below via flex-basis:100%). */
+    flex: 1 1 0;
     min-width: 0;
     max-width: 100%;
   }
@@ -698,8 +702,12 @@ body.is-external-display .rail {
   .detail-title .detail-cwd {
     max-width: 100%;
   }
-  .detail-actions {
-    flex-basis: 100%;
+  /* Two classes so this wins over the base `.detail-actions { flex: 0 0 auto }`
+     (which is later in source) — otherwise the bar stays inline, cramming the
+     title to a few chars instead of wrapping to its own row. flex 0 0 100% forces
+     the bar onto row 2, leaving the full title row for the name + the ⋯ toggle. */
+  .detail-head .detail-actions {
+    flex: 0 0 100%;
     margin-left: 0;
     padding-left: 0;
     justify-content: flex-end;
@@ -711,7 +719,9 @@ body.is-external-display .rail {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  margin-left: auto;
+  /* No margin-left:auto — the title's flex-grow right-aligns the cluster. An auto
+     margin would instead absorb the free space and strand the ⋯ toggle on the
+     left with a big gap before the (auto-pushed) cluster. */
   /* Clear breathing room from the title so the name truncates well before the
      icons rather than butting against them. */
   padding-left: 18px;
@@ -731,7 +741,11 @@ body.is-external-display .rail {
   padding-left: 0;
   pointer-events: none;
 }
-/* The ⋯ toggle stays accented while the bar is open so it reads as "expanded". */
+/* The ⋯ toggle stays accented while the bar is open so it reads as "expanded".
+   flex:0 0 auto so a long title can never shrink it off the row. */
+.detail-actions-toggle {
+  flex: 0 0 auto;
+}
 .detail-actions-toggle[data-on='true'] {
   color: var(--text);
 }
