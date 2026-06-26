@@ -1,0 +1,50 @@
+  - CLI: olam skills source show --json surfaces canonicalSkills.
+  - 112 core tests + 10 CLI tests green; both typechecks clean; CP3 adversarial
+  audit = 0 CRITICAL/0 HIGH (the one MEDIUM in my code — collision warning —
+  fixed; M1 trust-gate gap disclosed in the PR body as a Phase B follow-up). The
+  validate PR body CI check already passed.
+
+  Decisions I made (autonomously, per your "deliver" intent):
+  1. The plan was never run through /100x:commit-plan, so no tracker/design-doc
+  exists — I executed directly against the plan README's phase breakdown rather
+  than bouncing you through ceremony.
+  2. Scope = Phase A only. It's the foundation all phases depend on and the
+  largest slice that's genuinely fully tested locally. Phases B–F need the CF
+  Sandbox runner / Codex binary / SPA broker — not E2E-testable on this host,
+  which conflicts with your "fully tested" priority.
+
+  Two things to note:
+  - Shared checkout: HEAD is on feat/codex-skill-agent-parity-phase-a, not the
+  original fix/execute-vault-url-replay. Another window's uncommitted
+  vault-replay WIP (linear-approve.ts, broker.ts, etc.) is intact in the tree
+  but blocks a branch switch. Also, your session-start docs WIP
+  (olam-planning-debug-tools) is safe in git stash@{0}. Sort the branch position
+  when that other window is idle.
+  - M1 follow-up is disclosed in the PR body, not silently deferred.
+
+  My pick: continue to Phase B — it's the next-most locally-verifiable phase
+  (the runner's buildSkillLaydown has snapshot/unit tests), so I can keep the
+  "fully tested" bar. C–F hit the substrate wall.
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Next step 
+
+Phase A is shipped + fully tested (PR #1986). How far do you want me to push the
+rest of the epic?
+
+❯ 1. Continue to Phase B
+     Refactor the cloud runner's buildSkillLaydown to consume the new catalog.
+     Locally verifiable via the runner's snapshot/unit tests, so the 'fully
+     tested' bar holds. Opens a stacked Phase B PR.
+  2. Stop at Phase A
+     Phase A is a clean, complete, tested foundation. Get #1986 reviewed/merged
+     first; resume B–F later as separate PRs.
+  3. Write B–F now (untested)
+     Implement all remaining phases' code, but C–F can't be E2E-tested locally
+     (need CF Sandbox / Codex / SPA substrate) — ships code verified only by
+     unit tests, against your stated 'fully tested' priority.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

@@ -22,7 +22,7 @@ import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
-import { parsePanePrompt, isSystemPrompt } from './lib/prompt.js';
+import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
@@ -1794,20 +1794,21 @@ function startPromptPoller(id, sub) {
       try {
         // Visible pane only (no scrollback) — an answered picker frozen in
         // history must not re-fire. The live prompt is always on screen.
-        const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
         if (session.kind === 'codex') {
+          const cap = await tmux.capturePane(session.target, 120, false, false, { visibleOnly: true });
           prompt = parseCodexPrompt(cap);
           pickerOpen = !!prompt; // for codex, pickerOpen tracks the same parsed prompt
         } else {
-          // Claude: only surface RECOGNIZED system prompts (permission / trust /
-          // plan-review). Custom agent/skill pickers and prose questions are NOT
-          // shown — a real AskUserQuestion flows through the structured transcript
-          // path (pending), not this scrape.
-          const parsed = parsePanePrompt(cap);
-          prompt = isSystemPrompt(parsed) ? parsed : null;
-          // pickerOpen is broader than prompt: ANY numbered picker with cursor/footer
-          // qualifies (not just the narrower isSystemPrompt subset). This reuses the
-          // SAME capture already taken — zero new tmux execs.
+          // Claude: use join=true (-J) capture so hard-wrapped narrow-pane text
+          // (AskUserQuestion footer split across 3 physical lines) is pre-joined
+          // into logical lines before parsing. detectPanePicker surfaces ALL picker
+          // types — AskUserQuestion, permission, trust, plan-review, custom menus.
+          const cap = await tmux.capturePane(session.target, 120, false, true, { visibleOnly: true });
+          const parsed = detectPanePicker(cap);
+          // Scrape is the fallback: only assign if no structured prompt was set above.
+          if (prompt === null) {
+            prompt = parsed;
+          }
           pickerOpen = !!parsed;
         }
       } catch {
@@ -1979,8 +1980,8 @@ async function handleClientMessage(ws, msg) {
         // decides on the boolean presence of a parsed picker, identical for both.
         if (!msg.viaAnswer && (session.kind === 'claude' || session.kind === 'codex') && session.transport !== 'print') {
           try {
-            const cap = await tmux.capturePane(session.target, 80, false, false, { visibleOnly: true });
-            const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : parsePanePrompt(cap);
+            const cap = await tmux.capturePane(session.target, 120, false, true, { visibleOnly: true });
+            const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : detectPanePicker(cap);
             if (shouldRefuseSendForPicker({ viaAnswer: msg.viaAnswer, kind: session.kind, transport: session.transport, parsedPicker })) {
               send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: 'A question/picker is open in this pane — answer it via the question UI, not a free-text reply.' });
               return;
@@ -2037,10 +2038,11 @@ async function handleClientMessage(ws, msg) {
             let stepOk = false;
 
             while (attempt <= MAX_RETRIES && !stepOk) {
-              // 1. Capture current picker state.
+              // 1. Capture current picker state (join=true so hard-wrapped narrow-pane
+              //    labels are reconstructed into logical lines before parsing).
               let capture;
               try {
-                capture = await tmux.capturePane(session.target);
+                capture = await tmux.capturePane(session.target, 40, false, true);
               } catch (captureErr) {
                 console.log(`[answer/dynamic] capture failed q${qi}: ${captureErr?.message}`);
                 dynamicOk = false;
@@ -2064,7 +2066,7 @@ async function handleClientMessage(ws, msg) {
                 await tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS);
                 await new Promise((r) => setTimeout(r, SETTLE_MS));
                 // Verify: the review screen should be gone.
-                const afterReview = await tmux.capturePane(session.target);
+                const afterReview = await tmux.capturePane(session.target, 40, false, true);
                 const reparse = parsePicker(afterReview);
                 if (reparse.isReview) {
                   console.log(`[answer/dynamic] review screen still up after Enter — falling back`);
@@ -2095,7 +2097,7 @@ async function handleClientMessage(ws, msg) {
               await new Promise((r) => setTimeout(r, SETTLE_MS));
               let afterCapture;
               try {
-                afterCapture = await tmux.capturePane(session.target);
+                afterCapture = await tmux.capturePane(session.target, 40, false, true);
               } catch (captureErr) {
                 console.log(`[answer/dynamic] post-send capture failed q${qi}: ${captureErr?.message}`);
                 dynamicOk = false;
@@ -2156,7 +2158,7 @@ async function handleClientMessage(ws, msg) {
             // Capture and check: we may already be on the review screen (handled
             // in the loop above) or may need to check.
             try {
-              const finalCapture = await tmux.capturePane(session.target);
+              const finalCapture = await tmux.capturePane(session.target, 40, false, true);
               const finalParsed = parsePicker(finalCapture);
               if (finalParsed.isReview && finalParsed.confidence === 'ok') {
                 // Submit the review screen.
@@ -2307,10 +2309,11 @@ async function handleClientMessage(ws, msg) {
       return runSerial(session.target, async () => {
         const SETTLE_MS = 300;
 
-        // 1. Capture current picker state.
+        // 1. Capture current picker state (join=true so hard-wrapped narrow-pane
+        //    labels are reconstructed into logical lines before parsing).
         let capture;
         try {
-          capture = await tmux.capturePane(session.target);
+          capture = await tmux.capturePane(session.target, 40, false, true);
         } catch (captureErr) {
           throw new Error(`promptselect: capture failed: ${captureErr?.message}`);
         }
