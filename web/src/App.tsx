@@ -14,6 +14,7 @@ import { renameSession, createSession, getConfig, resetBinding, rematchAll } fro
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
@@ -1855,6 +1856,12 @@ function AppInner() {
               <div className="detail-split">
                 <AgentKindContext.Provider value={selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
+                  {/* Catch a render crash in the transcript so one bad message
+                      can't white-screen the whole app; resets on session switch. */}
+                  <ErrorBoundary
+                    resetKey={cockpit.selectedId ?? undefined}
+                    label="This conversation failed to render"
+                  >
                   <Thread
                     hasSelection={!!cockpit.selectedId}
                     agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
@@ -1903,6 +1910,7 @@ function AppInner() {
                     }}
                     onReply={onInlineReply}
                   />
+                  </ErrorBoundary>
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ArtifactPanel />
