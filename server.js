@@ -2096,6 +2096,16 @@ async function handleClientMessage(ws, msg) {
                 `[answer/dynamic] q${qi} attempt=${attempt} keys=${JSON.stringify(keys)}`,
               );
 
+              // Snapshot the option-label set BEFORE sending keys so we can detect
+              // structural screen advancement in the post-send verify (Gap-2 fix):
+              // if the option-label set changes after send, the screen advanced
+              // regardless of what label the cursor lands on — avoids false "stuck"
+              // when page N+1's cursor-0 label coincidentally equals page N's answer.
+              const preSendOptionLabels = parsed.rows
+                .filter((r) => r.kind === 'option')
+                .map((r) => r.label)
+                .join('\x00');
+
               // 5. Send keys.
               sentAny = true;
               await tmux.sendRawKeysSequenced(session.target, keys, SETTLE_MS);
@@ -2136,16 +2146,39 @@ async function handleClientMessage(ws, msg) {
                 stepOk = true;
               } else {
                 // Single-select: after Enter, picker should advance (screen changes).
-                // If the exact same option is still shown as selected (cursor on it),
-                // something went wrong. Accept any screen change as advancement.
+                // Accept any structural screen change as advancement.
+                //
+                // Stuck detection uses TWO criteria (both must be true to declare stuck):
+                //   a) cursor is on the same label we just answered, AND
+                //   b) the option-label SET is byte-identical to the pre-send state.
+                //
+                // Criterion (b) prevents false-bail when page N+1 legitimately has its
+                // cursor-0 label equal to page N's answer (the label-coincidence bug):
+                // a changed option set proves the screen advanced even if the cursor
+                // label matches, so we never declare stuck in that case.
+                //
+                // IMPORTANT: the TUI may take longer than SETTLE_MS to transition
+                // between pages (especially on the last question where it renders the
+                // full review screen). If we detect "stuck" and immediately retry, the
+                // retry capture happens at essentially the same wall-clock position and
+                // may also see the old screen — exhausting MAX_RETRIES and causing a
+                // mid-picker abort. Wait an extra 2×SETTLE_MS before the retry so the
+                // transition has enough time to complete regardless of host load.
+                const afterOptionLabels = afterParsed.rows
+                  .filter((r) => r.kind === 'option')
+                  .map((r) => r.label)
+                  .join('\x00');
+                const optionSetUnchanged = afterOptionLabels === preSendOptionLabels;
                 if (
                   afterParsed.confidence === 'ok' &&
                   !afterParsed.isReview &&
+                  optionSetUnchanged &&
                   afterParsed.rows.some(
                     (r) => r.cursor && r.kind === 'option' && r.label === selectedLabels[0],
                   )
                 ) {
-                  console.log(`[answer/dynamic] single-select stuck on q${qi} attempt=${attempt}`);
+                  console.log(`[answer/dynamic] single-select stuck on q${qi} attempt=${attempt} — extra settle`);
+                  await new Promise((r) => setTimeout(r, SETTLE_MS * 2));
                   attempt += 1;
                   continue;
                 }
