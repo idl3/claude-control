@@ -6842,3 +6842,27 @@ select.config-input {
   width: 100%;
   background: #fff;
 }
+
+/* Render-error fallback shown by <ErrorBoundary> when a transcript fails to
+   render — keeps one bad message from white-screening the whole app. */
+.error-boundary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--danger, #e5484d);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--danger, #e5484d) 10%, transparent);
+}
+.error-boundary-title {
+  font-weight: 600;
+  color: var(--danger, #e5484d);
+}
+.error-boundary-msg {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
