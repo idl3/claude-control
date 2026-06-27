@@ -2138,6 +2138,14 @@ async function handleClientMessage(ws, msg) {
                 // Single-select: after Enter, picker should advance (screen changes).
                 // If the exact same option is still shown as selected (cursor on it),
                 // something went wrong. Accept any screen change as advancement.
+                //
+                // IMPORTANT: the TUI may take longer than SETTLE_MS to transition
+                // between pages (especially on the last question where it renders the
+                // full review screen). If we detect "stuck" and immediately retry, the
+                // retry capture happens at essentially the same wall-clock position and
+                // may also see the old screen — exhausting MAX_RETRIES and causing a
+                // mid-picker abort. Wait an extra 2×SETTLE_MS before the retry so the
+                // transition has enough time to complete regardless of host load.
                 if (
                   afterParsed.confidence === 'ok' &&
                   !afterParsed.isReview &&
@@ -2145,7 +2153,8 @@ async function handleClientMessage(ws, msg) {
                     (r) => r.cursor && r.kind === 'option' && r.label === selectedLabels[0],
                   )
                 ) {
-                  console.log(`[answer/dynamic] single-select stuck on q${qi} attempt=${attempt}`);
+                  console.log(`[answer/dynamic] single-select stuck on q${qi} attempt=${attempt} — extra settle`);
+                  await new Promise((r) => setTimeout(r, SETTLE_MS * 2));
                   attempt += 1;
                   continue;
                 }
