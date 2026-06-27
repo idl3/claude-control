@@ -313,3 +313,152 @@ Enter to select · Tab/Arrow keys to navigate · Esc to cancel
   assert.equal(stuckCondition, true,
     'page-2 with cursor on Banana MUST trigger stuck condition (verifies that the extra-settle fix path is reachable)');
 });
+
+// ---------------------------------------------------------------------------
+// Gap-2 regression: label-coincidence false-bail.
+//
+// Bug: if page N+1's cursor-0 option label equals page N's answer label, the
+// OLD stuck check (label-only) fires even though the screen advanced — and more
+// settle never helps because the NEXT page legitimately shows that label.
+//
+// Fix (server.js): also require the option-label SET to be byte-identical to
+// the pre-send state. A changed set proves structural advancement regardless of
+// what label the cursor is on.
+// ---------------------------------------------------------------------------
+
+test('Gap-2: label-coincidence — page-2 starts on same label as page-1 answer (Apple→Apple)', () => {
+  // Scenario:
+  //   Page 1: "Choose a fruit", answer = "Apple"
+  //   Page 2: "Choose a vegetable", first option = "Apple" (cursor on it at idx 0)
+  //
+  // The OLD stuck check (label-only): cursor && label==='Apple' → stuck=true → false bail.
+  // The NEW stuck check must NOT fire because the option-label set changed
+  // (page-1 options: Apple/Banana/Cherry/Type something. vs page-2 options: Apple/Carrot/Daikon/Type something.).
+  //
+  // Fingerprints are derived via parsePicker to match the server.js production path.
+
+  // Pre-send: parse page-1 to get the option-label fingerprint
+  const page1Fixture = `\
+Choose a fruit
+
+❯ 1. Apple
+  2. Banana
+  3. Cherry
+  4. Type something.
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+  const preParsed = parsePicker(page1Fixture);
+  const preSendOptionLabels = preParsed.rows
+    .filter((r) => r.kind === 'option')
+    .map((r) => r.label)
+    .join('\x00');
+
+  // Post-send: page-2 with cursor on Apple (coincidence label)
+  const page2AppleCursor = `\
+Choose a vegetable
+
+❯ 1. Apple
+  2. Carrot
+  3. Daikon
+  4. Type something.
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+  const afterParsed = parsePicker(page2AppleCursor);
+  assert.equal(afterParsed.confidence, 'ok', 'page-2 parses ok');
+  assert.equal(afterParsed.isReview, false, 'page-2 is not review');
+
+  // Cursor IS on Apple (the coincidence label)
+  const cursorOnCoincidenceLabel = afterParsed.rows.some(
+    (r) => r.cursor && r.kind === 'option' && r.label === 'Apple',
+  );
+  assert.equal(cursorOnCoincidenceLabel, true, 'cursor is on Apple (the coincidence)');
+
+  // Option-label fingerprint AFTER send
+  const afterOptionLabels = afterParsed.rows
+    .filter((r) => r.kind === 'option')
+    .map((r) => r.label)
+    .join('\x00');
+
+  // Option sets differ → screen advanced
+  const optionSetUnchanged = afterOptionLabels === preSendOptionLabels;
+  assert.equal(optionSetUnchanged, false,
+    'page-1 and page-2 option sets differ → optionSetUnchanged=false');
+
+  // NEW stuck condition (server.js Gap-2 fix): requires BOTH label-match AND unchanged option set
+  const newStuckCondition =
+    afterParsed.confidence === 'ok' &&
+    !afterParsed.isReview &&
+    optionSetUnchanged &&
+    cursorOnCoincidenceLabel;
+
+  assert.equal(newStuckCondition, false,
+    'Gap-2 fix: changed option set prevents false-bail even when cursor label matches page-N answer');
+});
+
+test('Gap-2: genuine stuck still detected — same page, same options, cursor on answered label', () => {
+  // This is the REAL stuck case: page DIDN'T advance (option set is identical to
+  // pre-send) and cursor is on the answered label. Must still fire.
+  //
+  // NOTE: "Type something." (with trailing period) parses as an option row in the
+  // live TUI. The fingerprint is derived from parsePicker output on the PRE-send
+  // capture so it naturally includes it — both sides are computed the same way.
+
+  // Pre-send: cursor on Apple (initial state)
+  const page2AppleCursor = `\
+Choose a fruit
+
+❯ 1. Apple
+  2. Banana
+  3. Cherry
+  4. Type something.
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+  const preParsed = parsePicker(page2AppleCursor);
+  const preSendOptionLabels = preParsed.rows
+    .filter((r) => r.kind === 'option')
+    .map((r) => r.label)
+    .join('\x00');
+
+  // Post-send: same page, cursor landed on Banana (the answered label)
+  const page2BananaCursor = `\
+Choose a fruit
+
+  1. Apple
+❯ 2. Banana
+  3. Cherry
+  4. Type something.
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+  const afterParsed = parsePicker(page2BananaCursor);
+  const afterOptionLabels = afterParsed.rows
+    .filter((r) => r.kind === 'option')
+    .map((r) => r.label)
+    .join('\x00');
+  const optionSetUnchanged = afterOptionLabels === preSendOptionLabels;
+
+  assert.equal(optionSetUnchanged, true, 'same-page: option set is identical');
+
+  const cursorOnAnsweredLabel = afterParsed.rows.some(
+    (r) => r.cursor && r.kind === 'option' && r.label === 'Banana',
+  );
+  assert.equal(cursorOnAnsweredLabel, true, 'cursor is on Banana');
+
+  const newStuckCondition =
+    afterParsed.confidence === 'ok' &&
+    !afterParsed.isReview &&
+    optionSetUnchanged &&
+    cursorOnAnsweredLabel;
+
+  assert.equal(newStuckCondition, true,
+    'genuine stuck (same option set + cursor on answered label) must still fire');
+});
