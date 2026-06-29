@@ -1,5 +1,8 @@
-node_modules/
-web/node_modules/
+# Match BOTH a node_modules directory AND a `node_modules` symlink (worktrees
+# symlink it to the main checkout). A trailing-slash pattern matches dirs only,
+# so a symlink slipped past it and got committed once — keep these slash-less.
+node_modules
+web/node_modules
 web/dist/
 outputs/
 *.log
