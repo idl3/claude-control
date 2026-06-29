@@ -76,6 +76,18 @@ function messageText(msg: Msg): string {
 }
 
 /**
+ * True when the transcript already carries a tool_use block with this name + id.
+ * Used to decide whether to synthesize a live "incoming question" card: if the
+ * real AskUserQuestion record is already present (main-agent, written-on-open),
+ * its own card renders — so the synthetic one is suppressed to avoid a duplicate.
+ */
+export function transcriptHasToolUse(messages: Msg[], name: string, id: string): boolean {
+  return messages.some((m) =>
+    (m.blocks ?? []).some((b) => b.kind === 'tool_use' && b.name === name && b.id === id),
+  );
+}
+
+/**
  * Rewrite AskUserQuestion results that recorded a free-text option label so the
  * answer shows the user's actual typed reply (the next user text message). Pure
  * display fix: the underlying transcript is untouched; only the in-memory result

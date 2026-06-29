@@ -6662,6 +6662,30 @@ select.config-input {
   }
 }
 
+/* Awaiting state: list each option (label + description) so the full incoming
+   context is visible in the transcript, beside the composer choices below. */
+.ask-answered-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 18px;
+}
+.ask-answered-opt-label {
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.ask-answered-opt-desc {
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-faint, var(--text-dim));
+}
+
+/* The live incoming question pinned at the tail of the transcript (above the
+   composer). Sits in the message flow so it scrolls with the conversation. */
+.thread-incoming-ask {
+  padding: 4px 0 2px;
+}
+
 /* ─── WebViewer overlay ─────────────────────────────────────────────────────
    In-app iframe overlay for http(s) links clicked in transcript markdown.
    Default: large centered panel (not full-screen).

@@ -91,17 +91,19 @@ export function parseAskAnswers(text: string): { question: string; answer: strin
   return out;
 }
 
-export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
-  const { args, result } = props;
-  const input = toolInput(args) as { questions?: AskInputQuestion[] } | null;
-  const questions = input?.questions ?? [];
-  const res = toolResult(result);
-  const answered = res != null && !res.isError;
-  const pairs = answered ? parseAskAnswers(res.text) : [];
-
-  // No structured questions to show → fall back to the generic tool row.
-  if (questions.length === 0) return <ToolPart {...props} />;
-
+// Shared renderer for the Q&A card in both states: answered (✓ + chosen label)
+// and awaiting (question + "awaiting your answer…"). `pairs` is empty when not
+// yet answered. Used by AskAnsweredPart (transcript record) AND PendingAskCard
+// (the live incoming question, shown the moment it's asked).
+function AskCard({
+  questions,
+  pairs,
+  answered,
+}: {
+  questions: AskInputQuestion[];
+  pairs: { question: string; answer: string }[];
+  answered: boolean;
+}) {
   return (
     <div className="ask-answered" data-answered={answered ? 'true' : 'false'}>
       {questions.map((q, i) => {
@@ -119,15 +121,54 @@ export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
             ) : (
               <div className="ask-answered-waiting">awaiting your answer…</div>
             )}
-            {answered && opt?.description ? (
-              <div className="ask-answered-desc">{opt.description}</div>
-            ) : null}
+            {/* When still awaiting, surface each option's description so the user
+                has the full incoming context to choose by — not just labels. */}
+            {answered
+              ? opt?.description
+                ? <div className="ask-answered-desc">{opt.description}</div>
+                : null
+              : q.options
+                  ?.filter((o) => o.description)
+                  .map((o) => (
+                    <div className="ask-answered-opt" key={o.label}>
+                      <span className="ask-answered-opt-label">{o.label}</span>
+                      <span className="ask-answered-opt-desc">{o.description}</span>
+                    </div>
+                  ))}
           </div>
         );
       })}
     </div>
   );
+}
+
+export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
+  const { args, result } = props;
+  const input = toolInput(args) as { questions?: AskInputQuestion[] } | null;
+  const questions = input?.questions ?? [];
+  const res = toolResult(result);
+  const answered = res != null && !res.isError;
+  const pairs = answered ? parseAskAnswers(res.text) : [];
+
+  // No structured questions to show → fall back to the generic tool row.
+  if (questions.length === 0) return <ToolPart {...props} />;
+
+  return <AskCard questions={questions} pairs={pairs} answered={answered} />;
 };
+
+// The live, unanswered question — rendered in the transcript timeline the moment
+// it's asked (Claude Code records the AskUserQuestion turn to the JSONL only when
+// answered, and sub-agent questions never reach the main transcript, so without
+// this the chat shows nothing until the answer lands). Same card as the answered
+// state, in its "awaiting" form, so the incoming context sits beside the choices.
+export function PendingAskCard({ questions }: { questions: AskInputQuestion[] }) {
+  if (!questions || questions.length === 0) return null;
+  return (
+    <div className="thread-incoming-ask">
+      <AskCard questions={questions} pairs={[]} answered={false} />
+    </div>
+  );
+}
 
 // tool_use → controlled expandable row with a panel-open trigger on the name.
 //   ▸ <ToolName> — <one-line input summary>

@@ -8,7 +8,7 @@ import {
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
-import { convertMessages } from './lib/convert';
+import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession, createSession, getConfig, resetBinding, rematchAll } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
@@ -1224,6 +1224,19 @@ function AppInner() {
 
   const askActive = activePrompt !== null;
 
+  // The live unanswered AskUserQuestion to surface in the transcript timeline.
+  // Claude Code records the question turn to the JSONL only when answered (and
+  // sub-agent questions live in agent-*.jsonl, never the main transcript), so the
+  // chat would otherwise show nothing until the answer lands. Render it from the
+  // live pending state — UNLESS the real tool_use is already in the transcript
+  // (main-agent written-on-open), where AskAnsweredPart already shows it (no dup).
+  const incomingAsk = useMemo<Pending | null>(() => {
+    if (activePrompt?.kind !== 'ask') return null;
+    const id = activePrompt.pending.toolUseId;
+    const alreadyInTranscript = transcriptHasToolUse(cockpit.messages, 'AskUserQuestion', id);
+    return alreadyInTranscript ? null : activePrompt.pending;
+  }, [activePrompt, cockpit.messages]);
+
   // True while the selected Claude session is actively generating/thinking,
   // OR while a just-sent message is still unconfirmed (bridges the ~2-4s poll
   // gap so the working indicator fires immediately on send). Capped at 20s so a
@@ -1890,6 +1903,7 @@ function AppInner() {
                     onStop={handleStop}
                     askActive={askActive}
                     activePrompt={activePrompt}
+                    incomingAsk={incomingAsk}
                     onAnswer={(toolUseId, selections) => {
                       cockpit.sendAnswer(toolUseId, selections);
                       cockpit.clearCapture();
