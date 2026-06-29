@@ -5,8 +5,26 @@ import {
   toolSummary,
   toolInput,
   toolResult,
+  transcriptHasToolUse,
 } from './convert';
 import type { Msg } from './types';
+
+describe('transcriptHasToolUse (incoming-question dedupe)', () => {
+  const withAsk: Msg[] = [
+    { uuid: 'm1', role: 'assistant', blocks: [{ kind: 'tool_use', id: 'tu_1', name: 'AskUserQuestion', input: {} }] },
+  ];
+  it('detects a real AskUserQuestion tool_use by name + id', () => {
+    expect(transcriptHasToolUse(withAsk, 'AskUserQuestion', 'tu_1')).toBe(true);
+  });
+  it('is false when the id is absent (sub-agent / written-on-answer) → synthetic card shows', () => {
+    expect(transcriptHasToolUse(withAsk, 'AskUserQuestion', 'tu_OTHER')).toBe(false);
+    expect(transcriptHasToolUse([], 'AskUserQuestion', 'tu_1')).toBe(false);
+  });
+  it('does not match a different tool with the same id', () => {
+    const other: Msg[] = [{ uuid: 'm2', role: 'assistant', blocks: [{ kind: 'tool_use', id: 'tu_1', name: 'Bash', input: {} }] }];
+    expect(transcriptHasToolUse(other, 'AskUserQuestion', 'tu_1')).toBe(false);
+  });
+});
 
 // Narrow helpers so assertions read cleanly without `any`.
 type AnyPart = Record<string, unknown> & { type: string };

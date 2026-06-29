@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
+import { PendingAskCard } from './MessageParts';
 import { Composer } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
 import { SubAgentThread } from './SubAgentThread';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
-import type { SubAgent } from '../lib/types';
+import type { Pending, SubAgent } from '../lib/types';
 import type { ActivePrompt } from './AskInline';
 
 interface ThreadProps {
@@ -52,6 +53,9 @@ interface ThreadProps {
   /** Inline prompt morph props — forwarded to Composer. */
   askActive?: boolean;
   activePrompt?: ActivePrompt | null;
+  /** Live unanswered AskUserQuestion to surface in the transcript timeline (with
+   *  full context), or null when it's already present as a real transcript record. */
+  incomingAsk?: Pending | null;
   onAnswer?: (toolUseId: string, selections: string[][]) => void;
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
@@ -157,6 +161,7 @@ export function Thread({
   onStop,
   askActive,
   activePrompt,
+  incomingAsk,
   onAnswer,
   onKey,
   onSelect,
@@ -223,6 +228,9 @@ export function Thread({
               </button>
             ) : null}
             <ThreadPrimitive.Messages components={messageComponents} />
+            {/* Live incoming question — shows the asked context in the transcript
+                flow the moment it arrives, beside the composer choices below. */}
+            {incomingAsk ? <PendingAskCard questions={incomingAsk.questions} /> : null}
           </ThreadPrimitive.Viewport>
           {/* Tail-to-bottom: App toggles data-show when detached; click re-attaches.
               OUTSIDE the Viewport so it never affects iOS momentum scrolling. */}
