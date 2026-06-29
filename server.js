@@ -2526,6 +2526,17 @@ async function main() {
   uploadSweepTimer = setInterval(runUploadSweep, 24 * 3600 * 1000);
   uploadSweepTimer.unref();
 
+  // Without this, a stale instance still holding the port makes listen() emit an
+  // unhandled 'error' and the process dies with an opaque EADDRINUSE stack. Fail
+  // loud and clean instead.
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`claude-control: port ${CONFIG.port} is already in use — another instance is still running. Exiting.`);
+      process.exit(1);
+    }
+    console.error('[server error]', err?.stack || err);
+    process.exit(1);
+  });
   server.listen(CONFIG.port, CONFIG.host, () => {
     // eslint-disable-next-line no-console
     console.log(`claude-control → ${_scheme}://${CONFIG.host}:${CONFIG.port}/`);
@@ -2559,6 +2570,9 @@ function shutdown() {
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
   server.close();
+  // Long-lived WebSocket connections keep the listening socket bound; force them
+  // closed so the port frees immediately and an in-place restart can re-bind.
+  server.closeAllConnections?.();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
