@@ -17,6 +17,13 @@ mkdir -p "$DATA_DIR"
 LOG="$DATA_DIR/update.log"
 PORT="${CLAUDE_CONTROL_PORT:-${COCKPIT_PORT:-4317}}"
 
+# Triggered detached from the UI (or launchd), this can run under a stripped PATH
+# where `node`/`npm` aren't found — the restart then silently no-ops. Prepend the
+# usual install dirs and resolve an explicit node binary.
+# ponytail: covers Homebrew + standard installs; nvm/fnm users set CLAUDE_CONTROL_NODE.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+NODE_BIN="${CLAUDE_CONTROL_NODE:-$(command -v node || true)}"
+
 {
   echo "=== self-update $(date) (port $PORT) ==="
 
@@ -38,6 +45,10 @@ PORT="${CLAUDE_CONTROL_PORT:-${COCKPIT_PORT:-4317}}"
     sleep 1
   done
 
-  nohup node "$ROOT/server.js" > "$DATA_DIR/server.log" 2>&1 </dev/null &
-  echo "restarted server pid $!"
+  if [ -z "$NODE_BIN" ]; then
+    echo "FATAL: node not found on PATH (set CLAUDE_CONTROL_NODE) — server NOT restarted"
+    exit 1
+  fi
+  nohup "$NODE_BIN" "$ROOT/server.js" > "$DATA_DIR/server.log" 2>&1 </dev/null &
+  echo "restarted server pid $! (node: $NODE_BIN)"
 } >> "$LOG" 2>&1
