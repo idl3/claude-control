@@ -90,13 +90,13 @@ const TOOLS = [
     name: 'collab_remember',
     description: 'Replay the FULL append-only transcript of a room — use to restore context after a compaction/clear. Returns { log }.',
     inputSchema: { type: 'object', properties: { roomId: { type: 'string' } }, required: ['roomId'] },
-    handler: (a) => api('GET', '/api/collab/history', { query: { roomId: a.roomId } }),
+    handler: (a) => api('GET', '/api/collab/history', { query: { paneId: PANE_ID, roomId: a.roomId } }),
   },
   {
     name: 'collab_members',
     description: 'List the members of a collaboration room.',
     inputSchema: { type: 'object', properties: { roomId: { type: 'string' } }, required: ['roomId'] },
-    handler: (a) => api('GET', '/api/collab/members', { query: { roomId: a.roomId } }),
+    handler: (a) => api('GET', '/api/collab/members', { query: { paneId: PANE_ID, roomId: a.roomId } }),
   },
   {
     name: 'collab_leave',
