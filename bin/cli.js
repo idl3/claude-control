@@ -36,6 +36,7 @@ Usage:
   claude-control setup              Install local deps (ffmpeg + whisper.cpp + model) for voice input
   claude-control install-service    Install the launchd service (macOS): auto-start + restart
   claude-control uninstall-service  Remove the launchd service
+  claude-control collab install     Register the claude-collab MCP for Claude + Codex sessions
   claude-control --version
   claude-control --help
 
@@ -60,6 +61,21 @@ Requires: Node >=20 and tmux on PATH.`);
   case 'uninstall-service':
     runScript('uninstall-service.sh');
     break;
+
+  case 'collab': {
+    if (process.argv[3] !== 'install') {
+      console.error('usage: claude-control collab install');
+      process.exit(1);
+    }
+    const { installCollab } = await import(path.join(ROOT, 'lib', 'collab-install.js'));
+    const shimPath = path.join(ROOT, 'bin', 'collab-mcp.js');
+    const r = installCollab({ shimPath });
+    console.log('claude-collab MCP registered:');
+    console.log(`  Claude: ${r.claude}`);
+    console.log(`  Codex:  ${r.codex}`);
+    console.log('\nRestart any open Claude/Codex sessions to pick up the collab_* tools.');
+    break;
+  }
 
   case undefined:
   case 'start':

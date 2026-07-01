@@ -25,6 +25,7 @@ import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subag
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
+import { Collab } from './lib/collab.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
@@ -153,6 +154,7 @@ const IMAGE_MIME = {
 
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
+const collab = new Collab(); // session-to-session collaboration rooms (lib/collab.js)
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 const codexRpc = new CodexRpcManager();
 const claudePrint = new ClaudePrintManager();
@@ -244,6 +246,10 @@ const _handler = (req, res) => {
   if (u.pathname === '/api/sessions') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
+  }
+  if (u.pathname.startsWith('/api/collab/')) {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleCollab(req, res, u);
   }
   if (u.pathname === '/api/skills') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -980,6 +986,94 @@ async function handleSessionRename(req, res) {
     return endJson(res, 200, { ok: true });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// --- collaboration (claude-collab MCP) --------------------------------------
+// A session is idle (safe to nudge) when it is not thinking/compacting/errored
+// and has no open question/picker (`pending`).
+function isIdleSession(s) {
+  return !!s && !s.thinking && !s.compacting && !s.errored && !s.pending;
+}
+
+// Resolve the calling session from its tmux pane id ($TMUX_PANE / %N), which the
+// MCP shim passes verbatim. Returns the collab member shape, or null if unknown.
+function collabMemberByPane(paneId) {
+  if (!paneId) return null;
+  const s = registry.getSessions().find((x) => x.paneId === paneId);
+  if (!s) return null;
+  return { paneId: s.paneId, target: s.target, kind: s.kind, title: s.title || s.name || null, sessionId: s.sessionId ?? null };
+}
+
+const COLLAB_WAIT_MS = 25_000; // long-poll ceiling for /read?wait
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Router for /api/collab/* — all token-gated (see the dispatch above). The caller
+// self-identifies via `paneId` (its $TMUX_PANE); we map that to a live session.
+async function handleCollab(req, res, u) {
+  const op = u.pathname.slice('/api/collab/'.length);
+  try {
+    const body = req.method === 'POST' ? await readJsonBody(req) : {};
+    const paneId = String((body.paneId ?? u.searchParams.get('paneId')) || '');
+
+    // list is the only op that doesn't require a resolvable caller.
+    if (op === 'list' && req.method === 'GET') {
+      return endJson(res, 200, { rooms: collab.listOpen() });
+    }
+
+    const member = collabMemberByPane(paneId);
+    if (!member) return endJson(res, 400, { error: 'unknown session (paneId did not resolve — is this running inside a claude-control tmux pane?)' });
+
+    if (op === 'open' && req.method === 'POST') {
+      return endJson(res, 200, collab.open(member, { topic: body.topic }));
+    }
+    if (op === 'join' && req.method === 'POST') {
+      return endJson(res, 200, collab.join(member, { code: body.code, roomId: body.roomId }));
+    }
+    if (op === 'members' && req.method === 'GET') {
+      return endJson(res, 200, { members: collab.members(u.searchParams.get('roomId')) });
+    }
+    if (op === 'history' && req.method === 'GET') {
+      return endJson(res, 200, collab.history(u.searchParams.get('roomId')));
+    }
+    if (op === 'leave' && req.method === 'POST') {
+      return endJson(res, 200, collab.leave(body.roomId, member.paneId));
+    }
+    if (op === 'send' && req.method === 'POST') {
+      const { seq, recipients } = collab.post(body.roomId, member, body.text);
+      // Nudge only IDLE peers — inject a one-line prompt telling them to read.
+      const byPane = new Map(registry.getSessions().map((s) => [s.paneId, s]));
+      const nudged = [];
+      for (const r of recipients) {
+        const s = byPane.get(r.paneId);
+        if (!isIdleSession(s)) continue;
+        const line = `\n📨 [collab:${body.roomId}] ${member.title || 'peer'}: new message — call collab_read to view\n`;
+        try {
+          await tmux.sendText(s.target, line);
+          nudged.push(r.paneId);
+        } catch {
+          /* peer pane vanished — the message still waits in the log */
+        }
+      }
+      return endJson(res, 200, { seq, nudged, waiting: recipients.length - nudged.length });
+    }
+    if (op === 'read' && req.method === 'GET') {
+      const roomId = u.searchParams.get('roomId');
+      const since = Number(u.searchParams.get('since')) || 0;
+      const wait = u.searchParams.get('wait') === '1' || u.searchParams.get('wait') === 'true';
+      let result = collab.read(roomId, since);
+      if (wait && result.messages.length === 0) {
+        const deadline = Date.now() + COLLAB_WAIT_MS;
+        while (Date.now() < deadline && result.messages.length === 0) {
+          await delay(600);
+          result = collab.read(roomId, since);
+        }
+      }
+      return endJson(res, 200, result);
+    }
+    return endJson(res, 404, { error: `unknown collab op: ${op}` });
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
   }
 }
 
