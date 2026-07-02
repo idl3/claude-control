@@ -6951,3 +6951,11 @@ select.config-input {
 .olam-steer-approve { color: #4a86e8; background: rgba(74, 134, 232, 0.10); }
 .olam-steer-read-only { color: #999; background: rgba(127, 127, 127, 0.10); }
 .olam-steer-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+
+/* --- olam terminal/replay actions (Phase D) --- */
+.olam-terminal-actions { display: inline-flex; gap: 6px; margin-right: auto; }
+.olam-term-btn {
+  font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  background: rgba(127, 127, 127, 0.12); color: inherit; border: 1px solid rgba(127, 127, 127, 0.2);
+}
+.olam-term-btn:hover { background: rgba(127, 127, 127, 0.22); }

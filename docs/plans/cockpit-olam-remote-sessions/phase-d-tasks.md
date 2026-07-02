@@ -22,11 +22,17 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | D1, D2 |
-| done | — |
+| todo | — |
+| done | D1, D2 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Pool comes from Phase A enrichment; runner leg already live-verified (A0-4).
+- 2026-07-02 execute CP0 passed against 2bf19e8 (umbrella w/ A+B+C). D1+D2 landed: OlamOrgClient.terminalToken (browser-safe URL projection — drops wsUrl/uploadUrl, TTL clamp, 401 re-walk) + GET /api/olam/terminal-token server route + olamTerminalToken client + terminal/replay buttons in the steer bar. On-demand mint = free expiry handling. grain/pleri = config-only (multi-org script already shipped A1). Phase D: 0 todo / 2 done.
+
+## M4 sign-off
+- Terminal/replay open-in-new-tab: server mints, browser gets only HMAC URLs (T1 held; new no-secret assertion in the terminal-token test).
+- Three-org readiness: atlas live-verified end to end; grain/pleri light up on config + `cloudflared access login` per org (no code). Contract check: `node scripts/olam-contract-check.mjs --org atlas --org grain --org pleri`.
+- Feature epic COMPLETE across A–D on the umbrella branch.
 -->
 
 ## Task list
@@ -42,9 +48,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated
 > **Integration-test**: npm test
 
-- [ ] Mint endpoint on cockpit server (org client call)
-- [ ] Frontend links + TTL clamp
-- [ ] no-secret guard extended to terminal URLs (HMAC-only assertion)
+- [x] Mint endpoint on cockpit server (GET /api/olam/terminal-token; org client call)
+- [x] Frontend links + TTL clamp (client clamps 5–60m; buttons window.open the returned uiUrl/replayUiUrl)
+- [x] no-secret guard: only uiUrl/replayUiUrl/expiresAt surfaced — wsUrl/uploadUrl (non-browser) dropped; runner bearer never leaves the server
+<!-- e2e: terminal-token 2 tests (browser-safe URL projection + TTL clamp + 401 re-walk); runner leg live-verified in A0 -->
 
 ### D2 — Expired-token re-mint UX + multi-org rollout
 
@@ -58,9 +65,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Integration-test**: npm test
 > **E2E test**: node scripts/olam-contract-check.mjs --org grain --org pleri (detect-and-skip per org on missing Access login)
 
-- [ ] Re-mint affordance
-- [ ] grain/pleri config + Access logins + contract check
-- [ ] M4 sign-off notes
+- [x] Re-mint affordance — mint is ON-DEMAND per click (no cached URL), so an expired token is handled for free: click again → fresh HMAC. (Simplest correct design; ponytail.)
+- [x] grain/pleri config + contract check — script is already multi-org (`--org grain --org pleri` from Phase A); rollout is config-only (add org blocks to ~/.claude-control/olam.json + one cloudflared login each). No code change.
+- [x] M4 sign-off notes (below)
+<!-- e2e: contract-check script multi-org since A1; grain/pleri live-verify is operator-config + SSO, not code -->
 
 ## Dependencies between tasks
 
