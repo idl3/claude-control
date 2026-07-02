@@ -287,6 +287,56 @@ test('listSessions omits canonical status fields entirely when absent from the r
   }
 });
 
+// --- listSessions: model / context-remaining passthrough (SPA-computed) -------
+
+test('listSessions passes through last_model/last_ctx_pct as model/ctxPct', async () => {
+  const { impl: execFileImpl } = execStub();
+  const row = {
+    ...LIST_ROW,
+    session_id: 's-model-ctx',
+    last_model: 'claude-opus-4-8',
+    last_ctx_pct: 42,
+  };
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const [r] = await c.listSessions();
+  assert.equal(r.model, 'claude-opus-4-8');
+  assert.equal(r.ctxPct, 42);
+});
+
+test('listSessions leaves model/ctxPct undefined when last_model/last_ctx_pct are null', async () => {
+  const { impl: execFileImpl } = execStub();
+  const row = {
+    ...LIST_ROW,
+    session_id: 's-model-ctx-null',
+    last_model: null,
+    last_ctx_pct: null,
+  };
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const [r] = await c.listSessions();
+  assert.equal(r.model, undefined);
+  assert.equal(r.ctxPct, undefined);
+});
+
+test('listSessions leaves model/ctxPct undefined when the row omits last_model/last_ctx_pct entirely', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const [r] = await c.listSessions();
+  assert.equal(r.model, undefined);
+  assert.equal(r.ctxPct, undefined);
+});
+
 // --- enrich: prs/prCount surfaced from runner status ----------------------------
 
 test('enrich surfaces normalized prs + prCount from the runner status', async () => {
