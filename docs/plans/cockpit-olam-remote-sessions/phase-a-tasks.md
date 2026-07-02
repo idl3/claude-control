@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1 (SPA legs, operator SSO), A6 |
-| done | A2, A3, A4, A5 |
+| todo | A1 (SPA legs, operator SSO) |
+| done | A2, A3, A4, A5, A6 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A6 landed: remote org sections in SessionRail (health dot + reason, phase/pool/stale badges, per-org empty state), Session type extended additively, no-secret-in-bundle (dist grep + WS-frame key allowlist). node 682/682, vitest 332/332, build green. cumulative: files=20, loc=~2000 (budget: 1.0x — at budget, phase complete except A1 SSO residue)
 - 2026-07-02 A5 landed: registry merge (3-line surgical patch: _remoteSessions concat + setRemoteSessions) + RemoteSessionSource (per-org independent fetch, stale-not-dropped degradation, health()). 680/680 suite. cumulative: files=14, loc=~1700 (budget: 0.9x)
 - 2026-07-02 A4 landed: OlamHealthProbe (auth/login/install red vs transient amber; 3-strikes/60s halt + reset; brainUrl optional org field added). 9/9 tests. cumulative: files=10, loc=~1350 (budget: 0.72x)
 - 2026-07-02 A3 landed: OlamOrgClient (JWT via cloudflared w/ single re-mint; probe-arbitrated bearer walk; pool probe-confirm linear->sandbox->agentrun). 8/8 new tests. cumulative: files=7, loc=~1050 (budget: 0.6x)
@@ -146,9 +147,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: session list rendering for local sessions (visual + snapshot)
 > **Integration-test**: npm test && npm run build:web
 
-- [ ] Types + hook plumbing for remote fields
-- [ ] Org group headers, badges, health dot, per-org states
-- [ ] no-secret-in-bundle test
+- [x] Types + hook plumbing for remote fields
+- [x] Org group headers, badges, health dot, per-org states
+- [x] no-secret-in-bundle test
+<!-- e2e: build + dist-grep + WS-frame allowlist pass; web vitest 332/332 on 2026-07-02 -->
 
 ## Dependencies between tasks
 

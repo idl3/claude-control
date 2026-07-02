@@ -26,10 +26,29 @@ export interface Session {
   pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
-  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal). */
-  kind?: 'claude' | 'codex' | 'terminal';
+  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal); 'remote' = an olam remote sandbox session. */
+  kind?: 'claude' | 'codex' | 'terminal' | 'remote';
   /** Per-session control transport. */
-  transport?: 'tmux' | 'rpc' | 'print' | null;
+  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
+  // --- remote (olam) rows only — additive; absent on local sessions ---------
+  /** Org slug the remote session belongs to (atlas | grain | pleri | ...). */
+  org?: string;
+  /** Runner pool the session runs on (linear | sandbox | agentrun), probe-confirmed. */
+  pool?: string | null;
+  /** Runner phase (running | done | ...); null when list-only. */
+  phase?: string | null;
+  /** ADR-062 identity: session_id === Linear AgentSession id. */
+  linearRef?: string | null;
+  /** One-line session summary from the olam session store. */
+  summary?: string;
+  /** Agent turn currently in flight. */
+  inFlight?: boolean;
+  /** Session halted (budget/limits). */
+  halted?: boolean;
+  /** Row is last-known data from an unreachable org (render greyed). */
+  stale?: boolean;
+  /** Per-org probe state the row was fetched under. */
+  orgHealth?: { status: 'green' | 'amber' | 'red' | 'unknown'; reason: string | null };
   /** Local structured transport endpoint, when the server exposes one. */
   endpoint?: string | null;
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */
