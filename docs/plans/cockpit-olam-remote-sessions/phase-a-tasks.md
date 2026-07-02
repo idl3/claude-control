@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1, A2, A3, A4, A5, A6 |
-| done | — |
+| todo | A1 (SPA legs, operator SSO), A3, A4, A5, A6 |
+| done | A2 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A2 landed: config at ~/.claude-control/olam.json (repo data-dir convention, NOT ~/.cockpit — see Assumptions). 651/651 suite green. cumulative: files=5, loc=~700 (budget: 0.44x)
 - 2026-07-02 execute CP0 passed against 776bcd0 (rubrics present: T1-T6/P1-P2/S1-S3, seams, unwind cost). CP1.5 umbrella resolved: feat/cockpit-olam-remote-sessions-integration (PR #143). A1 partial-landed (SPA legs await operator SSO); advancing to A2 per DAG (A1 || A2). cumulative: files=2, loc=~330 (budget: 0.2x)
 -->
 
@@ -76,10 +77,11 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: server startup path (cockpit without olam.json must boot exactly as before)
 > **Integration-test**: node --test test/olam-config.test.js
 
-- [ ] Config schema + loader (absent file → remote sources disabled, zero behavior change)
-- [ ] Secret resolver: GSM-first (`ernest.codes@gmail.com` account), file fallback, in-memory only
-- [ ] Mandatory-auth gate (decision 7) — fail-loud startup
-- [ ] Path validation + no-logging discipline + tests
+- [x] Config schema + loader (absent file → remote sources disabled, zero behavior change)
+- [x] Secret resolver: GSM-first (`ernest.codes@gmail.com` account), file fallback, in-memory only
+- [x] Mandatory-auth gate (decision 7) — fail-loud startup
+- [x] Path validation + no-logging discipline + tests
+<!-- e2e: pass (gate fires against tokenless server with orgs configured) on 2026-07-02 -->
 
 ### A3 — OlamOrgClient: list + enrichment + operator-JWT auth
 
@@ -164,3 +166,6 @@ cd ~/Projects/claude-cockpit && git revert "$PHASE_A_MERGE_SHA"                 
 - [ ] T1/T2/T3/T5/P1 rubric rows demonstrably covered (see Audit item coverage)
 - [ ] Local-only cockpit behavior byte-identical (snapshots)
 - [ ] docs/olam-contract.md committed with live-verified recipes
+
+## Assumptions log
+- task A2: config path = `~/.claude-control/olam.json` (honours CLAUDE_CONTROL_DATA), not the plan's `~/.cockpit/olam.json`; reason: repo's established data-dir convention (lib/config.js); cost-if-wrong: small (path rename)
