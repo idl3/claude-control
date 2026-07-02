@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1 (SPA legs, operator SSO), A5, A6 |
-| done | A2, A3, A4 |
+| todo | A1 (SPA legs, operator SSO), A6 |
+| done | A2, A3, A4, A5 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A5 landed: registry merge (3-line surgical patch: _remoteSessions concat + setRemoteSessions) + RemoteSessionSource (per-org independent fetch, stale-not-dropped degradation, health()). 680/680 suite. cumulative: files=14, loc=~1700 (budget: 0.9x)
 - 2026-07-02 A4 landed: OlamHealthProbe (auth/login/install red vs transient amber; 3-strikes/60s halt + reset; brainUrl optional org field added). 9/9 tests. cumulative: files=10, loc=~1350 (budget: 0.72x)
 - 2026-07-02 A3 landed: OlamOrgClient (JWT via cloudflared w/ single re-mint; probe-arbitrated bearer walk; pool probe-confirm linear->sandbox->agentrun). 8/8 new tests. cumulative: files=7, loc=~1050 (budget: 0.6x)
 - 2026-07-02 A2 landed: config at ~/.claude-control/olam.json (repo data-dir convention, NOT ~/.cockpit — see Assumptions). 651/651 suite green. cumulative: files=5, loc=~700 (budget: 0.44x)
@@ -129,9 +130,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: SessionRegistry refresh loop, WS session-list payloads (every cockpit client sees these)
 > **Integration-test**: npm test
 
-- [ ] RemoteSessionSource adapter (registry-facing shape)
-- [ ] Merge + eviction semantics (org unhealthy → rows greyed, not dropped)
-- [ ] Snapshot tests for local-path invariance
+- [x] RemoteSessionSource adapter (registry-facing shape)
+- [x] Merge + eviction semantics (org unhealthy → rows greyed, not dropped)
+- [x] Snapshot tests for local-path invariance
+<!-- e2e: 12/12 merge+compat tests; full suite 680/680 on 2026-07-02 -->
 
 ### A6 — Frontend fleet view
 
