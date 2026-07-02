@@ -35,6 +35,7 @@ import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
+import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
@@ -129,6 +130,8 @@ const CONFIG = {
 // (org bearers must not sit behind an open port — design doc T5, decision 7).
 const OLAM = loadOlamConfig();
 assertAuthWithRemoteOrgs(OLAM, CONFIG.token);
+/** @type {import('./lib/olam-sessions.js').RemoteSessionSource|null} */
+let olamSource = null;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -2621,6 +2624,11 @@ async function main() {
   registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
   resources.start();
+  if (OLAM.enabled) {
+    olamSource = new RemoteSessionSource(OLAM, registry);
+    olamSource.start();
+    console.log(`[olam] remote sessions enabled for orgs: ${OLAM.orgs.map((o) => o.org).join(', ')}`);
+  }
   await registry.refresh().catch(() => {});
 
   // Daily attachment cleanup: sweep at startup, then every 24h.
