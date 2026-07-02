@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
@@ -106,11 +106,20 @@ function groupByTmux(sessions: Session[]): SessionGroup[] {
 interface RemoteOrgGroup {
   org: string;
   health: { status: string; reason: string | null };
+  /** Active (not-archived) rows — rendered as today. */
   rows: Session[];
+  /** Archived rows (lib/olam-archive.js deriveArchived) — rendered under a
+   *  collapsible "Archived (N)" section, default collapsed. Never dropped. */
+  archivedRows: Session[];
 }
 
-/** Group remote (olam) rows per org, newest activity first within the org. */
-function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
+/** Newest-activity-first comparator shared by active + archived rail lists. */
+function byRecentActivity(x: Session, y: Session): number {
+  return String(y.lastActivity ?? '').localeCompare(String(x.lastActivity ?? ''));
+}
+
+/** Group remote (olam) rows per org (active vs archived), newest activity first within each. */
+export function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
   const byOrg = new Map<string, Session[]>();
   for (const s of sessions) {
     const org = s.org ?? '?';
@@ -119,10 +128,11 @@ function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
   }
   return [...byOrg.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([org, rows]) => ({
+    .map(([org, all]) => ({
       org,
-      health: rows[0]?.orgHealth ?? { status: 'unknown', reason: null },
-      rows: [...rows].sort((x, y) => String(y.lastActivity ?? '').localeCompare(String(x.lastActivity ?? ''))),
+      health: all[0]?.orgHealth ?? { status: 'unknown', reason: null },
+      rows: all.filter((s) => !s.archived).sort(byRecentActivity),
+      archivedRows: all.filter((s) => s.archived).sort(byRecentActivity),
     }));
 }
 
@@ -152,10 +162,83 @@ function RemoteRow({
           {s.inFlight ? <span className="remote-badge remote-badge-inflight">in-flight</span> : null}
           {phase ? <span className={`remote-badge remote-badge-phase-${phase}`}>{phase}</span> : null}
           {s.pool ? <span className="remote-badge remote-badge-pool">{s.pool}</span> : null}
+          {s.archived ? <span className="remote-badge remote-badge-archived">archived</span> : null}
+          {s.prs?.length ? (
+            <a
+              href={s.prs[0].url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="remote-badge remote-badge-pr"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {s.prs.length > 1 ? `${s.prs.length} PRs` : `PR #${s.prs[0].number ?? ''}`}
+            </a>
+          ) : null}
           {s.stale ? <span className="remote-badge remote-badge-stale">stale</span> : null}
         </span>
       </button>
     </li>
+  );
+}
+
+/** One org's remote (olam) section: active rows always shown, archived rows
+ *  collapsed under "Archived (N)" by default — never hard-removed. */
+function RemoteOrgSection({
+  g,
+  selectedId,
+  onSelect,
+}: {
+  g: RemoteOrgGroup;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  return (
+    <section className="session-group remote-group">
+      <div className="session-group-head remote-group-head">
+        <span
+          className={`remote-health remote-health-${g.health.status}`}
+          title={g.health.reason ?? g.health.status}
+          aria-label={`org ${g.org} health ${g.health.status}`}
+        />
+        <span className="session-group-name">olam · {g.org}</span>
+        <span className="session-group-count">{g.rows.length}</span>
+      </div>
+      {g.health.reason ? (
+        <div className="remote-group-reason" role="note">{g.health.reason}</div>
+      ) : null}
+      {g.rows.length === 0 && g.archivedRows.length === 0 ? (
+        <div className="session-empty">no remote sessions</div>
+      ) : (
+        <ul className="session-pane-list">
+          {g.rows.map((s) => (
+            <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+          ))}
+        </ul>
+      )}
+      {g.archivedRows.length > 0 ? (
+        <div className="remote-archived" data-collapsed={archivedOpen ? undefined : 'true'}>
+          <button
+            type="button"
+            className="remote-archived-toggle"
+            aria-expanded={archivedOpen}
+            onClick={() => setArchivedOpen((v) => !v)}
+          >
+            <span className="remote-archived-chevron" aria-hidden="true">
+              {archivedOpen ? '▾' : '▸'}
+            </span>
+            Archived ({g.archivedRows.length})
+          </button>
+          {archivedOpen ? (
+            <ul className="session-pane-list">
+              {g.archivedRows.map((s) => (
+                <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -403,29 +486,7 @@ export function SessionRail({
         );
       })}
       {remoteGroups.map((g) => (
-        <section key={`remote:${g.org}`} className="session-group remote-group">
-          <div className="session-group-head remote-group-head">
-            <span
-              className={`remote-health remote-health-${g.health.status}`}
-              title={g.health.reason ?? g.health.status}
-              aria-label={`org ${g.org} health ${g.health.status}`}
-            />
-            <span className="session-group-name">olam · {g.org}</span>
-            <span className="session-group-count">{g.rows.length}</span>
-          </div>
-          {g.health.reason ? (
-            <div className="remote-group-reason" role="note">{g.health.reason}</div>
-          ) : null}
-          {g.rows.length === 0 ? (
-            <div className="session-empty">no remote sessions</div>
-          ) : (
-            <ul className="session-pane-list">
-              {g.rows.map((s) => (
-                <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
-              ))}
-            </ul>
-          )}
-        </section>
+        <RemoteOrgSection key={`remote:${g.org}`} g={g} selectedId={selectedId} onSelect={onSelect} />
       ))}
     </div>
   );
