@@ -1,17 +1,20 @@
 /**
- * Regression tests for parsePanePrompt robustness against bordered two-column
- * TUI pickers. Before the fix, a two-column line like:
- *   │ ❯ 1. Pause Phase B here     │ 3. Push what's done + open  │
- * was matched as a single option whose label contained the entire right column
- * including the literal │ glyph and the other option's text.
+ * Regression tests for parsePanePrompt against Claude Code's AskUserQuestion
+ * picker, which renders a bordered PREVIEW/tooltip panel to the RIGHT of the
+ * option list. `tmux capture-pane` flattens that 2-D overlay into the option
+ * lines, so a captured row looks like:
  *
- * Root causes fixed (all in parsePanePrompt, lib/prompt.js):
- *   1. normalizeBoxLines() splits each line on │/┃/║ before OPTION_RE runs, so
- *      a two-column line becomes two independent candidate lines.
- *   2. Pure box-drawing rule lines (─────) are dropped by normalizeBoxLines()
- *      before they can become option descriptions.
- *   3. stripBoxGlyphs() removes any residual leading/trailing box-drawing chars
- *      from labels, questions, and descriptions.
+ *   "  2. Continue B2–B5 as    │ stop Phase B at 1/6; resume with app running… │"
+ *
+ * Before the fix the parser folded that box text into option 2 (either merged
+ * into the label with a literal │, or into the description). The fix strips the
+ * floating box by truncating each line at the first box-drawing glyph
+ * (stripFloatingBox in lib/prompt.js) — real option labels never contain them.
+ *
+ * The fixture below is a faithful reconstruction of a REAL capture (Atlas
+ * /execute Phase-B picker). NOTE: earlier work modelled this as a "two-column
+ * options grid" — that scenario does not exist; only the preview panel is boxed,
+ * and the option list itself is unbordered.
  */
 
 import { test } from 'node:test';
@@ -19,142 +22,78 @@ import assert from 'node:assert/strict';
 import { parsePanePrompt } from '../lib/prompt.js';
 
 // ---------------------------------------------------------------------------
-// BORDERED TWO-COLUMN FIXTURE
-//
-// Reconstruction of a skill-rendered TUI picker where options are displayed in
-// a box-drawn two-column grid. The geometry used here exercises:
-//   - top/bottom border lines (pure ─ / └ / ┘ / ┌ / ┐ chars) → must be dropped
-//   - left + right │ frame glyphs on every content row → must be split
-//   - vertical separator ┼ / ┤ / ├ between columns → split point
-//   - ❯ cursor indicator on option 1 (left column)
-//   - option 3 starts in the right column of the first content row
-//   - option 4 continuation text appears in the right column of a wrapped row
-//   - "esc to cancel" footer so the interactive-signal guard passes
+// FLOATING PREVIEW-BOX FIXTURE (real capture geometry)
+//   - unbordered option list on the left (❯ cursor on option 1)
+//   - a floating preview box (┌─┐ │ └─┘) flattened onto the option rows
+//   - option 2's label wraps to a second line ("static-verified code")
+//   - a footer hint ("Notes: …") sits below the box, past the option column
+//   - "Esc to cancel" footer so the interactive-signal guard passes
 // ---------------------------------------------------------------------------
-
-const BORDERED_TWO_COL = [
-  '┌────────────────────────────┬────────────────────────────┐',
-  '│ ❯ 1. Pause Phase B here    │ 3. Push what\'s done + open  │',
-  '│   2. Continue B2–B5 as     │      static-verified code  │',
-  '│      static-verified code  │                            │',
-  '└────────────────────────────┴────────────────────────────┘',
-  'Esc to cancel',
+const RULE = '─'.repeat(70);
+const FLOATING_BOX = [
+  '◇ Phase B',
+  '',
+  'B1 done. How do you want to handle the rest of Phase B (B2–B6)?',
+  '',
+  `❯ 1. Pause Phase B here           ┌${RULE}┐`,
+  '  2. Continue B2–B5 as            │ stop Phase B at 1/6; resume with app running / Phase C                 │',
+  `    static-verified code          └${RULE}┘`,
+  " 3. Push what's done + open",
+  '   PRs                            Notes: press n to add notes',
+  '',
+  'Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel',
 ].join('\n');
 
-test('parsePanePrompt: bordered two-column picker — exactly 3 options parsed', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
-  assert.ok(r, 'expected a non-null prompt from the bordered two-column fixture');
-  assert.equal(r.options.length, 3, `expected exactly 3 options, got ${r.options.length}`);
+test('floating-box picker: exactly 3 options, clean labels', () => {
+  const r = parsePanePrompt(FLOATING_BOX);
+  assert.ok(r, 'expected a non-null prompt');
+  assert.equal(r.options.length, 3, `expected 3 options, got ${r.options.length}`);
   assert.deepEqual(
-    r.options.map((o) => o.key),
-    ['1', '2', '3'],
-    'option keys must be [1, 2, 3] in order',
+    r.options.map((o) => o.label),
+    ['Pause Phase B here', 'Continue B2–B5 as', "Push what's done + open"],
   );
 });
 
-test('parsePanePrompt: bordered two-column picker — option 1 label has no │ or ─ glyphs', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
+test('floating-box picker: the preview box never leaks into any option', () => {
+  const r = parsePanePrompt(FLOATING_BOX);
   assert.ok(r);
-  const label1 = r.options[0].label;
-  assert.doesNotMatch(label1, /[│┃║─━┌┐└┘├┤┼┬┴╔╗╚╝╠╣╦╩╬]/, `option 1 label contains box-drawing chars: "${label1}"`);
-  assert.doesNotMatch(label1, /Push what/, `option 1 label must not contain option 3 text; got: "${label1}"`);
+  const blob = JSON.stringify(r);
+  // The core bug: the tooltip text merged into option 2.
+  assert.doesNotMatch(blob, /stop Phase B at 1\/6/, 'preview-box text leaked into an option');
+  // No box-drawing glyph survives anywhere in the parsed result.
+  assert.doesNotMatch(blob, /[─-╿]/, 'a box-drawing glyph leaked into the parsed prompt');
 });
 
-test('parsePanePrompt: bordered two-column picker — option 1 label is "Pause Phase B here"', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
+test('floating-box picker: option 2 label + wrapped description are clean', () => {
+  const r = parsePanePrompt(FLOATING_BOX);
   assert.ok(r);
-  assert.equal(r.options[0].label, 'Pause Phase B here');
+  assert.equal(r.options[1].label, 'Continue B2–B5 as');
+  // The wrapped second line becomes the description — and ONLY that, not the box.
+  assert.equal(r.options[1].description, 'static-verified code');
 });
 
-test('parsePanePrompt: bordered two-column picker — option 2 label is clean (no │)', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
+test('floating-box picker: cursor selects option 1', () => {
+  const r = parsePanePrompt(FLOATING_BOX);
   assert.ok(r);
-  const label2 = r.options[1].label;
-  assert.doesNotMatch(label2, /[│┃║─━]/, `option 2 label contains box-drawing chars: "${label2}"`);
-  assert.doesNotMatch(label2, /static-verified code\s*[│]/,
-    `option 2 label must not end with │ glyph: "${label2}"`);
-});
-
-test('parsePanePrompt: bordered two-column picker — option 3 label is clean (no other-option text)', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
-  assert.ok(r);
-  const label3 = r.options[2].label;
-  assert.doesNotMatch(label3, /[│┃║─━]/, `option 3 label contains box-drawing chars: "${label3}"`);
-  assert.doesNotMatch(label3, /Pause Phase/, `option 3 label must not contain option 1 text: "${label3}"`);
-});
-
-test('parsePanePrompt: bordered two-column picker — no description equals a pure box-rule string', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
-  assert.ok(r);
-  for (const opt of r.options) {
-    if (opt.description !== undefined) {
-      assert.doesNotMatch(
-        opt.description,
-        /^[─━—–=_\s┌┐└┘├┤┼┬┴]+$/,
-        `option ${opt.key} description is a pure box-rule line: "${opt.description}"`,
-      );
-    }
-  }
-});
-
-test('parsePanePrompt: bordered two-column picker — option 1 has cursor (❯)', () => {
-  const r = parsePanePrompt(BORDERED_TWO_COL);
-  assert.ok(r);
-  assert.equal(r.options[0].selected, true, 'option 1 should be selected (❯ cursor)');
-  assert.equal(r.options[1].selected, false);
-  assert.equal(r.options[2].selected, false);
-});
-
-// ---------------------------------------------------------------------------
-// SINGLE-COLUMN REGRESSION — prove the fix does NOT break normal pickers
-// ---------------------------------------------------------------------------
-
-const SINGLE_COL = [
-  'How should I proceed?',
-  ' ❯ 1. Run all tests',
-  '    2. Run only unit tests',
-  '    3. Skip and continue',
-  '',
-  'Esc to cancel',
-].join('\n');
-
-test('parsePanePrompt: single-column picker still works after box-drawing fix', () => {
-  const r = parsePanePrompt(SINGLE_COL);
-  assert.ok(r, 'single-column picker must still be detected');
-  assert.equal(r.options.length, 3);
-  assert.deepEqual(r.options.map((o) => o.key), ['1', '2', '3']);
-  assert.equal(r.options[0].label, 'Run all tests');
-  assert.equal(r.options[1].label, 'Run only unit tests');
-  assert.equal(r.options[2].label, 'Skip and continue');
   assert.equal(r.options[0].selected, true);
-  assert.equal(r.options[1].selected, false);
-  assert.match(r.question, /How should I proceed/);
 });
 
 // ---------------------------------------------------------------------------
-// HORIZONTAL RULE LINES — must not appear as descriptions
+// NON-BORDERED PICKER — must be completely unaffected (no box glyphs → no-op).
 // ---------------------------------------------------------------------------
-
-const WITH_RULES = [
-  'Pick an action:',
-  '──────────────────────────',
-  ' ❯ 1. Deploy now',
-  '──────────────────────────',
-  '    2. Wait for review',
-  '──────────────────────────',
-  'Esc to cancel',
+const PLAIN = [
+  'Which environment?',
+  '',
+  '❯ 1. staging',
+  '  2. production',
+  '  3. local',
+  '',
+  'Enter to select · Esc to cancel',
 ].join('\n');
 
-test('parsePanePrompt: horizontal rule lines between options do not become descriptions', () => {
-  const r = parsePanePrompt(WITH_RULES);
-  assert.ok(r, 'picker with rule lines must still be detected');
-  assert.equal(r.options.length, 2);
-  // Neither option should have a description that is just dashes
-  for (const opt of r.options) {
-    if (opt.description !== undefined) {
-      assert.doesNotMatch(opt.description, /^[─\s]+$/, `option ${opt.key} description is a rule line`);
-    }
-  }
-  assert.equal(r.options[0].label, 'Deploy now');
-  assert.equal(r.options[1].label, 'Wait for review');
+test('plain picker (no box): parses unchanged', () => {
+  const r = parsePanePrompt(PLAIN);
+  assert.ok(r);
+  assert.deepEqual(r.options.map((o) => o.label), ['staging', 'production', 'local']);
+  assert.equal(r.options[0].selected, true);
 });
