@@ -168,13 +168,19 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
           </button>
         </span>
       </header>
-      <iframe
-        ref={frameRef}
-        className="term-frame"
-        src={url}
-        title={`Raw terminal for ${label}`}
-        onLoad={onFrameLoad}
-      />
+      {/* Scroll wrapper: on narrow screens the iframe is forced wider/taller than
+          the viewport (see .term-frame min-width/height) so this container can
+          pan the oversized terminal instead of clipping it. Desktop is untouched
+          (min-* sit below the viewport, so width/height:100% win). */}
+      <div className="term-scroll">
+        <iframe
+          ref={frameRef}
+          className="term-frame"
+          src={url}
+          title={`Raw terminal for ${label}`}
+          onLoad={onFrameLoad}
+        />
+      </div>
     </div>
   );
 }
