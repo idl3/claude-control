@@ -291,6 +291,8 @@ export interface ControlConfig {
    * base iPad size.
    */
   externalFontSize: number;
+  /** Preconfigured project directories for the New Session dropdown. */
+  projectDirs: { label: string; path: string }[];
 }
 
 export interface OptimizeResult {

@@ -3763,6 +3763,12 @@ body.is-external-display .composer {
   width: 100%;
   box-sizing: border-box;
 }
+/* Dropdown variant uses system font so labels read naturally. */
+select.rail-new-cwd {
+  font-family: inherit;
+  cursor: pointer;
+  appearance: auto;
+}
 .rail-new-cwd::placeholder {
   color: var(--text-faint);
   font-style: italic;
@@ -4127,6 +4133,54 @@ select.config-input {
   border: 1px solid var(--line);
   background: var(--bg-2);
   flex-shrink: 0;
+}
+/* Project directories manager */
+.config-proj-dirs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.config-proj-dir-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 28px;
+  gap: 6px;
+  align-items: center;
+}
+.config-proj-dir-label {
+  font-size: 12px;
+}
+.config-proj-dir-path {
+  font-size: 12px;
+}
+.config-proj-dir-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+.config-proj-dir-remove:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.config-proj-dir-remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.config-proj-dir-add {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 .config-icon-actions {
   display: flex;
