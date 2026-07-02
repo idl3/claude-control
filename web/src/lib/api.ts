@@ -195,6 +195,31 @@ export async function triggerUpdate(): Promise<boolean> {
   }
 }
 
+/**
+ * Trigger an operator-requested restart (POST /api/restart). Only succeeds
+ * when the server is supervised (see ControlConfig.restartSupported) — a
+ * 409 means the process is running bare and would not respawn, and its
+ * `message` explains why. Like triggerUpdate, a successful restart can drop
+ * the connection before the response completes; that's treated as success
+ * since it means the exit already happened.
+ */
+export async function restartService(): Promise<{ ok: boolean; message?: string }> {
+  try {
+    const res = await authFetch('/api/restart', { method: 'POST' });
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      error?: string;
+    };
+    if (!res.ok) {
+      return { ok: false, message: json.message || json.error || `HTTP ${res.status}` };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: true }; // connection dropped == server is restarting
+  }
+}
+
 /** Fetch the server's VAPID public key (token-gated). Null on error. */
 export async function getVapidPublicKey(): Promise<string | null> {
   try {
@@ -293,6 +318,12 @@ export interface ControlConfig {
   externalFontSize: number;
   /** Preconfigured project directories for the New Session dropdown. */
   projectDirs: { label: string; path: string }[];
+  /**
+   * True when the running process is supervised (launchd KeepAlive / pm2 /
+   * systemd) and can safely self-restart. False for a bare `node server.js`
+   * dev process, where exiting would not respawn.
+   */
+  restartSupported: boolean;
 }
 
 export interface OptimizeResult {

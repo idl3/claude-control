@@ -4219,7 +4219,8 @@ select.config-input {
   margin-left: auto;
 }
 .config-cancel,
-.config-save {
+.config-save,
+.config-restart {
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
@@ -4242,8 +4243,21 @@ select.config-input {
 .config-save:hover:not(:disabled) {
   filter: brightness(1.08);
 }
+/* Secondary/danger-ish action, sits left of Cancel/Save. Hidden intent is
+   still visible-but-disabled (with a tooltip) when unsupported, rather than
+   hidden outright, so the operator learns restart exists and how to enable it. */
+.config-restart {
+  margin-right: auto;
+  background: color-mix(in oklch, var(--danger, #e5484d) 10%, transparent);
+  color: var(--danger, #e5484d);
+  border: 1px solid color-mix(in oklch, var(--danger, #e5484d) 45%, transparent);
+}
+.config-restart:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--danger, #e5484d) 18%, transparent);
+}
 .config-save:disabled,
-.config-cancel:disabled {
+.config-cancel:disabled,
+.config-restart:disabled {
   opacity: 0.6;
   cursor: default;
 }
