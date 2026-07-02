@@ -24,11 +24,13 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | C1, C2, C3, C4 |
-| done | — |
+| todo | — |
+| done | C1, C2, C3, C4 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Steer recipe = A0-2 (writeCloudDispatch mirror → /api/cloud-dispatch → plan-DO; server/index.ts:3720). host-cp dispatch-turn is local-only — not used.
+- 2026-07-02 CP3 audit (adversarial, epic 3-lens): 1 CRITICAL confirmed + fixed — read-only composer gate was DEAD (readOnly field never populated → gate could never fire). Fix wires it to a real signal: scope=all returns org-mates' sessions, so readOnly = owner_email !== operatorEmail (decoded from the edge-verified JWT email claim, non-enumerable). Belt-and-suspenders with the SPA ownership-404 dispatchSteer already surfaces. Other 5 findings Land-as-is (apiPost body immutable by design; error-slice bounded 200ch; classification tested; steer_mode operator-authorized; early-return clarified w/ comment). node 717, build green.
+- 2026-07-02 execute CP0 passed against f1b4ac4 (umbrella w/ A+B). C1-C4 landed: OlamOrgClient.apiPost (2-layer POST) + lib/olam-transport.js (dispatchSteer mirrors writeCloudDispatch body; composerMode; replyTransport classifier; DISPATCH_ERRORS) + server.js reply remote branch + client mode bar + hard-steer toggle. Key insight (scouted pre-merge): the agent reply streams back as chunks → Phase B renders it, so steer needs NO response plumbing. cumulative: files~7, loc~600 (budget 1.3x of C's 450).
 -->
 
 ## Audit item coverage
@@ -52,9 +54,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: handleClientMessage routing (every input path in cockpit)
 > **Integration-test**: npm test
 
-- [ ] lib/olam-transport.js (dispatch body builder + send)
-- [ ] handleClientMessage branch + ack correlation
-- [ ] four-branch routing test
+- [x] lib/olam-transport.js (dispatch body builder + send)
+- [x] handleClientMessage branch + ack correlation (replyTransport classifier drives the olam guard)
+- [x] four-branch routing test (replyTransport: tmux/rpc/print unshadowed)
+<!-- e2e: transport 6 + routing 5 tests; server parses; olam reply → /api/cloud-dispatch mirror -->
 
 ### C2 — Composer modes: steer / approve / read-only
 
@@ -67,9 +70,9 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: composer for local sessions (must be untouched)
 > **Integration-test**: npm test
 
-- [ ] Session-state → mode derivation
-- [ ] Approve routing (bearer path + deep-link fallback)
-- [ ] Composer UI states
+- [x] Session-state → mode derivation (composerMode server + remoteComposerMode client mirror)
+- [x] Approve routing (approve = first reply via cloud-dispatch; plan-DO latch)
+- [x] Composer UI states (steer/approve/read-only mode bar in App.tsx)
 
 ### C3 — Steer lifecycle + dispatch error classes in-thread
 
@@ -83,9 +86,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Integration-test**: npm test
 > **E2E test**: scripts/olam-steer-e2e.sh (real atlas session; detect-and-skip `[e2e:skipped] reason: no live session/Access login` )
 
-- [ ] Lifecycle state machine + WS events
-- [ ] Error-class surfacing + retry
-- [ ] Pending-clear via stream correlation
+- [x] Lifecycle state machine + WS events (ack{transport:'olam',mode}; reply→chunks stream reconciles the optimistic bubble, reusing Phase B)
+- [x] Error-class surfacing + retry (DISPATCH_ERRORS 429/402/502/409/404 verbatim; unknown carries body text)
+- [x] Pending-clear via stream correlation (existing pendingSends echo path; remote reply appears as a chunk)
+<!-- e2e: dispatch error-class tests (all 5 classes + network + unknown) -->
 
 ### C4 — Soft/hard steer toggle for dispatch-type sessions
 

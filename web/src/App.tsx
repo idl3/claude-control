@@ -5,6 +5,7 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
+import { remoteComposerMode } from './lib/olamMode';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
@@ -382,7 +383,17 @@ function AppInner() {
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
       const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
-      const reqId = cockpit.sendReply(text, paths.length);
+      // Remote steer: read-only refuses locally; else pass the hard-steer flag.
+      if (selectedSession?.kind === 'remote' && remoteComposerMode(selectedSession) === 'read-only') {
+        showToast('This session is read-only — steering disabled.', 'error');
+        return;
+      }
+      const reqId = cockpit.sendReply(
+        text,
+        paths.length,
+        false,
+        selectedSession?.kind === 'remote' ? steerHardRef.current : false,
+      );
       if (!reqId) {
         // The socket couldn't even write the frame — nothing was dispatched, so
         // show NO optimistic bubble (the old code's danger: a bubble that lied).
@@ -1121,6 +1132,15 @@ function AppInner() {
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
   );
+
+  // Remote (olam) composer mode + hard-steer toggle (Phase C).
+  const remoteMode = useMemo(
+    () => (selectedSession?.kind === 'remote' ? remoteComposerMode(selectedSession) : null),
+    [selectedSession],
+  );
+  const [steerHard, setSteerHard] = useState(false);
+  const steerHardRef = useRef(false);
+  steerHardRef.current = steerHard;
 
   // "Answer settling" state: suppresses the scrape prompt / synthesized-ask
   // from reflashing after the user answers, until the TUI picker has visually
@@ -1871,6 +1891,27 @@ function AppInner() {
                   <div className="olam-degraded-banner" role="status">
                     ⚠ log tail only — live conversation stream unavailable
                     {cockpit.degraded.reason ? ` (${cockpit.degraded.reason})` : ''}
+                  </div>
+                ) : null}
+                {remoteMode ? (
+                  <div className={`olam-steer-bar olam-steer-${remoteMode}`} role="status">
+                    {remoteMode === 'approve' ? (
+                      <span>⏵ approve mode — your reply approves + starts this session</span>
+                    ) : remoteMode === 'read-only' ? (
+                      <span>🔒 read-only session — steering disabled</span>
+                    ) : (
+                      <>
+                        <span>⇄ steering {selectedSession?.org}</span>
+                        <label className="olam-steer-toggle">
+                          <input
+                            type="checkbox"
+                            checked={steerHard}
+                            onChange={(e) => setSteerHard(e.target.checked)}
+                          />
+                          hard steer
+                        </label>
+                      </>
+                    )}
                   </div>
                 ) : null}
                 <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>

@@ -6940,3 +6940,14 @@ select.config-input {
   background: rgba(255, 149, 0, 0.10);
   border-bottom: 1px solid rgba(255, 149, 0, 0.25);
 }
+
+/* --- olam steer mode bar (Phase C) --- */
+.olam-steer-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 5px 12px; font-size: 12px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+}
+.olam-steer-steer { color: #34c759; background: rgba(52, 199, 89, 0.08); }
+.olam-steer-approve { color: #4a86e8; background: rgba(74, 134, 232, 0.10); }
+.olam-steer-read-only { color: #999; background: rgba(127, 127, 127, 0.10); }
+.olam-steer-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }

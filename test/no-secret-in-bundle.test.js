@@ -61,6 +61,7 @@ const ALLOWED_REMOTE_KEYS = new Set([
   'id', 'kind', 'transport', 'pending', 'stale', 'orgHealth',
   'org', 'sessionId', 'worldId', 'summary', 'lastActivity',
   'inFlight', 'halted', 'linearRef', 'linearIssueId', 'planStatus', 'title', 'pool', 'phase',
+  'ownerEmail', 'readOnly',
 ]);
 
 test('remote WS rows carry only the allow-listed keys (no token-shaped fields)', async () => {
