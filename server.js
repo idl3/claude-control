@@ -2055,8 +2055,10 @@ async function handleClientMessage(ws, msg) {
     case 'reply': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
-      // Remote (olam) sessions steer via the cloud-dispatch mirror, not tmux.
-      // The agent's reply streams back as chunks (Phase B) — no extra plumbing.
+      // Remote (olam) sessions steer via the cloud-dispatch mirror, not tmux:
+      // no tmux target, no pane picker, no send-settle delay — so this branch
+      // early-returns BEFORE all of that. The agent's reply streams back as
+      // chunks (Phase B), so there is no separate response plumbing.
       if (replyTransport(session) === 'olam') {
         const reqId = msg.reqId;
         const mode = composerMode(session);

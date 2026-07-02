@@ -53,6 +53,10 @@ export interface Session {
   stale?: boolean;
   /** Per-org probe state the row was fetched under. */
   orgHealth?: { status: 'green' | 'amber' | 'red' | 'unknown'; reason: string | null };
+  /** Owning operator's email (org scope=all list). */
+  ownerEmail?: string | null;
+  /** True when owned by a different operator — view-only (steering disabled). */
+  readOnly?: boolean;
   /** Local structured transport endpoint, when the server exposes one. */
   endpoint?: string | null;
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */

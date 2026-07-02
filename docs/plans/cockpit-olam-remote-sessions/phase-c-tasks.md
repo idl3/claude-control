@@ -29,6 +29,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Steer recipe = A0-2 (writeCloudDispatch mirror → /api/cloud-dispatch → plan-DO; server/index.ts:3720). host-cp dispatch-turn is local-only — not used.
+- 2026-07-02 CP3 audit (adversarial, epic 3-lens): 1 CRITICAL confirmed + fixed — read-only composer gate was DEAD (readOnly field never populated → gate could never fire). Fix wires it to a real signal: scope=all returns org-mates' sessions, so readOnly = owner_email !== operatorEmail (decoded from the edge-verified JWT email claim, non-enumerable). Belt-and-suspenders with the SPA ownership-404 dispatchSteer already surfaces. Other 5 findings Land-as-is (apiPost body immutable by design; error-slice bounded 200ch; classification tested; steer_mode operator-authorized; early-return clarified w/ comment). node 717, build green.
 - 2026-07-02 execute CP0 passed against f1b4ac4 (umbrella w/ A+B). C1-C4 landed: OlamOrgClient.apiPost (2-layer POST) + lib/olam-transport.js (dispatchSteer mirrors writeCloudDispatch body; composerMode; replyTransport classifier; DISPATCH_ERRORS) + server.js reply remote branch + client mode bar + hard-steer toggle. Key insight (scouted pre-merge): the agent reply streams back as chunks → Phase B renders it, so steer needs NO response plumbing. cumulative: files~7, loc~600 (budget 1.3x of C's 450).
 -->
 
