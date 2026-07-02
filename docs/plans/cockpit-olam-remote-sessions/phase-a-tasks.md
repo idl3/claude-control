@@ -24,11 +24,19 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1, A2, A3, A4, A5, A6 |
-| done | — |
+| todo | — |
+| done | A1, A2, A3, A4, A5, A6 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A1 CLOSED after operator SSO: contract check 4/4 PASS live. Recipe correction folded into code: OlamOrgClient two-layer SPA auth (JWT + bootstrap app bearer, both cached non-enumerable); live list fields richer than source (linear_issue_id present -> OQ6 escape hatch moot); shape auth CLEARED -> Phase B GO full mode. 684/684 + 332/332 + build green. Phase A: 0 todo / 6 done.
+- 2026-07-02 CP3 audit (adversarial, epic 3-lens): verdict (c) → follow-up landed. CRITICAL(T1 in-memory bearers) risk-assessed remote-likelihood → smallest-true-fix: non-enumerable token fields + JSON.stringify guard test (re-read-per-call rejected: 2 subprocess spawns/tick for a remote threat; T5 covers process compromise). HIGH(silent enrich truncation) fixed: active-only enrichment + unenriched count surfaced in orgHealth reason. MEDIUMs: 401 diagnostics label added; shared-visibility documented (single-operator tool, plan out-of-scope); tick/refresh 'race' DROPPED (atomic swap, eventual consistency, risk <0.6). 685/685 green.
+- 2026-07-02 A6 landed: remote org sections in SessionRail (health dot + reason, phase/pool/stale badges, per-org empty state), Session type extended additively, no-secret-in-bundle (dist grep + WS-frame key allowlist). node 682/682, vitest 332/332, build green. cumulative: files=20, loc=~2000 (budget: 1.0x — at budget, phase complete except A1 SSO residue)
+- 2026-07-02 A5 landed: registry merge (3-line surgical patch: _remoteSessions concat + setRemoteSessions) + RemoteSessionSource (per-org independent fetch, stale-not-dropped degradation, health()). 680/680 suite. cumulative: files=14, loc=~1700 (budget: 0.9x)
+- 2026-07-02 A4 landed: OlamHealthProbe (auth/login/install red vs transient amber; 3-strikes/60s halt + reset; brainUrl optional org field added). 9/9 tests. cumulative: files=10, loc=~1350 (budget: 0.72x)
+- 2026-07-02 A3 landed: OlamOrgClient (JWT via cloudflared w/ single re-mint; probe-arbitrated bearer walk; pool probe-confirm linear->sandbox->agentrun). 8/8 new tests. cumulative: files=7, loc=~1050 (budget: 0.6x)
+- 2026-07-02 A2 landed: config at ~/.claude-control/olam.json (repo data-dir convention, NOT ~/.cockpit — see Assumptions). 651/651 suite green. cumulative: files=5, loc=~700 (budget: 0.44x)
+- 2026-07-02 execute CP0 passed against 776bcd0 (rubrics present: T1-T6/P1-P2/S1-S3, seams, unwind cost). CP1.5 umbrella resolved: feat/cockpit-olam-remote-sessions-integration (PR #143). A1 partial-landed (SPA legs await operator SSO); advancing to A2 per DAG (A1 || A2). cumulative: files=2, loc=~330 (budget: 0.2x)
 -->
 
 ## Audit item coverage
@@ -55,11 +63,15 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Integration-test**: n/a (this task IS the integration check)
 > **E2E test**: node scripts/olam-contract-check.mjs --org atlas (detect-and-skip with `[e2e:skipped] reason: no Access session` when cloudflared login absent)
 
-- [ ] Complete `cloudflared access login https://olam.dev-atlas.kitchen` (operator SSO; prompt if absent)
-- [ ] Authenticated GET sessions list — snapshot returned fields; confirm absence of pool/linear metadata; record ADR-062 join recipe
-- [ ] Probe shape endpoint auth with the operator JWT; record accept/reject
-- [ ] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
-- [ ] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
+- [x] Complete `cloudflared access login https://olam.dev-atlas.kitchen` (operator SSO; prompt if absent)
+- [x] Authenticated GET sessions list — snapshot returned fields; confirm absence of pool/linear metadata; record ADR-062 join recipe
+- [x] Probe shape endpoint auth with the operator JWT; record accept/reject
+<!-- e2e: full PASS (4/4 checks) on 2026-07-02 after SSO; recipe corrected: two-layer auth (JWT + /api/bootstrap app bearer); live list RICHER than source snapshot (linear_issue_id/title/plan_status present) -->
+- [x] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
+- [x] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
+<!-- e2e: pass-with-skips (runner legs PASS live; SPA legs [e2e:skipped] no Access session) on 2026-07-02 -->
+<!-- A1 partial: 3 SPA subtasks blocked on operator SSO (cloudflared access login https://olam.dev-atlas.kitchen) -->
+<!-- live finding: GSM olam-atlas-sandbox-runner-token stale (401) vs rotation file (200) - probe-arbitrated; GSM version refresh escalated -->
 
 ### A2 — Org config + GSM-first secret loading + mandatory cockpit auth
 
@@ -72,10 +84,11 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: server startup path (cockpit without olam.json must boot exactly as before)
 > **Integration-test**: node --test test/olam-config.test.js
 
-- [ ] Config schema + loader (absent file → remote sources disabled, zero behavior change)
-- [ ] Secret resolver: GSM-first (`ernest.codes@gmail.com` account), file fallback, in-memory only
-- [ ] Mandatory-auth gate (decision 7) — fail-loud startup
-- [ ] Path validation + no-logging discipline + tests
+- [x] Config schema + loader (absent file → remote sources disabled, zero behavior change)
+- [x] Secret resolver: GSM-first (`ernest.codes@gmail.com` account), file fallback, in-memory only
+- [x] Mandatory-auth gate (decision 7) — fail-loud startup
+- [x] Path validation + no-logging discipline + tests
+<!-- e2e: pass (gate fires against tokenless server with orgs configured) on 2026-07-02 -->
 
 ### A3 — OlamOrgClient: list + enrichment + operator-JWT auth
 
@@ -88,10 +101,11 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated (new module)
 > **Integration-test**: node --test test/olam-client.test.js
 
-- [ ] JWT mint/refresh wrapper around cloudflared (typed NoAccessSession error)
-- [ ] Sessions list fetch + ADR-062 join normalization
-- [ ] Runner status enrichment batch (≤1 cycle/10s/org) + pool probe-confirm
-- [ ] 401 → single token re-read (audit digest log) hook
+- [x] JWT mint/refresh wrapper around cloudflared (typed NoAccessSession error)
+- [x] Sessions list fetch + ADR-062 join normalization
+- [x] Runner status enrichment batch (≤1 cycle/10s/org) + pool probe-confirm
+- [x] 401 → single token re-read (audit digest log) hook
+<!-- e2e: covered by A1 script (runner legs live) + mock-backed unit suite on 2026-07-02 -->
 
 ### A4 — Per-org health probe with error classification
 
@@ -104,9 +118,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated
 > **Integration-test**: node --test test/olam-health-probe.test.js
 
-- [ ] Probe loop + error classes + backoff
-- [ ] Brain `/health` check integration
-- [ ] Health state exposed on the org client for A5/A6
+- [x] Probe loop + error classes + backoff
+- [x] Brain `/health` check integration
+- [x] Health state exposed on the org client for A5/A6
+<!-- e2e: mock-backed unit suite (9/9); live drift already reproduced by A1 script on 2026-07-02 -->
 
 ### A5 — RemoteSessionSource merged into SessionRegistry
 
@@ -119,9 +134,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: SessionRegistry refresh loop, WS session-list payloads (every cockpit client sees these)
 > **Integration-test**: npm test
 
-- [ ] RemoteSessionSource adapter (registry-facing shape)
-- [ ] Merge + eviction semantics (org unhealthy → rows greyed, not dropped)
-- [ ] Snapshot tests for local-path invariance
+- [x] RemoteSessionSource adapter (registry-facing shape)
+- [x] Merge + eviction semantics (org unhealthy → rows greyed, not dropped)
+- [x] Snapshot tests for local-path invariance
+<!-- e2e: 12/12 merge+compat tests; full suite 680/680 on 2026-07-02 -->
 
 ### A6 — Frontend fleet view
 
@@ -134,9 +150,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: session list rendering for local sessions (visual + snapshot)
 > **Integration-test**: npm test && npm run build:web
 
-- [ ] Types + hook plumbing for remote fields
-- [ ] Org group headers, badges, health dot, per-org states
-- [ ] no-secret-in-bundle test
+- [x] Types + hook plumbing for remote fields
+- [x] Org group headers, badges, health dot, per-org states
+- [x] no-secret-in-bundle test
+<!-- e2e: build + dist-grep + WS-frame allowlist pass; web vitest 332/332 on 2026-07-02 -->
 
 ## Dependencies between tasks
 
@@ -160,3 +177,6 @@ cd ~/Projects/claude-cockpit && git revert "$PHASE_A_MERGE_SHA"                 
 - [ ] T1/T2/T3/T5/P1 rubric rows demonstrably covered (see Audit item coverage)
 - [ ] Local-only cockpit behavior byte-identical (snapshots)
 - [ ] docs/olam-contract.md committed with live-verified recipes
+
+## Assumptions log
+- task A2: config path = `~/.claude-control/olam.json` (honours CLAUDE_CONTROL_DATA), not the plan's `~/.cockpit/olam.json`; reason: repo's established data-dir convention (lib/config.js); cost-if-wrong: small (path rename)
