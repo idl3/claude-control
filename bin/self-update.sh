@@ -18,10 +18,17 @@ LOG="$DATA_DIR/update.log"
 PORT="${CLAUDE_CONTROL_PORT:-${COCKPIT_PORT:-4317}}"
 
 # Triggered detached from the UI (or launchd), this can run under a stripped PATH
-# where `node`/`npm` aren't found — the restart then silently no-ops. Prepend the
-# usual install dirs and resolve an explicit node binary.
-# ponytail: covers Homebrew + standard installs; nvm/fnm users set CLAUDE_CONTROL_NODE.
+# where `node`/`npm` aren't found — the restart then silently no-ops AND the
+# `npm install` steps below fail, leaving deps (e.g. `ws`) missing so the next
+# boot crashes with ERR_MODULE_NOT_FOUND. Make node/npm resolvable across
+# Homebrew, standard installs, and nvm (whose bins live outside any of those).
+# ponytail: sources nvm + globs its newest version; fnm users set CLAUDE_CONTROL_NODE.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
+if ! command -v node >/dev/null 2>&1; then
+  _nvm_node="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)"
+  [ -n "$_nvm_node" ] && export PATH="$(dirname "$_nvm_node"):$PATH"
+fi
 NODE_BIN="${CLAUDE_CONTROL_NODE:-$(command -v node || true)}"
 
 {
