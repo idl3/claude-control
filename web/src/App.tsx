@@ -1961,6 +1961,7 @@ function AppInner() {
             sessionId={id}
             visible={id === cockpit.selectedId && terminalShown}
             label={cockpit.sessions.find((s) => s.id === id)?.name ?? id}
+            sendKey={cockpit.sendPaneKey}
             onClose={() => setTerminalShown(false)}
           />
         ))}
