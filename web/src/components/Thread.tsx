@@ -60,6 +60,14 @@ interface ThreadProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  /**
+   * Override the empty-transcript state (default: the "What are we shipping
+   * today?" welcome + chips, which implies the user should type first). Set
+   * for remote (olam) sessions where the agent may already be working and
+   * transcript is simply still loading over the wire — a centered status
+   * message reads better than a compose invitation.
+   */
+  emptyState?: { heading: string; subtitle?: string } | null;
 }
 
 const messageComponents = {
@@ -166,6 +174,7 @@ export function Thread({
   onKey,
   onSelect,
   onReply,
+  emptyState = null,
 }: ThreadProps) {
   return (
     <ThreadPrimitive.Root className="thread-root">
@@ -207,6 +216,13 @@ export function Thread({
               <ThreadPrimitive.Empty>
                 {loading ? (
                   <TranscriptLoader loading={loading} />
+                ) : emptyState ? (
+                  <div className="thread-empty-remote" role="status">
+                    <p className="thread-empty-remote-heading">{emptyState.heading}</p>
+                    {emptyState.subtitle ? (
+                      <p className="thread-empty-remote-subtitle">{emptyState.subtitle}</p>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className="thread-welcome">
                     <h1 className="thread-welcome-heading">What are we shipping today?</h1>

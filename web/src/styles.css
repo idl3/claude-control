@@ -1085,6 +1085,29 @@ body.is-external-display .rail {
   color: var(--text-faint);
   text-align: center;
 }
+/* Remote (olam) session with zero transcript yet — status framing, not a
+   compose invitation (the agent may already be working; item 6). */
+.thread-empty-remote {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  max-width: 420px;
+  padding: 0 20px;
+}
+.thread-empty-remote-heading {
+  margin: 0;
+  font-size: var(--txt-transcript);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.thread-empty-remote-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
 /* Fresh-session welcome — shown by <ThreadPrimitive.Empty> when a session has
    no messages yet. Editorial serif headline + subtitle + chip row. */
 .thread-welcome {
@@ -7040,6 +7063,22 @@ select.config-input {
 .remote-badge-phase-halted { color: #ff9500; }
 .remote-badge-stale { color: #ff9500; }
 .remote-stale { opacity: 0.55; }
+.remote-badge-pr {
+  color: #4a86e8;
+  text-decoration: none;
+  cursor: pointer;
+}
+.remote-badge-pr:hover { background: rgba(74, 134, 232, 0.18); text-decoration: underline; }
+.remote-badge-archived { color: var(--muted, #888); }
+
+/* --- olam archived (collapsed) section — item 3 --- */
+.remote-archived-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 10px 4px 24px; font-size: 11px; color: var(--muted, #888);
+  background: none; border: none; cursor: pointer; text-align: left;
+}
+.remote-archived-toggle:hover { color: var(--text-dim, #aaa); }
+.remote-archived-chevron { display: inline-block; width: 10px; }
 
 /* --- olam degraded (log-tail-only) streaming banner --- */
 .olam-degraded-banner {
@@ -7050,21 +7089,66 @@ select.config-input {
   border-bottom: 1px solid rgba(255, 149, 0, 0.25);
 }
 
-/* --- olam steer mode bar (Phase C) --- */
+/* --- olam steer mode bar (Phase C) — a toolbar row: terminal toggle ·
+   steering-mode · hard-steer · PR link. Reads as an intentional bar, not
+   floating chips (item 6 polish). --- */
 .olam-steer-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 5px 12px; font-size: 12px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; font-size: 12px;
   border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+  flex: 0 0 auto;
 }
 .olam-steer-steer { color: #34c759; background: rgba(52, 199, 89, 0.08); }
 .olam-steer-approve { color: #4a86e8; background: rgba(74, 134, 232, 0.10); }
 .olam-steer-read-only { color: #999; background: rgba(127, 127, 127, 0.10); }
 .olam-steer-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+.olam-steer-mode { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.olam-steer-pr { margin-left: auto; flex: 0 0 auto; }
 
-/* --- olam terminal/replay actions (Phase D) --- */
-.olam-terminal-actions { display: inline-flex; gap: 6px; margin-right: auto; }
+/* --- olam terminal actions (Phase D) --- */
+.olam-terminal-actions { display: inline-flex; gap: 6px; }
 .olam-term-btn {
   font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
   background: rgba(127, 127, 127, 0.12); color: inherit; border: 1px solid rgba(127, 127, 127, 0.2);
 }
 .olam-term-btn:hover { background: rgba(127, 127, 127, 0.22); }
+.olam-term-btn[aria-pressed='true'] { background: rgba(74, 134, 232, 0.22); border-color: rgba(74, 134, 232, 0.4); }
+.olam-term-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* --- inline remote terminal panel (item 5) --- */
+.olam-terminal-panel {
+  display: flex; flex-direction: column;
+  flex: 0 0 auto;
+  height: min(46vh, 420px);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+  background: #0a0c10;
+}
+.olam-terminal-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 10px; font-size: 11px; color: var(--muted, #888);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.14);
+  flex: 0 0 auto;
+}
+.olam-terminal-panel-close {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px 6px; border-radius: 4px;
+}
+.olam-terminal-panel-close:hover { background: rgba(127, 127, 127, 0.18); }
+.olam-terminal-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  background: #0a0c10;
+}
+.olam-terminal-placeholder {
+  flex: 1 1 auto;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; text-align: center;
+  font-size: 12px; color: var(--muted, #888);
+}
+.olam-terminal-newtab {
+  flex: 0 0 auto;
+  padding: 3px 10px; font-size: 11px; text-align: right;
+  color: var(--muted, #888); text-decoration: none;
+}
+.olam-terminal-newtab:hover { color: var(--text-dim, #aaa); text-decoration: underline; }

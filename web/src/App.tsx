@@ -6,6 +6,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { remoteComposerMode } from './lib/olamMode';
+import { sessionDisplayLabel } from './lib/olamLabel';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
@@ -1142,23 +1143,49 @@ function AppInner() {
   const steerHardRef = useRef(false);
   steerHardRef.current = steerHard;
 
-  // Phase D — open a remote session's live terminal / replay in a new tab. The
-  // server mints the runner HMAC token; we only ever hand the browser the URL.
-  const openRemoteTerminal = useCallback(
-    async (which: 'ui' | 'replay') => {
-      const id = cockpit.selectedId;
-      if (!id) return;
-      try {
-        const { uiUrl, replayUiUrl } = await olamTerminalToken(id);
-        const url = which === 'replay' ? replayUiUrl : uiUrl;
-        if (url) window.open(url, '_blank', 'noopener,noreferrer');
-        else showToast('No terminal URL available for this session', 'error');
-      } catch (err) {
-        showToast(`Terminal token failed: ${(err as Error).message}`, 'error');
-      }
-    },
-    [cockpit.selectedId, showToast],
-  );
+  // A session whose sandbox has very likely been torn down can't offer a
+  // live terminal — the runner HMAC mint would just fail or point at a dead
+  // sandbox. `archived` (lib/olam-archive.js deriveArchived) already folds in
+  // halted / terminal canonical status / phase:'done', so it's the single
+  // signal to check here. Render a placeholder instead of attempting to open one.
+  const remoteSandboxEnded = selectedSession?.kind === 'remote' && selectedSession.archived === true;
+
+  // Phase D / inline-terminal — a remote session's live terminal renders INLINE
+  // (the runner's self-contained xterm.js page already carries its own `?t=`
+  // HMAC token, so it iframes fine cross-origin; no CF Access needed for it).
+  // uiUrl is cached per session id so re-toggling doesn't re-mint the token on
+  // every open; switching sessions resets the panel closed.
+  const [remoteTermOpen, setRemoteTermOpen] = useState(false);
+  const [remoteTermUrl, setRemoteTermUrl] = useState<string | null>(null);
+  const [remoteTermLoading, setRemoteTermLoading] = useState(false);
+  const remoteTermSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Selection changed: close the panel and drop the cached URL (a stale
+    // token for the PREVIOUS session must never render for the new one).
+    setRemoteTermOpen(false);
+    setRemoteTermUrl(null);
+    remoteTermSessionRef.current = null;
+  }, [cockpit.selectedId]);
+
+  const toggleRemoteTerminal = useCallback(async () => {
+    const id = cockpit.selectedId;
+    if (!id) return;
+    setRemoteTermOpen((v) => !v);
+    if (remoteTermSessionRef.current === id && remoteTermUrl) return; // already minted for this session
+    remoteTermSessionRef.current = id;
+    setRemoteTermLoading(true);
+    try {
+      const { uiUrl } = await olamTerminalToken(id);
+      if (remoteTermSessionRef.current !== id) return; // selection moved on while awaiting
+      if (uiUrl) setRemoteTermUrl(uiUrl);
+      else showToast('No terminal URL available for this session', 'error');
+    } catch (err) {
+      showToast(`Terminal token failed: ${(err as Error).message}`, 'error');
+    } finally {
+      if (remoteTermSessionRef.current === id) setRemoteTermLoading(false);
+    }
+  }, [cockpit.selectedId, remoteTermUrl, showToast]);
 
   // "Answer settling" state: suppresses the scrape prompt / synthesized-ask
   // from reflashing after the user answers, until the TUI picker has visually
@@ -1757,7 +1784,7 @@ function AppInner() {
                 ) : (
                   <>
                     <span className="detail-name">
-                      {selectedSession?.name || cockpit.selectedId || 'claude control'}
+                      {sessionDisplayLabel(selectedSession, cockpit.selectedId)}
                     </span>
                     {selectedSession?.cwd ? (
                       <span className="detail-cwd" title={selectedSession.cwd}>
@@ -1914,25 +1941,94 @@ function AppInner() {
                 {remoteMode ? (
                   <div className={`olam-steer-bar olam-steer-${remoteMode}`} role="status">
                     <span className="olam-terminal-actions">
-                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('ui')} title="Open a live terminal into this sandbox">⌥ terminal</button>
-                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('replay')} title="Open the recorded session replay">▷ replay</button>
+                      <button
+                        type="button"
+                        className="olam-term-btn"
+                        aria-pressed={remoteTermOpen}
+                        disabled={remoteSandboxEnded}
+                        onClick={() => void toggleRemoteTerminal()}
+                        title={
+                          remoteSandboxEnded
+                            ? 'Sandbox ended — no live terminal'
+                            : remoteTermOpen
+                              ? 'Close the inline terminal'
+                              : 'Open a live terminal into this sandbox'
+                        }
+                      >
+                        ⌥ terminal
+                      </button>
                     </span>
-                    {remoteMode === 'approve' ? (
-                      <span>⏵ approve mode — your reply approves + starts this session</span>
-                    ) : remoteMode === 'read-only' ? (
-                      <span>🔒 read-only session — steering disabled</span>
-                    ) : (
+                    <span className="olam-steer-mode">
+                      {remoteMode === 'approve' ? (
+                        <span>⏵ approve mode — your reply approves + starts this session</span>
+                      ) : remoteMode === 'read-only' ? (
+                        <span>🔒 read-only session — steering disabled</span>
+                      ) : (
+                        <>
+                          <span>⇄ steering {selectedSession?.org}</span>
+                          <label className="olam-steer-toggle">
+                            <input
+                              type="checkbox"
+                              checked={steerHard}
+                              onChange={(e) => setSteerHard(e.target.checked)}
+                            />
+                            hard steer
+                          </label>
+                        </>
+                      )}
+                    </span>
+                    {selectedSession?.prs?.length ? (
+                      <a
+                        href={selectedSession.prs[0].url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="remote-badge remote-badge-pr olam-steer-pr"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {selectedSession.prs.length > 1
+                          ? `${selectedSession.prs.length} PRs`
+                          : `PR #${selectedSession.prs[0].number ?? ''}`}
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+                {remoteTermOpen && selectedSession?.kind === 'remote' ? (
+                  <div className="olam-terminal-panel">
+                    <div className="olam-terminal-panel-head">
+                      <span>Live terminal</span>
+                      <button
+                        type="button"
+                        className="olam-terminal-panel-close"
+                        aria-label="Close terminal"
+                        onClick={() => setRemoteTermOpen(false)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {remoteSandboxEnded ? (
+                      <div className="olam-terminal-placeholder">
+                        Sandbox ended — no live terminal (transcript is still available)
+                      </div>
+                    ) : remoteTermLoading && !remoteTermUrl ? (
+                      <div className="olam-terminal-placeholder">Minting terminal token…</div>
+                    ) : remoteTermUrl ? (
                       <>
-                        <span>⇄ steering {selectedSession?.org}</span>
-                        <label className="olam-steer-toggle">
-                          <input
-                            type="checkbox"
-                            checked={steerHard}
-                            onChange={(e) => setSteerHard(e.target.checked)}
-                          />
-                          hard steer
-                        </label>
+                        <iframe
+                          src={remoteTermUrl}
+                          className="olam-terminal-frame"
+                          title="Remote sandbox terminal"
+                        />
+                        <a
+                          className="olam-terminal-newtab"
+                          href={remoteTermUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          open in new tab ↗
+                        </a>
                       </>
+                    ) : (
+                      <div className="olam-terminal-placeholder">No terminal URL available for this session</div>
                     )}
                   </div>
                 ) : null}
@@ -1948,6 +2044,11 @@ function AppInner() {
                     hasSelection={!!cockpit.selectedId}
                     agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
                     loading={!cockpit.messagesLoaded}
+                    emptyState={
+                      selectedSession?.kind === 'remote'
+                        ? { heading: 'No transcript yet — waiting for the agent' }
+                        : null
+                    }
                     sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}

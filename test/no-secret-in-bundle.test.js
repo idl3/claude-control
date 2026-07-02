@@ -62,6 +62,11 @@ const ALLOWED_REMOTE_KEYS = new Set([
   'org', 'sessionId', 'worldId', 'summary', 'lastActivity',
   'inFlight', 'halted', 'linearRef', 'linearIssueId', 'planStatus', 'title', 'pool', 'phase',
   'ownerEmail', 'readOnly',
+  // lib/olam-prs.js normalizePrs() output + count (item #2 — PR badge/link).
+  'prs', 'prCount',
+  // lib/olam-archive.js deriveArchived() — reads canonical Gateway-written
+  // status only (no gh/subprocess); see that module's header comment.
+  'archived',
 ]);
 
 test('remote WS rows carry only the allow-listed keys (no token-shaped fields)', async () => {

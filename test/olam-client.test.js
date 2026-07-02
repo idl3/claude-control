@@ -249,3 +249,75 @@ test('operatorEmail decodes the JWT email claim, cached, never serialized', asyn
   assert.equal(await c.operatorEmail(), 'e@x.io');
   assert.ok(!JSON.stringify(c).includes('e@x.io')); // non-enumerable
 });
+
+// --- listSessions: canonical archive-status passthrough (Gateway-written) -----
+
+test('listSessions captures canonical status fields onto the row when present', async () => {
+  const { impl: execFileImpl } = execStub();
+  const row = {
+    ...LIST_ROW,
+    session_id: 's-status',
+    plan_status: 'merged',
+    status: 'closed',
+    linear_state: 'Done',
+    merged_at: '2026-07-02T00:00:00Z',
+  };
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const [r] = await c.listSessions();
+  assert.equal(r.planStatus, 'merged');
+  assert.equal(r.status, 'closed');
+  assert.equal(r.linearState, 'Done');
+  assert.equal(r.mergedAt, '2026-07-02T00:00:00Z');
+});
+
+test('listSessions omits canonical status fields entirely when absent from the row (no invented values)', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const [r] = await c.listSessions();
+  for (const key of ['status', 'state', 'closed', 'closedAt', 'cancelled', 'canceled', 'archived', 'archivedAt', 'prState', 'merged', 'mergedAt', 'linearState', 'linearStatus']) {
+    assert.ok(!(key in r), `unexpected invented field: ${key}`);
+  }
+});
+
+// --- enrich: prs/prCount surfaced from runner status ----------------------------
+
+test('enrich surfaces normalized prs + prCount from the runner status', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    ['token-probe', () => json(200, {})],
+    ['/agent-run/status', () => json(200, {
+      phase: 'done',
+      done: true,
+      prs: ['https://github.com/idl3/claude-control/pull/153'],
+      prCount: 1,
+    })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const rows = [{ sessionId: 's1', pool: null, phase: null, inFlight: true }];
+  await c.enrich(rows);
+  assert.deepEqual(rows[0].prs, [{ url: 'https://github.com/idl3/claude-control/pull/153', number: 153 }]);
+  assert.equal(rows[0].prCount, 1);
+});
+
+test('enrich falls back to prs.length when the runner omits prCount', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    ['token-probe', () => json(200, {})],
+    ['/agent-run/status', () => json(200, {
+      phase: 'running',
+      prs: [{ url: 'https://x/pull/1' }, { url: 'https://x/pull/2' }],
+    })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const rows = [{ sessionId: 's1', pool: null, phase: null, inFlight: true }];
+  await c.enrich(rows);
+  assert.equal(rows[0].prCount, 2);
+});
