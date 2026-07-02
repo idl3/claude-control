@@ -64,7 +64,7 @@ export interface CockpitStore {
   messagesLoaded: boolean;
   select: (id: string) => void;
   resubscribe: () => void;
-  sendReply: (text: string, attachments?: number, viaAnswer?: boolean) => string | null;
+  sendReply: (text: string, attachments?: number, viaAnswer?: boolean, hardSteer?: boolean) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
@@ -279,7 +279,7 @@ export function useCockpit(): CockpitStore {
   // success alone is NOT delivery. Null means the frame couldn't even be sent
   // (socket closed): nothing was dispatched, show no optimistic bubble.
   const sendReply = useCallback(
-    (text: string, attachments = 0, viaAnswer = false): string | null => {
+    (text: string, attachments = 0, viaAnswer = false, hardSteer = false): string | null => {
       const id = selectedRef.current;
       if (!id || !text.trim()) return null;
       const reqId = `r${Date.now().toString(36)}${(replySeq.current++).toString(36)}`;
@@ -290,7 +290,7 @@ export function useCockpit(): CockpitStore {
       // picker via promptkey/answer first). The server's open-question reply guard
       // refuses raw composer replies into an open picker, but must let these
       // through — they ARE the answer, not an accidental keystroke.
-      const ok = socket.send({ type: 'reply', id, text, reqId, attachments, viaAnswer });
+      const ok = socket.send({ type: 'reply', id, text, reqId, attachments, viaAnswer, hardSteer });
       return ok ? reqId : null;
     },
     [socket],

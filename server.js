@@ -37,6 +37,7 @@ import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { OlamTranscriptSource } from './lib/olam-transcript.js';
+import { dispatchSteer, composerMode, replyTransport } from './lib/olam-transport.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
@@ -2054,6 +2055,34 @@ async function handleClientMessage(ws, msg) {
     case 'reply': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      // Remote (olam) sessions steer via the cloud-dispatch mirror, not tmux.
+      // The agent's reply streams back as chunks (Phase B) — no extra plumbing.
+      if (replyTransport(session) === 'olam') {
+        const reqId = msg.reqId;
+        const mode = composerMode(session);
+        if (mode === 'read-only') {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: 'This session is read-only — steering is disabled.' });
+          return;
+        }
+        const client = olamSource?.clientForOrg(session.org);
+        if (!client || !session.worldId) {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: `Cannot steer ${session.org} session (org unavailable or no world id yet).` });
+          return;
+        }
+        const steerMode = msg.hardSteer ? 'hard' : 'soft';
+        const result = await dispatchSteer(client, {
+          worldId: session.worldId,
+          sessionId: session.sessionId,
+          draft: String(msg.text ?? ''),
+          mode: steerMode,
+        });
+        if (result.ok) {
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode });
+        } else {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: result.error });
+        }
+        return;
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       // SAFETY: never send a raw reply (paste+Enter) into a pane with an OPEN
       // picker (AskUserQuestion OR a pane-scrape permission/trust/plan/numbered
