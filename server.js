@@ -192,6 +192,16 @@ function checkToken(req) {
   return authCheckToken(req, CONFIG.token);
 }
 
+// Restart support: true only when a supervisor will respawn the process after
+// it exits. launchd (bin/install-service.sh, KeepAlive: true) reparents its
+// managed agents to PID 1, so `process.ppid === 1` is the launchd signal.
+// pm2/systemd users can opt in explicitly via CLAUDE_CONTROL_MANAGED=1. A bare
+// `node server.js` (dev) has neither, so restart is correctly disabled there —
+// process.exit(0) would just kill it with no respawn.
+function isServiceManaged() {
+  return process.env.CLAUDE_CONTROL_MANAGED === '1' || process.ppid === 1;
+}
+
 // ttyd exception: the raw-terminal surface is opened with `window.open` to a
 // separately-proxied URL and CANNOT send an Authorization header, so it keeps a
 // `?token=` in its own URL. This gate reads the token from the query string for
@@ -388,9 +398,26 @@ const _handler = (req, res) => {
   }
   if (u.pathname === '/api/config') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
-    if (req.method === 'GET') return endJson(res, 200, readConfig());
+    if (req.method === 'GET') return endJson(res, 200, { ...readConfig(), restartSupported: isServiceManaged() });
     if (req.method === 'POST') return handleConfigSave(req, res);
     return endJson(res, 405, { error: 'method not allowed' });
+  }
+  // POST /api/restart — operator-triggered self-restart. Only meaningful under
+  // a supervisor (launchd KeepAlive / pm2 / systemd) that respawns the process
+  // after it exits; see isServiceManaged(). A bare dev process would just die.
+  if (u.pathname === '/api/restart') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    if (!isServiceManaged()) {
+      return endJson(res, 409, {
+        error: 'not_managed',
+        message: 'Restart requires the launchd/pm2 service (KeepAlive). Running as a bare process — exit would not respawn.',
+      });
+    }
+    console.log('[restart] requested via API — exiting for supervisor respawn');
+    endJson(res, 200, { ok: true, restarting: true });
+    setTimeout(() => process.exit(0), 250);
+    return;
   }
   if (u.pathname === '/api/optimize') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });

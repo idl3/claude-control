@@ -7,6 +7,7 @@ import {
   getModels,
   uploadIcon,
   resetIcon,
+  restartService,
   type OptimizeBackend,
   type ModelsInfo,
 } from '../lib/api';
@@ -35,9 +36,12 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
+  const [restartSupported, setRestartSupported] = useState(false);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restartConfirming, setRestartConfirming] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [version, setVersion] = useState<{
     current: string;
     root?: string;
@@ -82,6 +86,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setTranscriptFontSize(c.transcriptFontSize ?? 0);
         setExternalFontSize(c.externalFontSize ?? 0);
         setProjectDirs(c.projectDirs ?? []);
+        setRestartSupported(c.restartSupported ?? false);
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -184,6 +189,29 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const onRestartClick = () => {
+    if (!restartConfirming) {
+      setRestartConfirming(true);
+      return;
+    }
+    setRestartConfirming(false);
+    setRestarting(true);
+    onToast('Restarting… the app will reconnect automatically', 'ok');
+    restartService()
+      .then((result) => {
+        if (!result.ok) {
+          setRestarting(false);
+          onToast(`Restart failed: ${result.message ?? 'unknown error'}`, 'error');
+        }
+        // On success the process exits and the WS client's own reconnect-with-
+        // backoff (see lib/ws.ts) recovers the UI — no polling needed here.
+      })
+      .catch((err) => {
+        setRestarting(false);
+        onToast(`Restart failed: ${(err as Error).message}`, 'error');
+      });
   };
 
   const versionMeta = version
@@ -562,6 +590,20 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         </div>
 
         <div className="config-actions">
+          <button
+            type="button"
+            className="config-restart"
+            title={
+              restartSupported
+                ? undefined
+                : 'Run cockpit as a service (launchd/pm2) to enable restart'
+            }
+            onClick={onRestartClick}
+            onBlur={() => setRestartConfirming(false)}
+            disabled={!restartSupported || loading || saving || restarting}
+          >
+            {restarting ? 'Restarting…' : restartConfirming ? 'Confirm restart?' : 'Restart service'}
+          </button>
           <button
             type="button"
             className="config-cancel"

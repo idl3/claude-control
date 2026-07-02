@@ -239,6 +239,51 @@ test('/api/agents: valid token → 200 with agents array', async () => {
 });
 
 // ===========================================================================
+// 2b. GET /api/config restartSupported + POST /api/restart — supervised gate
+// ===========================================================================
+// The child process here is a plain `spawn(...)` from this test file (not
+// launchd), so process.ppid !== 1 and CLAUDE_CONTROL_MANAGED is unset — the
+// server MUST report itself as unmanaged and refuse to restart, which is
+// exactly the footgun the supervised-gate exists to prevent.
+
+test('/api/config: missing token → 401', async () => {
+  const res = await req(port, '/api/config');
+  assert.equal(res.status, 401);
+});
+
+test('/api/config: valid token → 200 with restartSupported:false for an unsupervised process', async () => {
+  const res = await req(port, '/api/config', { headers: AUTH_HEADER });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.restartSupported, false, 'a bare test-spawned process must not report itself as restart-supported');
+  // Additive-only: existing fields must still be present.
+  assert.equal(typeof body.launchCommand, 'string');
+  assert.equal(typeof body.defaultCwd, 'string');
+});
+
+test('/api/restart: missing token → 401', async () => {
+  const res = await req(port, '/api/restart', { method: 'POST' });
+  assert.equal(res.status, 401);
+});
+
+test('/api/restart: GET → 405 (POST-only)', async () => {
+  const res = await req(port, '/api/restart', { headers: AUTH_HEADER });
+  assert.equal(res.status, 405);
+});
+
+test('/api/restart: valid token, unmanaged process → 409 not_managed, server stays up', async () => {
+  const res = await req(port, '/api/restart', { method: 'POST', headers: AUTH_HEADER });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.error, 'not_managed');
+  assert.match(body.message, /KeepAlive|pm2|service/i);
+
+  // The process must NOT have exited — a follow-up request still succeeds.
+  const followUp = await req(port, '/api/agents', { headers: AUTH_HEADER });
+  assert.equal(followUp.status, 200, 'server must still be alive after a refused restart');
+});
+
+// ===========================================================================
 // 3. WS auth handshake — subprotocol token gate
 // ===========================================================================
 
