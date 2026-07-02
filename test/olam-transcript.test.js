@@ -232,3 +232,31 @@ test('degraded feed only emits NEW entries past the cursor', async () => {
   assert.deepEqual(texts.filter((t) => t === 'a').length, 1);
   assert.ok(texts.includes('b'));
 });
+
+// --- B3 CP3 follow-up: degraded feed cursor survives a runner reset ------------
+
+test('degraded feed re-emits after a runner reset (cursor rewinds, no skip)', async () => {
+  let call = 0;
+  const feeds = [
+    { feed: ['a', 'b'], feedCursor: 2 },        // baseline: emit a,b → cursor 2
+    { feed: ['x'], feedCursor: 1 },             // RUNNER RESET: shorter feed
+    { feed: ['x', 'y', 'z'], feedCursor: 3 },   // grows from the reset baseline
+  ];
+  const client = {
+    org: 'atlas',
+    apiFetch: async () => ({ ok: false, status: 401, headers: new Map(), json: async () => [] }),
+    runnerStatus: async () => feeds[Math.min(call++, feeds.length - 1)],
+  };
+  const src = new OlamTranscriptSource(client, { worldId: 'w1', sessionId: 's1', feedPollMs: 4 });
+  const seen = [];
+  src.on('append', (m) => { seen.push(...m.map((x) => x.blocks[0].text)); });
+  src.start();
+  await new Promise((r) => setTimeout(r, 60));
+  src.stop();
+  // Pre-fix bug: 'x' and 'y' would be skipped (cursor stuck at 2 → slice(2) of
+  // ['x','y','z'] = ['z']). Fixed: every reset entry surfaces, none skipped.
+  assert.ok(seen.includes('a') && seen.includes('b'), `missing baseline: ${seen}`);
+  assert.ok(seen.includes('x'), `runner-reset entry x skipped: ${seen}`);
+  assert.ok(seen.includes('y'), `runner-reset entry y skipped: ${seen}`);
+  assert.ok(seen.includes('z'), `runner-reset entry z skipped: ${seen}`);
+});
