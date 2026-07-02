@@ -79,6 +79,17 @@ export interface Session {
   usagePct?: number | null;
   /** Codex-only: primary rate-limit window in minutes (e.g. 300 = 5h, 10080 = 7d). */
   usageWindowMin?: number | null;
+  /** Remote (olam) rows only: PRs opened by this session's agent run, normalized
+   *  from the runner status `prs` field (lib/olam-prs.js normalizePrs). */
+  prs?: Array<{ url: string; number: number | null }>;
+  /** Remote (olam) rows only: PR count (falls back to prs.length when the
+   *  runner status omits it). */
+  prCount?: number;
+  /** Remote (olam) rows only: derived from canonical Gateway-written status
+   *  (halted / terminal plan/PR/Linear status / phase:'done') — see
+   *  lib/olam-archive.js deriveArchived. Sessions with archived:true render
+   *  under the rail's collapsed "Archived" section instead of the active list. */
+  archived?: boolean;
 }
 
 export type Role = 'user' | 'assistant' | 'system';

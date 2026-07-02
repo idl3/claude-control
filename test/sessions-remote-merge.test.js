@@ -148,3 +148,38 @@ test('health() exposes per-org probe state for the API/frontend', async () => {
   await src.tick();
   assert.equal(src.health().atlas.status, 'green');
 });
+
+// --- archive-lifecycle derivation (canonical Gateway-written status) -----------
+
+test('tick derives archived:true for a halted session', async () => {
+  const { src, reg } = sourceWith({
+    listSessions: async () => [
+      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: true, linearRef: 's1', pool: null, phase: null },
+    ],
+  });
+  await src.tick();
+  const remote = reg.getSessions().find((s) => s.kind === 'remote');
+  assert.equal(remote.archived, true);
+});
+
+test('tick derives archived:true from a canonical terminal planStatus (e.g. merged)', async () => {
+  const { src, reg } = sourceWith({
+    listSessions: async () => [
+      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null, planStatus: 'merged' },
+    ],
+  });
+  await src.tick();
+  const remote = reg.getSessions().find((s) => s.kind === 'remote');
+  assert.equal(remote.archived, true);
+});
+
+test('tick derives archived:false for an active session', async () => {
+  const { src, reg } = sourceWith({
+    listSessions: async () => [
+      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: null, phase: 'running', planStatus: 'approved' },
+    ],
+  });
+  await src.tick();
+  const remote = reg.getSessions().find((s) => s.kind === 'remote');
+  assert.equal(remote.archived, false);
+});
