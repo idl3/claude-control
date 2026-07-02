@@ -36,6 +36,7 @@ import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
+import { OlamTranscriptSource } from './lib/olam-transcript.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
@@ -1672,6 +1673,42 @@ claudePrint.on('close', (id) => {
 });
 
 function ensureSubscription(id) {
+  // Remote (olam) sessions stream from the chunks substrate, not a local
+  // transcript file. Build an OlamTranscriptSource whose 'append' events carry
+  // the SAME NormalizedMessage shape as the local tailer, so the WS fan-out +
+  // renderer are reused. Exactly one live subscription per selected session;
+  // teardown/trim/snapshot go through the shared sub.tailer surface below.
+  {
+    const remote = sessionById(id);
+    if (remote?.kind === 'remote') {
+      const existing = subscriptions.get(id);
+      if (existing) return existing;
+      const client = olamSource?.clientForOrg(remote.org);
+      if (!client || !remote.worldId) {
+        // Can't stream (org gone from config, or no world_id yet) — allow a
+        // tailer-less sub so the row is still selectable; a later refresh that
+        // fills world_id upgrades it via upgradeSubscriptionIfTranscriptReady's
+        // remote analogue (recreated on next select).
+        const bare = { tailer: null, subagents: null, clients: new Set(), pending: null, ready: Promise.resolve(), remote: true };
+        subscriptions.set(id, bare);
+        return bare;
+      }
+      const source = new OlamTranscriptSource(client, {
+        worldId: remote.worldId,
+        sessionId: remote.sessionId,
+        pool: remote.pool ?? 'agentrun',
+        maxBuffer: CONFIG.maxBuffer,
+      });
+      const rsub = { tailer: source, subagents: null, clients: new Set(), pending: null, remote: true };
+      subscriptions.set(id, rsub);
+      source.on('append', (msgs) => broadcastTo(id, { type: 'append', id, messages: msgs }));
+      source.on('banner', (b) => broadcastTo(id, { type: 'olam-degraded', id, degraded: b.degraded, reason: b.reason }));
+      source.on('error', (err) =>
+        broadcastTo(id, { type: 'ack', op: 'tail', ok: false, error: String(err?.message || err) }));
+      rsub.ready = source.start();
+      return rsub;
+    }
+  }
   let sub = subscriptions.get(id);
   if (sub) {
     // Upgrade a previously tailer-less subscription once the session's

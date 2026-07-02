@@ -31,6 +31,8 @@ export interface CockpitStore {
   messages: Msg[];
   pending: Pending | null;
   prompt: PanePrompt | null;
+  /** Remote (olam) selected session in degraded (log-tail) streaming mode. */
+  degraded: { degraded: boolean; reason: string | null } | null;
   subagents: SubAgent[];
   /**
    * Number of *running* sub-agents per session id. Only sessions with ≥1 running
@@ -104,6 +106,7 @@ export function useCockpit(): CockpitStore {
 
   // Per-session caches. Mutated via setState replacement (immutable updates).
   const [messagesById, setMessagesById] = useState<Record<string, Msg[]>>({});
+  const [degradedById, setDegradedById] = useState<Record<string, { degraded: boolean; reason: string | null }>>({});
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
@@ -163,6 +166,12 @@ export function useCockpit(): CockpitStore {
           setMessagesById((prev) => ({
             ...prev,
             [msg.id]: [...(prev[msg.id] ?? []), ...(msg.messages ?? [])],
+          }));
+          break;
+        case 'olam-degraded':
+          setDegradedById((prev) => ({
+            ...prev,
+            [msg.id]: { degraded: !!msg.degraded, reason: msg.reason ?? null },
           }));
           break;
         case 'pending':
@@ -393,6 +402,10 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
+  const degraded = useMemo(
+    () => (selectedId ? degradedById[selectedId] ?? null : null),
+    [selectedId, degradedById],
+  );
   // True when a TUI picker is on screen for the selected session right now —
   // the fastest/most-authoritative send-guard signal (screen-truth).
   const pickerOpen = useMemo(
@@ -429,6 +442,7 @@ export function useCockpit(): CockpitStore {
     messagesLoaded,
     pending,
     prompt,
+    degraded,
     subagents,
     runningSubagentCountById,
     conn,

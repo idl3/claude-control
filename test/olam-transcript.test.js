@@ -168,3 +168,67 @@ test('bounded backfill caps the initial replay to backfillCap rows', async () =>
   assert.equal(seen.length, 10); // last 10 of 50
   assert.equal(seen[0].uuid, 'm40');
 });
+
+// --- B3: OlamTranscriptSource (degraded fallback) -------------------------------
+
+import { OlamTranscriptSource } from '../lib/olam-transcript.js';
+
+test('full mode: shape appends flow through unchanged', async () => {
+  const client = clientWith([
+    { headers: { 'electric-offset': '1' }, body: [insert(row({ chunk: 'live text' })), upToDate] },
+  ]);
+  const src = new OlamTranscriptSource(client, { worldId: 'w1', sessionId: 's1' });
+  const seen = [];
+  src.on('append', (m) => { seen.push(...m); src.stop(); });
+  src.start();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(seen[0].blocks[0].text, 'live text');
+  assert.equal(src.degraded, false);
+});
+
+test('shape 401 → banner{degraded} + runner feed tail takes over', async () => {
+  let statusCalls = 0;
+  const client = {
+    org: 'atlas',
+    apiFetch: async () => ({ ok: false, status: 401, headers: new Map(), json: async () => [] }),
+    runnerStatus: async () => {
+      statusCalls += 1;
+      return { feed: ['boot', 'clone', 'edit'], feedCursor: 3 };
+    },
+  };
+  const src = new OlamTranscriptSource(client, { worldId: 'w1', sessionId: 's1', feedPollMs: 5 });
+  let banner = null;
+  const seen = [];
+  src.on('banner', (b) => { banner = b; });
+  src.on('append', (m) => { seen.push(...m); });
+  src.start();
+  await new Promise((r) => setTimeout(r, 40));
+  src.stop();
+  assert.equal(banner?.degraded, true);
+  assert.equal(src.degraded, true);
+  assert.deepEqual(seen.map((m) => m.blocks[0].text), ['boot', 'clone', 'edit']);
+  assert.ok(statusCalls >= 1);
+});
+
+test('degraded feed only emits NEW entries past the cursor', async () => {
+  let call = 0;
+  const feeds = [
+    { feed: ['a'], feedCursor: 1 },
+    { feed: ['a', 'b'], feedCursor: 2 },
+  ];
+  const client = {
+    org: 'atlas',
+    apiFetch: async () => ({ ok: false, status: 403, headers: new Map(), json: async () => [] }),
+    runnerStatus: async () => feeds[Math.min(call++, feeds.length - 1)],
+  };
+  const src = new OlamTranscriptSource(client, { worldId: 'w1', sessionId: 's1', feedPollMs: 5 });
+  const seen = [];
+  src.on('append', (m) => { seen.push(...m); });
+  src.start();
+  await new Promise((r) => setTimeout(r, 40));
+  src.stop();
+  // 'a' emitted once, then only 'b' — no duplicate 'a'
+  const texts = seen.map((m) => m.blocks[0].text);
+  assert.deepEqual(texts.filter((t) => t === 'a').length, 1);
+  assert.ok(texts.includes('b'));
+});
