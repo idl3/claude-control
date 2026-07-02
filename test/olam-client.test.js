@@ -133,18 +133,18 @@ test('enrich confirms pool by first non-empty phase and caches it', async () => 
     ['pool=sandbox', () => json(200, { phase: '', done: false })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const rows = [{ sessionId: 's1', pool: null, phase: null }];
+  const rows = [{ sessionId: 's1', pool: null, phase: null, inFlight: true }];
   await c.enrich(rows);
   assert.equal(rows[0].pool, 'linear');
   assert.equal(rows[0].phase, 'running');
   // second enrich uses the cached pool — no re-probe of other pools
   const before = calls.length;
-  const again = [{ sessionId: 's1', pool: 'linear', phase: null }];
+  const again = [{ sessionId: 's1', pool: 'linear', phase: null, inFlight: true }];
   await c.enrich(again);
   assert.ok(calls.length - before <= 1 + 0 + 1); // status probe(s) only for confirmed pool
 });
 
-test('enrich leaves rows list-only when no pool shows signal, bounded by maxProbes', async () => {
+test('enrich probes only in-flight (or pool-cached) rows; idle rows stay list-only', async () => {
   const { impl: execFileImpl } = execStub();
   let probes = 0;
   const { impl: fetchImpl } = fetchStub([
@@ -153,12 +153,40 @@ test('enrich leaves rows list-only when no pool shows signal, bounded by maxProb
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
   const rows = [
-    { sessionId: 's1', pool: null, phase: null },
-    { sessionId: 's2', pool: null, phase: null },
+    { sessionId: 'idle-1', pool: null, phase: null, inFlight: false },
+    { sessionId: 'live-1', pool: null, phase: null, inFlight: true },
   ];
-  await c.enrich(rows, { maxProbes: 4 });
+  await c.enrich(rows);
   assert.equal(rows[0].pool, null);
-  assert.ok(probes <= 4);
+  assert.ok(probes <= 3); // only the in-flight row walked pools
+});
+
+test('enrich reports (never hides) in-flight rows the probe budget could not cover', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    ['token-probe', () => json(200, {})],
+    ['/agent-run/status', () => json(200, { phase: '', done: false })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const rows = Array.from({ length: 5 }, (_, i) => ({
+    sessionId: `s${i}`, pool: null, phase: null, inFlight: true,
+  }));
+  const { unenriched } = await c.enrich(rows, { maxProbes: 3 });
+  assert.ok(unenriched >= 3, `expected >=3 unenriched, got ${unenriched}`);
+});
+
+test('client instance never serializes token material (CP3 T1 guard)', async () => {
+  const { impl: execFileImpl } = execStub({ jwt: 'JWT-SECRET', gsm: 'BEARER-SECRET' });
+  const { impl: fetchImpl } = fetchStub([
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [] })],
+    ['token-probe', () => json(200, {})],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  await c.listSessions();
+  await c.runnerToken();
+  const dump = JSON.stringify(c);
+  assert.ok(!dump.includes('JWT-SECRET'), 'JWT leaked via JSON.stringify(client)');
+  assert.ok(!dump.includes('BEARER-SECRET'), 'runner bearer leaked via JSON.stringify(client)');
 });
 
 // --- secret hygiene -------------------------------------------------------------
