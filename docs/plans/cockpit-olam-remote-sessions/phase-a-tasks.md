@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1 (SPA legs, operator SSO), A4, A5, A6 |
-| done | A2, A3 |
+| todo | A1 (SPA legs, operator SSO), A5, A6 |
+| done | A2, A3, A4 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A4 landed: OlamHealthProbe (auth/login/install red vs transient amber; 3-strikes/60s halt + reset; brainUrl optional org field added). 9/9 tests. cumulative: files=10, loc=~1350 (budget: 0.72x)
 - 2026-07-02 A3 landed: OlamOrgClient (JWT via cloudflared w/ single re-mint; probe-arbitrated bearer walk; pool probe-confirm linear->sandbox->agentrun). 8/8 new tests. cumulative: files=7, loc=~1050 (budget: 0.6x)
 - 2026-07-02 A2 landed: config at ~/.claude-control/olam.json (repo data-dir convention, NOT ~/.cockpit — see Assumptions). 651/651 suite green. cumulative: files=5, loc=~700 (budget: 0.44x)
 - 2026-07-02 execute CP0 passed against 776bcd0 (rubrics present: T1-T6/P1-P2/S1-S3, seams, unwind cost). CP1.5 umbrella resolved: feat/cockpit-olam-remote-sessions-integration (PR #143). A1 partial-landed (SPA legs await operator SSO); advancing to A2 per DAG (A1 || A2). cumulative: files=2, loc=~330 (budget: 0.2x)
@@ -112,9 +113,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated
 > **Integration-test**: node --test test/olam-health-probe.test.js
 
-- [ ] Probe loop + error classes + backoff
-- [ ] Brain `/health` check integration
-- [ ] Health state exposed on the org client for A5/A6
+- [x] Probe loop + error classes + backoff
+- [x] Brain `/health` check integration
+- [x] Health state exposed on the org client for A5/A6
+<!-- e2e: mock-backed unit suite (9/9); live drift already reproduced by A1 script on 2026-07-02 -->
 
 ### A5 — RemoteSessionSource merged into SessionRegistry
 
