@@ -42,16 +42,33 @@ const ORGS = {
     ],
   },
   grain: {
-    runnerUrl: "https://<grain-runner-guess>",
-    spaBase: "https://<grain-spa-guess>",
+    // Verified 2026-07-02: worker name from wrangler.grain.jsonc `name`
+    // (account <cf-account-id>…); live-probed 401 on /agent-run/status (auth-gated,
+    // correct host). Previously-guessed <grain-runner-guess>
+    // returns 404.
+    runnerUrl: "https://<grain-runner>",
+    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.grain.toml `pattern`;
+    // curl 302 -> <grain-access-team> login, kid matches toml CF_ACCESS_AUD.
+    spaBase: "https://<grain-spa>",
     runnerTokenCandidates: [
       { kind: "gsm", secret: "<grain-runner-token-secret>" },
       { kind: "file", path: join(homedir(), ".olam/secrets/grain-olam-task-token") },
     ],
   },
   pleri: {
-    runnerUrl: "https://olam-worker-runner-sandbox.kaluga.workers.dev",
-    spaBase: "https://<legacy-spa>",
+    // UNVERIFIED (2026-07-02): worker name is confirmed as
+    // "pleri-worker-runner-sandbox" (wrangler.pleri.jsonc `name`, account
+    // <cf-account-id>…) but the workers.dev account subdomain is not recorded in
+    // any wrangler file. Probed candidates (pleri, idl3, kaluga, pleri-org,
+    // pleri-com, pleriorg, pleri-worker, olam-pleri; both worker-name prefixes)
+    // all failed to connect. Left null on purpose — a guessed hostname is worse
+    // than a loud failure. Confirm at next pleri deploy and fill in.
+    runnerUrl: null,
+    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.pleri.toml `pattern`;
+    // curl 302 -> <pleri-access-team> login, kid matches toml CF_ACCESS_AUD.
+    // <legacy-spa> is also live but redirects to the ATLAS Access team
+    // (<atlas-access-team>) — it is not pleri's SPA, do not use.
+    spaBase: "https://<pleri-spa>",
     runnerTokenCandidates: [
       { kind: "gsm", secret: "<pleri-runner-token-secret>" },
       { kind: "file", path: join(homedir(), ".olam/secrets/pleri-olam-task-token") },
