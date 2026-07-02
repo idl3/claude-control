@@ -29,6 +29,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 execute CP0 passed against 776bcd0 (rubrics present: T1-T6/P1-P2/S1-S3, seams, unwind cost). CP1.5 umbrella resolved: feat/cockpit-olam-remote-sessions-integration (PR #143). A1 partial-landed (SPA legs await operator SSO); advancing to A2 per DAG (A1 || A2). cumulative: files=2, loc=~330 (budget: 0.2x)
 -->
 
 ## Audit item coverage
@@ -58,8 +59,11 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 - [ ] Complete `cloudflared access login https://olam.dev-atlas.kitchen` (operator SSO; prompt if absent)
 - [ ] Authenticated GET sessions list — snapshot returned fields; confirm absence of pool/linear metadata; record ADR-062 join recipe
 - [ ] Probe shape endpoint auth with the operator JWT; record accept/reject
-- [ ] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
-- [ ] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
+- [x] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
+- [x] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
+<!-- e2e: pass-with-skips (runner legs PASS live; SPA legs [e2e:skipped] no Access session) on 2026-07-02 -->
+<!-- A1 partial: 3 SPA subtasks blocked on operator SSO (cloudflared access login https://olam.dev-atlas.kitchen) -->
+<!-- live finding: GSM olam-atlas-sandbox-runner-token stale (401) vs rotation file (200) - probe-arbitrated; GSM version refresh escalated -->
 
 ### A2 — Org config + GSM-first secret loading + mandatory cockpit auth
 
