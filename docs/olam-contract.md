@@ -25,10 +25,15 @@ Sources: plan A0 spike (2026-07-02, `~/.claude/plans/cockpit-olam-remote-session
 | Org | Runner | SPA | Runner token candidates (probe-arbitrated, in order) |
 |---|---|---|---|
 | atlas | `olam-worker-runner-sandbox.atlas-kitchen.workers.dev` | `olam.dev-atlas.kitchen` (CF Access team `atlas-development`) | GSM `olam-atlas-sandbox-runner-token` → `~/.olam/secrets/sandbox-runner-token` → `~/.olam/secrets/atlas-olam-task-token` |
-| grain | `olam-worker-runner-sandbox.grain.workers.dev` *(unverified)* | `olam.grain.kitchen` *(unverified)* | GSM `olam-grain-sandbox-runner-token` → `~/.olam/secrets/grain-olam-task-token` |
-| pleri | `olam-worker-runner-sandbox.kaluga.workers.dev` *(unverified)* | `olam.kaluga.co` | GSM `olam-pleri-sandbox-runner-token` → `~/.olam/secrets/pleri-olam-task-token` |
+| grain | `grain-worker-runner-sandbox.grain.workers.dev` | `olam.grain.com.sg` (CF Access team `grain.cloudflareaccess.com`, AUD `6ed71e61…`) | GSM `olam-grain-sandbox-runner-token` → `~/.olam/secrets/grain-olam-task-token` |
+| pleri | `<unverified — confirm at pleri deploy>` (worker name is `pleri-worker-runner-sandbox`; workers.dev account subdomain not yet determined — see note below) | `olam.pleri.com` (CF Access team `idl3.cloudflareaccess.com`, AUD `bf7f83d4…`) | GSM `olam-pleri-sandbox-runner-token` → `~/.olam/secrets/pleri-olam-task-token` |
 
-grain/pleri coordinates are provisional until their D2 contract runs (`wrangler.<org>.toml` in olam is authoritative).
+Verified 2026-07-02 against olam's `wrangler.<org>.{toml,jsonc}` (source of truth) plus live probes:
+
+- **grain SPA**: `olam.grain.com.sg` — `packages/plan-chat-spa/wrangler.grain.toml` `pattern`; `curl -sI https://olam.grain.com.sg/api/plan-chat/v1/sessions` → `HTTP/2 302` to `grain.cloudflareaccess.com/cdn-cgi/access/login/...?kid=6ed71e61…`, matching the toml's `CF_ACCESS_AUD` exactly. The previously-guessed `olam.grain.kitchen` does not resolve (curl exit 6 / connection failure).
+- **pleri SPA**: `olam.pleri.com` — `packages/plan-chat-spa/wrangler.pleri.toml` `pattern`; `curl -sI https://olam.pleri.com/api/plan-chat/v1/sessions` → `HTTP/2 302` to `idl3.cloudflareaccess.com/cdn-cgi/access/login/...?kid=bf7f83d4…`, matching the toml's `CF_ACCESS_AUD` exactly. The previously-used `olam.kaluga.co` is also live (`HTTP/2 302`) but redirects to `atlaskitchen.cloudflareaccess.com` — the **atlas** Access team, not pleri's — so it is not pleri's SPA and should not be used for this org; kept only as a stray/legacy alias note.
+- **grain runner**: `grain-worker-runner-sandbox.grain.workers.dev` — worker name from `packages/worker-runner-cloudflare-sandbox/wrangler.grain.jsonc` (`name`, account `1069793468ee…`); live-probed `GET .../agent-run/status?sessionId=x&pool=agentrun` → `401` (auth-gated, correct host). The previously-guessed `olam-worker-runner-sandbox.grain.workers.dev` returns `404`.
+- **pleri runner**: worker name confirmed as `pleri-worker-runner-sandbox` from `packages/worker-runner-cloudflare-sandbox/wrangler.pleri.jsonc` (account `9f52732a13cb…`), but the workers.dev account subdomain is not recorded in any wrangler file and no probed candidate (`pleri`, `idl3`, `kaluga`, `pleri-org`, `pleri-com`, `pleriorg`, `pleri-worker`, `olam-pleri` — each tried with both `pleri-worker-runner-sandbox.*` and `olam-worker-runner-sandbox.*` prefixes) returned a live response (all `000`/connection failure). Left `unverified` rather than shipping a guess — confirm at next pleri deploy (`wrangler deploy --config wrangler.pleri.jsonc` prints the live workers.dev URL) or via `wrangler deployments list`.
 
 ## SPA machine-client auth recipe (two layers, live-verified)
 

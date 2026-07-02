@@ -42,16 +42,33 @@ const ORGS = {
     ],
   },
   grain: {
-    runnerUrl: "https://olam-worker-runner-sandbox.grain.workers.dev",
-    spaBase: "https://olam.grain.kitchen",
+    // Verified 2026-07-02: worker name from wrangler.grain.jsonc `name`
+    // (account 1069793468ee…); live-probed 401 on /agent-run/status (auth-gated,
+    // correct host). Previously-guessed olam-worker-runner-sandbox.grain.workers.dev
+    // returns 404.
+    runnerUrl: "https://grain-worker-runner-sandbox.grain.workers.dev",
+    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.grain.toml `pattern`;
+    // curl 302 -> grain.cloudflareaccess.com login, kid matches toml CF_ACCESS_AUD.
+    spaBase: "https://olam.grain.com.sg",
     runnerTokenCandidates: [
       { kind: "gsm", secret: "olam-grain-sandbox-runner-token" },
       { kind: "file", path: join(homedir(), ".olam/secrets/grain-olam-task-token") },
     ],
   },
   pleri: {
-    runnerUrl: "https://olam-worker-runner-sandbox.kaluga.workers.dev",
-    spaBase: "https://olam.kaluga.co",
+    // UNVERIFIED (2026-07-02): worker name is confirmed as
+    // "pleri-worker-runner-sandbox" (wrangler.pleri.jsonc `name`, account
+    // 9f52732a13cb…) but the workers.dev account subdomain is not recorded in
+    // any wrangler file. Probed candidates (pleri, idl3, kaluga, pleri-org,
+    // pleri-com, pleriorg, pleri-worker, olam-pleri; both worker-name prefixes)
+    // all failed to connect. Left null on purpose — a guessed hostname is worse
+    // than a loud failure. Confirm at next pleri deploy and fill in.
+    runnerUrl: null,
+    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.pleri.toml `pattern`;
+    // curl 302 -> idl3.cloudflareaccess.com login, kid matches toml CF_ACCESS_AUD.
+    // olam.kaluga.co is also live but redirects to the ATLAS Access team
+    // (atlaskitchen.cloudflareaccess.com) — it is not pleri's SPA, do not use.
+    spaBase: "https://olam.pleri.com",
     runnerTokenCandidates: [
       { kind: "gsm", secret: "olam-pleri-sandbox-runner-token" },
       { kind: "file", path: join(homedir(), ".olam/secrets/pleri-olam-task-token") },
