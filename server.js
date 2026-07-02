@@ -34,6 +34,7 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
@@ -121,6 +122,13 @@ const CONFIG = {
   iconFile:
     env('ICON') || path.join(os.homedir(), '.claude-control', 'icon.png'),
 };
+
+// Remote olam orgs (docs/plans/cockpit-olam-remote-sessions). Feature-flag by
+// file presence: no olam.json → OLAM.enabled false and nothing below changes.
+// A malformed file or a tokenless server with orgs configured refuses startup
+// (org bearers must not sit behind an open port — design doc T5, decision 7).
+const OLAM = loadOlamConfig();
+assertAuthWithRemoteOrgs(OLAM, CONFIG.token);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
