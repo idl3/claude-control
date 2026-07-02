@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | B1, B2, B3, B4 |
-| done | — |
+| todo | B3, B4 |
+| done | B1, B2 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Go/no-go per org on first authenticated shape read (decision 6/plan Phase B).
+- 2026-07-02 execute CP0 passed against 3a802b2 (umbrella tip w/ merged Phase A). Phase B GO full-mode (A1 live-verified shape auth cleared). B1+B2 landed as one module lib/olam-transcript.js (ShapeSubscriber + chunksToMessages). Caught+fixed a live-poll hot-loop (starved node:test reporter) — added livePollDelayMs bound. cumulative: files=2, loc=~430 (budget 0.86x of B's 500)
 -->
 
 ## Audit item coverage
@@ -52,9 +53,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated (new module)
 > **Integration-test**: node --test test/olam-transcript.test.js
 
-- [ ] Long-poll loop with offset/handle state (persisted per session)
-- [ ] Backoff + reconnect semantics
-- [ ] Typed degraded signal on auth/shape failure
+- [x] Long-poll loop with offset/handle state (persisted per session)
+- [x] Backoff + reconnect semantics (livePollDelayMs; 409 rehydrate)
+- [x] Typed degraded signal on auth/shape failure
+<!-- e2e: 12/12 (B1+B2 combined module); hot-loop fix (live-poll delay) verified -->
 
 ### B2 — Chunk rows → TranscriptTailer append events
 
@@ -67,9 +69,9 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: message renderer receives a new producer — local transcript rendering must be untouched (existing tests)
 > **Integration-test**: npm test
 
-- [ ] Row→event mapping table (chunk kinds → message roles)
-- [ ] Backfill bounds + ordering guarantees
-- [ ] Malformed-row tolerance
+- [x] Row→event mapping table (chunk kinds → message roles)
+- [x] Backfill bounds + ordering guarantees
+- [x] Malformed-row tolerance
 
 ### B3 — Degraded fallback (runner logTail + feed)
 
