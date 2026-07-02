@@ -260,6 +260,22 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
   }
+  // Phase D — mint a runner terminal/replay token for a remote (olam) session.
+  // The HMAC lives only in the returned URLs (browser-safe); the runner bearer
+  // never leaves the server. GET /api/olam/terminal-token?id=olam:<org>:<sid>
+  if (u.pathname === '/api/olam/terminal-token') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const id = u.searchParams.get('id') ?? '';
+    const session = sessionById(id);
+    if (!session || session.kind !== 'remote') return endJson(res, 404, { error: 'unknown remote session' });
+    const client = olamSource?.clientForOrg(session.org);
+    if (!client) return endJson(res, 503, { error: `org ${session.org} unavailable` });
+    client
+      .terminalToken(session.sessionId, session.pool ?? 'agentrun')
+      .then((urls) => endJson(res, 200, urls))
+      .catch((err) => endJson(res, 502, { error: String(err?.message ?? err) }));
+    return;
+  }
   if (u.pathname.startsWith('/api/collab/')) {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleCollab(req, res, u);
