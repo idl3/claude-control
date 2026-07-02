@@ -13,6 +13,8 @@ const ORG = {
   runnerTokenFiles: [],
 };
 
+const BOOT_ROUTE = ['/api/bootstrap', () => json(200, { token: 'app-bearer-1' })];
+
 /** execFile stub: cloudflared → jwt (or fail); gcloud → gsm token value. */
 function execStub({ jwt = 'jwt-1', gsm = 'runner-tok' } = {}) {
   const calls = [];
@@ -62,6 +64,7 @@ const LIST_ROW = {
 test('listSessions normalises rows on the ADR-062 identity', async () => {
   const { impl: execFileImpl } = execStub();
   const { impl: fetchImpl, calls } = fetchStub([
+    BOOT_ROUTE,
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
@@ -74,9 +77,10 @@ test('listSessions normalises rows on the ADR-062 identity', async () => {
   assert.equal(r.inFlight, true);
   assert.equal(r.halted, false);
   assert.equal(r.pool, null); // filled by enrich()
-  // JWT rode the request header, not the URL
-  assert.match(calls[0].url, /^https:\/\/spa\.test\//);
-  assert.equal(calls[0].init.headers['cf-access-token'], 'jwt-1');
+  // Both auth layers rode request headers, not the URL
+  const listCall = calls.find((x) => x.url.includes('/v1/sessions'));
+  assert.equal(listCall.init.headers['cf-access-token'], 'jwt-1');
+  assert.equal(listCall.init.headers.Authorization, 'Bearer app-bearer-1');
 });
 
 test('missing Access session surfaces a typed NoAccessSession, not a crash', async () => {
@@ -90,6 +94,7 @@ test('SPA 401 re-mints the JWT once, then surfaces NoAccessSession', async () =>
   const { impl: execFileImpl, calls: execCalls } = execStub();
   let hits = 0;
   const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
     ['/api/plan-chat/v1/sessions', () => json(hits++ === 0 ? 401 : 401, {})],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
@@ -178,6 +183,7 @@ test('enrich reports (never hides) in-flight rows the probe budget could not cov
 test('client instance never serializes token material (CP3 T1 guard)', async () => {
   const { impl: execFileImpl } = execStub({ jwt: 'JWT-SECRET', gsm: 'BEARER-SECRET' });
   const { impl: fetchImpl } = fetchStub([
+    ['/api/bootstrap', () => json(200, { token: 'APP-BEARER-SECRET' })],
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [] })],
     ['token-probe', () => json(200, {})],
   ]);
@@ -187,6 +193,7 @@ test('client instance never serializes token material (CP3 T1 guard)', async () 
   const dump = JSON.stringify(c);
   assert.ok(!dump.includes('JWT-SECRET'), 'JWT leaked via JSON.stringify(client)');
   assert.ok(!dump.includes('BEARER-SECRET'), 'runner bearer leaked via JSON.stringify(client)');
+  assert.ok(!dump.includes('APP-BEARER-SECRET'), 'app bearer leaked via JSON.stringify(client)');
 });
 
 // --- secret hygiene -------------------------------------------------------------
@@ -194,6 +201,7 @@ test('client instance never serializes token material (CP3 T1 guard)', async () 
 test('normalised rows and thrown errors never carry token material', async () => {
   const { impl: execFileImpl } = execStub({ gsm: 'SUPER-SECRET' });
   const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
     ['token-probe', () => json(401, {})],
   ]);

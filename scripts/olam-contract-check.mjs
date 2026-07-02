@@ -142,29 +142,39 @@ async function checkOrg(org) {
     record("runner-terminal-token", tt.ok ? "PASS" : "FAIL", `HTTP ${tt.status}; keys=[${Object.keys(ttBody).join(",")}]`);
   }
 
-  // 3+4 — SPA surface (CF Access JWT via cloudflared)
+  // 3+4 — SPA surface. Two-layer auth (live-verified 2026-07-02):
+  //   layer 1: CF Access JWT (operator identity, `cloudflared access token`)
+  //   layer 2: app bearer from GET /api/bootstrap {token} — by design, Access-
+  //            authenticated clients are handed PLAN_CHAT_BEARER for API calls.
   const jwt = await accessJwt(cfg.spaBase);
   if (!jwt) {
     console.error(`[e2e:skipped] reason: no Access session for ${cfg.spaBase} — run: cloudflared access login ${cfg.spaBase}`);
     record("spa-sessions", "SKIP", "no cloudflared Access session");
     record("spa-shape-auth", "SKIP", "no cloudflared Access session");
   } else {
-    const hdrs = { "cf-access-token": jwt };
-    const sessions = await fetch(`${cfg.spaBase}/api/plan-chat/v1/sessions?type=chat&scope=all`, { headers: hdrs });
-    let detail = `HTTP ${sessions.status}`;
-    if (sessions.ok) {
-      const body = await sessions.json().catch(() => null);
-      const rows = Array.isArray(body) ? body : (body?.sessions ?? []);
-      const fields = rows[0] ? Object.keys(rows[0]).join(",") : "(no rows)";
-      detail += `; rows=${Array.isArray(rows) ? rows.length : "?"}; fields=[${fields}]`;
-    }
-    record("spa-sessions", sessions.ok ? "PASS" : "FAIL", detail);
+    const boot = await fetch(`${cfg.spaBase}/api/bootstrap`, { headers: { "cf-access-token": jwt } });
+    const bootBody = boot.ok ? await boot.json().catch(() => ({})) : {};
+    const appBearer = typeof bootBody.token === "string" ? bootBody.token : "";
+    if (!appBearer) {
+      record("spa-sessions", "FAIL", `bootstrap HTTP ${boot.status}: no app bearer handed off`);
+      record("spa-shape-auth", "FAIL", "no app bearer");
+    } else {
+      const hdrs = { "cf-access-token": jwt, Authorization: `Bearer ${appBearer}` };
+      const sessions = await fetch(`${cfg.spaBase}/api/plan-chat/v1/sessions?type=chat&scope=all`, { headers: hdrs });
+      let detail = `HTTP ${sessions.status}`;
+      if (sessions.ok) {
+        const body = await sessions.json().catch(() => null);
+        const rows = Array.isArray(body) ? body : (body?.sessions ?? []);
+        const fields = rows[0] ? Object.keys(rows[0]).join(",") : "(no rows)";
+        detail += `; rows=${Array.isArray(rows) ? rows.length : "?"}; fields=[${fields}]`;
+      }
+      record("spa-sessions", sessions.ok ? "PASS" : "FAIL", detail);
 
-    // Auth-posture probe only: 400 (missing params) proves the JWT cleared the
-    // gate; 401/403 means machine JWTs are rejected — the plan's T3 fork.
-    const shape = await fetch(`${cfg.spaBase}/api/plan-chat/v1/shape`, { headers: hdrs });
-    const cleared = shape.status !== 401 && shape.status !== 403;
-    record("spa-shape-auth", cleared ? "PASS" : "FAIL", `HTTP ${shape.status} (${cleared ? "auth cleared; params-level response" : "machine JWT rejected"})`);
+      // Param-level 400 proves both auth layers cleared; 401/403 = rejected.
+      const shape = await fetch(`${cfg.spaBase}/api/plan-chat/v1/shape`, { headers: hdrs });
+      const cleared = shape.status !== 401 && shape.status !== 403;
+      record("spa-shape-auth", cleared ? "PASS" : "FAIL", `HTTP ${shape.status} (${cleared ? "auth cleared" : "machine client rejected"})`);
+    }
   }
 
   const failed = results.filter((r) => r.status === "FAIL").length;

@@ -24,11 +24,12 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | A1 (SPA legs, operator SSO) |
-| done | A2, A3, A4, A5, A6 |
+| todo | — |
+| done | A1, A2, A3, A4, A5, A6 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3 (autonomous: true, confidence 97). B3 gate: plan amended with ## Reuse decisions + ## Dependency topology (authored from established plan content). B6 elided: none (epic keeps full scaffold).
+- 2026-07-02 A1 CLOSED after operator SSO: contract check 4/4 PASS live. Recipe correction folded into code: OlamOrgClient two-layer SPA auth (JWT + bootstrap app bearer, both cached non-enumerable); live list fields richer than source (linear_issue_id present -> OQ6 escape hatch moot); shape auth CLEARED -> Phase B GO full mode. 684/684 + 332/332 + build green. Phase A: 0 todo / 6 done.
 - 2026-07-02 CP3 audit (adversarial, epic 3-lens): verdict (c) → follow-up landed. CRITICAL(T1 in-memory bearers) risk-assessed remote-likelihood → smallest-true-fix: non-enumerable token fields + JSON.stringify guard test (re-read-per-call rejected: 2 subprocess spawns/tick for a remote threat; T5 covers process compromise). HIGH(silent enrich truncation) fixed: active-only enrichment + unenriched count surfaced in orgHealth reason. MEDIUMs: 401 diagnostics label added; shared-visibility documented (single-operator tool, plan out-of-scope); tick/refresh 'race' DROPPED (atomic swap, eventual consistency, risk <0.6). 685/685 green.
 - 2026-07-02 A6 landed: remote org sections in SessionRail (health dot + reason, phase/pool/stale badges, per-org empty state), Session type extended additively, no-secret-in-bundle (dist grep + WS-frame key allowlist). node 682/682, vitest 332/332, build green. cumulative: files=20, loc=~2000 (budget: 1.0x — at budget, phase complete except A1 SSO residue)
 - 2026-07-02 A5 landed: registry merge (3-line surgical patch: _remoteSessions concat + setRemoteSessions) + RemoteSessionSource (per-org independent fetch, stale-not-dropped degradation, health()). 680/680 suite. cumulative: files=14, loc=~1700 (budget: 0.9x)
@@ -62,9 +63,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Integration-test**: n/a (this task IS the integration check)
 > **E2E test**: node scripts/olam-contract-check.mjs --org atlas (detect-and-skip with `[e2e:skipped] reason: no Access session` when cloudflared login absent)
 
-- [ ] Complete `cloudflared access login https://olam.dev-atlas.kitchen` (operator SSO; prompt if absent)
-- [ ] Authenticated GET sessions list — snapshot returned fields; confirm absence of pool/linear metadata; record ADR-062 join recipe
-- [ ] Probe shape endpoint auth with the operator JWT; record accept/reject
+- [x] Complete `cloudflared access login https://olam.dev-atlas.kitchen` (operator SSO; prompt if absent)
+- [x] Authenticated GET sessions list — snapshot returned fields; confirm absence of pool/linear metadata; record ADR-062 join recipe
+- [x] Probe shape endpoint auth with the operator JWT; record accept/reject
+<!-- e2e: full PASS (4/4 checks) on 2026-07-02 after SSO; recipe corrected: two-layer auth (JWT + /api/bootstrap app bearer); live list RICHER than source snapshot (linear_issue_id/title/plan_status present) -->
 - [x] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
 - [x] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
 <!-- e2e: pass-with-skips (runner legs PASS live; SPA legs [e2e:skipped] no Access session) on 2026-07-02 -->
