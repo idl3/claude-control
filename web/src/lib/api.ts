@@ -586,3 +586,16 @@ export async function uploadFile(file: File): Promise<UploadResult> {
   }
   return { ok: true, path: obj.path, name: obj.name ?? file.name };
 }
+
+/**
+ * Mint a remote (olam) session's terminal + replay URLs. The server calls the
+ * runner, which returns HMAC-bearing URLs safe to open in the browser; the org
+ * runner bearer never leaves the server. Returns null URLs on failure.
+ */
+export async function olamTerminalToken(
+  id: string,
+): Promise<{ uiUrl: string | null; replayUiUrl: string | null; expiresAt: string | null }> {
+  const res = await authFetch(`/api/olam/terminal-token?id=${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(`terminal-token HTTP ${res.status}`);
+  return res.json();
+}

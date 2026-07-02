@@ -103,6 +103,62 @@ function groupByTmux(sessions: Session[]): SessionGroup[] {
     }));
 }
 
+interface RemoteOrgGroup {
+  org: string;
+  health: { status: string; reason: string | null };
+  rows: Session[];
+}
+
+/** Group remote (olam) rows per org, newest activity first within the org. */
+function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
+  const byOrg = new Map<string, Session[]>();
+  for (const s of sessions) {
+    const org = s.org ?? '?';
+    if (!byOrg.has(org)) byOrg.set(org, []);
+    byOrg.get(org)!.push(s);
+  }
+  return [...byOrg.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([org, rows]) => ({
+      org,
+      health: rows[0]?.orgHealth ?? { status: 'unknown', reason: null },
+      rows: [...rows].sort((x, y) => String(y.lastActivity ?? '').localeCompare(String(x.lastActivity ?? ''))),
+    }));
+}
+
+function RemoteRow({
+  s,
+  selected,
+  onSelect,
+}: {
+  s: Session;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const label = s.title || s.summary || s.linearRef || s.id;
+  const phase = s.phase ?? (s.halted ? 'halted' : null);
+  return (
+    <li>
+      <button
+        type="button"
+        className={`session-item remote-item${selected ? ' selected' : ''}${s.stale ? ' remote-stale' : ''}`}
+        role="option"
+        aria-selected={selected}
+        onClick={() => onSelect(s.id)}
+        title={s.linearRef ? `Linear agent session ${s.linearRef}` : s.id}
+      >
+        <span className="remote-item-label">{label}</span>
+        <span className="remote-item-badges">
+          {s.inFlight ? <span className="remote-badge remote-badge-inflight">in-flight</span> : null}
+          {phase ? <span className={`remote-badge remote-badge-phase-${phase}`}>{phase}</span> : null}
+          {s.pool ? <span className="remote-badge remote-badge-pool">{s.pool}</span> : null}
+          {s.stale ? <span className="remote-badge remote-badge-stale">stale</span> : null}
+        </span>
+      </button>
+    </li>
+  );
+}
+
 function PaneRow({
   s,
   selected,
@@ -271,6 +327,7 @@ export function SessionRail({
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
   const groups = useMemo(() => {
     const visible = sessions.filter((s) => {
+      if (s.kind === 'remote') return false; // remote rows render in their own org sections
       if (filter === 'all') return true;
       if (filter === 'agents') return s.kind !== 'terminal'; // claude + codex, no shells
       if (filter === 'terminal') return s.kind === 'terminal';
@@ -281,7 +338,13 @@ export function SessionRail({
     return groupByTmux(visible);
   }, [sessions, filter]);
 
-  if (groups.length === 0) {
+  // Remote (olam) org sections — shown under 'all' and 'agents' filters.
+  const remoteGroups = useMemo(() => {
+    if (filter !== 'all' && filter !== 'agents') return [];
+    return groupRemoteByOrg(sessions.filter((s) => s.kind === 'remote'));
+  }, [sessions, filter]);
+
+  if (groups.length === 0 && remoteGroups.length === 0) {
     return (
       <div className="session-list" role="listbox" aria-label="Sessions">
         <div className="session-empty">
@@ -339,6 +402,31 @@ export function SessionRail({
           </section>
         );
       })}
+      {remoteGroups.map((g) => (
+        <section key={`remote:${g.org}`} className="session-group remote-group">
+          <div className="session-group-head remote-group-head">
+            <span
+              className={`remote-health remote-health-${g.health.status}`}
+              title={g.health.reason ?? g.health.status}
+              aria-label={`org ${g.org} health ${g.health.status}`}
+            />
+            <span className="session-group-name">olam · {g.org}</span>
+            <span className="session-group-count">{g.rows.length}</span>
+          </div>
+          {g.health.reason ? (
+            <div className="remote-group-reason" role="note">{g.health.reason}</div>
+          ) : null}
+          {g.rows.length === 0 ? (
+            <div className="session-empty">no remote sessions</div>
+          ) : (
+            <ul className="session-pane-list">
+              {g.rows.map((s) => (
+                <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
     </div>
   );
 }

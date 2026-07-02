@@ -31,6 +31,8 @@ export interface CockpitStore {
   messages: Msg[];
   pending: Pending | null;
   prompt: PanePrompt | null;
+  /** Remote (olam) selected session in degraded (log-tail) streaming mode. */
+  degraded: { degraded: boolean; reason: string | null } | null;
   subagents: SubAgent[];
   /**
    * Number of *running* sub-agents per session id. Only sessions with ≥1 running
@@ -62,7 +64,7 @@ export interface CockpitStore {
   messagesLoaded: boolean;
   select: (id: string) => void;
   resubscribe: () => void;
-  sendReply: (text: string, attachments?: number, viaAnswer?: boolean) => string | null;
+  sendReply: (text: string, attachments?: number, viaAnswer?: boolean, hardSteer?: boolean) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
@@ -104,6 +106,7 @@ export function useCockpit(): CockpitStore {
 
   // Per-session caches. Mutated via setState replacement (immutable updates).
   const [messagesById, setMessagesById] = useState<Record<string, Msg[]>>({});
+  const [degradedById, setDegradedById] = useState<Record<string, { degraded: boolean; reason: string | null }>>({});
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
@@ -163,6 +166,12 @@ export function useCockpit(): CockpitStore {
           setMessagesById((prev) => ({
             ...prev,
             [msg.id]: [...(prev[msg.id] ?? []), ...(msg.messages ?? [])],
+          }));
+          break;
+        case 'olam-degraded':
+          setDegradedById((prev) => ({
+            ...prev,
+            [msg.id]: { degraded: !!msg.degraded, reason: msg.reason ?? null },
           }));
           break;
         case 'pending':
@@ -270,7 +279,7 @@ export function useCockpit(): CockpitStore {
   // success alone is NOT delivery. Null means the frame couldn't even be sent
   // (socket closed): nothing was dispatched, show no optimistic bubble.
   const sendReply = useCallback(
-    (text: string, attachments = 0, viaAnswer = false): string | null => {
+    (text: string, attachments = 0, viaAnswer = false, hardSteer = false): string | null => {
       const id = selectedRef.current;
       if (!id || !text.trim()) return null;
       const reqId = `r${Date.now().toString(36)}${(replySeq.current++).toString(36)}`;
@@ -281,7 +290,7 @@ export function useCockpit(): CockpitStore {
       // picker via promptkey/answer first). The server's open-question reply guard
       // refuses raw composer replies into an open picker, but must let these
       // through — they ARE the answer, not an accidental keystroke.
-      const ok = socket.send({ type: 'reply', id, text, reqId, attachments, viaAnswer });
+      const ok = socket.send({ type: 'reply', id, text, reqId, attachments, viaAnswer, hardSteer });
       return ok ? reqId : null;
     },
     [socket],
@@ -393,6 +402,10 @@ export function useCockpit(): CockpitStore {
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
   );
+  const degraded = useMemo(
+    () => (selectedId ? degradedById[selectedId] ?? null : null),
+    [selectedId, degradedById],
+  );
   // True when a TUI picker is on screen for the selected session right now —
   // the fastest/most-authoritative send-guard signal (screen-truth).
   const pickerOpen = useMemo(
@@ -429,6 +442,7 @@ export function useCockpit(): CockpitStore {
     messagesLoaded,
     pending,
     prompt,
+    degraded,
     subagents,
     runningSubagentCountById,
     conn,

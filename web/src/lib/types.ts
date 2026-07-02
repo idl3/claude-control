@@ -26,10 +26,37 @@ export interface Session {
   pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
-  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal). */
-  kind?: 'claude' | 'codex' | 'terminal';
+  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal); 'remote' = an olam remote sandbox session. */
+  kind?: 'claude' | 'codex' | 'terminal' | 'remote';
   /** Per-session control transport. */
-  transport?: 'tmux' | 'rpc' | 'print' | null;
+  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
+  // --- remote (olam) rows only — additive; absent on local sessions ---------
+  /** Org slug the remote session belongs to (atlas | grain | pleri | ...). */
+  org?: string;
+  /** Runner pool the session runs on (linear | sandbox | agentrun), probe-confirmed. */
+  pool?: string | null;
+  /** Runner phase (running | done | ...); null when list-only. */
+  phase?: string | null;
+  /** ADR-062 identity: session_id === Linear AgentSession id. */
+  linearRef?: string | null;
+  /** One-line session summary from the olam session store. */
+  summary?: string;
+  /** Linear issue identifier when the session is Linear-delegated (live list field). */
+  linearIssueId?: string | null;
+  /** olam plan status (planned/approved/...); null for ad-hoc chats. */
+  planStatus?: string | null;
+  /** Agent turn currently in flight. */
+  inFlight?: boolean;
+  /** Session halted (budget/limits). */
+  halted?: boolean;
+  /** Row is last-known data from an unreachable org (render greyed). */
+  stale?: boolean;
+  /** Per-org probe state the row was fetched under. */
+  orgHealth?: { status: 'green' | 'amber' | 'red' | 'unknown'; reason: string | null };
+  /** Owning operator's email (org scope=all list). */
+  ownerEmail?: string | null;
+  /** True when owned by a different operator — view-only (steering disabled). */
+  readOnly?: boolean;
   /** Local structured transport endpoint, when the server exposes one. */
   endpoint?: string | null;
   /** true if this terminal pane is a composer >_ sister shell (auto-created). */
@@ -194,6 +221,7 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: Session[] }
   | { type: 'messages'; id: string; messages: Msg[]; pending: Pending | null }
   | { type: 'append'; id: string; messages: Msg[] }
+  | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }
@@ -214,7 +242,7 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
-  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean }
+  | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }

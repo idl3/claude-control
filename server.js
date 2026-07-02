@@ -34,6 +34,10 @@ import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
+import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
+import { RemoteSessionSource } from './lib/olam-sessions.js';
+import { OlamTranscriptSource } from './lib/olam-transcript.js';
+import { dispatchSteer, composerMode, replyTransport } from './lib/olam-transport.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
@@ -121,6 +125,15 @@ const CONFIG = {
   iconFile:
     env('ICON') || path.join(os.homedir(), '.claude-control', 'icon.png'),
 };
+
+// Remote olam orgs (docs/plans/cockpit-olam-remote-sessions). Feature-flag by
+// file presence: no olam.json → OLAM.enabled false and nothing below changes.
+// A malformed file or a tokenless server with orgs configured refuses startup
+// (org bearers must not sit behind an open port — design doc T5, decision 7).
+const OLAM = loadOlamConfig();
+assertAuthWithRemoteOrgs(OLAM, CONFIG.token);
+/** @type {import('./lib/olam-sessions.js').RemoteSessionSource|null} */
+let olamSource = null;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -246,6 +259,22 @@ const _handler = (req, res) => {
   if (u.pathname === '/api/sessions') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return endJson(res, 200, { sessions: registry.getSessions() });
+  }
+  // Phase D — mint a runner terminal/replay token for a remote (olam) session.
+  // The HMAC lives only in the returned URLs (browser-safe); the runner bearer
+  // never leaves the server. GET /api/olam/terminal-token?id=olam:<org>:<sid>
+  if (u.pathname === '/api/olam/terminal-token') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const id = u.searchParams.get('id') ?? '';
+    const session = sessionById(id);
+    if (!session || session.kind !== 'remote') return endJson(res, 404, { error: 'unknown remote session' });
+    const client = olamSource?.clientForOrg(session.org);
+    if (!client) return endJson(res, 503, { error: `org ${session.org} unavailable` });
+    client
+      .terminalToken(session.sessionId, session.pool ?? 'agentrun')
+      .then((urls) => endJson(res, 200, urls))
+      .catch((err) => endJson(res, 502, { error: String(err?.message ?? err) }));
+    return;
   }
   if (u.pathname.startsWith('/api/collab/')) {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -1668,6 +1697,42 @@ claudePrint.on('close', (id) => {
 });
 
 function ensureSubscription(id) {
+  // Remote (olam) sessions stream from the chunks substrate, not a local
+  // transcript file. Build an OlamTranscriptSource whose 'append' events carry
+  // the SAME NormalizedMessage shape as the local tailer, so the WS fan-out +
+  // renderer are reused. Exactly one live subscription per selected session;
+  // teardown/trim/snapshot go through the shared sub.tailer surface below.
+  {
+    const remote = sessionById(id);
+    if (remote?.kind === 'remote') {
+      const existing = subscriptions.get(id);
+      if (existing) return existing;
+      const client = olamSource?.clientForOrg(remote.org);
+      if (!client || !remote.worldId) {
+        // Can't stream (org gone from config, or no world_id yet) — allow a
+        // tailer-less sub so the row is still selectable; a later refresh that
+        // fills world_id upgrades it via upgradeSubscriptionIfTranscriptReady's
+        // remote analogue (recreated on next select).
+        const bare = { tailer: null, subagents: null, clients: new Set(), pending: null, ready: Promise.resolve(), remote: true };
+        subscriptions.set(id, bare);
+        return bare;
+      }
+      const source = new OlamTranscriptSource(client, {
+        worldId: remote.worldId,
+        sessionId: remote.sessionId,
+        pool: remote.pool ?? 'agentrun',
+        maxBuffer: CONFIG.maxBuffer,
+      });
+      const rsub = { tailer: source, subagents: null, clients: new Set(), pending: null, remote: true };
+      subscriptions.set(id, rsub);
+      source.on('append', (msgs) => broadcastTo(id, { type: 'append', id, messages: msgs }));
+      source.on('banner', (b) => broadcastTo(id, { type: 'olam-degraded', id, degraded: b.degraded, reason: b.reason }));
+      source.on('error', (err) =>
+        broadcastTo(id, { type: 'ack', op: 'tail', ok: false, error: String(err?.message || err) }));
+      rsub.ready = source.start();
+      return rsub;
+    }
+  }
   let sub = subscriptions.get(id);
   if (sub) {
     // Upgrade a previously tailer-less subscription once the session's
@@ -2013,6 +2078,36 @@ async function handleClientMessage(ws, msg) {
     case 'reply': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      // Remote (olam) sessions steer via the cloud-dispatch mirror, not tmux:
+      // no tmux target, no pane picker, no send-settle delay — so this branch
+      // early-returns BEFORE all of that. The agent's reply streams back as
+      // chunks (Phase B), so there is no separate response plumbing.
+      if (replyTransport(session) === 'olam') {
+        const reqId = msg.reqId;
+        const mode = composerMode(session);
+        if (mode === 'read-only') {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: 'This session is read-only — steering is disabled.' });
+          return;
+        }
+        const client = olamSource?.clientForOrg(session.org);
+        if (!client || !session.worldId) {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: `Cannot steer ${session.org} session (org unavailable or no world id yet).` });
+          return;
+        }
+        const steerMode = msg.hardSteer ? 'hard' : 'soft';
+        const result = await dispatchSteer(client, {
+          worldId: session.worldId,
+          sessionId: session.sessionId,
+          draft: String(msg.text ?? ''),
+          mode: steerMode,
+        });
+        if (result.ok) {
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode });
+        } else {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: result.error });
+        }
+        return;
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       // SAFETY: never send a raw reply (paste+Enter) into a pane with an OPEN
       // picker (AskUserQuestion OR a pane-scrape permission/trust/plan/numbered
@@ -2620,6 +2715,11 @@ async function main() {
   registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
   resources.start();
+  if (OLAM.enabled) {
+    olamSource = new RemoteSessionSource(OLAM, registry);
+    olamSource.start();
+    console.log(`[olam] remote sessions enabled for orgs: ${OLAM.orgs.map((o) => o.org).join(', ')}`);
+  }
   await registry.refresh().catch(() => {});
 
   // Daily attachment cleanup: sweep at startup, then every 24h.

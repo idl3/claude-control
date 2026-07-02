@@ -5,12 +5,13 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
+import { remoteComposerMode } from './lib/olamMode';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll } from './lib/api';
+import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -382,7 +383,17 @@ function AppInner() {
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
       const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
-      const reqId = cockpit.sendReply(text, paths.length);
+      // Remote steer: read-only refuses locally; else pass the hard-steer flag.
+      if (selectedSession?.kind === 'remote' && remoteComposerMode(selectedSession) === 'read-only') {
+        showToast('This session is read-only — steering disabled.', 'error');
+        return;
+      }
+      const reqId = cockpit.sendReply(
+        text,
+        paths.length,
+        false,
+        selectedSession?.kind === 'remote' ? steerHardRef.current : false,
+      );
       if (!reqId) {
         // The socket couldn't even write the frame — nothing was dispatched, so
         // show NO optimistic bubble (the old code's danger: a bubble that lied).
@@ -1120,6 +1131,33 @@ function AppInner() {
 
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
+  );
+
+  // Remote (olam) composer mode + hard-steer toggle (Phase C).
+  const remoteMode = useMemo(
+    () => (selectedSession?.kind === 'remote' ? remoteComposerMode(selectedSession) : null),
+    [selectedSession],
+  );
+  const [steerHard, setSteerHard] = useState(false);
+  const steerHardRef = useRef(false);
+  steerHardRef.current = steerHard;
+
+  // Phase D — open a remote session's live terminal / replay in a new tab. The
+  // server mints the runner HMAC token; we only ever hand the browser the URL.
+  const openRemoteTerminal = useCallback(
+    async (which: 'ui' | 'replay') => {
+      const id = cockpit.selectedId;
+      if (!id) return;
+      try {
+        const { uiUrl, replayUiUrl } = await olamTerminalToken(id);
+        const url = which === 'replay' ? replayUiUrl : uiUrl;
+        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        else showToast('No terminal URL available for this session', 'error');
+      } catch (err) {
+        showToast(`Terminal token failed: ${(err as Error).message}`, 'error');
+      }
+    },
+    [cockpit.selectedId, showToast],
   );
 
   // "Answer settling" state: suppresses the scrape prompt / synthesized-ask
@@ -1867,7 +1905,38 @@ function AppInner() {
               />
             ) : (
               <div className="detail-split">
-                <AgentKindContext.Provider value={selectedSession?.kind ?? 'claude'}>
+                {cockpit.degraded?.degraded ? (
+                  <div className="olam-degraded-banner" role="status">
+                    ⚠ log tail only — live conversation stream unavailable
+                    {cockpit.degraded.reason ? ` (${cockpit.degraded.reason})` : ''}
+                  </div>
+                ) : null}
+                {remoteMode ? (
+                  <div className={`olam-steer-bar olam-steer-${remoteMode}`} role="status">
+                    <span className="olam-terminal-actions">
+                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('ui')} title="Open a live terminal into this sandbox">⌥ terminal</button>
+                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('replay')} title="Open the recorded session replay">▷ replay</button>
+                    </span>
+                    {remoteMode === 'approve' ? (
+                      <span>⏵ approve mode — your reply approves + starts this session</span>
+                    ) : remoteMode === 'read-only' ? (
+                      <span>🔒 read-only session — steering disabled</span>
+                    ) : (
+                      <>
+                        <span>⇄ steering {selectedSession?.org}</span>
+                        <label className="olam-steer-toggle">
+                          <input
+                            type="checkbox"
+                            checked={steerHard}
+                            onChange={(e) => setSteerHard(e.target.checked)}
+                          />
+                          hard steer
+                        </label>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+                <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   {/* Catch a render crash in the transcript so one bad message
                       can't white-screen the whole app; resets on session switch. */}
