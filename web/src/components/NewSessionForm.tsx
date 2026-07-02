@@ -62,12 +62,16 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   const [name, setName] = useState('');
-  const [cwd, setCwd] = useState('');
+  // Selected value in the project-dir dropdown: a path string, or '' to use
+  // defaultCwd, or the sentinel 'custom' to show the free-text input.
+  const [cwdChoice, setCwdChoice] = useState('');
+  const [cwdCustom, setCwdCustom] = useState('');
   const [creating, setCreating] = useState(false);
   // A fresh default each time the form opens, so the placeholder is current.
   const [placeholder, setPlaceholder] = useState(defaultName);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
+  const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   // On open: refresh default name, reset state, fetch agent availability + config.
@@ -75,7 +79,8 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     if (!open) return;
     setPlaceholder(defaultName());
     setName('');
-    setCwd('');
+    setCwdChoice('');
+    setCwdCustom('');
     setAgent(defaultAgentForFilter(filter));
     setClaudeTransport('tmux');
     setCodexTransport('rpc');
@@ -90,7 +95,10 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
         // Non-fatal: form still works, agents just won't show disabled state.
       });
     getConfig()
-      .then((cfg) => setDefaultCwd(cfg.defaultCwd || '~'))
+      .then((cfg) => {
+        setDefaultCwd(cfg.defaultCwd || '~');
+        setProjectDirs(cfg.projectDirs ?? []);
+      })
       .catch(() => {
         // Non-fatal: placeholder falls back to '~'.
       });
@@ -101,7 +109,8 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
   const close = useCallback(() => {
     setOpen(false);
     setName('');
-    setCwd('');
+    setCwdChoice('');
+    setCwdCustom('');
   }, []);
 
   const submit = useCallback(async () => {
@@ -109,7 +118,12 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     setCreating(true);
     // Required-with-default: blank name field falls back to the shown placeholder.
     const resolvedName = agent === 'codex' ? undefined : (name.trim() || placeholder);
-    const resolvedCwd = cwd.trim() || undefined;
+    // Resolve the effective cwd: '' = use server default; 'custom' = free-text;
+    // otherwise the path from the selected dropdown option.
+    const resolvedCwd =
+      cwdChoice === 'custom'
+        ? cwdCustom.trim() || undefined
+        : cwdChoice || undefined;
     onToast('Creating session…');
     try {
       const result = await createSession({
@@ -126,7 +140,7 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
     } finally {
       setCreating(false);
     }
-  }, [creating, agent, claudeTransport, codexTransport, name, cwd, placeholder, onToast, close]);
+  }, [creating, agent, claudeTransport, codexTransport, name, cwdChoice, cwdCustom, placeholder, onToast, close]);
 
   // Helper: look up availability for an agent id.
   function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
@@ -272,22 +286,39 @@ export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFor
         </div>
       )}
 
-      {/* CWD field — plain text, server defaults when blank */}
-      <input
+      {/* CWD: dropdown of project directories + Custom… option */}
+      <select
         className="rail-new-cwd"
-        type="text"
-        value={cwd}
-        placeholder={`(default) ${defaultCwd}`}
+        value={cwdChoice}
         disabled={creating}
-        onChange={(e) => setCwd(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') { e.preventDefault(); close(); }
-        }}
+        onChange={(e) => setCwdChoice(e.target.value)}
         aria-label="Working directory"
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-      />
+      >
+        <option value="">(default) {defaultCwd}</option>
+        {projectDirs.map((d) => (
+          <option key={d.path} value={d.path}>
+            {d.label}
+          </option>
+        ))}
+        <option value="custom">Custom…</option>
+      </select>
+      {cwdChoice === 'custom' ? (
+        <input
+          className="rail-new-cwd"
+          type="text"
+          value={cwdCustom}
+          placeholder="~/Projects/my-project"
+          disabled={creating}
+          onChange={(e) => setCwdCustom(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(); }
+          }}
+          aria-label="Custom working directory"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+      ) : null}
 
       <div className="rail-new-actions">
         <button
