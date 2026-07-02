@@ -1867,6 +1867,12 @@ function AppInner() {
               />
             ) : (
               <div className="detail-split">
+                {cockpit.degraded?.degraded ? (
+                  <div className="olam-degraded-banner" role="status">
+                    ⚠ log tail only — live conversation stream unavailable
+                    {cockpit.degraded.reason ? ` (${cockpit.degraded.reason})` : ''}
+                  </div>
+                ) : null}
                 <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   {/* Catch a render crash in the transcript so one bad message

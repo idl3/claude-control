@@ -217,6 +217,7 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: Session[] }
   | { type: 'messages'; id: string; messages: Msg[]; pending: Pending | null }
   | { type: 'append'; id: string; messages: Msg[] }
+  | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }

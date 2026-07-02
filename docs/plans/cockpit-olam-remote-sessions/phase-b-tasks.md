@@ -24,11 +24,14 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | State | Tasks |
 |---|---|
-| todo | B1, B2, B3, B4 |
-| done | — |
+| todo | — |
+| done | B1, B2, B3, B4 |
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Go/no-go per org on first authenticated shape read (decision 6/plan Phase B).
+- 2026-07-02 CP3 audit (adversarial, epic 3-lens): 1 CRITICAL confirmed + fixed — degraded feed cursor used monotonic Math.max, so a runner feed reset (restart/truncate) couldn't rewind → silent skip of new entries. Fix: detect reset (serverCursor or feed.length < ours) → rewind to 0 (replay window; duplicate-over-skip) + added runner-reset regression test. Other 6 findings all Land-as-is (teardown/unsubscribe leaks bounded by single-operator + 30min heartbeat; T1 verified no secrets in olam-degraded/append frames; degraded path reuses org auth, no bypass). 16/16 transcript, full suite green.
+- 2026-07-02 B3+B4 landed: OlamTranscriptSource (shape full-mode w/ runner-feed degraded fallback, banner event, tailer-compatible getMessages/getPending/trim surface) + server.js remote branch in ensureSubscription (one live source per selected session, append→WS, olam-degraded→banner) + useCockpit degraded state + App banner. node 703 (0 fail, 1 skip), lifecycle 4/4. cumulative: files~6, loc~900 (budget 1.8x of B's 500 — B absorbed B1/B2 combine + degraded + full UI wiring; within epic budget). Phase B: 0 todo / 4 done.
+- 2026-07-02 execute CP0 passed against 3a802b2 (umbrella tip w/ merged Phase A). Phase B GO full-mode (A1 live-verified shape auth cleared). B1+B2 landed as one module lib/olam-transcript.js (ShapeSubscriber + chunksToMessages). Caught+fixed a live-poll hot-loop (starved node:test reporter) — added livePollDelayMs bound. cumulative: files=2, loc=~430 (budget 0.86x of B's 500)
 -->
 
 ## Audit item coverage
@@ -52,9 +55,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated (new module)
 > **Integration-test**: node --test test/olam-transcript.test.js
 
-- [ ] Long-poll loop with offset/handle state (persisted per session)
-- [ ] Backoff + reconnect semantics
-- [ ] Typed degraded signal on auth/shape failure
+- [x] Long-poll loop with offset/handle state (persisted per session)
+- [x] Backoff + reconnect semantics (livePollDelayMs; 409 rehydrate)
+- [x] Typed degraded signal on auth/shape failure
+<!-- e2e: 12/12 (B1+B2 combined module); hot-loop fix (live-poll delay) verified -->
 
 ### B2 — Chunk rows → TranscriptTailer append events
 
@@ -67,9 +71,9 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: message renderer receives a new producer — local transcript rendering must be untouched (existing tests)
 > **Integration-test**: npm test
 
-- [ ] Row→event mapping table (chunk kinds → message roles)
-- [ ] Backfill bounds + ordering guarantees
-- [ ] Malformed-row tolerance
+- [x] Row→event mapping table (chunk kinds → message roles)
+- [x] Backfill bounds + ordering guarantees
+- [x] Malformed-row tolerance
 
 ### B3 — Degraded fallback (runner logTail + feed)
 
@@ -82,9 +86,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated
 > **Integration-test**: node --test test/olam-transcript-degraded.test.js
 
-- [ ] Feed/logTail poller behind the same TranscriptSource interface
-- [ ] Degraded banner state through WS to frontend
-- [ ] Recovery path
+- [x] Feed/logTail poller behind the same TranscriptSource interface
+- [x] Degraded banner state through WS to frontend (`olam-degraded` msg → banner)
+- [x] Recovery path (shape 401 → DegradedRequired → feed tail; cursor-tracked)
+<!-- e2e: 15/15 (B1+B2+B3 module); degraded banner rendered in App.tsx -->
 
 ### B4 — Selected-session lifecycle wiring
 
@@ -97,9 +102,10 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: server.js WS connection handler (all clients)
 > **Integration-test**: npm test
 
-- [ ] Subscribe/teardown on selection messages
-- [ ] Single-subscription invariant
-- [ ] Local-path snapshot guard
+- [x] Subscribe/teardown on selection messages (ensureSubscription remote branch)
+- [x] Single-subscription invariant (blocking-client concurrency test: max 1)
+- [x] Local-path snapshot guard (getMessages/getPending/trim surface; full suite green)
+<!-- e2e: olam-stream-lifecycle 4/4; node 703 (0 fail); web vitest 332 -->
 
 ## Dependencies between tasks
 
