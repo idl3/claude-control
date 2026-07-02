@@ -1867,7 +1867,7 @@ function AppInner() {
               />
             ) : (
               <div className="detail-split">
-                <AgentKindContext.Provider value={selectedSession?.kind ?? 'claude'}>
+                <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                   {/* Catch a render crash in the transcript so one bad message
                       can't white-screen the whole app; resets on session switch. */}
