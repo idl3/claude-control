@@ -11,7 +11,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll } from './lib/api';
+import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -1142,6 +1142,24 @@ function AppInner() {
   const steerHardRef = useRef(false);
   steerHardRef.current = steerHard;
 
+  // Phase D — open a remote session's live terminal / replay in a new tab. The
+  // server mints the runner HMAC token; we only ever hand the browser the URL.
+  const openRemoteTerminal = useCallback(
+    async (which: 'ui' | 'replay') => {
+      const id = cockpit.selectedId;
+      if (!id) return;
+      try {
+        const { uiUrl, replayUiUrl } = await olamTerminalToken(id);
+        const url = which === 'replay' ? replayUiUrl : uiUrl;
+        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        else showToast('No terminal URL available for this session', 'error');
+      } catch (err) {
+        showToast(`Terminal token failed: ${(err as Error).message}`, 'error');
+      }
+    },
+    [cockpit.selectedId, showToast],
+  );
+
   // "Answer settling" state: suppresses the scrape prompt / synthesized-ask
   // from reflashing after the user answers, until the TUI picker has visually
   // disappeared. See web/src/lib/answerSettle.ts for design rationale.
@@ -1895,6 +1913,10 @@ function AppInner() {
                 ) : null}
                 {remoteMode ? (
                   <div className={`olam-steer-bar olam-steer-${remoteMode}`} role="status">
+                    <span className="olam-terminal-actions">
+                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('ui')} title="Open a live terminal into this sandbox">⌥ terminal</button>
+                      <button type="button" className="olam-term-btn" onClick={() => openRemoteTerminal('replay')} title="Open the recorded session replay">▷ replay</button>
+                    </span>
                     {remoteMode === 'approve' ? (
                       <span>⏵ approve mode — your reply approves + starts this session</span>
                     ) : remoteMode === 'read-only' ? (
