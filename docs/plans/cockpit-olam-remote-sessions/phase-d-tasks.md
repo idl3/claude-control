@@ -27,6 +27,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Pool comes from Phase A enrichment; runner leg already live-verified (A0-4).
+- 2026-07-02 CP3 audit (adversarial, epic × clean-revert, Security+Simplicity): (a) Land as-is — ZERO findings. T1 held (runner bearer never leaves server; only uiUrl/replayUiUrl/expiresAt projected; wsUrl/uploadUrl dropped). Auth-gated route, session-kind validated, window.open noopener,noreferrer, TTL clamped server-side, encodeURIComponent on sessionId/pool, on-demand mint = clean expiry. Epic A–D production-ready.
 - 2026-07-02 execute CP0 passed against 2bf19e8 (umbrella w/ A+B+C). D1+D2 landed: OlamOrgClient.terminalToken (browser-safe URL projection — drops wsUrl/uploadUrl, TTL clamp, 401 re-walk) + GET /api/olam/terminal-token server route + olamTerminalToken client + terminal/replay buttons in the steer bar. On-demand mint = free expiry handling. grain/pleri = config-only (multi-org script already shipped A1). Phase D: 0 todo / 2 done.
 
 ## M4 sign-off
