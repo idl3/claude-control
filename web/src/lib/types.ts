@@ -41,6 +41,10 @@ export interface Session {
   linearRef?: string | null;
   /** One-line session summary from the olam session store. */
   summary?: string;
+  /** Linear issue identifier when the session is Linear-delegated (live list field). */
+  linearIssueId?: string | null;
+  /** olam plan status (planned/approved/...); null for ad-hoc chats. */
+  planStatus?: string | null;
   /** Agent turn currently in flight. */
   inFlight?: boolean;
   /** Session halted (budget/limits). */

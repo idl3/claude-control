@@ -60,7 +60,7 @@ test('built web bundle contains no olam secret machinery', (t) => {
 const ALLOWED_REMOTE_KEYS = new Set([
   'id', 'kind', 'transport', 'pending', 'stale', 'orgHealth',
   'org', 'sessionId', 'worldId', 'summary', 'lastActivity',
-  'inFlight', 'halted', 'linearRef', 'pool', 'phase',
+  'inFlight', 'halted', 'linearRef', 'linearIssueId', 'planStatus', 'title', 'pool', 'phase',
 ]);
 
 test('remote WS rows carry only the allow-listed keys (no token-shaped fields)', async () => {

@@ -135,7 +135,7 @@ function RemoteRow({
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
-  const label = s.summary || s.linearRef || s.id;
+  const label = s.title || s.summary || s.linearRef || s.id;
   const phase = s.phase ?? (s.halted ? 'halted' : null);
   return (
     <li>
