@@ -47,6 +47,8 @@ import {
   ActivityIcon,
   SearchIcon,
   RefreshIcon,
+  SteeringWheelIcon,
+  ExternalLinkIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Msg, Pending, ServerMessage } from './lib/types';
@@ -1900,6 +1902,82 @@ function AppInner() {
                         ) : null}
                       </button>
                     ) : null}
+                    {/* Olam (remote) controls — folded into the shared action bar
+                        (was a standalone .olam-steer-bar row in the transcript area).
+                        Green-accented so they read as remote-specific at a glance;
+                        absent entirely for local sessions since remoteMode is null. */}
+                    {remoteMode ? (
+                      <>
+                        <button
+                          type="button"
+                          className="detail-action detail-action--olam"
+                          aria-pressed={remoteTermOpen}
+                          data-on={remoteTermOpen ? 'true' : undefined}
+                          disabled={remoteSandboxEnded}
+                          aria-label="Remote terminal"
+                          title={
+                            remoteSandboxEnded
+                              ? 'Sandbox ended — no live terminal'
+                              : remoteTermOpen
+                                ? 'Close the inline terminal'
+                                : 'Open a live terminal into this sandbox'
+                          }
+                          onClick={() => void toggleRemoteTerminal()}
+                        >
+                          <TerminalSquareIcon />
+                        </button>
+                        {remoteMode === 'steer' ? (
+                          <button
+                            type="button"
+                            className="detail-action detail-action--olam"
+                            aria-pressed={steerHard}
+                            data-on={steerHard ? 'true' : undefined}
+                            aria-label={steerHard ? 'Hard steer on' : 'Hard steer off'}
+                            title={
+                              steerHard
+                                ? `Hard steer on — replies interrupt ${selectedSession?.org ?? 'the agent'} immediately`
+                                : `Hard steer off — replies queue for ${selectedSession?.org ?? 'the agent'}`
+                            }
+                            onClick={() => setSteerHard((v) => !v)}
+                          >
+                            <SteeringWheelIcon />
+                          </button>
+                        ) : null}
+                        <span
+                          className={`detail-action-pill detail-action-pill--${remoteMode}`}
+                          role="status"
+                          title={
+                            remoteMode === 'approve'
+                              ? 'approve mode — your reply approves + starts this session'
+                              : remoteMode === 'read-only'
+                                ? 'read-only session — steering disabled'
+                                : `steering ${selectedSession?.org ?? ''}`
+                          }
+                        >
+                          {remoteMode === 'approve' ? '⏵ approve' : remoteMode === 'read-only' ? '🔒 read-only' : '⇄ steer'}
+                        </span>
+                        {selectedSession?.prs?.length ? (
+                          <a
+                            href={selectedSession.prs[0].url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="detail-action detail-action--olam"
+                            aria-label="Open PR"
+                            title={
+                              selectedSession.prs.length > 1
+                                ? `${selectedSession.prs.length} PRs — open the first`
+                                : `Open PR #${selectedSession.prs[0].number ?? ''}`
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLinkIcon />
+                            {selectedSession.prs.length > 1 ? (
+                              <span className="detail-action-count">{selectedSession.prs.length}</span>
+                            ) : null}
+                          </a>
+                        ) : null}
+                      </>
+                    ) : null}
                   </>
                 ) : null}
                 <button
@@ -1936,60 +2014,6 @@ function AppInner() {
                   <div className="olam-degraded-banner" role="status">
                     ⚠ log tail only — live conversation stream unavailable
                     {cockpit.degraded.reason ? ` (${cockpit.degraded.reason})` : ''}
-                  </div>
-                ) : null}
-                {remoteMode ? (
-                  <div className={`olam-steer-bar olam-steer-${remoteMode}`} role="status">
-                    <span className="olam-terminal-actions">
-                      <button
-                        type="button"
-                        className="olam-term-btn"
-                        aria-pressed={remoteTermOpen}
-                        disabled={remoteSandboxEnded}
-                        onClick={() => void toggleRemoteTerminal()}
-                        title={
-                          remoteSandboxEnded
-                            ? 'Sandbox ended — no live terminal'
-                            : remoteTermOpen
-                              ? 'Close the inline terminal'
-                              : 'Open a live terminal into this sandbox'
-                        }
-                      >
-                        ⌥ terminal
-                      </button>
-                    </span>
-                    <span className="olam-steer-mode">
-                      {remoteMode === 'approve' ? (
-                        <span>⏵ approve mode — your reply approves + starts this session</span>
-                      ) : remoteMode === 'read-only' ? (
-                        <span>🔒 read-only session — steering disabled</span>
-                      ) : (
-                        <>
-                          <span>⇄ steering {selectedSession?.org}</span>
-                          <label className="olam-steer-toggle">
-                            <input
-                              type="checkbox"
-                              checked={steerHard}
-                              onChange={(e) => setSteerHard(e.target.checked)}
-                            />
-                            hard steer
-                          </label>
-                        </>
-                      )}
-                    </span>
-                    {selectedSession?.prs?.length ? (
-                      <a
-                        href={selectedSession.prs[0].url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="remote-badge remote-badge-pr olam-steer-pr"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {selectedSession.prs.length > 1
-                          ? `${selectedSession.prs.length} PRs`
-                          : `PR #${selectedSession.prs[0].number ?? ''}`}
-                      </a>
-                    ) : null}
                   </div>
                 ) : null}
                 {remoteTermOpen && selectedSession?.kind === 'remote' ? (

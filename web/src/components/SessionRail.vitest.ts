@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { claudeWorking } from './SessionRail';
+import { claudeWorking, remoteRowLabel } from './SessionRail';
 import type { Session } from '../lib/types';
 
 /**
@@ -181,5 +181,33 @@ describe('computeClaudeState — cloning state (running sub-agents)', () => {
     vi.setSystemTime(Date.now());
     const s = makeSession({ id: 'sess-l', lastActivityMs: Date.now() - 60_000 });
     expect(computeClaudeState(s, 'sess-l', true)).toBe('cloning');
+  });
+});
+
+describe('remoteRowLabel — rail label never shows the raw olam:org:uuid id', () => {
+  it('prefers title when present', () => {
+    const s = { id: 'olam:atlas:55717fae-...', title: 'Fix login bug', summary: 'ignored' };
+    expect(remoteRowLabel(s)).toBe('Fix login bug');
+  });
+
+  it('falls back to summary when title is absent', () => {
+    const s = { id: 'olam:atlas:55717fae-...', title: undefined, summary: 'Investigate flaky test' };
+    expect(remoteRowLabel(s)).toBe('Investigate flaky test');
+  });
+
+  it('falls back to the prettified id (org · short8) when both title and summary are absent', () => {
+    const s = { id: 'olam:atlas:55717fae-1234-5678-9abc-def012345678', title: undefined, summary: undefined };
+    expect(remoteRowLabel(s)).toBe('atlas · 55717fae');
+  });
+
+  it('falls back to the prettified id when title is an empty string (falsy)', () => {
+    const s = { id: 'olam:grain:00000000-1111-2222-3333-444444444444', title: '', summary: undefined };
+    expect(remoteRowLabel(s)).toBe('grain · 00000000');
+  });
+
+  it('never returns the raw 36-char olam:org:uuid id verbatim', () => {
+    const rawId = 'olam:atlas:55717fae-1234-5678-9abc-def012345678';
+    const s = { id: rawId, title: undefined, summary: undefined };
+    expect(remoteRowLabel(s)).not.toBe(rawId);
   });
 });

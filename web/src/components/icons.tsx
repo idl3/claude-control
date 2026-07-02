@@ -140,6 +140,42 @@ export function SearchIcon(p: IconProps) {
   );
 }
 
+// Steering-wheel glyph — the olam "hard steer" toggle in the detail action bar
+// (Change 1: relocated out of the old .olam-steer-bar).
+export function SteeringWheelIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M12 3v6.5" />
+      <path d="m5.6 8.5 5.7 3.3" />
+      <path d="m18.4 8.5-5.7 3.3" />
+      <path d="M12 14.5V21" />
+    </Svg>
+  );
+}
+
+// External-link glyph — the olam "Open PR" action bar button.
+export function ExternalLinkIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+    </Svg>
+  );
+}
+
+// Cloud glyph — leading icon for remote (olam) session rail rows, the
+// analogue of ClaudeRobotIcon/CodexIcon for local panes (Change 2).
+export function CloudIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A4.5 4.5 0 0 0 6.5 19h11z" />
+    </Svg>
+  );
+}
+
 // Battery with a fill bar (width set inline by the caller) + optional charge bolt.
 export function StopIcon(p: IconProps) {
   return (

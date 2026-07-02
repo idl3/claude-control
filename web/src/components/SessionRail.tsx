@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon } from './icons';
+import { TerminalSquareIcon, CloudIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
+import { prettifyRemoteId } from '../lib/olamLabel';
 
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
@@ -136,6 +137,17 @@ export function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
     }));
 }
 
+/**
+ * Rail-row label for a remote (olam) session. Never falls through to the raw
+ * 36-char `olam:org:uuid` id — the SAME prettifier the detail header uses
+ * (sessionDisplayLabel/prettifyRemoteId, web/src/lib/olamLabel.ts) turns an
+ * id-only row into "atlas · 55717fae". Real titles backfill separately
+ * server-side and take over automatically once present.
+ */
+export function remoteRowLabel(s: Pick<Session, 'title' | 'summary' | 'id'>): string {
+  return s.title || s.summary || prettifyRemoteId(s.id);
+}
+
 function RemoteRow({
   s,
   selected,
@@ -145,7 +157,7 @@ function RemoteRow({
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
-  const label = s.title || s.summary || s.linearRef || s.id;
+  const label = remoteRowLabel(s);
   const phase = s.phase ?? (s.halted ? 'halted' : null);
   return (
     <li>
@@ -157,25 +169,49 @@ function RemoteRow({
         onClick={() => onSelect(s.id)}
         title={s.linearRef ? `Linear agent session ${s.linearRef}` : s.id}
       >
-        <span className="remote-item-label">{label}</span>
-        <span className="remote-item-badges">
-          {s.inFlight ? <span className="remote-badge remote-badge-inflight">in-flight</span> : null}
-          {phase ? <span className={`remote-badge remote-badge-phase-${phase}`}>{phase}</span> : null}
-          {s.pool ? <span className="remote-badge remote-badge-pool">{s.pool}</span> : null}
-          {s.archived ? <span className="remote-badge remote-badge-archived">archived</span> : null}
-          {s.prs?.length ? (
-            <a
-              href={s.prs[0].url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="remote-badge remote-badge-pr"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {s.prs.length > 1 ? `${s.prs.length} PRs` : `PR #${s.prs[0].number ?? ''}`}
-            </a>
-          ) : null}
-          {s.stale ? <span className="remote-badge remote-badge-stale">stale</span> : null}
-        </span>
+        <div className="session-top">
+          {/* Leading icon, mirroring PaneRow's .session-top / .pane-icon — gives
+              remote rows the same visual anchor as local Claude/Codex/terminal rows. */}
+          <span
+            className="pane-icon"
+            data-kind="remote"
+            data-active="true"
+            aria-label="olam remote session"
+          >
+            <CloudIcon size={16} />
+          </span>
+          <span className="remote-item-label">{label}</span>
+          <span className="remote-item-badges">
+            {s.inFlight ? <span className="remote-badge remote-badge-inflight">in-flight</span> : null}
+            {phase ? <span className={`remote-badge remote-badge-phase-${phase}`}>{phase}</span> : null}
+            {s.pool ? <span className="remote-badge remote-badge-pool">{s.pool}</span> : null}
+            {s.archived ? <span className="remote-badge remote-badge-archived">archived</span> : null}
+            {s.prs?.length ? (
+              <a
+                href={s.prs[0].url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="remote-badge remote-badge-pr"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {s.prs.length > 1 ? `${s.prs.length} PRs` : `PR #${s.prs[0].number ?? ''}`}
+              </a>
+            ) : null}
+            {s.stale ? <span className="remote-badge remote-badge-stale">stale</span> : null}
+          </span>
+        </div>
+        {/* Model + context-remaining — SAME session-meta render local PaneRow
+            uses (Change 2, coordinator direction: cockpit-only render
+            passthrough). Silent until s.model/s.ctxPct are populated; the
+            olam-side SPA change to surface message_usage lands separately. */}
+        {s.model || s.ctxPct != null ? (
+          <div className="session-meta">
+            {s.model ? <span className="meta-model">{s.model}</span> : null}
+            {s.ctxPct != null ? (
+              <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
+            ) : null}
+          </div>
+        ) : null}
       </button>
     </li>
   );
@@ -210,11 +246,15 @@ function RemoteOrgSection({
       {g.rows.length === 0 && g.archivedRows.length === 0 ? (
         <div className="session-empty">no remote sessions</div>
       ) : (
-        <ul className="session-pane-list">
-          {g.rows.map((s) => (
-            <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
-          ))}
-        </ul>
+        // .session-window (no header — olam rows have no tmux window concept)
+        // matches the left-border indent local PaneRow lists get for free.
+        <div className="session-window remote-window">
+          <ul className="session-pane-list">
+            {g.rows.map((s) => (
+              <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+            ))}
+          </ul>
+        </div>
       )}
       {g.archivedRows.length > 0 ? (
         <div className="remote-archived" data-collapsed={archivedOpen ? undefined : 'true'}>
@@ -230,11 +270,13 @@ function RemoteOrgSection({
             Archived ({g.archivedRows.length})
           </button>
           {archivedOpen ? (
-            <ul className="session-pane-list">
-              {g.archivedRows.map((s) => (
-                <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
-              ))}
-            </ul>
+            <div className="session-window remote-window">
+              <ul className="session-pane-list">
+                {g.archivedRows.map((s) => (
+                  <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
       ) : null}
