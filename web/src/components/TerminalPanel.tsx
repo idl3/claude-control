@@ -9,8 +9,21 @@ interface TerminalPanelProps {
   label: string;
   /** When false the panel is mounted but hidden (warm/preloaded). */
   visible: boolean;
+  /** Send a raw tmux key to the selected session's pane (e.g. 'Up', 'Escape'). */
+  sendKey: (key: string) => boolean;
   onClose: () => void;
 }
+
+// On-screen keys so a phone can drive the tmux TUI without a keyboard. Values
+// are tmux key names (whitelisted server-side in lib/shell.js SHELL_KEYS).
+const ACTION_KEYS: { key: string; glyph: string; title: string }[] = [
+  { key: 'Escape', glyph: 'Esc', title: 'Escape' },
+  { key: 'Left', glyph: '←', title: 'Left arrow' },
+  { key: 'Up', glyph: '↑', title: 'Up arrow' },
+  { key: 'Down', glyph: '↓', title: 'Down arrow' },
+  { key: 'Right', glyph: '→', title: 'Right arrow' },
+  { key: 'Enter', glyph: '⏎', title: 'Enter' },
+];
 
 /**
  * Full-screen overlay hosting the raw ttyd terminal for a session in an iframe.
@@ -19,7 +32,7 @@ interface TerminalPanelProps {
  * mobile keyboards). The iframe loads `/term/<id>?token=…`, served by
  * claude-control's token-gated reverse proxy in front of a loopback ttyd.
  */
-export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPanelProps) {
+export function TerminalPanel({ sessionId, label, visible, sendKey, onClose }: TerminalPanelProps) {
   const url = terminalUrl(sessionId);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -181,6 +194,25 @@ export function TerminalPanel({ sessionId, label, visible, onClose }: TerminalPa
           onLoad={onFrameLoad}
         />
       </div>
+      {/* On-screen keys — drive the tmux TUI on a phone with no keyboard.
+          preventDefault on pointerdown keeps focus off the button so a mobile
+          keyboard never pops up; keys route through the existing pane-key op. */}
+      <nav className="term-keys" aria-label="Terminal keys">
+        {ACTION_KEYS.map(({ key, glyph, title }) => (
+          <button
+            key={key}
+            type="button"
+            className="term-key"
+            title={title}
+            aria-label={title}
+            tabIndex={visible ? 0 : -1}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => sendKey(key)}
+          >
+            {glyph}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
