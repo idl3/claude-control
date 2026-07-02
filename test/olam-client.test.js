@@ -211,3 +211,41 @@ test('normalised rows and thrown errors never carry token material', async () =>
   const err = await c.runnerToken().catch((e) => e);
   assert.ok(!String(err.message).includes('SUPER-SECRET'));
 });
+
+// --- Phase C CP3: readOnly derived from owner mismatch (dead-gate fix) ---------
+
+test('readOnly is set for an org-mate session, false for the operator own', async () => {
+  // JWT with email claim ernest@atlas.kitchen (payload only; edge already verified).
+  const payload = Buffer.from(JSON.stringify({ email: 'ernest@atlas.kitchen', sub: 'u1' })).toString('base64url');
+  const jwt = `h.${payload}.sig`;
+  const execFileImpl = (cmd, args, opts, cb) => {
+    if (cmd === 'cloudflared') return cb(null, `${jwt}\n`);
+    if (cmd === 'gcloud') return cb(null, 'tok\n');
+    cb(new Error('x'), '');
+  };
+  const rows = [
+    { session_id: 'mine', owner_email: 'ernest@atlas.kitchen', summary: 'a' },
+    { session_id: 'theirs', owner_email: 'someone@atlas.kitchen', summary: 'b' },
+    { session_id: 'noowner', owner_email: null, summary: 'c' },
+  ];
+  const fetchImpl = async (url) => {
+    if (url.includes('/api/bootstrap')) return json(200, { token: 'app' });
+    if (url.includes('/v1/sessions')) return json(200, { sessions: rows });
+    return json(200, {});
+  };
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const out = await c.listSessions();
+  const by = Object.fromEntries(out.map((r) => [r.sessionId, r]));
+  assert.equal(by.mine.readOnly, false);
+  assert.equal(by.theirs.readOnly, true);   // org-mate's session → view-only
+  assert.equal(by.noowner.readOnly, false); // unknown owner → not gated (404 still guards)
+});
+
+test('operatorEmail decodes the JWT email claim, cached, never serialized', async () => {
+  const payload = Buffer.from(JSON.stringify({ email: 'e@x.io' })).toString('base64url');
+  const jwt = `h.${payload}.s`;
+  const execFileImpl = (cmd, args, opts, cb) => cb(null, cmd === 'cloudflared' ? `${jwt}\n` : 'tok\n');
+  const c = new OlamOrgClient(ORG, { fetchImpl: async () => json(200, {}), execFileImpl });
+  assert.equal(await c.operatorEmail(), 'e@x.io');
+  assert.ok(!JSON.stringify(c).includes('e@x.io')); // non-enumerable
+});
