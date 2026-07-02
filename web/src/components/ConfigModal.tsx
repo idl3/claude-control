@@ -34,6 +34,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   // 0 = CSS default (auto); non-zero = user-chosen px value.
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
+  const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,6 +81,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setMlxModel(c.mlxModel ?? '');
         setTranscriptFontSize(c.transcriptFontSize ?? 0);
         setExternalFontSize(c.externalFontSize ?? 0);
+        setProjectDirs(c.projectDirs ?? []);
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -146,6 +148,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         mlxModel,
         transcriptFontSize,
         externalFontSize,
+        projectDirs,
       });
       setLaunchCommand(saved.launchCommand);
       setClaudeBin(saved.claudeBin ?? '');
@@ -157,6 +160,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       setMlxModel(saved.mlxModel ?? '');
       setTranscriptFontSize(saved.transcriptFontSize ?? 0);
       setExternalFontSize(saved.externalFontSize ?? 0);
+      setProjectDirs(saved.projectDirs ?? []);
       // Apply the new font size LIVE (no reload): App's font effect listens.
       window.dispatchEvent(
         new CustomEvent('cockpit:fontsize', {
@@ -322,6 +326,71 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
             />
             <span className="config-hint">Existing dir new sessions start in.</span>
           </label>
+
+          <div className="config-field config-field--wide">
+            <span className="config-label">Project directories</span>
+            <div className="config-proj-dirs">
+              {projectDirs.map((entry, i) => (
+                <div key={i} className="config-proj-dir-row">
+                  <input
+                    className="config-input config-proj-dir-label"
+                    type="text"
+                    value={entry.label}
+                    placeholder="Label"
+                    disabled={loading}
+                    onChange={(e) => {
+                      const next = projectDirs.map((d, j) =>
+                        j === i ? { ...d, label: e.target.value } : d,
+                      );
+                      setProjectDirs(next);
+                    }}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label={`Project directory ${i + 1} label`}
+                  />
+                  <input
+                    className="config-input config-proj-dir-path"
+                    type="text"
+                    value={entry.path}
+                    placeholder="~/Projects/my-project"
+                    disabled={loading}
+                    onChange={(e) => {
+                      const next = projectDirs.map((d, j) =>
+                        j === i ? { ...d, path: e.target.value } : d,
+                      );
+                      setProjectDirs(next);
+                    }}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label={`Project directory ${i + 1} path`}
+                  />
+                  <button
+                    type="button"
+                    className="config-proj-dir-remove"
+                    disabled={loading}
+                    aria-label={`Remove ${entry.label || 'project directory'}`}
+                    onClick={() => setProjectDirs(projectDirs.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="config-cancel config-proj-dir-add"
+                disabled={loading}
+                onClick={() => setProjectDirs([...projectDirs, { label: '', path: '' }])}
+              >
+                + Add directory
+              </button>
+            </div>
+            <span className="config-hint">
+              Shown as a dropdown in New Session. Label = short name; path supports{' '}
+              <code>~</code>. Custom… option always available for free-text entry.
+            </span>
+          </div>
 
           <label className="config-field">
             <span className="config-label">Enhancer backend</span>
