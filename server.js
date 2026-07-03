@@ -26,6 +26,7 @@ import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
 import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
 import { Collab } from './lib/collab.js';
+import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
@@ -289,6 +290,11 @@ const _handler = (req, res) => {
   if (u.pathname.startsWith('/api/collab/')) {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleCollab(req, res, u);
+  }
+  if (u.pathname === '/api/client-error') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    return handleClientError(req, res);
   }
   if (u.pathname === '/api/skills') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -1049,6 +1055,17 @@ async function handleSessionRename(req, res) {
     return endJson(res, 200, { ok: true });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// Append a frontend crash report to the client-error sink (see lib/client-errors.js).
+async function handleClientError(req, res) {
+  try {
+    const body = await readJsonBody(req);
+    recordClientError(body, { userAgent: req.headers['user-agent'] });
+    return endJson(res, 200, { ok: true });
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
   }
 }
 
