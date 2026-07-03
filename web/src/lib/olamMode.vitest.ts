@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   remoteComposerMode,
   isExecuteShaped,
+  shouldSteerDoor,
   remoteModeLabel,
   remoteModeTitle,
   REMOTE_REFUSAL_MESSAGES,
@@ -98,6 +99,33 @@ describe('isExecuteShaped (client mirror of server isExecuteShaped)', () => {
     expect(isExecuteShaped(remote({}))).toBe(false);
     expect(isExecuteShaped(remote({}), { state: 'unknown' })).toBe(false);
     expect(isExecuteShaped(remote({ pool: null } as Partial<Session>), { state: 'live' })).toBe(false);
+  });
+});
+
+// --- shouldSteerDoor (Phase B, B3 routing predicate — server mirror) -----------
+
+describe('shouldSteerDoor: client mirror of server shouldSteerDoor — drives hard-steer gating + next-turn-boundary copy', () => {
+  it('execute-shaped + live → true', () => {
+    expect(shouldSteerDoor(remote({ pool: 'linear' } as Partial<Session>), { state: 'live' })).toBe(true);
+    expect(shouldSteerDoor(remote({}), { state: 'live', containerSessionId: 'c1' })).toBe(true);
+  });
+
+  it('execute-shaped + dormant/unknown/n-a/no-liveness → false — hard steer stays disabled', () => {
+    const s = remote({ pool: 'linear' } as Partial<Session>);
+    expect(shouldSteerDoor(s, { state: 'dormant' })).toBe(false);
+    expect(shouldSteerDoor(s, { state: 'unknown' })).toBe(false);
+    expect(shouldSteerDoor(s, { state: 'n/a' })).toBe(false);
+    expect(shouldSteerDoor(s, undefined)).toBe(false);
+    expect(shouldSteerDoor(s, null)).toBe(false);
+  });
+
+  it('a plan/chat (non execute-shaped) session is false even if liveness somehow reads live', () => {
+    expect(shouldSteerDoor(remote({}), { state: 'live' })).toBe(false);
+  });
+
+  it('null/undefined session is false', () => {
+    expect(shouldSteerDoor(null, { state: 'live' })).toBe(false);
+    expect(shouldSteerDoor(undefined, { state: 'live' })).toBe(false);
   });
 });
 
