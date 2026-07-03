@@ -149,6 +149,36 @@ test('health() exposes per-org probe state for the API/frontend', async () => {
   assert.equal(src.health().atlas.status, 'green');
 });
 
+// --- Phase A (task A4) regression guard: liveness is NEVER polled -------------
+//
+// R5: liveness is fetched ONLY on session select and immediately before a
+// send (both in server.js) — never from the 10s background tick. If a future
+// edit wires sessionLiveness() into _fetchOrg()/tick(), this test catches it.
+test('tick() makes zero sessionLiveness calls, even across repeated ticks (R5 guard)', async () => {
+  let livenessCalls = 0;
+  const olamConfig = {
+    orgs: [{ org: 'atlas', runnerUrl: 'https://r.test', spaBase: 'https://s.test', brainUrl: null }],
+  };
+  const reg = makeRegistry();
+  const client = {
+    listSessions: async () => [
+      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: 'linear', phase: 'running' },
+    ],
+    enrich: async (rows) => rows,
+    sessionLiveness: async () => { livenessCalls += 1; return { state: 'live' }; },
+    cfg: { spaBase: 'https://s.test' },
+  };
+  const probe = { probe: async () => ({ status: 'green', reason: null }), state: { status: 'green', reason: null } };
+  const src = new RemoteSessionSource(olamConfig, reg, {
+    clientFactory: () => client,
+    probeFactory: () => probe,
+  });
+  await src.tick();
+  await src.tick();
+  await src.tick();
+  assert.equal(livenessCalls, 0);
+});
+
 // --- archive-lifecycle derivation (canonical Gateway-written status) -----------
 
 // A halted session is awaiting input — ACTIVE, not archived (#157: archive only
