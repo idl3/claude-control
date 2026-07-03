@@ -107,8 +107,11 @@ function groupByTmux(sessions: Session[]): SessionGroup[] {
 interface RemoteOrgGroup {
   org: string;
   health: { status: string; reason: string | null };
-  /** Active (not-archived) rows — rendered as today. */
+  /** Non-archived AND current (live or active in the last 48h) — shown by default. */
   rows: Session[];
+  /** Non-archived but older-idle rows — collapsed under "Earlier (N)", default
+   *  collapsed. Keeps a large backfill from scrolling the rail. Never dropped. */
+  earlierRows: Session[];
   /** Archived rows (lib/olam-archive.js deriveArchived) — rendered under a
    *  collapsible "Archived (N)" section, default collapsed. Never dropped. */
   archivedRows: Session[];
@@ -119,8 +122,37 @@ function byRecentActivity(x: Session, y: Session): number {
   return String(y.lastActivity ?? '').localeCompare(String(x.lastActivity ?? ''));
 }
 
-/** Group remote (olam) rows per org (active vs archived), newest activity first within each. */
-export function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
+/** Rows older than this with no live signal collapse under "Earlier". */
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000; // 48h
+
+/** Best-effort activity epoch (ms) for a remote row. `lastActivityMs` wins;
+ *  otherwise `lastActivity`, which the olam client sets from the server as an
+ *  ISO string (`last_turn_at ?? created_at`) even though the field is loosely
+ *  typed `number`. Handles both string (ISO) and numeric (epoch-ms) forms. */
+function activityMs(s: Session): number {
+  if (typeof s.lastActivityMs === 'number' && Number.isFinite(s.lastActivityMs)) return s.lastActivityMs;
+  const la: unknown = s.lastActivity;
+  if (typeof la === 'number' && Number.isFinite(la)) return la;
+  if (typeof la === 'string' && la) {
+    const p = Date.parse(la);
+    if (Number.isFinite(p)) return p;
+  }
+  return NaN;
+}
+
+/** A remote row is "current" (shown by default) when it's still LIVE — in-flight,
+ *  awaiting a reply (`pending`), or `halted` — OR it saw activity within the last
+ *  48h. Older idle rows collapse under "Earlier (N)" so a large backfill can't
+ *  scroll the rail off. Nothing is dropped; the collapse is one click away. */
+export function isCurrentRemote(s: Session, now: number = Date.now()): boolean {
+  if (s.inFlight || s.pending || s.halted) return true;
+  const ms = activityMs(s);
+  return Number.isFinite(ms) && now - ms < RECENT_WINDOW_MS;
+}
+
+/** Group remote (olam) rows per org into current / earlier / archived, newest
+ *  activity first within each. `now` is injectable for deterministic tests. */
+export function groupRemoteByOrg(sessions: Session[], now: number = Date.now()): RemoteOrgGroup[] {
   const byOrg = new Map<string, Session[]>();
   for (const s of sessions) {
     const org = s.org ?? '?';
@@ -129,12 +161,16 @@ export function groupRemoteByOrg(sessions: Session[]): RemoteOrgGroup[] {
   }
   return [...byOrg.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([org, all]) => ({
-      org,
-      health: all[0]?.orgHealth ?? { status: 'unknown', reason: null },
-      rows: all.filter((s) => !s.archived).sort(byRecentActivity),
-      archivedRows: all.filter((s) => s.archived).sort(byRecentActivity),
-    }));
+    .map(([org, all]) => {
+      const active = all.filter((s) => !s.archived);
+      return {
+        org,
+        health: all[0]?.orgHealth ?? { status: 'unknown', reason: null },
+        rows: active.filter((s) => isCurrentRemote(s, now)).sort(byRecentActivity),
+        earlierRows: active.filter((s) => !isCurrentRemote(s, now)).sort(byRecentActivity),
+        archivedRows: all.filter((s) => s.archived).sort(byRecentActivity),
+      };
+    });
 }
 
 /**
@@ -229,6 +265,7 @@ function RemoteOrgSection({
   onSelect: (id: string) => void;
 }) {
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [earlierOpen, setEarlierOpen] = useState(false);
   return (
     <section className="session-group remote-group">
       <div className="session-group-head remote-group-head">
@@ -243,7 +280,7 @@ function RemoteOrgSection({
       {g.health.reason ? (
         <div className="remote-group-reason" role="note">{g.health.reason}</div>
       ) : null}
-      {g.rows.length === 0 && g.archivedRows.length === 0 ? (
+      {g.rows.length === 0 && g.earlierRows.length === 0 && g.archivedRows.length === 0 ? (
         <div className="session-empty">no remote sessions</div>
       ) : (
         // .session-window (no header — olam rows have no tmux window concept)
@@ -256,6 +293,30 @@ function RemoteOrgSection({
           </ul>
         </div>
       )}
+      {g.earlierRows.length > 0 ? (
+        <div className="remote-archived remote-earlier" data-collapsed={earlierOpen ? undefined : 'true'}>
+          <button
+            type="button"
+            className="remote-archived-toggle"
+            aria-expanded={earlierOpen}
+            onClick={() => setEarlierOpen((v) => !v)}
+          >
+            <span className="remote-archived-chevron" aria-hidden="true">
+              {earlierOpen ? '▾' : '▸'}
+            </span>
+            Earlier ({g.earlierRows.length})
+          </button>
+          {earlierOpen ? (
+            <div className="session-window remote-window">
+              <ul className="session-pane-list">
+                {g.earlierRows.map((s) => (
+                  <RemoteRow key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {g.archivedRows.length > 0 ? (
         <div className="remote-archived" data-collapsed={archivedOpen ? undefined : 'true'}>
           <button
