@@ -5,6 +5,7 @@ import { PendingAskCard } from './MessageParts';
 import { Composer } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
 import { SubAgentThread } from './SubAgentThread';
+import { ErrorBoundary } from './ErrorBoundary';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { Pending, SubAgent } from '../lib/types';
@@ -243,10 +244,19 @@ export function Thread({
                 Load earlier messages ({hiddenCount} hidden)
               </button>
             ) : null}
-            <ThreadPrimitive.Messages components={messageComponents} />
-            {/* Live incoming question — shows the asked context in the transcript
-                flow the moment it arrives, beside the composer choices below. */}
-            {incomingAsk ? <PendingAskCard questions={incomingAsk.questions} /> : null}
+            {/* Nested firewall: a crash rendering THIS session's messages stays
+                contained to the transcript pane — the composer, toolbar, rail and
+                other sessions keep working, and Retry re-renders just this pane
+                (no full page reload). Keyed by session so switching auto-clears. */}
+            <ErrorBoundary
+              resetKey={sessionId ?? undefined}
+              label="This conversation's transcript failed to render"
+            >
+              <ThreadPrimitive.Messages components={messageComponents} />
+              {/* Live incoming question — shows the asked context in the transcript
+                  flow the moment it arrives, beside the composer choices below. */}
+              {incomingAsk ? <PendingAskCard questions={incomingAsk.questions} /> : null}
+            </ErrorBoundary>
           </ThreadPrimitive.Viewport>
           {/* Tail-to-bottom: App toggles data-show when detached; click re-attaches.
               OUTSIDE the Viewport so it never affects iOS momentum scrolling. */}

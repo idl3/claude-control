@@ -7037,6 +7037,47 @@ select.config-input {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.error-boundary-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.error-boundary-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--danger, #e5484d);
+  background: var(--danger, #e5484d);
+  color: #fff;
+  cursor: pointer;
+}
+.error-boundary-btn--ghost {
+  background: transparent;
+  color: var(--danger, #e5484d);
+}
+.error-boundary-btn:hover {
+  filter: brightness(1.08);
+}
+.error-boundary-details {
+  font-size: 11.5px;
+  color: var(--text-faint, var(--text-dim));
+}
+.error-boundary-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+.error-boundary-stack {
+  margin: 6px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* --- remote (olam) org sections — docs/plans/cockpit-olam-remote-sessions --- */
 .remote-group-head { display: flex; align-items: center; gap: 6px; }
