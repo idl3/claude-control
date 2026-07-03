@@ -3,6 +3,7 @@ import {
   remoteComposerMode,
   isExecuteShaped,
   shouldSteerDoor,
+  blocksResumeResend,
   remoteModeLabel,
   remoteModeTitle,
   REMOTE_REFUSAL_MESSAGES,
@@ -145,9 +146,12 @@ describe('remoteModeLabel / remoteModeTitle: exhaustive over every RemoteCompose
     expect(new Set(titles).size).toBe(modes.length);
   });
 
-  it('dormant/unknown titles carry the same refusal copy as REMOTE_REFUSAL_MESSAGES', () => {
-    expect(remoteModeTitle('dormant')).toBe(REMOTE_REFUSAL_MESSAGES.dormant);
+  it('unknown title carries the same refusal copy as REMOTE_REFUSAL_MESSAGES', () => {
     expect(remoteModeTitle('unknown')).toBe(REMOTE_REFUSAL_MESSAGES.unknown);
+  });
+
+  it('dormant title describes the resume-and-send affordance, not a pure refusal', () => {
+    expect(remoteModeTitle('dormant')).toMatch(/resum/i);
   });
 
   it('an unrecognised mode value renders a visible ⚠ fallback, never a silent steer label', () => {
@@ -155,6 +159,28 @@ describe('remoteModeLabel / remoteModeTitle: exhaustive over every RemoteCompose
     expect(remoteModeLabel(bogus)).toBe('⚠ bogus-mode');
     expect(remoteModeLabel(bogus)).not.toBe(remoteModeLabel('steer'));
     expect(remoteModeTitle(bogus)).toContain('bogus-mode');
+  });
+});
+
+// --- blocksResumeResend (Phase C, C5 re-click guard) ---------------------------
+
+describe('blocksResumeResend: dormant-session resume re-click guard', () => {
+  it('blocks a second submit for the SAME session while a resume is in flight', () => {
+    expect(blocksResumeResend({ sessionId: 's1' }, 's1')).toBe(true);
+  });
+
+  it('does not block a submit for a DIFFERENT session while a resume is in flight elsewhere', () => {
+    expect(blocksResumeResend({ sessionId: 's1' }, 's2')).toBe(false);
+  });
+
+  it('does not block when no resume is in flight (null/undefined)', () => {
+    expect(blocksResumeResend(null, 's1')).toBe(false);
+    expect(blocksResumeResend(undefined, 's1')).toBe(false);
+  });
+
+  it('does not block when the target session id is missing', () => {
+    expect(blocksResumeResend({ sessionId: 's1' }, null)).toBe(false);
+    expect(blocksResumeResend({ sessionId: 's1' }, undefined)).toBe(false);
   });
 });
 

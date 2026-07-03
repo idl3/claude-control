@@ -3478,6 +3478,22 @@ body.is-external-display .composer {
   font-size: calc(12.5px * var(--ui-scale));
   font-weight: 600;
 }
+/* Resume strip — a dormant session's Resume & send round trip is in flight
+   (Phase C, C5). Same shape as .composer-compacting, distinct color so the
+   two in-flight states read as different at a glance. */
+.composer-resuming {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 2px 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-2, var(--accent));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--accent-2, var(--accent)) 12%, transparent);
+  color: var(--text);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+}
 /* Error strip — the agent stalled on an API error; offer a Retry. */
 .composer-errored {
   display: flex;
@@ -7250,6 +7266,37 @@ select.config-input {
   background: rgba(255, 149, 0, 0.10);
   border-bottom: 1px solid rgba(255, 149, 0, 0.25);
 }
+
+/* --- olam resume-issue banner (Phase C, C5): persistent (not a toast — a
+   409-pr_fix_in_flight failure carries a real link the operator must click,
+   and Toast is plain-text/auto-hiding) --- */
+.olam-resume-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #ff9500;
+  background: rgba(255, 149, 0, 0.10);
+  border-bottom: 1px solid rgba(255, 149, 0, 0.25);
+}
+.olam-resume-banner a {
+  color: inherit;
+  text-decoration: underline;
+  flex: none;
+}
+.olam-resume-banner button {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.olam-resume-banner button:hover { opacity: 1; }
 
 /* --- olam action-bar controls (relocated into .detail-actions, replacing the
    old standalone .olam-steer-bar transcript-area row) — terminal toggle ·

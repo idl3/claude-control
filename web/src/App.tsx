@@ -10,6 +10,7 @@ import {
   remoteModeLabel,
   remoteModeTitle,
   shouldSteerDoor,
+  blocksResumeResend,
   REMOTE_REFUSAL_MESSAGES,
   type SessionLiveness,
 } from './lib/olamMode';
@@ -89,6 +90,12 @@ function msgText(msg: Msg): string {
 // bubble must bridge that gap rather than vanish. This is only a last-resort
 // cleanup for sends whose echo never arrives at all.
 const PENDING_SEND_TTL_MS = 1_800_000;
+// Backstop for a dormant-session resume send (Phase C, C5): the WS round trip
+// covers BOTH resuming the session AND delivering the message, so it can take
+// far longer than a normal steer ack. p95 is ~2min; this gives real headroom
+// before assuming the ack was lost (dropped connection, etc.) and re-enabling
+// the composer for a retry.
+const RESUME_TIMEOUT_MS = 150_000;
 // Optimistic sends are persisted here so a page reload doesn't drop an un-echoed
 // message — on load they rehydrate and the transcript reconcile resolves them.
 const PENDING_SENDS_LS_KEY = 'cc:pendingSends';
@@ -394,21 +401,36 @@ function AppInner() {
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
       const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
-      // Remote steer: read-only/dormant/unknown all refuse locally (fast path —
-      // the server's preSendGate is the authoritative re-check, see server.js's
-      // WS 'reply' handler); else pass the hard-steer flag. remoteLivenessRef
+      // Remote steer: read-only/unknown refuse locally (fast path — the
+      // server's preSendGate is the authoritative re-check, see server.js's
+      // WS 'reply' handler); dormant instead resumes-and-sends in one call
+      // (Phase C, C5) — else pass the hard-steer flag. remoteLivenessRef
       // (not the remoteLiveness state var) is read here because onNew is a
       // stable useCallback whose deps deliberately omit render-time values
       // (matches the pre-existing selectedSession-via-closure pattern below).
+      let isResumeSend = false;
       if (selectedSession?.kind === 'remote') {
         const mode = remoteComposerMode(selectedSession, remoteLivenessRef.current);
         if (mode === 'read-only') {
           showToast('This session is read-only — steering disabled.', 'error');
           return;
         }
-        if (mode === 'dormant' || mode === 'unknown') {
-          showToast(REMOTE_REFUSAL_MESSAGES[mode], 'error');
+        if (mode === 'unknown') {
+          showToast(REMOTE_REFUSAL_MESSAGES.unknown, 'error');
           return;
+        }
+        if (mode === 'dormant') {
+          // Re-click guard: a resume ack round-trip can take up to ~2min, far
+          // longer than React needs to flush the composer's disabled state —
+          // check the ref synchronously so a rapid double-Enter can't fire a
+          // second resume for the same session. blocksResumeResend is pure
+          // (lib/olamMode.ts) so this predicate is unit-testable without
+          // mounting App.tsx.
+          if (blocksResumeResend(resumingRef.current, sid)) {
+            showToast('Resume already in progress — hold on', 'error');
+            return;
+          }
+          isResumeSend = true;
         }
       }
       const reqId = cockpit.sendReply(
@@ -423,12 +445,16 @@ function AppInner() {
         showToast('Not connected — reconnecting…', 'error');
         return;
       }
-      // Deliberately "Queued", not "Sent": delivery is only confirmed when the
-      // server's ack for this reqId arrives (handled below). A SOFT steer-door
-      // send (Phase B, B3) queues onto the ledger rather than dispatching
-      // immediately — it's claimed (and actually applied) at the NEXT turn
-      // boundary, so the copy says so instead of implying instant delivery.
-      if (
+      if (isResumeSend && sid) {
+        setResumeIssue(null);
+        setResuming({ sessionId: sid, reqId });
+        showToast('Resuming session & sending…', 'ok');
+      } else if (
+        // Deliberately "Queued", not "Sent": delivery is only confirmed when the
+        // server's ack for this reqId arrives (handled below). A SOFT steer-door
+        // send (Phase B, B3) queues onto the ledger rather than dispatching
+        // immediately — it's claimed (and actually applied) at the NEXT turn
+        // boundary, so the copy says so instead of implying instant delivery.
         selectedSession?.kind === 'remote' &&
         !steerHardRef.current &&
         shouldSteerDoor(selectedSession, remoteLivenessRef.current)
@@ -469,6 +495,8 @@ function AppInner() {
         ok?: boolean;
         reqId?: string;
         error?: string;
+        transport?: string;
+        prUrl?: string;
       };
       if (d?.op !== 'reply' || !d.reqId) return;
       setPendingSends((q) =>
@@ -477,6 +505,23 @@ function AppInner() {
         ),
       );
       if (!d.ok) showToast(`Send failed: ${d.error ?? 'not delivered'}`, 'error');
+      // Phase C (task C5): a resume ack resolves the in-flight "resuming…"
+      // state started in onNew, matched by reqId (not just session id) so a
+      // stale ack from a superseded resume can't clobber a newer one.
+      if (d.transport === 'resume' && resumingRef.current?.reqId === d.reqId) {
+        const sid = resumingRef.current.sessionId;
+        setResuming(null);
+        if (d.ok) {
+          // No new WS plumbing needed for the transcript (chunks continue
+          // streaming automatically) — re-probe liveness so the mode pill
+          // flips dormant→steer once the server confirms the session is live.
+          olamSessionLiveness(sid).then((liveness) => {
+            if (remoteLivenessSessionRef.current === sid) setRemoteLiveness(liveness);
+          });
+        } else {
+          setResumeIssue({ sessionId: sid, message: d.error ?? 'resume failed', prUrl: d.prUrl });
+        }
+      }
     };
     window.addEventListener('cockpit:ack', onAck);
     return () => window.removeEventListener('cockpit:ack', onAck);
@@ -1204,6 +1249,32 @@ function AppInner() {
   const remoteLivenessRef = useRef<SessionLiveness | null>(null);
   remoteLivenessRef.current = remoteLiveness;
   const remoteLivenessSessionRef = useRef<string | null>(null);
+
+  // Dormant-session "Resume & send" in-flight + failure state (Phase C, C5).
+  // `resuming` mirrors Composer's `compacting` prop shape: it blocks further
+  // sends and shows a progress strip until the resume ack lands (or times
+  // out). `resumingRef` backs the synchronous re-click guard in onNew.
+  const [resuming, setResuming] = useState<{ sessionId: string; reqId: string } | null>(null);
+  const resumingRef = useRef<typeof resuming>(null);
+  resumingRef.current = resuming;
+  const [resumeIssue, setResumeIssue] = useState<{ sessionId: string; message: string; prUrl?: string } | null>(null);
+
+  useEffect(() => {
+    // Selection changed: never let a previous session's resume state (or its
+    // banner) linger onto a newly-selected one.
+    setResuming(null);
+    setResumeIssue(null);
+  }, [cockpit.selectedId]);
+
+  useEffect(() => {
+    if (!resuming) return;
+    const id = setTimeout(() => {
+      if (resumingRef.current?.reqId !== resuming.reqId) return; // already resolved
+      setResuming(null);
+      showToast('Resume is taking longer than expected — check the session and retry if needed', 'error');
+    }, RESUME_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [resuming, showToast]);
 
   useEffect(() => {
     // Selection changed: drop the previous session's liveness immediately —
@@ -2138,6 +2209,19 @@ function AppInner() {
                     {cockpit.degraded.reason ? ` (${cockpit.degraded.reason})` : ''}
                   </div>
                 ) : null}
+                {resumeIssue?.sessionId === cockpit.selectedId ? (
+                  <div className="olam-resume-banner" role="alert">
+                    ⚠ {resumeIssue.message}
+                    {resumeIssue.prUrl ? (
+                      <a href={resumeIssue.prUrl} target="_blank" rel="noopener noreferrer">
+                        open PR ↗
+                      </a>
+                    ) : null}
+                    <button type="button" onClick={() => setResumeIssue(null)} aria-label="Dismiss">
+                      ✕
+                    </button>
+                  </div>
+                ) : null}
                 {remoteTermOpen && selectedSession?.kind === 'remote' ? (
                   <div className="olam-terminal-panel">
                     <div className="olam-terminal-panel-head">
@@ -2211,6 +2295,7 @@ function AppInner() {
                     onCloseAgent={closeAgent}
                     working={agentWorking}
                     compacting={!!selectedSession?.compacting}
+                    resuming={resuming?.sessionId === cockpit.selectedId}
                     errored={!!selectedSession?.errored}
                     onRetry={() => {
                       const ok = cockpit.sendReply('Continue');
