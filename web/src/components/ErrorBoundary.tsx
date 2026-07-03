@@ -11,35 +11,71 @@ interface Props {
 
 interface State {
   error: Error | null;
+  componentStack: string | null;
 }
 
+/**
+ * Render-error firewall. Catches a throw from its subtree, shows the actual
+ * error (message + full stack, copyable) instead of a white screen, and offers
+ * a Retry that re-renders the subtree WITHOUT a page reload. `resetKey` also
+ * clears the error automatically when it changes (e.g. switching sessions).
+ * Nest one around a pane (the transcript) so a crash there stays contained to
+ * that pane and the rest of the app keeps working.
+ */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, componentStack: null };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    this.setState({ componentStack: info.componentStack ?? null });
     console.error('[ErrorBoundary] render error', error, info.componentStack);
   }
 
   componentDidUpdate(prevProps: Props): void {
-    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
-      this.setState({ error: null });
-    }
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) this.reset();
   }
 
+  reset = (): void => {
+    this.setState({ error: null, componentStack: null });
+  };
+
   render(): ReactNode {
-    const { error } = this.state;
+    const { error, componentStack } = this.state;
     if (!error) return this.props.children;
+
+    // The caught error, fully surfaced: message headline + stack, plus the React
+    // component stack when present. This exact text is what "Copy error" yields.
+    const detail = `${error.stack || String(error)}${
+      componentStack ? `\n\nComponent stack:${componentStack}` : ''
+    }`;
 
     return (
       <div className="error-boundary-card" role="alert" aria-live="assertive">
         <span className="error-boundary-title">
-          {this.props.label ?? 'This session failed to render'}
+          {this.props.label ?? 'This view failed to render'}
         </span>
-        <span className="error-boundary-msg">{error.message}</span>
+        <span className="error-boundary-msg">{error.message || String(error)}</span>
+        <div className="error-boundary-actions">
+          <button type="button" className="error-boundary-btn" onClick={this.reset}>
+            Retry
+          </button>
+          <button
+            type="button"
+            className="error-boundary-btn error-boundary-btn--ghost"
+            onClick={() => void navigator.clipboard?.writeText(detail)}
+          >
+            Copy error
+          </button>
+        </div>
+        {error.stack || componentStack ? (
+          <details className="error-boundary-details">
+            <summary>Stack trace</summary>
+            <pre className="error-boundary-stack">{detail}</pre>
+          </details>
+        ) : null}
       </div>
     );
   }
