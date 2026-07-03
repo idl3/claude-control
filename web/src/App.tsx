@@ -5,14 +5,21 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
-import { remoteComposerMode } from './lib/olamMode';
+import {
+  remoteComposerMode,
+  isExecuteShaped,
+  remoteModeLabel,
+  remoteModeTitle,
+  REMOTE_REFUSAL_MESSAGES,
+  type SessionLiveness,
+} from './lib/olamMode';
 import { sessionDisplayLabel } from './lib/olamLabel';
 import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken } from './lib/api';
+import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -386,10 +393,22 @@ function AppInner() {
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
       const text = [prefixedTyped, ...paths].filter(Boolean).join(' ');
       if (!text) return;
-      // Remote steer: read-only refuses locally; else pass the hard-steer flag.
-      if (selectedSession?.kind === 'remote' && remoteComposerMode(selectedSession) === 'read-only') {
-        showToast('This session is read-only — steering disabled.', 'error');
-        return;
+      // Remote steer: read-only/dormant/unknown all refuse locally (fast path —
+      // the server's preSendGate is the authoritative re-check, see server.js's
+      // WS 'reply' handler); else pass the hard-steer flag. remoteLivenessRef
+      // (not the remoteLiveness state var) is read here because onNew is a
+      // stable useCallback whose deps deliberately omit render-time values
+      // (matches the pre-existing selectedSession-via-closure pattern below).
+      if (selectedSession?.kind === 'remote') {
+        const mode = remoteComposerMode(selectedSession, remoteLivenessRef.current);
+        if (mode === 'read-only') {
+          showToast('This session is read-only — steering disabled.', 'error');
+          return;
+        }
+        if (mode === 'dormant' || mode === 'unknown') {
+          showToast(REMOTE_REFUSAL_MESSAGES[mode], 'error');
+          return;
+        }
       }
       const reqId = cockpit.sendReply(
         text,
@@ -1136,10 +1155,44 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
-  // Remote (olam) composer mode + hard-steer toggle (Phase C).
+  // Phase A (cloud-session-chat task A4): on-demand liveness for the
+  // selected remote session, held as SEPARATE component state — never
+  // folded onto the polled Session row (that's the 10s-tick object; this is
+  // fetched only here, on select, and re-checked server-side immediately
+  // before a send). Only fetched for sessions that already look
+  // execute-shaped from session state alone (isExecuteShaped(selectedSession)
+  // with no liveness arg — the `pool` signal); a plain plan/chat session
+  // never triggers a fetch, so it "bypasses this entirely" per task A4.
+  const [remoteLiveness, setRemoteLiveness] = useState<SessionLiveness | null>(null);
+  const remoteLivenessRef = useRef<SessionLiveness | null>(null);
+  remoteLivenessRef.current = remoteLiveness;
+  const remoteLivenessSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Selection changed: drop the previous session's liveness immediately —
+    // a stale dormant/unknown flag from session A must never linger and gate
+    // session B's composer for even one render.
+    setRemoteLiveness(null);
+    remoteLivenessSessionRef.current = null;
+    const id = cockpit.selectedId;
+    if (!id || selectedSession?.kind !== 'remote' || !isExecuteShaped(selectedSession)) return;
+    remoteLivenessSessionRef.current = id;
+    olamSessionLiveness(id).then((liveness) => {
+      if (remoteLivenessSessionRef.current !== id) return; // selection moved on while awaiting
+      setRemoteLiveness(liveness);
+    });
+    // selectedSession is re-derived from cockpit.selectedId + cockpit.sessions
+    // every render; keying on cockpit.selectedId alone (mirroring the reset
+    // effect below) avoids re-fetching on every unrelated session-list
+    // refresh (the 10s tick, R5) while still reading the fresh value via
+    // closure when the effect actually runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cockpit.selectedId]);
+
+  // Remote (olam) composer mode + hard-steer toggle (Phase C; liveness Phase A).
   const remoteMode = useMemo(
-    () => (selectedSession?.kind === 'remote' ? remoteComposerMode(selectedSession) : null),
-    [selectedSession],
+    () => (selectedSession?.kind === 'remote' ? remoteComposerMode(selectedSession, remoteLiveness) : null),
+    [selectedSession, remoteLiveness],
   );
   const [steerHard, setSteerHard] = useState(false);
   const steerHardRef = useRef(false);
@@ -1943,18 +1996,20 @@ function AppInner() {
                             <SteeringWheelIcon />
                           </button>
                         ) : null}
+                        {/* Exhaustive by construction: remoteModeLabel/remoteModeTitle switch
+                            on every RemoteComposerMode value and fail TS compilation (never
+                            never) if a new mode is added without a pill — no silent 'steer'
+                            fallback for dormant/unknown (task A4). */}
                         <span
                           className={`detail-action-pill detail-action-pill--${remoteMode}`}
                           role="status"
                           title={
-                            remoteMode === 'approve'
-                              ? 'approve mode — your reply approves + starts this session'
-                              : remoteMode === 'read-only'
-                                ? 'read-only session — steering disabled'
-                                : `steering ${selectedSession?.org ?? ''}`
+                            remoteMode === 'steer'
+                              ? `steering ${selectedSession?.org ?? ''}`
+                              : remoteModeTitle(remoteMode)
                           }
                         >
-                          {remoteMode === 'approve' ? '⏵ approve' : remoteMode === 'read-only' ? '🔒 read-only' : '⇄ steer'}
+                          {remoteModeLabel(remoteMode)}
                         </span>
                         {selectedSession?.prs?.length ? (
                           <a
