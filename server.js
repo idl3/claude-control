@@ -38,7 +38,7 @@ import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { OlamTranscriptSource } from './lib/olam-transcript.js';
-import { dispatchSteer, replyTransport, preSendGate } from './lib/olam-transport.js';
+import { dispatchLiveSteer, replyTransport, preSendGate } from './lib/olam-transport.js';
 import { LivenessCache } from './lib/olam-liveness.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
@@ -2300,16 +2300,17 @@ async function handleClientMessage(ws, msg) {
           return;
         }
         const steerMode = msg.hardSteer ? 'hard' : 'soft';
-        const result = await dispatchSteer(client, {
-          worldId: session.worldId,
-          sessionId: session.sessionId,
-          draft: String(msg.text ?? ''),
-          mode: steerMode,
-        });
+        // Phase B (task B3): dispatchLiveSteer is the single source of truth
+        // for the steer-door-vs-cloud-dispatch routing decision — it re-uses
+        // the SAME `liveness` this gate already fetched (no second probe).
+        // `result.door` ('steer-live'|'dispatch') rides on the ack alongside
+        // the existing `mode` field (steer/approve) so the UI can tell the
+        // two apart without a naming collision.
+        const result = await dispatchLiveSteer(client, session, liveness, String(msg.text ?? ''), steerMode);
         if (result.ok) {
-          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode });
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode, door: result.door });
         } else {
-          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: result.error });
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: result.error, door: result.door });
         }
         return;
       }
