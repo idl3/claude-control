@@ -5,12 +5,23 @@ import { deriveArchived, ARCHIVED_STATUSES } from '../lib/olam-archive.js';
 
 // --- deriveArchived -------------------------------------------------------------
 
-test('deriveArchived: halted session is archived', () => {
-  assert.equal(deriveArchived({ halted: true }), true);
+test('deriveArchived: halted (awaiting input) is ACTIVE, not archived', () => {
+  assert.equal(deriveArchived({ halted: true }), false);
 });
 
-test('deriveArchived: phase done is archived', () => {
-  assert.equal(deriveArchived({ phase: 'done' }), true);
+test('deriveArchived: phase "done" (run finished) is ACTIVE, not archived', () => {
+  assert.equal(deriveArchived({ phase: 'done' }), false);
+});
+
+test('deriveArchived: ambiguous "done"/"completed" statuses are NOT archived (canonical only)', () => {
+  assert.equal(deriveArchived({ planStatus: 'done' }), false);
+  assert.equal(deriveArchived({ planStatus: 'completed' }), false);
+  assert.equal(deriveArchived({ linearState: 'completed' }), false);
+});
+
+test('deriveArchived: canonical archived_at / archived (Gateway-written) DOES archive', () => {
+  assert.equal(deriveArchived({ archivedAt: '2026-07-03T00:00:00Z' }), true);
+  assert.equal(deriveArchived({ archived: true }), true);
 });
 
 test('deriveArchived: prMerged flag is archived', () => {
