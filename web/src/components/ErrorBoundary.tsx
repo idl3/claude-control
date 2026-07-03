@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { reportClientError } from '../lib/reportError';
 
 interface Props {
   children: ReactNode;
@@ -7,6 +8,12 @@ interface Props {
   resetKey?: string | number;
   /** Optional label shown in the error card for context. */
   label?: string;
+  /**
+   * Optional hard-recovery action (root boundary only): shown as a "Clear cached
+   * state & reload" button. Use when a crash may be caused by poisoned persisted
+   * state that a plain Retry can't clear.
+   */
+  onHardReset?: () => void;
 }
 
 interface State {
@@ -32,6 +39,15 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo): void {
     this.setState({ componentStack: info.componentStack ?? null });
     console.error('[ErrorBoundary] render error', error, info.componentStack);
+    // Log it server-side so the crash is traceable + fixable without a live repro.
+    reportClientError({
+      source: 'react-boundary',
+      label: this.props.label,
+      message: error.message || String(error),
+      stack: error.stack,
+      componentStack: info.componentStack ?? undefined,
+      sessionId: this.props.resetKey != null ? String(this.props.resetKey) : undefined,
+    });
   }
 
   componentDidUpdate(prevProps: Props): void {
@@ -69,6 +85,15 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             Copy error
           </button>
+          {this.props.onHardReset ? (
+            <button
+              type="button"
+              className="error-boundary-btn error-boundary-btn--ghost"
+              onClick={this.props.onHardReset}
+            >
+              Clear cached state &amp; reload
+            </button>
+          ) : null}
         </div>
         {error.stack || componentStack ? (
           <details className="error-boundary-details">
