@@ -71,6 +71,23 @@ describe('remoteComposerMode: liveness precedence mirrors the server composerMod
   });
 });
 
+// --- CP3 audit Finding 2: 'n/a' liveness sentinel (never demotes) -------------
+
+describe("remoteComposerMode: 'n/a' liveness (no check applicable/made) never demotes", () => {
+  it('n/a is treated like no liveness at all — distinct from unknown', () => {
+    expect(remoteComposerMode(remote({ pool: 'linear' } as Partial<Session>), { state: 'n/a' })).toBe('steer');
+    expect(remoteComposerMode(remote({}), { state: 'n/a' })).toBe('steer');
+  });
+  it('read-only / approve still outrank n/a liveness', () => {
+    expect(remoteComposerMode(remote({ readOnly: true } as Partial<Session>), { state: 'n/a' })).toBe('read-only');
+    expect(remoteComposerMode(remote({ planStatus: 'planned' }), { state: 'n/a' })).toBe('approve');
+  });
+  it('isExecuteShaped: n/a liveness carries no positive evidence', () => {
+    expect(isExecuteShaped(remote({}), { state: 'n/a' })).toBe(false);
+    expect(isExecuteShaped(remote({ pool: null } as Partial<Session>), { state: 'n/a' })).toBe(false);
+  });
+});
+
 describe('isExecuteShaped (client mirror of server isExecuteShaped)', () => {
   it('true on dormant liveness, containerSessionId, or a confirmed pool', () => {
     expect(isExecuteShaped(remote({}), { state: 'dormant' })).toBe(true);

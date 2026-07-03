@@ -19,9 +19,15 @@ import type { Session } from './types';
 export type RemoteComposerMode = 'steer' | 'approve' | 'read-only' | 'dormant' | 'unknown';
 
 /** Server-authoritative liveness read (GET /api/olam/liveness). Optional —
- * held as on-demand component state, NEVER folded onto the polled Session. */
+ * held as on-demand component state, NEVER folded onto the polled Session.
+ *
+ * `'n/a'` (CP3 audit Finding 2) is the server's honest default for a check
+ * that was never actually attempted/applicable — distinct from `'unknown'`,
+ * which means a check WAS attempted and its result couldn't be determined.
+ * `remoteComposerMode`/`isExecuteShaped` treat `'n/a'` identically to no
+ * liveness at all: it never demotes the composer. */
 export interface SessionLiveness {
-  state: 'live' | 'dormant' | 'unknown';
+  state: 'live' | 'dormant' | 'unknown' | 'n/a';
   phase?: string;
   done?: boolean;
   containerSessionId?: string;
