@@ -79,9 +79,27 @@ export function remoteComposerMode(
   return 'steer';
 }
 
-/** Refusal copy for a send attempted while locked out — mirrors server's DISPATCH_ERRORS. */
-export const REMOTE_REFUSAL_MESSAGES: Record<'dormant' | 'unknown', string> = {
-  dormant: 'session dormant — resume support lands in Phase C',
+/**
+ * Re-click guard for a dormant-session "Resume & send" (Phase C, C5): true
+ * when a resume is already in flight for the SAME session, so onNew should
+ * no-op a second submit instead of firing a duplicate resume. Needed because
+ * the WS round trip for a resume ack can take up to ~2min — far longer than
+ * React needs to flush the composer's disabled state — so a rapid double-
+ * Enter must be caught synchronously via a ref, not just the disabled prop.
+ * Pure so the guard is unit-testable without mounting App.tsx.
+ */
+export function blocksResumeResend(
+  resuming: { sessionId: string } | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  return !!resuming && !!sessionId && resuming.sessionId === sessionId;
+}
+
+/** Refusal copy for a send attempted while locked out — mirrors server's DISPATCH_ERRORS.
+ * `dormant` is no longer a pure refusal (Phase C, C5): a dormant send now
+ * resumes the session and delivers the message in one call, so it has no
+ * entry here — see remoteModeTitle('dormant') for its copy instead. */
+export const REMOTE_REFUSAL_MESSAGES: Record<'unknown', string> = {
   unknown: 'session liveness unknown — steering disabled until state is confirmed',
 };
 
@@ -93,7 +111,7 @@ export function remoteModeLabel(mode: RemoteComposerMode): string {
     case 'steer': return '⇄ steer';
     case 'approve': return '✓ approve';
     case 'read-only': return '👁 read-only';
-    case 'dormant': return '⏸ dormant';
+    case 'dormant': return '⟲ resume & send';
     case 'unknown': return '? unknown';
     default: {
       const _exhaustive: never = mode;
@@ -108,7 +126,7 @@ export function remoteModeTitle(mode: RemoteComposerMode): string {
     case 'steer': return 'Reply steers the running session';
     case 'approve': return 'Reply approves the plan and starts the run';
     case 'read-only': return 'Shared session — steering is disabled';
-    case 'dormant': return REMOTE_REFUSAL_MESSAGES.dormant;
+    case 'dormant': return 'Session is dormant — sending resumes it and delivers this message (can take up to ~2 min)';
     case 'unknown': return REMOTE_REFUSAL_MESSAGES.unknown;
     default: {
       const _exhaustive: never = mode;

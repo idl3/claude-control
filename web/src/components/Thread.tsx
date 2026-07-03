@@ -45,6 +45,9 @@ interface ThreadProps {
   working?: boolean;
   /** True while Claude is compacting the conversation — blocks sends + shows progress. */
   compacting?: boolean;
+  /** True while a dormant remote session's "Resume & send" is in flight
+   *  (Phase C, C5) — blocks sends + shows progress, mirrors `compacting`. */
+  resuming?: boolean;
   /** True when the session hit an API error and stalled — shows a Retry strip. */
   errored?: boolean;
   /** Retry handler for the error strip (sends "Continue"). */
@@ -185,6 +188,7 @@ export function Thread({
   onCloseAgent,
   working,
   compacting,
+  resuming,
   errored,
   onRetry,
   onStop,
@@ -312,6 +316,7 @@ export function Thread({
         onTerminalModeChange={onTerminalModeChange}
         working={working}
         compacting={compacting}
+        resuming={resuming}
         errored={errored}
         onRetry={onRetry}
         onStop={onStop}

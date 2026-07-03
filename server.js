@@ -38,7 +38,7 @@ import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { OlamTranscriptSource } from './lib/olam-transcript.js';
-import { dispatchLiveSteer, replyTransport, preSendGate } from './lib/olam-transport.js';
+import { dispatchLiveSteer, dispatchResume, replyTransport, preSendGate } from './lib/olam-transport.js';
 import { LivenessCache } from './lib/olam-liveness.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
@@ -2290,6 +2290,26 @@ async function handleClientMessage(ws, msg) {
         const liveness = await getSessionLiveness(session);
         const gate = preSendGate(session, liveness);
         if (!gate.ok) {
+          // Phase C (task C5, D14): a dormant session is NOT a dead end — route
+          // to dispatchResume instead of the blanket refusal, which resumes the
+          // session AND delivers this same message in ONE call (the steer door
+          // is never separately called here, avoiding double-delivery). Only
+          // 'unknown' (and 'read-only', which never reaches this branch) keep
+          // refusing via gate.error exactly as before.
+          if (gate.mode === 'dormant') {
+            const resumeClient = olamSource?.clientForOrg(session.org);
+            if (!resumeClient) {
+              send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: `Cannot resume ${session.org} session (org unavailable).` });
+              return;
+            }
+            const result = await dispatchResume(resumeClient, session, String(msg.text ?? ''));
+            if (result.ok) {
+              send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'resume', reqId, worldId: result.worldId, containerSessionId: result.containerSessionId });
+            } else {
+              send(ws, { type: 'ack', op: 'reply', ok: false, reqId, transport: 'resume', error: result.error, prUrl: result.prUrl });
+            }
+            return;
+          }
           send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: gate.error });
           return;
         }
