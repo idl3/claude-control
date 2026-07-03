@@ -56,14 +56,10 @@ const ORGS = {
     ],
   },
   pleri: {
-    // UNVERIFIED (2026-07-02): worker name is confirmed as
-    // "pleri-worker-runner-sandbox" (wrangler.pleri.jsonc `name`, account
-    // <cf-account-id>…) but the workers.dev account subdomain is not recorded in
-    // any wrangler file. Probed candidates (pleri, idl3, kaluga, pleri-org,
-    // pleri-com, pleriorg, pleri-worker, olam-pleri; both worker-name prefixes)
-    // all failed to connect. Left null on purpose — a guessed hostname is worse
-    // than a loud failure. Confirm at next pleri deploy and fill in.
-    runnerUrl: null,
+    // Verified live 2026-07-02: workers.dev account subdomain is "<cf-subdomain>"
+    // (CF API accounts/<cf-account-id>…/workers/subdomain); bearer-authed status
+    // probe to the URL below returned HTTP 200.
+    runnerUrl: "https://<pleri-runner>",
     // Verified 2026-07-02: packages/plan-chat-spa/wrangler.pleri.toml `pattern`;
     // curl 302 -> <pleri-access-team> login, kid matches toml CF_ACCESS_AUD.
     // <legacy-spa> is also live but redirects to the ATLAS Access team
