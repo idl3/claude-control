@@ -151,7 +151,9 @@ test('health() exposes per-org probe state for the API/frontend', async () => {
 
 // --- archive-lifecycle derivation (canonical Gateway-written status) -----------
 
-test('tick derives archived:true for a halted session', async () => {
+// A halted session is awaiting input — ACTIVE, not archived (#157: archive only
+// on a canonical terminal status, never on active halted/done).
+test('tick keeps a halted session active (not archived)', async () => {
   const { src, reg } = sourceWith({
     listSessions: async () => [
       { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: true, linearRef: 's1', pool: null, phase: null },
@@ -159,7 +161,7 @@ test('tick derives archived:true for a halted session', async () => {
   });
   await src.tick();
   const remote = reg.getSessions().find((s) => s.kind === 'remote');
-  assert.equal(remote.archived, true);
+  assert.equal(remote.archived, false);
 });
 
 test('tick derives archived:true from a canonical terminal planStatus (e.g. merged)', async () => {
