@@ -37,7 +37,7 @@ import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { OlamTranscriptSource } from './lib/olam-transcript.js';
-import { dispatchSteer, replyTransport, isExecuteShaped, preSendGate } from './lib/olam-transport.js';
+import { dispatchSteer, replyTransport, preSendGate } from './lib/olam-transport.js';
 import { LivenessCache } from './lib/olam-liveness.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
@@ -192,20 +192,35 @@ function sessionById(id) {
 }
 
 /**
- * On-demand liveness for a remote (olam) session (Phase A, task A4). Only
- * called for sessions that already look execute-shaped from session state
- * alone (isExecuteShaped(session) with no liveness arg — the `pool` signal;
- * see lib/olam-transport.js's isExecuteShaped doc) — a plain plan/chat
- * session (no confirmed pool) never triggers a liveness fetch at all, so it
- * "bypasses this entirely" per task A4's contract. Cached briefly
- * (LivenessCache TTL) so a select immediately followed by a send doesn't
- * double the round trip. Fails closed to `{state:'unknown'}` when the org
- * client is unavailable — never throws.
+ * On-demand liveness for a remote (olam) session (Phase A, task A4;
+ * always-probe policy added as a CP3 audit follow-up). ALWAYS attempts one
+ * fetch per remote session at both call sites — GET /api/olam/liveness
+ * (session select) and the WS 'reply' handler (pre-send) — regardless of
+ * whether the session already looks execute-shaped from local state alone.
+ *
+ * Previously this was gated on `isExecuteShaped(session)` (no liveness arg),
+ * whose only signal is `session.pool` — populated ONLY by OlamOrgClient's
+ * in-memory `_pools` cache, which is empty until a session is observed
+ * inFlight during THIS process lifetime. That made the gate a circularity
+ * trap: a dormant execute session after a cockpit restart has pool=null, so
+ * liveness was never fetched and the composer silently stayed 'steer'.
+ *
+ * `isExecuteShaped(session, liveness)` still gates whether the FETCHED
+ * RESULT is allowed to demote the composer (lib/olam-transport.js's
+ * composerMode/preSendGate) — a plain chat session's `unknown` result still
+ * cannot demote it, since isExecuteShaped requires positive evidence
+ * (dormant state, containerSessionId, or a confirmed pool) from either the
+ * session or the liveness response itself. Cached briefly (LivenessCache
+ * TTL) so a select immediately followed by a send doesn't double the round
+ * trip. The plan-DO answers `{state:'unknown'}` instantly for a session with
+ * no execute mapping (no runner probe server-side), so probing every remote
+ * session stays within the on-demand-only budget (R5 — zero timers/ticks;
+ * lib/olam-sessions.js is untouched). Fails closed to `{state:'unknown'}`
+ * when the org client is unavailable — never throws.
  * @param {object} session
  * @returns {Promise<{ state: 'live'|'dormant'|'unknown' }>}
  */
 function getSessionLiveness(session) {
-  if (!isExecuteShaped(session)) return Promise.resolve(undefined);
   const client = olamSource?.clientForOrg(session.org);
   if (!client) return Promise.resolve({ state: 'unknown' });
   const cacheId = `olam:${session.org}:${session.sessionId}`;
@@ -316,6 +331,10 @@ const _handler = (req, res) => {
   // Phase A (cloud-session-chat, task A4) — on-demand liveness for a remote
   // (olam) session, fetched ONLY on select (this route) + pre-send (the WS
   // 'reply' handler's getSessionLiveness call) — never on the 10s tick (R5).
+  // Always probes for every remote session (CP3 audit follow-up — see
+  // getSessionLiveness's doc). `n/a` (not `live`) is the honest default for
+  // a liveness that could somehow resolve undefined here — defaulting to
+  // 'live' would be a lie about a check that was never actually made.
   // GET /api/olam/liveness?id=olam:<org>:<sid>
   if (u.pathname === '/api/olam/liveness') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -323,7 +342,7 @@ const _handler = (req, res) => {
     const session = sessionById(id);
     if (!session || session.kind !== 'remote') return endJson(res, 404, { error: 'unknown remote session' });
     getSessionLiveness(session)
-      .then((liveness) => endJson(res, 200, liveness ?? { state: 'live' }))
+      .then((liveness) => endJson(res, 200, liveness ?? { state: 'n/a' }))
       .catch(() => endJson(res, 200, { state: 'unknown' }));
     return;
   }
@@ -2152,11 +2171,14 @@ async function handleClientMessage(ws, msg) {
       // chunks (Phase B), so there is no separate response plumbing.
       if (replyTransport(session) === 'olam') {
         const reqId = msg.reqId;
-        // Phase A (task A4): pre-send liveness check, on-demand only. A
-        // plan/chat session (not execute-shaped) never triggers a fetch here
-        // — getSessionLiveness resolves undefined and preSendGate's mode
-        // computation is identical to pre-Phase-A behaviour ("bypasses this
-        // entirely").
+        // Phase A (task A4) + CP3 audit follow-up: pre-send liveness check,
+        // on-demand only, ALWAYS attempted for a remote session —
+        // isExecuteShaped no longer gates whether the fetch happens (that
+        // was the circularity trap: a pool-only signal meant a dormant
+        // session after a cockpit restart was never probed). preSendGate
+        // still uses isExecuteShaped to decide whether the fetched result
+        // demotes the composer, so a plain chat session's 'unknown' liveness
+        // still can't lock it out.
         const liveness = await getSessionLiveness(session);
         const gate = preSendGate(session, liveness);
         if (!gate.ok) {

@@ -7,7 +7,6 @@ import {
 } from '@assistant-ui/react';
 import {
   remoteComposerMode,
-  isExecuteShaped,
   remoteModeLabel,
   remoteModeTitle,
   REMOTE_REFUSAL_MESSAGES,
@@ -1155,14 +1154,19 @@ function AppInner() {
     (s) => s.id === cockpit.selectedId,
   );
 
-  // Phase A (cloud-session-chat task A4): on-demand liveness for the
-  // selected remote session, held as SEPARATE component state — never
-  // folded onto the polled Session row (that's the 10s-tick object; this is
-  // fetched only here, on select, and re-checked server-side immediately
-  // before a send). Only fetched for sessions that already look
-  // execute-shaped from session state alone (isExecuteShaped(selectedSession)
-  // with no liveness arg — the `pool` signal); a plain plan/chat session
-  // never triggers a fetch, so it "bypasses this entirely" per task A4.
+  // Phase A (cloud-session-chat task A4) + CP3 audit follow-up (Finding 1):
+  // on-demand liveness for the selected remote session, held as SEPARATE
+  // component state — never folded onto the polled Session row (that's the
+  // 10s-tick object; this is fetched only here, on select, and re-checked
+  // server-side immediately before a send). ALWAYS fetched for every remote
+  // session on select — isExecuteShaped(selectedSession) with no liveness
+  // arg (the `pool` signal) no longer gates whether the fetch happens. That
+  // preflight was a circularity trap: a dormant execute session after a
+  // cockpit restart has pool=null (a fresh process never observed it
+  // inFlight), so the fetch was skipped and the composer silently stayed
+  // 'steer'. isExecuteShaped still gates whether the FETCHED result demotes
+  // the composer (see remoteComposerMode below) — a plain chat session's
+  // liveness result still can't lock it out.
   const [remoteLiveness, setRemoteLiveness] = useState<SessionLiveness | null>(null);
   const remoteLivenessRef = useRef<SessionLiveness | null>(null);
   remoteLivenessRef.current = remoteLiveness;
@@ -1175,7 +1179,7 @@ function AppInner() {
     setRemoteLiveness(null);
     remoteLivenessSessionRef.current = null;
     const id = cockpit.selectedId;
-    if (!id || selectedSession?.kind !== 'remote' || !isExecuteShaped(selectedSession)) return;
+    if (!id || selectedSession?.kind !== 'remote') return;
     remoteLivenessSessionRef.current = id;
     olamSessionLiveness(id).then((liveness) => {
       if (remoteLivenessSessionRef.current !== id) return; // selection moved on while awaiting

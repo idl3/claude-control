@@ -63,6 +63,23 @@ test('composerMode: a containerSessionId on liveness is itself sufficient proof 
   assert.equal(composerMode({}, { state: 'unknown', containerSessionId: 'c1' }), 'unknown');
 });
 
+// --- CP3 audit Finding 2: 'n/a' liveness sentinel (never demotes) ---------------
+
+test('composerMode: n/a liveness (no check applicable/made) never demotes — distinct from unknown', () => {
+  assert.equal(composerMode({ pool: 'linear' }, { state: 'n/a' }), 'steer');
+  assert.equal(composerMode({}, { state: 'n/a' }), 'steer');
+  assert.equal(composerMode({ readOnly: true }, { state: 'n/a' }), 'read-only'); // read-only still outranks
+});
+
+test('isExecuteShaped: n/a liveness state carries no positive evidence', () => {
+  assert.equal(isExecuteShaped({}, { state: 'n/a' }), false);
+  assert.equal(isExecuteShaped({ pool: null }, { state: 'n/a' }), false);
+});
+
+test('preSendGate: n/a liveness never locks out an execute-shaped session', () => {
+  assert.deepEqual(preSendGate({ pool: 'linear' }, { state: 'n/a' }), { ok: true, mode: 'steer' });
+});
+
 // --- isExecuteShaped (Phase A execute/chat discriminator) -----------------------
 
 test('isExecuteShaped: true on dormant liveness, containerSessionId, or a confirmed pool', () => {
