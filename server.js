@@ -56,6 +56,7 @@ import { transcribe } from './lib/transcribe.js';
 import { replyShouldBlock } from './lib/reply-guard.js';
 import { shouldRefuseSendForPicker } from './lib/picker-send-guard.js';
 import { listSkills, readSkill } from './lib/skills.js';
+import { reapSiblingServers } from './lib/reap-siblings.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -2756,6 +2757,15 @@ async function runUploadSweep() {
 }
 
 async function main() {
+  // Self-healing orphan guard: a past restart or a manual `npm start` can leave
+  // duplicate server.js instances running for days (each polling tmux) if they
+  // aren't holding the port when a new instance starts (#137 only frees the
+  // port itself). Reap any other process running this exact server.js before
+  // we do anything else. Best-effort — never blocks boot.
+  for (const pid of reapSiblingServers({ scriptPath: fileURLToPath(import.meta.url) })) {
+    console.log(`claude-control: reaped duplicate server.js instance (pid ${pid})`);
+  }
+
   registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
   resources.start();
