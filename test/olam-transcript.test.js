@@ -169,6 +169,63 @@ test('bounded backfill caps the initial replay to backfillCap rows', async () =>
   assert.equal(seen[0].uuid, 'm40');
 });
 
+// --- 'ready' event: initial snapshot drained to the live cursor -----------------
+// (loading-UX fix: an empty transcript must be distinguishable from an
+// in-flight backfill — see lib/olam-transcript.js's ShapeSubscriber.start doc.)
+
+test('emits ready exactly once after the snapshot drains to up-to-date (non-empty)', async () => {
+  const client = clientWith([
+    { headers: { 'electric-offset': '10', 'electric-handle': 'h1' }, body: [insert(row({ chunk: 'a' })), upToDate] },
+  ]);
+  const sub = new ShapeSubscriber(client, { worldId: 'w1', sessionId: 's1' });
+  let readyCount = 0;
+  sub.on('append', () => {});
+  sub.on('ready', () => { readyCount += 1; sub.stop(); });
+  await sub.start();
+  assert.equal(readyCount, 1);
+});
+
+test('emits ready for a genuinely-empty transcript (no rows, just up-to-date)', async () => {
+  const client = clientWith([{ headers: {}, body: [upToDate] }]);
+  const sub = new ShapeSubscriber(client, { worldId: 'w1', sessionId: 's1' });
+  const appended = [];
+  let ready = false;
+  sub.on('append', (m) => appended.push(...m));
+  sub.on('ready', () => { ready = true; sub.stop(); });
+  await sub.start();
+  assert.equal(appended.length, 0);
+  assert.equal(ready, true);
+});
+
+test('does not emit ready if stopped mid-drain (before up-to-date is reached)', async () => {
+  let calls = 0;
+  let sub;
+  const client = {
+    org: 'atlas',
+    apiFetch: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        json: async () => {
+          // Simulate the caller tearing down mid-drain (e.g. a session
+          // reselect racing the initial backfill) before this page ever
+          // reports up-to-date.
+          sub.stop();
+          return [];
+        },
+      };
+    },
+  };
+  sub = new ShapeSubscriber(client, { worldId: 'w1', sessionId: 's1' });
+  let ready = false;
+  sub.on('ready', () => { ready = true; });
+  await sub.start();
+  assert.equal(ready, false);
+  assert.equal(calls, 1);
+});
+
 // --- B3: OlamTranscriptSource (degraded fallback) -------------------------------
 
 import { OlamTranscriptSource } from '../lib/olam-transcript.js';
@@ -184,6 +241,18 @@ test('full mode: shape appends flow through unchanged', async () => {
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(seen[0].blocks[0].text, 'live text');
   assert.equal(src.degraded, false);
+});
+
+test('full mode: forwards the shape ready event once the snapshot is drained', async () => {
+  const client = clientWith([
+    { headers: { 'electric-offset': '1' }, body: [insert(row({ chunk: 'live text' })), upToDate] },
+  ]);
+  const src = new OlamTranscriptSource(client, { worldId: 'w1', sessionId: 's1' });
+  let ready = false;
+  src.on('ready', () => { ready = true; src.stop(); });
+  src.start();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(ready, true);
 });
 
 test('shape 401 → banner{degraded} + runner feed tail takes over', async () => {

@@ -1203,6 +1203,44 @@ body.is-external-display .rail {
     opacity: 0.4;
   }
 }
+/* Skeleton rows — message-shaped shimmer placeholders shown alongside the
+   spinner above while a transcript is loading (primarily the remote/olam
+   backfill window; local sessions resolve near-instantly). Rows alternate
+   alignment to loosely suggest a user/assistant exchange without implying
+   real content. */
+.thread-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(420px, 80vw);
+}
+.thread-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.thread-skeleton-row[data-align='end'] {
+  align-items: flex-end;
+}
+.thread-skeleton-bar {
+  display: block;
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-hover) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-skeleton-bar {
+    animation: none;
+    background: var(--bg-2);
+  }
+}
 /* "Load earlier messages" — revealed only when the render cap hides older
    messages. Sits at the top of the scrollback, centered, low-emphasis. */
 .load-earlier {
