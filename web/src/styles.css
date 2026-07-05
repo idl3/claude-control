@@ -7153,6 +7153,18 @@ select.config-input {
 /* .remote-item stays a plain marker class (stale-opacity, selectors) — the
    actual row layout lives on .session-top (shared with local PaneRow) so a
    second line (.session-meta: model/ctx) can stack underneath it. */
+/* .remote-item is a <button>, whose UA default display:inline-block is
+   shrink-to-fit: a long label grows the button PAST the rail, so the label's
+   own overflow:hidden/text-overflow:ellipsis never engages (its box is as wide
+   as the text). Force it block + full-width (border-box so the 9/11px padding
+   is included) — now it's rail-constrained like the local <li> rows, and the
+   label truncates. */
+.remote-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
 .remote-item .session-top {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
 }
