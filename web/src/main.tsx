@@ -1,4 +1,3 @@
-import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -43,14 +42,22 @@ function clearCachedStateAndReload(): void {
   location.reload();
 }
 
-// ROOT firewall: without this, ANY throw above the in-app boundaries (the rail, a
-// context provider, useCockpit, the app shell) unmounts the whole tree → a blank
-// black screen with no clue. This shows the actual error + stack instead, with
-// Retry and a state-clearing recovery.
+// ROOT firewall (fullscreen: safe-area-padded + centered so it isn't clipped under
+// the mobile notch): without this, ANY throw above the in-app boundaries (the rail,
+// a context provider, useCockpit, the app shell) unmounts the whole tree → a blank
+// black screen. This shows the actual error + stack instead, with Retry + recovery.
+//
+// StrictMode intentionally OMITTED: @assistant-ui/react's runtime keys off a
+// `devStrictMode` flag and does its own mount/unmount simulation when StrictMode is
+// present — which double-unmounts one of its internal fibers ("Tried to unmount a
+// fiber that is already unmounted"). Dropping StrictMode removes that trigger; it
+// only added dev-time double-invoke checks, so there's no production downside.
 createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary label="claude-control failed to load" onHardReset={clearCachedStateAndReload}>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
+  <ErrorBoundary
+    fullscreen
+    label="claude-control failed to load"
+    onHardReset={clearCachedStateAndReload}
+  >
+    <App />
+  </ErrorBoundary>,
 );
