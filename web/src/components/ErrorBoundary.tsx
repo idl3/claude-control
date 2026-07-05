@@ -14,6 +14,12 @@ interface Props {
    * state that a plain Retry can't clear.
    */
   onHardReset?: () => void;
+  /**
+   * Root-level use: center the card in a full-viewport container with safe-area
+   * insets, so on mobile it isn't clipped under the notch/status bar. Nested
+   * (in-app) boundaries leave this off and render the card inline.
+   */
+  fullscreen?: boolean;
 }
 
 interface State {
@@ -68,7 +74,7 @@ export class ErrorBoundary extends Component<Props, State> {
       componentStack ? `\n\nComponent stack:${componentStack}` : ''
     }`;
 
-    return (
+    const card = (
       <div className="error-boundary-card" role="alert" aria-live="assertive">
         <span className="error-boundary-title">
           {this.props.label ?? 'This view failed to render'}
@@ -103,5 +109,10 @@ export class ErrorBoundary extends Component<Props, State> {
         ) : null}
       </div>
     );
+
+    if (this.props.fullscreen) {
+      return <div className="error-boundary-fullscreen">{card}</div>;
+    }
+    return card;
   }
 }
