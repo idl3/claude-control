@@ -233,6 +233,11 @@ export type ServerMessage =
   | { type: 'messages'; id: string; messages: Msg[]; pending: Pending | null }
   | { type: 'append'; id: string; messages: Msg[] }
   | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }
+  // Remote (olam) session only: the Electric chunks shape's initial snapshot
+  // has drained to its live cursor — the transcript is no longer ambiguous
+  // between "still loading" and "genuinely empty". See useCockpit's
+  // remote-only messagesLoaded gate.
+  | { type: 'olam-transcript-ready'; id: string }
   | { type: 'pending'; id: string; pending: Pending | null }
   | { type: 'resources'; snapshot: ResourceSnapshot; warning?: string }
   | { type: 'capture'; id: string; text: string }
