@@ -12,6 +12,10 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: 'es2020',
+    // Emit source maps so a client crash logged to /api/client-error carries a
+    // readable stack (function names + source lines) instead of minified offsets.
+    // Personal tool on localhost/tailnet — exposing source is a non-issue.
+    sourcemap: true,
   },
   // Unit tests run in a plain Node env (no jsdom): convert.ts is pure, and the
   // ws.ts tests stub a minimal WebSocket on globalThis. Deterministic + fast.
