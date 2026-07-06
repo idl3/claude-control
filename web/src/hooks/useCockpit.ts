@@ -57,9 +57,19 @@ export interface CockpitStore {
   /** Per-session picker state map — exposed for debugging / advanced callers. */
   pickerOpenById: Record<string, boolean>;
   /**
-   * True once the server has sent the `messages` frame for the selected session.
-   * False while the session is selected but the transcript tail is still loading.
-   * Used to show a loader instead of the empty-state welcome during the load window.
+   * True once the selected session's transcript can be trusted as fully loaded.
+   *
+   * - LOCAL / codex sessions: true as soon as the server's `messages` frame has
+   *   arrived (the `in` operator — an empty `[]` counts as loaded, since a local
+   *   tailer's first frame IS the whole known tail, sync with the transcript file).
+   * - REMOTE (olam) sessions: gated on the `olam-transcript-ready` signal instead
+   *   — an empty `[]` `messages` frame merely means "no backfill has landed on
+   *   the wire yet", NOT "genuinely empty" (the Electric chunks shape drains its
+   *   snapshot asynchronously; see lib/olam-transcript.js's ShapeSubscriber).
+   *
+   * False while the session is selected but its transcript is still loading.
+   * Used to show a loader instead of the empty-state welcome during the load
+   * window, and to keep the composer disabled until the transcript settles.
    */
   messagesLoaded: boolean;
   select: (id: string) => void;
@@ -107,6 +117,10 @@ export function useCockpit(): CockpitStore {
   // Per-session caches. Mutated via setState replacement (immutable updates).
   const [messagesById, setMessagesById] = useState<Record<string, Msg[]>>({});
   const [degradedById, setDegradedById] = useState<Record<string, { degraded: boolean; reason: string | null }>>({});
+  // Remote (olam) sessions only: sessionId -> true once the server has forwarded
+  // `olam-transcript-ready` (the Electric shape's initial snapshot drained to its
+  // live cursor). See `messagesLoaded` below for how this gates loading per kind.
+  const [readyById, setReadyById] = useState<Record<string, boolean>>({});
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
@@ -173,6 +187,9 @@ export function useCockpit(): CockpitStore {
             ...prev,
             [msg.id]: { degraded: !!msg.degraded, reason: msg.reason ?? null },
           }));
+          break;
+        case 'olam-transcript-ready':
+          setReadyById((prev) => (prev[msg.id] ? prev : { ...prev, [msg.id]: true }));
           break;
         case 'pending':
           setPendingById((prev) => ({ ...prev, [msg.id]: msg.pending }));
@@ -269,6 +286,17 @@ export function useCockpit(): CockpitStore {
       if (id === selectedRef.current) return;
       setSelectedId(id);
       setCapture(null);
+      // Clear any stale ready flag for the session we're switching TO: the
+      // server tears down + recreates a remote session's OlamTranscriptSource
+      // once its last subscribed client disconnects (maybeTeardown in
+      // server.js), so a prior visit's 'ready' does not describe the fresh
+      // subscription's backfill — wait for a new 'olam-transcript-ready' frame.
+      setReadyById((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       socket.select(id);
     },
     [socket],
@@ -383,12 +411,20 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
-  // True once the server has delivered the `messages` frame for this session.
-  // Uses the `in` operator so an empty transcript ([]) still counts as loaded.
-  const messagesLoaded = useMemo(
-    () => selectedId != null && selectedId in messagesById,
-    [selectedId, messagesById],
-  );
+  // See the CockpitStore.messagesLoaded doc comment above for the full
+  // local-vs-remote rationale. Remote detection mirrors the rest of the hook
+  // (`session.kind === 'remote'`, e.g. olamMode.ts / App.tsx), with the
+  // `olam:` id prefix as a defensive fallback for the brief window before the
+  // `sessions` snapshot has arrived for a just-selected id.
+  const messagesLoaded = useMemo(() => {
+    if (selectedId == null) return false;
+    const session = sessions.find((s) => s.id === selectedId);
+    const isRemote = session ? session.kind === 'remote' : selectedId.startsWith('olam:');
+    if (isRemote) return !!readyById[selectedId];
+    // Local / codex: the `in` operator so an empty transcript ([]) still
+    // counts as loaded — unchanged from prior behavior.
+    return selectedId in messagesById;
+  }, [selectedId, messagesById, readyById, sessions]);
 
   const messages = useMemo(
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
