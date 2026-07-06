@@ -88,6 +88,12 @@ const AC_MAX = 4;
 
 interface ComposerProps {
   disabled: boolean;
+  /** True while the selected session's transcript is still loading from the
+   *  server (see Thread's `loading` prop / useCockpit's `messagesLoaded`).
+   *  Purely a copy hint — `disabled` already carries the send-blocking gate;
+   *  this only swaps the placeholder to something more specific than "Select
+   *  a session…" while a session IS selected but not yet ready. */
+  loading?: boolean;
   /** Active session id — used to scope the enhance/review state so an
    *  improvement from one session can't leak into another on switch. */
   sessionId?: string | null;
@@ -226,6 +232,7 @@ const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
 
 export function Composer({
   disabled,
+  loading = false,
   sessionId,
   subAgentMode = true,
   onSubAgentModeChange,
@@ -1809,7 +1816,13 @@ export function Composer({
         >
           <ComposerPrimitive.Input
             className="composer-input"
-            placeholder={disabled && !terminal ? 'Select a session…' : ' '}
+            placeholder={
+              loading && !terminal
+                ? 'Loading transcript…'
+                : disabled && !terminal
+                  ? 'Select a session…'
+                  : ' '
+            }
             submitOnEnter={false}
             onKeyUp={(e) => updateCaret(e.currentTarget)}
             onClick={(e) => updateCaret(e.currentTarget)}

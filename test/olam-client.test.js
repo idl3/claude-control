@@ -103,6 +103,59 @@ test('SPA 401 re-mints the JWT once, then surfaces NoAccessSession', async () =>
   assert.equal(mints, 2); // initial + one re-mint, no loop
 });
 
+/** An expired CF Access session — the edge answers 302 → login HTML (200 after
+ *  fetch follows the redirect), NOT a 401. Response-like with a text/html
+ *  content-type and redirected:true; .json() throws like the real parse would. */
+const html = (status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  redirected: true,
+  headers: { get: (h) => (String(h).toLowerCase() === 'content-type' ? 'text/html; charset=UTF-8' : null) },
+  json: async () => {
+    throw new SyntaxError("Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON");
+  },
+});
+
+test('expired CF Access (302→HTML, not 401) re-mints once, then surfaces NoAccessSession', async () => {
+  // Login is gone: cloudflared cannot mint a fresh JWT on the re-attempt.
+  const { impl: execFileImpl, calls: execCalls } = execStub({ jwt: 'stale-jwt' });
+  let hits = 0;
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    // Every call rides the CF Access wall (HTML), never a clean JSON body.
+    ['/api/plan-chat/v1/sessions', () => { hits++; return html(200); }],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  await assert.rejects(() => c.listSessions(), NoAccessSession);
+  // Re-mint fired on the HTML wall (not just on 401) — exactly once, no loop.
+  assert.equal(hits, 2);
+  assert.equal(execCalls.filter((x) => x.cmd === 'cloudflared').length, 2);
+});
+
+test('expired CF Access self-heals after re-login: HTML wall → re-mint → JSON', async () => {
+  // First mint returns the stale JWT (still cached from before expiry); after the
+  // operator re-runs `cloudflared access login`, the re-mint returns a fresh JWT
+  // and the retried request gets clean JSON — no process restart needed.
+  let mint = 0;
+  const execFileImpl = (cmd, args, opts, cb) => {
+    if (cmd === 'cloudflared') return cb(null, `${mint++ === 0 ? 'stale-jwt' : 'fresh-jwt'}\n`);
+    if (cmd === 'gcloud') return cb(null, 'runner-tok\n');
+    cb(new Error(`unexpected ${cmd}`), '');
+  };
+  let hits = 0;
+  const { impl: fetchImpl, calls } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => (hits++ === 0 ? html(200) : json(200, { sessions: [LIST_ROW] }))],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const rows = await c.listSessions();
+  assert.equal(rows.length, 1); // recovered without a restart
+  assert.equal(hits, 2); // HTML wall, then JSON on retry
+  // The retried request carried the FRESH re-minted JWT.
+  const retry = calls.filter((x) => x.url.includes('/v1/sessions')).at(-1);
+  assert.equal(retry.init.headers['cf-access-token'], 'fresh-jwt');
+});
+
 // --- runnerToken (probe-arbitrated walk) ---------------------------------------
 
 test('runnerToken keeps the first candidate the live runner accepts', async () => {

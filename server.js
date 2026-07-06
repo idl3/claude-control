@@ -1771,6 +1771,10 @@ function ensureSubscription(id) {
       const rsub = { tailer: source, subagents: null, clients: new Set(), pending: null, remote: true };
       subscriptions.set(id, rsub);
       source.on('append', (msgs) => broadcastTo(id, { type: 'append', id, messages: msgs }));
+      // Snapshot fully drained (shape reached its live cursor) — tells the
+      // client the empty-vs-loading ambiguity is resolved for this remote
+      // session (see lib/olam-transcript.js's ShapeSubscriber 'ready' event).
+      source.on('ready', () => broadcastTo(id, { type: 'olam-transcript-ready', id }));
       source.on('banner', (b) => broadcastTo(id, { type: 'olam-degraded', id, degraded: b.degraded, reason: b.reason }));
       source.on('error', (err) =>
         broadcastTo(id, { type: 'ack', op: 'tail', ok: false, error: String(err?.message || err) }));

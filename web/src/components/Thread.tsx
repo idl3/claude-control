@@ -97,7 +97,18 @@ const WELCOME_CHIPS: WelcomeChip[] = [
 // arrives), flip showLoader off so the welcome renders rather than spinning forever.
 const LOADER_TIMEOUT_MS = 8_000;
 
-/** Spinner shown while the transcript tail is being fetched from the server. */
+/** Widths (%) for each skeleton row's text bars — mimics a few chat bubbles
+ *  of varying length so the shape reads as "message-ish" rather than generic. */
+const SKELETON_ROWS: { align?: 'end'; widths: number[] }[] = [
+  { widths: [62, 38] },
+  { align: 'end', widths: [46] },
+  { widths: [70, 54, 30] },
+];
+
+/** Skeleton + spinner shown while the transcript tail is being fetched from the
+ *  server. The skeleton rows give a sense of "content incoming" (vs. a bare
+ *  spinner reading as indefinite/stuck); the spinner keeps the classic
+ *  in-progress affordance for users who scan past the shimmer. */
 function TranscriptLoader({ loading }: { loading: boolean }) {
   const [showLoader, setShowLoader] = useState(true);
 
@@ -115,6 +126,15 @@ function TranscriptLoader({ loading }: { loading: boolean }) {
   return (
     <div className="thread-loading" aria-label="Loading transcript" aria-live="polite">
       <span className="thread-loading-spinner" aria-hidden="true" />
+      <div className="thread-skeleton" aria-hidden="true">
+        {SKELETON_ROWS.map((row, i) => (
+          <div key={i} className="thread-skeleton-row" data-align={row.align}>
+            {row.widths.map((w, j) => (
+              <span key={j} className="thread-skeleton-bar" style={{ width: `${w}%` }} />
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -284,7 +304,8 @@ export function Thread({
         viewingAgentId={viewingAgent?.agentId ?? null}
       />
       <Composer
-        disabled={!hasSelection}
+        disabled={!hasSelection || loading}
+        loading={loading}
         sessionId={sessionId}
         subAgentMode={subAgentMode}
         onSubAgentModeChange={onSubAgentModeChange}
