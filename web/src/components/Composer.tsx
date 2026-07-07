@@ -111,6 +111,10 @@ interface ComposerProps {
    *  composer blocks sends and shows a "Compacting…" progress strip so it never
    *  looks hung. */
   compacting?: boolean;
+  /** True while a dormant remote session's "Resume & send" call is in flight
+   *  (Phase C, C5). Mirrors `compacting`'s gating: blocks further sends and
+   *  shows a progress strip so a ~2min resume round trip never looks hung. */
+  resuming?: boolean;
   /** True when the selected session hit an API error and stalled — shows a Retry strip. */
   errored?: boolean;
   /** Called when the user clicks Retry on the error strip (sends "Continue"). */
@@ -239,6 +243,7 @@ export function Composer({
   onTerminalModeChange,
   working = false,
   compacting = false,
+  resuming = false,
   errored = false,
   onRetry,
   onStop,
@@ -1495,7 +1500,7 @@ export function Composer({
   );
 
   const runEnhance = useCallback(async () => {
-    if (disabled || optimizing || compacting) return;
+    if (disabled || optimizing || compacting || resuming) return;
     const original = composer.getState().text ?? '';
     if (!original.trim()) return;
     const sid = key; // the session this enhancement belongs to
@@ -1508,7 +1513,7 @@ export function Composer({
     } catch {
       patchEnhance(sid, { optimizing: false });
     }
-  }, [composer, composerServices, disabled, optimizing, compacting, key, patchEnhance]);
+  }, [composer, composerServices, disabled, optimizing, compacting, resuming, key, patchEnhance]);
 
   // ⌘/Ctrl+Enter (optimise) and ⌘/Ctrl+Shift+Enter (send raw) from ANYWHERE —
   // window-level + capture phase so it fires even when focus is outside the
@@ -1789,6 +1794,16 @@ export function Composer({
           <div className="composer-compacting" role="status" aria-live="polite">
             <span className="working-spinner" aria-hidden="true" />
             <span>Compacting conversation… sending is paused</span>
+          </div>
+        ) : null}
+        {/* Resume strip (Phase C, C5): a dormant session's "Resume & send" is
+            in flight — the round trip resumes the session AND delivers the
+            message, and can take up to ~2min, so this must read as progress,
+            not a hang. */}
+        {resuming && !terminal && !voice && !askActive ? (
+          <div className="composer-resuming" role="status" aria-live="polite">
+            <span className="working-spinner" aria-hidden="true" />
+            <span>Resuming session & sending your message… (up to ~2 min)</span>
           </div>
         ) : null}
         {/* Error strip: the agent hit an API error and stalled — offer a Retry
@@ -2081,7 +2096,7 @@ export function Composer({
               className="composer-enhance composer-bypass"
               aria-label="Send without optimising"
               title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
-              disabled={disabled || optimizing || empty || compacting}
+              disabled={disabled || optimizing || empty || compacting || resuming}
               onClick={() => {
                 composer.send();
                 refocusComposer();
@@ -2128,7 +2143,7 @@ export function Composer({
                   data-queue={working ? 'true' : undefined}
                   aria-label="Optimise and send"
                   title="Optimise & send (⌘/Ctrl+↵)"
-                  disabled={disabled || optimizing || empty || compacting}
+                  disabled={disabled || optimizing || empty || compacting || resuming}
                   data-hotkey="⌘↵"
                   onClick={() => void runEnhance()}
                 >
