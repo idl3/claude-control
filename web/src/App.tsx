@@ -59,8 +59,9 @@ import {
   ExternalLinkIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { Msg, Pending, ServerMessage } from './lib/types';
+import type { Pending, ServerMessage } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
+import { echoMatches, hasDeliveredEcho, msgText, toMs } from './lib/pendingSend';
 import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
@@ -72,15 +73,6 @@ import gsap, { prefersReducedMotion } from './lib/anim';
 // (tailer-less sessions only carry the flag). The server will not recognise this
 // id, which is acceptable — the goal is to never leave the user blind.
 const FLAG_PENDING_TOOL_USE_ID = '__flag__';
-
-// Concatenate a transcript message's text blocks (to match a real user echo
-// against a queued send).
-function msgText(msg: Msg): string {
-  return (msg.blocks ?? [])
-    .filter((b): b is { kind: 'text'; text: string } => b.kind === 'text')
-    .map((b) => b.text)
-    .join(' ');
-}
 
 // How long a queued send waits for its transcript echo before we stop showing it.
 // Keep an unconfirmed optimistic send visible for a long time: the user must
@@ -105,6 +97,11 @@ type PendingSend = {
   sessionId: string;
   text: string;
   label: string;
+  // Attachment count at original send time (see onNew) — reused by Retry so a
+  // re-sent image-laden message still gets the server's paste→Enter settle
+  // scaling. Optional so pre-existing localStorage entries (persisted before
+  // this field existed) still pass loadPendingSends's type guard.
+  attachments?: number;
   at: number;
   status: 'queued' | 'sent' | 'failed';
 };
@@ -474,6 +471,7 @@ function AppInner() {
             sessionId: sid,
             text,
             label,
+            attachments: paths.length,
             at: Date.now(),
             status: 'queued',
           },
@@ -536,25 +534,16 @@ function AppInner() {
   useEffect(() => {
     const sid = cockpit.selectedId;
     if (!sid || !pendingSends.some((e) => e.sessionId === sid)) return;
-    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
-    const toMs = (ts: unknown) =>
-      typeof ts === 'number' ? ts : typeof ts === 'string' ? Date.parse(ts) || 0 : 0;
-    const SKEW = 5000; // clock-skew tolerance between send time and transcript ts
     const echoes = cockpit.messages
       .filter((m) => m.role === 'user')
-      .map((m) => ({ t: norm(msgText(m)), ts: toMs(m.ts) }))
-      .filter((e) => e.t);
+      .map((m) => ({ t: msgText(m), ts: toMs(m.ts) }))
+      .filter((e) => e.t.trim());
     setPendingSends((q) => {
       const claimed = new Set<number>();
       const next = q.filter((e) => {
         if (e.sessionId !== sid) return true; // leave other sessions untouched
-        const text = norm(e.text);
-        const label = norm(e.label);
         const idx = echoes.findIndex(
-          (ec, i) =>
-            !claimed.has(i) &&
-            ec.ts >= e.at - SKEW &&
-            (ec.t === text || ec.t === label || ec.t.startsWith(label) || text.startsWith(ec.t)),
+          (ec, i) => !claimed.has(i) && echoMatches(e, ec.t, ec.ts),
         );
         if (idx >= 0) {
           claimed.add(idx);
@@ -580,6 +569,67 @@ function AppInner() {
     }, 5_000);
     return () => clearInterval(t);
   }, [pendingSends.length]);
+
+  // Retry / Discard actions on a stale "Not delivered" bubble (dispatched by
+  // UserMessage in Messages.tsx, keyed by the PendingSend's `key`, parsed from
+  // the optimistic bubble's `queued-<key>` message id).
+  //
+  // Discard: just drop the entry — localStorage persistence follows automatically
+  // via the effect above that mirrors pendingSends there on every change.
+  //
+  // Retry is reconcile-first: it's possible the send actually landed (a stale/
+  // false-negative ack, or the echo arrived AFTER the ack was marked failed) —
+  // re-using the SAME echoMatches rule as the batch reconcile effect above means
+  // we never double-send a message that's already in the transcript. If no echo
+  // exists, re-dispatch the ORIGINAL text through the same cockpit.sendReply used
+  // by onNew, with a fresh reqId; the existing ack/reconcile effects then take
+  // the re-queued entry over normally. If the socket can't even dispatch (no
+  // reqId), leave the entry 'failed' and surface the same "Not connected" toast
+  // onNew uses for that case.
+  useEffect(() => {
+    const keyFromEvent = (ev: Event): number | null => {
+      const k = (ev as CustomEvent).detail?.key;
+      return typeof k === 'number' ? k : null;
+    };
+    const onDiscard = (ev: Event) => {
+      const key = keyFromEvent(ev);
+      if (key == null) return;
+      setPendingSends((q) => q.filter((e) => e.key !== key));
+    };
+    const onRetry = (ev: Event) => {
+      const key = keyFromEvent(ev);
+      if (key == null) return;
+      setPendingSends((q) => {
+        const entry = q.find((e) => e.key === key);
+        // No-op guard: already discarded/resolved, or a stale event from a
+        // fast double-click on an entry that isn't (or is no longer) failed.
+        if (!entry || entry.status !== 'failed') return q;
+        // A retry can only safely target the currently selected session —
+        // cockpit.sendReply always sends to it, not to entry.sessionId.
+        if (entry.sessionId !== cockpit.selectedId) {
+          showToast('Switch to that session to retry', 'error');
+          return q;
+        }
+        if (hasDeliveredEcho(entry, cockpit.messages)) {
+          return q.filter((e) => e.key !== key); // promote: the real bubble already exists
+        }
+        const reqId = cockpit.sendReply(entry.text, entry.attachments ?? 0, false, false);
+        if (!reqId) {
+          showToast('Not connected — reconnecting…', 'error');
+          return q; // nothing was dispatched — stay failed
+        }
+        return q.map((e) =>
+          e.key === key ? { ...e, reqId, at: Date.now(), status: 'queued' as const } : e,
+        );
+      });
+    };
+    window.addEventListener('cockpit:pending-retry', onRetry);
+    window.addEventListener('cockpit:pending-discard', onDiscard);
+    return () => {
+      window.removeEventListener('cockpit:pending-retry', onRetry);
+      window.removeEventListener('cockpit:pending-discard', onDiscard);
+    };
+  }, [cockpit, showToast]);
 
   // Clear the post-answer working indicator on the next activity / session change.
   useEffect(() => {

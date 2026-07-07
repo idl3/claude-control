@@ -1399,6 +1399,14 @@ body.is-external-display .rail {
   background: var(--bg-1);
   color: var(--text);
 }
+/* Discard on a "Not delivered" bubble is destructive — stay as quiet as any
+   other act-btn at rest, but tint danger-red on hover/focus so it reads as
+   discoverable-but-deliberate rather than an accidental click target. */
+.act-btn-danger:hover,
+.act-btn-danger:focus-visible {
+  background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
+  color: var(--danger, #e5484d);
+}
 /* Toggle copy ↔ copied via the data-copied attribute assistant-ui sets. */
 .act-copy-idle {
   display: flex;

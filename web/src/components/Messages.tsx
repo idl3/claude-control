@@ -9,6 +9,7 @@ import { SlotText } from 'slot-text/react';
 import 'slot-text/style.css';
 import { TextPart, ToolPart, AskAnsweredPart, lastUpdateLine } from './MessageParts';
 import { useLiveThinkingId } from './ThinkingContext';
+import { parsePendingKey } from '../lib/pendingSend';
 
 // width/height come from CSS (.act-ico, sized in em) so the icon scales WITH the
 // label's font-size on external displays / iPad (both driven by --ui-scale).
@@ -44,6 +45,30 @@ function WarnIcon() {
       <path d="M12 3l9 16H3l9-16z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       <path d="M12 10v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       <circle cx="12" cy="17" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+function RetryIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 4v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M4.5 15a8 8 0 1 0 2-8.5L4 10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M9 7V4h6v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 7l1 13h10l1-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -245,6 +270,7 @@ function GroupedBody() {
 // so the bubble shows its delivery state: queued (pulsing, awaiting server ack),
 // sent (ack confirmed, awaiting transcript echo), or failed (loud — never landed).
 export function UserMessage() {
+  const id = useMessage((m) => m.id);
   const optimistic = useMessage((m) => m.metadata?.custom?.optimistic) as
     | boolean
     | undefined;
@@ -259,6 +285,18 @@ export function UserMessage() {
   // "Queued" state; only a delivery FAILURE diverges.
   const failed = sendStatus === 'failed';
   const display = failed ? 'failed' : 'queued';
+
+  // Retry / Discard dispatch a plain window CustomEvent (matching the
+  // cockpit:ack / cockpit:fontsize idiom) carrying the PendingSend's key,
+  // recovered from this optimistic bubble's `queued-<key>` message id. App.tsx
+  // owns the actual retry/discard logic (it holds the pendingSends queue and
+  // the send transport) — this component only ever signals intent.
+  const dispatchPendingAction = (type: 'cockpit:pending-retry' | 'cockpit:pending-discard') => {
+    const key = parsePendingKey(id);
+    if (key == null) return;
+    window.dispatchEvent(new CustomEvent(type, { detail: { key } }));
+  };
+
   return (
     <MessagePrimitive.Root
       className="msg-row"
@@ -284,6 +322,26 @@ export function UserMessage() {
               </>
             )}
           </span>
+          {failed ? (
+            <>
+              <button
+                type="button"
+                className="act-btn"
+                aria-label="Retry send"
+                onClick={() => dispatchPendingAction('cockpit:pending-retry')}
+              >
+                <RetryIcon /> Retry
+              </button>
+              <button
+                type="button"
+                className="act-btn act-btn-danger"
+                aria-label="Discard message"
+                onClick={() => dispatchPendingAction('cockpit:pending-discard')}
+              >
+                <TrashIcon /> Discard
+              </button>
+            </>
+          ) : null}
         </div>
       ) : (
         <MessageActions />
