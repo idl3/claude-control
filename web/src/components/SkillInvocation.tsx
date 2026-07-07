@@ -6,12 +6,13 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
+import { SkillIcon } from './icons';
 
 // ── Detection ────────────────────────────────────────────────────────────────
 
-export function isSkillInvocation(text: string): boolean {
-  return text.trimStart().startsWith('Base directory for this skill:');
-}
+// Owned by lib/convert.ts (convertMessages reroutes skill invocations off the
+// user-bubble path) — re-exported here so callers only need this module.
+export { isSkillInvocation } from '../lib/convert';
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -165,7 +166,8 @@ function SkillModal({ parsed, onClose }: SkillModalProps) {
         {/* Header */}
         <div className="modal-head">
           <span className="modal-title modal-title-skill">
-            🧩 Skill: {parsed.name}
+            <SkillIcon size={16} />
+            Skill: {parsed.name}
           </span>
           <button
             type="button"
@@ -227,9 +229,7 @@ export function SkillInvocation({ text }: SkillInvocationProps): JSX.Element {
         }}
         title={parsed.description ?? `Skill: ${parsed.name}`}
       >
-        <span className="skill-chip-icon" aria-hidden="true">
-          🧩
-        </span>
+        <SkillIcon size={14} className="skill-chip-icon" />
         <span className="skill-chip-name">{parsed.name}</span>
         <span className="skill-chip-tag">skill</span>
       </button>
