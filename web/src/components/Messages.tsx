@@ -351,18 +351,21 @@ export function UserMessage() {
 }
 
 // Assistant (and system, tagged via metadata.custom.cockpitRole) message.
+// A system-tagged message (e.g. a Skill invocation chip, see convert.ts) is a
+// quiet inline marker, not a conversation turn — it never gets the Copy bar.
 export function AssistantMessage() {
   const cockpitRole =
     (useMessage((m) => m.metadata?.custom?.cockpitRole) as string | undefined) ??
     'assistant';
   const working = useMessage((m) => m.metadata?.custom?.working) as boolean | undefined;
+  const isSystem = cockpitRole === 'system';
 
   return (
     <MessagePrimitive.Root className="msg-row" data-role={cockpitRole}>
       <div className="msg-body">
         <GroupedBody />
       </div>
-      {!working && <MessageActions />}
+      {!working && !isSystem && <MessageActions />}
     </MessagePrimitive.Root>
   );
 }

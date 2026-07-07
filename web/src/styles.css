@@ -4884,8 +4884,9 @@ select.config-input {
   background: var(--line);
 }
 .skill-chip-icon {
-  font-size: 13px;
   flex: 0 0 auto;
+  /* SVG inherits currentColor, so it recolors with the chip's dim/hover text. */
+  display: inline-flex;
 }
 .skill-chip-name {
   font-weight: 600;
@@ -4967,6 +4968,9 @@ select.config-input {
 }
 .modal-title-skill {
   /* Accent colour matching other modal titles but cooler than amber. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--accent);
 }
 /* The modal body for skill detail: flex column, scrollable. */
