@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   convertMessages,
   compactSystemText,
+  isSkillInvocation,
   toolSummary,
   toolInput,
   toolResult,
@@ -59,6 +60,45 @@ describe('convertMessages — role mapping', () => {
     expect(out[0].role).toBe('assistant');
     expect((out[0].metadata as { custom?: Record<string, unknown> }).custom)
       .toMatchObject({ cockpitRole: 'system' });
+  });
+});
+
+describe('convertMessages — Skill invocation routing', () => {
+  const SKILL_TEXT =
+    'Base directory for this skill: /home/user/.claude/skills/plan-hard\n---\nname: plan-hard\ndescription: Deep planning\n---\nBody text.';
+
+  it('reroutes a Skill-invocation user turn to role "assistant" tagged cockpitRole "system"', () => {
+    const out = convertMessages([
+      { uuid: 'sk1', role: 'user', blocks: [{ kind: 'text', text: SKILL_TEXT }] },
+    ] as Msg[]);
+    expect(out).toHaveLength(1);
+    expect(out[0].role).toBe('assistant'); // NOT 'user' — no bubble/edge-bar/Copy chrome
+    expect(out[0].metadata?.custom?.cockpitRole).toBe('system');
+    expect(parts(out[0])).toEqual([{ type: 'text', text: SKILL_TEXT }]); // text unchanged for SkillInvocation to parse
+  });
+
+  it('leaves an ordinary user message on the normal user path (cockpitRole "user")', () => {
+    const out = convertMessages([
+      { uuid: 'u1', role: 'user', blocks: [{ kind: 'text', text: 'hello there' }] },
+    ] as Msg[]);
+    expect(out[0].role).toBe('user');
+    expect(out[0].metadata?.custom?.cockpitRole).toBe('user');
+  });
+
+  it('does not reroute a Skill-invocation-shaped assistant message (detection is user-only)', () => {
+    const out = convertMessages([
+      { uuid: 'a1', role: 'assistant', blocks: [{ kind: 'text', text: SKILL_TEXT }] },
+    ] as Msg[]);
+    expect(out[0].metadata?.custom?.cockpitRole).toBe('assistant');
+  });
+
+  it('ends an assistant turn boundary (does not merge into surrounding assistant work)', () => {
+    const out = convertMessages([
+      { uuid: 'a1', role: 'assistant', blocks: [{ kind: 'text', text: 'before' }] },
+      { uuid: 'sk1', role: 'user', blocks: [{ kind: 'text', text: SKILL_TEXT }] },
+      { uuid: 'a2', role: 'assistant', blocks: [{ kind: 'text', text: 'after' }] },
+    ] as Msg[]);
+    expect(out.map((m) => m.id)).toEqual(['a1', 'sk1', 'a2']); // 3 distinct turns, not merged
   });
 });
 
@@ -389,6 +429,19 @@ describe('compactSystemText', () => {
     expect(compactSystemText('   <system-reminder>x</system-reminder>')).toBe(
       '⚙ system reminder',
     );
+  });
+});
+
+describe('isSkillInvocation', () => {
+  it('matches the Skill tool_result marker', () => {
+    expect(isSkillInvocation('Base directory for this skill: /path/to/skill')).toBe(true);
+  });
+  it('tolerates leading whitespace', () => {
+    expect(isSkillInvocation('   Base directory for this skill: /path')).toBe(true);
+  });
+  it('returns false for normal prose, even mentioning the phrase mid-text', () => {
+    expect(isSkillInvocation('hello world')).toBe(false);
+    expect(isSkillInvocation('See: Base directory for this skill: /x')).toBe(false);
   });
 });
 

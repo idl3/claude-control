@@ -192,12 +192,19 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
     const parts = buildParts(msg.blocks ?? [], resultsById, msg.role === 'user');
     if (parts.length === 0) return;
 
+    // A Skill invocation arrives as a normal `user` turn (Claude Code echoes the
+    // Skill tool's SKILL.md dump that way), but it isn't a conversational turn —
+    // reroute it down the same path as a tagged system message so it renders as
+    // a quiet inline marker (the SkillInvocation chip) instead of a chat bubble.
+    const isSkillMsg =
+      msg.role === 'user' && parts.some((p) => p.type === 'text' && isSkillInvocation(p.text));
+
     // assistant-ui only allows tool-call parts on assistant messages. Map
-    // user/assistant straight through; render system as assistant tagged via
-    // metadata so its styling differs without violating the system-message
-    // single-text-part rule.
+    // user/assistant straight through; render system (and skill invocations) as
+    // assistant tagged via metadata so their styling differs without violating
+    // the system-message single-text-part rule.
     const role: ThreadMessageLike['role'] =
-      msg.role === 'user' ? 'user' : 'assistant';
+      msg.role === 'user' && !isSkillMsg ? 'user' : 'assistant';
 
     let id = msg.uuid || `m-${i}`;
     if (seenIds.has(id)) id = `${id}#${i}`;
@@ -208,7 +215,7 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
       id,
       createdAt: msg.ts ? new Date(msg.ts) : undefined,
       content: parts,
-      metadata: { custom: { cockpitRole: msg.role } },
+      metadata: { custom: { cockpitRole: isSkillMsg ? 'system' : msg.role } },
     } as ThreadMessageLike);
   });
 
@@ -249,6 +256,17 @@ function mergeAssistantTurns(messages: ThreadMessageLike[]): ThreadMessageLike[]
     }
   }
   return merged;
+}
+
+/**
+ * True when a text block is Claude Code echoing a Skill invocation's SKILL.md
+ * dump back as a (synthetic) `user` turn — the tool_result of the Skill tool.
+ * Owned here (rather than in the SkillInvocation component) so convertMessages
+ * can reroute these off the user-bubble path; SkillInvocation.tsx re-exports it
+ * for its own text-part detection.
+ */
+export function isSkillInvocation(text: string): boolean {
+  return text.trimStart().startsWith('Base directory for this skill:');
 }
 
 /**
