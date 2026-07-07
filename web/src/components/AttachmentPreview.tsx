@@ -79,6 +79,34 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
     dialogRef.current?.focus();
   }, []);
 
+  // Scroll-lock + pull-to-refresh guard while the Lightbox is open. Belt and
+  // braces, mounted for the lifetime of this single Lightbox instance:
+  //  - `lightbox-open` on <html> (styles.css) hard-locks page scroll/rubber-band.
+  //  - `touch-action`/`overscroll-behavior` on .lightbox-backdrop (styles.css)
+  //    tell the browser not to hand this element's touches to native scrolling.
+  //  - the non-passive touchmove listener below both preventDefaults (blocks
+  //    iOS Safari's native pull-to-refresh, which our CSS overscroll-behavior
+  //    normally suppresses but a fixed full-viewport overlay can bypass) and
+  //    stopPropagation()s — this app also drives its OWN pull-to-refresh via
+  //    JS (see hooks/usePullToRefresh.ts, bound to the app root and keyed off
+  //    `.thread-viewport` scrollTop). Without stopping propagation here, a
+  //    drag on the overlay — which sits inside `.thread-viewport` in the DOM
+  //    despite being visually fixed on top — would still bubble to that
+  //    listener and could trigger its hard `window.location.reload()`.
+  useEffect(() => {
+    document.documentElement.classList.add('lightbox-open');
+    const node = dialogRef.current;
+    const blockTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    node?.addEventListener('touchmove', blockTouchMove, { passive: false });
+    return () => {
+      document.documentElement.classList.remove('lightbox-open');
+      node?.removeEventListener('touchmove', blockTouchMove);
+    };
+  }, []);
+
   // Dismiss on Escape.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -101,12 +129,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       onClick={onClose}
       onKeyDown={onKeyDown}
     >
-      <img
-        className="lightbox-img"
-        src={src}
-        alt={alt}
-        onClick={(e) => e.stopPropagation()} // tap on image doesn't dismiss
-      />
+      <img className="lightbox-img" src={src} alt={alt} />
     </div>
   );
 }
