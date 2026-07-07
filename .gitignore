@@ -11,3 +11,5 @@ outputs/
 .env.*
 *.tgz
 .envrc
+scratch/
+web/scratch/
