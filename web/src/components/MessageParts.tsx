@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMessage } from '@assistant-ui/react';
 import type {
   TextMessagePartComponent,
   ToolCallMessagePartComponent,
@@ -7,6 +8,8 @@ import { toolInput, toolResult, toolSummary } from '../lib/convert';
 import { MarkdownText } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
 import { isSkillInvocation, SkillInvocation } from './SkillInvocation';
+import { GoalPill, TextWithUltrathink } from './ReservedTokens';
+import { parseGoalInvocation } from '../lib/reservedTokens';
 import { useArtifactPanel } from './ArtifactContext';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { CodexIcon } from './CodexIcon';
@@ -18,6 +21,7 @@ import { useAgentKind } from './AgentContext';
 const WORKING_RE = /^\s*working…?\s*$/i;
 export const TextPart: TextMessagePartComponent = (props) => {
   const agentKind = useAgentKind();
+  const role = useMessage((m) => m.role);
   if (typeof props.text === 'string' && WORKING_RE.test(props.text)) {
     return (
       <span className="working-indicator" role="status" aria-live="polite">
@@ -30,6 +34,19 @@ export const TextPart: TextMessagePartComponent = (props) => {
         </span>
         <span className="shimmer-text">Working…</span>
       </span>
+    );
+  }
+  // /goal is a reserved token — only in user messages, so an assistant reply
+  // that happens to start with the literal text "/goal" is never repainted.
+  const goal = role === 'user' && typeof props.text === 'string'
+    ? parseGoalInvocation(props.text)
+    : null;
+  if (goal) {
+    return (
+      <>
+        <GoalPill token={goal.token} />
+        {goal.rest ? <TextWithUltrathink text={goal.rest} /> : null}
+      </>
     );
   }
   if (typeof props.text === 'string' && isSkillInvocation(props.text)) {
