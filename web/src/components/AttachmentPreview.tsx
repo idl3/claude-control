@@ -71,12 +71,53 @@ interface LightboxProps {
   onClose: () => void;
 }
 
+/**
+ * Walks up from `el` to the nearest ancestor that is actually scrolled
+ * (computed overflow-y is auto/scroll AND its content overflows) — a plain,
+ * class-name-agnostic detector rather than a hardcoded selector, since the
+ * Lightbox mounts from many different panes (main transcript, sub-agent
+ * thread, attachments) each with their own scroll container.
+ */
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node && node !== document.documentElement) {
+    const { overflowY } = window.getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 export function Lightbox({ src, alt, onClose }: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Focus trap: move focus to the dialog on open.
+  // Focus the dialog for a11y/Escape, without the browser's default
+  // scroll-into-view. The backdrop is `position: fixed` (already covers the
+  // full viewport) but is still a DOM descendant of whichever scrollable
+  // pane rendered the triggering image, and some engines still try to
+  // scroll that ancestor to "reveal" a newly focused descendant — which is
+  // what was snapping the transcript to the top on open. `preventScroll`
+  // stops that at the source; the scrollTop capture/restore is the belt-
+  // and-braces fallback, and also covers the symmetric case on dismiss
+  // (this element unmounting shouldn't leave the pane scrolled anywhere
+  // other than where the user had it).
   useEffect(() => {
-    dialogRef.current?.focus();
+    const node = dialogRef.current;
+    const scroller = findScrollParent(node);
+    const savedScrollTop = scroller?.scrollTop ?? null;
+
+    node?.focus({ preventScroll: true });
+    if (scroller && savedScrollTop !== null && scroller.scrollTop !== savedScrollTop) {
+      scroller.scrollTop = savedScrollTop;
+    }
+
+    return () => {
+      if (scroller && savedScrollTop !== null) {
+        scroller.scrollTop = savedScrollTop;
+      }
+    };
   }, []);
 
   // Scroll-lock + pull-to-refresh guard while the Lightbox is open. Belt and
