@@ -48,6 +48,9 @@ const claudeBin = args.bin || 'claude';
 // that leaves the session usable. Overridable via --permission-mode.
 const permissionMode = args['permission-mode'] || 'bypassPermissions';
 const sessionName = args.name || '';
+// Applied on every turn (not just the first) since print mode spawns a fresh
+// `claude -p` child per turn — the model choice must survive across resumes.
+const model = args.model || '';
 
 if (!socketPath) {
   console.error('claude-print-bridge: --socket is required');
@@ -171,6 +174,7 @@ function runClaudeChild(text, useStreamInput, { reportExitError = true } = {}) {
     } else if (sessionName) {
       turnArgs.push('--name', sessionName);
     }
+    if (model) turnArgs.push('--model', model);
 
     const child = spawn(claudeBin, turnArgs, {
       cwd,

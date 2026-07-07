@@ -941,15 +941,37 @@ async function resolvePaneTarget(target) {
   }
 }
 
+// Claude model flag values the draft-composer UI may request. 'default'
+// (or anything else unrecognized) omits --model entirely — silent fallback,
+// same pattern as claudeTransport/codexTransport below, not a 400.
+const ALLOWED_CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+
+// Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
+// is raised for this endpoint (see the readJsonBody call below) to leave room
+// for a prompt up to this size plus JSON-escaping overhead and the other
+// fields; this is the actual boundary check on the prompt content itself.
+const MAX_PROMPT_BYTES = 100_000;
+
 // POST /api/session/new — create a new tmux window in the configured (or
 // body-overridden) cwd, then type the launch command into it via send-keys so
 // the interactive shell resolves aliases. Security: the command is operator
 // config and is only ever sent into a pane (never shell-exec'd), consistent
 // with this app already typing into live sessions. Token-gated + localhost.
+//
+// Optional `prompt` (initial message) and `model` (Claude only) let the
+// draft-composer UI create a session WITH its first prompt atomically:
+//   - Claude tmux:  prompt/model become extra positional/flag args typed into
+//                   the pane as part of the SAME launch command (atomic).
+//   - Claude print: model becomes a bridge --model arg; prompt is submitted
+//                   over the bridge socket once the bridge signals ready.
+//   - Codex tmux:   prompt becomes a positional arg on the launch command.
+//   - Codex RPC:    prompt is submitted over the RPC thread once attached.
 async function handleSessionNew(req, res) {
   let body;
   try {
-    body = await readJsonBody(req);
+    // Default cap (64KB) is too tight for a multi-line initial prompt; the
+    // prompt itself is still bounded by MAX_PROMPT_BYTES below.
+    body = await readJsonBody(req, 256 * 1024);
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }
@@ -979,6 +1001,20 @@ async function handleSessionNew(req, res) {
   // `session-<short-ts>` so a session is ALWAYS named (the rail reads the tmux
   // window name until a transcript title exists).
   const name = tmux.sanitizeName(body.name) || tmux.defaultSessionName();
+
+  // model: Claude-only. Unknown/absent → null (no --model flag, agent default).
+  const model = agent === 'claude' && ALLOWED_CLAUDE_MODELS.has(body.model) ? body.model : null;
+
+  // prompt: optional initial message, delivered atomically with the launch
+  // (tmux transports) or over the print/RPC socket once the agent is ready.
+  // Boundary validation — never trust external input shape/size.
+  if (body.prompt !== undefined && typeof body.prompt !== 'string') {
+    return endJson(res, 400, { error: 'prompt must be a string' });
+  }
+  if (typeof body.prompt === 'string' && Buffer.byteLength(body.prompt, 'utf8') > MAX_PROMPT_BYTES) {
+    return endJson(res, 400, { error: `prompt exceeds ${MAX_PROMPT_BYTES}-byte limit` });
+  }
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
 
   // --- Pre-validation: binary resolution + cwd check BEFORE creating any window ---
 
@@ -1027,9 +1063,13 @@ async function handleSessionNew(req, res) {
         // Codex has none. The tmux window is still named (above) so the rail
         // shows it. buildSpawnCommand is the single source of truth for Codex's
         // launch shape; the cwd arg is shell-quoted since the command is typed
-        // into an interactive shell via sendText.
+        // into an interactive shell via sendText. An initial prompt is a
+        // trivially-supported positional arg (`codex [OPTIONS] [PROMPT]`),
+        // appended last and shell-quoted like the cwd above.
         const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
-        launch = `${bin} ${args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a)).join(' ')}`;
+        const argv = args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a));
+        if (prompt) argv.push(tmux.shellQuoteName(prompt));
+        launch = `${bin} ${argv.join(' ')}`;
       }
     } else if (claudeTransport === 'print') {
       printPaneTarget = await resolvePaneTarget(target);
@@ -1046,11 +1086,15 @@ async function handleSessionNew(req, res) {
         cwd,
         claudeBin,
         name,
+        model: model || undefined,
         permissionMode: 'bypassPermissions',
         quote: tmux.shellQuoteName,
       });
     } else {
-      // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation.
+      // Claude path: BYTE-IDENTICAL to the pre-Phase-D implementation, plus the
+      // optional --model flag and positional initial prompt (both new, both
+      // appended — appending is the only change, so the pre-Phase-D shape with
+      // neither set is still byte-identical).
       // (2) Claude's own session title: `claude --help` exposes `-n/--name`
       //     (display name in the prompt box, /resume picker, terminal title), so
       //     we append it to the launch command rather than relying on a delayed
@@ -1058,6 +1102,12 @@ async function handleSessionNew(req, res) {
       //     control chars/newlines) since the command is typed into an interactive
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
+      if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
+      // Positional prompt goes last (`claude [options] [command] [prompt]`).
+      // sendText pastes the whole multi-line command atomically (bracketed
+      // paste), so an embedded newline inside the single-quoted prompt is safe
+      // — it never prematurely submits the half-typed command.
+      if (prompt) launch += ` ${tmux.shellQuoteName(prompt)}`;
     }
 
     if (agent === 'codex') {
@@ -1069,9 +1119,25 @@ async function handleSessionNew(req, res) {
     await tmux.sendText(target, launch);
     if (printClient) {
       await printClient.waitForBridge();
+      // Reliable socket submit (no tmux typing) — the session is already
+      // created either way, so a submit failure here is logged, not fatal.
+      if (prompt) {
+        try {
+          printClient.submit(prompt);
+        } catch (err) {
+          console.error(`session/new: initial prompt submit failed for ${printPaneTarget}:`, err?.message || err);
+        }
+      }
     }
     if (agent === 'codex' && codexRpcEndpoint) {
       await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd });
+      if (prompt) {
+        try {
+          await codexRpc.submit(target, prompt, { cwd });
+        } catch (err) {
+          console.error(`session/new: initial prompt submit failed for ${target}:`, err?.message || err);
+        }
+      }
     }
     return endJson(res, 200, {
       ok: true,

@@ -18,7 +18,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness } from './lib/api';
+import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -34,6 +34,7 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { PermissionBanner } from './components/PermissionBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
+import { NewSessionDraft } from './components/NewSessionDraft';
 import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
@@ -837,6 +838,17 @@ function AppInner() {
   // Mobile master/detail: reveal the chat pane once a session is selected.
   const [railOpenMobile, setRailOpenMobile] = useState(true);
 
+  // New-session draft screen: shown in the main content area in place of the
+  // transcript (mirrors the mobile rail→content navigation a real session
+  // selection uses). Closed by Cancel/Esc or by successfully creating a
+  // session (onDraftCreated selects the new session, which unmounts this).
+  const [draftOpen, setDraftOpen] = useState(false);
+  const openDraft = useCallback(() => {
+    setDraftOpen(true);
+    setRailOpenMobile(false); // mobile: navigate rail → content, same as select()
+  }, []);
+  const closeDraft = useCallback(() => setDraftOpen(false), []);
+
   // Desktop focus mode: collapse the sidebar (persisted). On mobile the rail is
   // the master pane (handled by data-detail), so focus mode is desktop-only.
   const narrow = useIsNarrow();
@@ -1091,12 +1103,21 @@ function AppInner() {
     (id: string) => {
       cockpit.select(id);
       setRailOpenMobile(false);
+      setDraftOpen(false); // selecting a session abandons an open draft
       // Deep-link: reflect the selection in the URL hash so a reload restores
       // it. The token no longer lives in the URL (it's in localStorage), so the
       // hash is the only stateful part of the URL.
       window.location.hash = encodeURIComponent(id);
     },
     [cockpit],
+  );
+
+  // New session created from the draft screen: land the user in its
+  // transcript, same as tapping it in the rail (the rail itself picks it up
+  // on the next ~4s registry refresh).
+  const onDraftCreated = useCallback(
+    (result: CreateSessionResult) => select(result.target),
+    [select],
   );
 
   // The service worker posts {type:'open-session', id} when a push notification
@@ -1724,7 +1745,7 @@ function AppInner() {
       <div
         ref={appRef}
         className="app"
-        data-detail={cockpit.selectedId && !railOpenMobile ? 'open' : 'closed'}
+        data-detail={(cockpit.selectedId || draftOpen) && !railOpenMobile ? 'open' : 'closed'}
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
@@ -1762,7 +1783,7 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <NewSessionForm onToast={showToast} filter={sessionFilter} onCycleFilter={cycleFilter} />
+            <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
@@ -1811,6 +1832,15 @@ function AppInner() {
           </aside>
 
           <main className="detail">
+            {draftOpen ? (
+              <NewSessionDraft
+                filter={sessionFilter}
+                onToast={showToast}
+                onCancel={closeDraft}
+                onCreated={onDraftCreated}
+              />
+            ) : (
+              <>
             <header className="detail-head">
               <button
                 type="button"
@@ -2195,6 +2225,8 @@ function AppInner() {
             )}
             </ShellContext.Provider>
             </div>
+              </>
+            )}
           </main>
         </div>
 
