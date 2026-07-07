@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { OlamOrgClient, NoAccessSession } from '../lib/olam-client.js';
+import { composerMode } from '../lib/olam-transport.js';
 
 const ORG = {
   org: 'atlas',
@@ -408,6 +409,82 @@ test('enrich surfaces normalized prs + prCount from the runner status', async ()
   await c.enrich(rows);
   assert.deepEqual(rows[0].prs, [{ url: 'https://github.com/idl3/claude-control/pull/153', number: 153 }]);
   assert.equal(rows[0].prCount, 1);
+});
+
+// --- sessionLiveness (Phase A, cloud-session-chat task A4) --------------------
+
+test('sessionLiveness returns the parsed body on 200', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl, calls } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/session-liveness', () => json(200, { state: 'dormant', phase: 'disposed' })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const liveness = await c.sessionLiveness('s1');
+  assert.deepEqual(liveness, { state: 'dormant', phase: 'disposed' });
+  const call = calls.find((x) => x.url.includes('/api/session-liveness'));
+  assert.match(call.url, /session_id=s1/);
+});
+
+test('sessionLiveness fails CLOSED to {state:"unknown"} on a non-200, never throws', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/session-liveness', () => json(404, { error: 'not found' })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  assert.deepEqual(await c.sessionLiveness('s1'), { state: 'unknown' });
+});
+
+test('sessionLiveness fails CLOSED to {state:"unknown"} on a network error, never throws', async () => {
+  const { impl: execFileImpl } = execStub();
+  const fetchImpl = async (url) => {
+    if (url.includes('/api/bootstrap')) return json(200, { token: 'app' });
+    throw new Error('socket hang up');
+  };
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  assert.deepEqual(await c.sessionLiveness('s1'), { state: 'unknown' });
+});
+
+test('sessionLiveness fails CLOSED to {state:"unknown"} on a malformed body (no state field)', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/session-liveness', () => json(200, { phase: 'running' })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  assert.deepEqual(await c.sessionLiveness('s1'), { state: 'unknown' });
+});
+
+// --- CP3 audit Finding 1: always-probe liveness policy (the restart scenario) --
+
+test('CP3 Finding 1 regression: a fresh client (empty _pools), session pool=null, still surfaces dormant liveness — server.js no longer gates the fetch on isExecuteShaped(session)', async () => {
+  const { impl: execFileImpl } = execStub();
+  const { impl: fetchImpl, calls } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/session-liveness', () => json(200, { state: 'dormant', containerSessionId: 'exec-x' })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  // Fresh process: _pools is empty — no session was ever observed inFlight
+  // during this process lifetime (exactly the state right after a cockpit
+  // restart).
+  assert.equal(c._pools.size, 0);
+  // Session row as it looks right after that restart: no cached pool.
+  // isExecuteShaped(session) with no liveness arg would be false here — the
+  // old preflight gate in server.js's getSessionLiveness would have skipped
+  // the fetch entirely on this signal alone.
+  const session = { pool: null };
+  // The always-probe policy calls sessionLiveness() unconditionally rather
+  // than gating on session.pool.
+  const liveness = await c.sessionLiveness('exec-x');
+  assert.deepEqual(liveness, { state: 'dormant', containerSessionId: 'exec-x' });
+  const call = calls.find((x) => x.url.includes('/api/session-liveness'));
+  assert.ok(call, 'sessionLiveness must have actually hit the network — no gate suppressed it');
+  // isExecuteShaped(session, liveness) now has positive evidence FROM the
+  // fetched result itself (dormant state + containerSessionId), so
+  // composerMode correctly demotes the composer — proving the dormant-after-
+  // restart session no longer silently resolves to 'steer'.
+  assert.equal(composerMode(session, liveness), 'dormant');
 });
 
 test('enrich falls back to prs.length when the runner omits prCount', async () => {

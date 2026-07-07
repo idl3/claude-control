@@ -7,6 +7,7 @@
 // header, so terminalUrl() keeps a `?token=` sourced from the stored token.
 
 import { getToken, clearToken } from './auth';
+import type { SessionLiveness } from './olamMode';
 
 // --- 401 handling -----------------------------------------------------------
 // When any authenticated request comes back 401, the stored token is stale or
@@ -629,4 +630,23 @@ export async function olamTerminalToken(
   const res = await authFetch(`/api/olam/terminal-token?id=${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(`terminal-token HTTP ${res.status}`);
   return res.json();
+}
+
+/**
+ * On-demand liveness for a remote (olam) session (Phase A, cloud-session-chat
+ * task A4). Called ONLY on session select + immediately before a send —
+ * NEVER on a poll/tick. Fails CLOSED to `{state:'unknown'}` on any network
+ * error or non-200 (never throws) — a liveness read that can't complete must
+ * never be mistaken for 'live'.
+ */
+export async function olamSessionLiveness(id: string): Promise<SessionLiveness> {
+  try {
+    const res = await authFetch(`/api/olam/liveness?id=${encodeURIComponent(id)}`);
+    if (!res.ok) return { state: 'unknown' };
+    const body = (await res.json().catch(() => null)) as Partial<SessionLiveness> | null;
+    if (!body || typeof body.state !== 'string') return { state: 'unknown' };
+    return body as SessionLiveness;
+  } catch {
+    return { state: 'unknown' };
+  }
 }
