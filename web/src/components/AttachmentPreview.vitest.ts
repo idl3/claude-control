@@ -64,6 +64,71 @@ describe('Lightbox', () => {
   });
 });
 
+describe('Lightbox — scroll position preservation (opening the modal must not scroll the page)', () => {
+  // A synthetic scroll container standing in for `.thread-viewport` (or any
+  // other pane) — findScrollParent() is class-name-agnostic (walks ancestors
+  // for computed overflow-y + real overflow), so a plain styled/stubbed div
+  // is enough; it does not need the real class name to be picked up.
+  function makeScrollParent(initialScrollTop: number): { scrollParent: HTMLElement; container: HTMLElement } {
+    const scrollParent = document.createElement('div');
+    scrollParent.style.overflowY = 'auto';
+    Object.defineProperty(scrollParent, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(scrollParent, 'clientHeight', { value: 300, configurable: true });
+    document.body.appendChild(scrollParent);
+    const container = document.createElement('div');
+    scrollParent.appendChild(container);
+    scrollParent.scrollTop = initialScrollTop;
+    return { scrollParent, container };
+  }
+
+  it('focuses the dialog with preventScroll (the actual fix for the reported jump)', () => {
+    const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus');
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+  });
+
+  it('leaves the scroll parent untouched on mount (no real DOM jump in jsdom, sanity check)', () => {
+    const { scrollParent, container } = makeScrollParent(240);
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }), { container });
+    expect(scrollParent.scrollTop).toBe(240);
+    document.body.removeChild(scrollParent);
+  });
+
+  it('restores the scroll parent immediately if focusing the dialog moved it (simulated engine jump)', () => {
+    const { scrollParent, container } = makeScrollParent(240);
+    // Simulate the real-world bug this fixes: some engines scroll an
+    // ancestor container to "reveal" a newly focused descendant even though
+    // the dialog is position:fixed and already fills the viewport.
+    const focusSpy = vi
+      .spyOn(HTMLElement.prototype, 'focus')
+      .mockImplementation(() => {
+        scrollParent.scrollTop = 0;
+      });
+
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }), { container });
+
+    expect(scrollParent.scrollTop).toBe(240); // restored right after the simulated jump
+    focusSpy.mockRestore();
+    document.body.removeChild(scrollParent);
+  });
+
+  it('restores the pre-open scrollTop on unmount (dismiss)', () => {
+    const { scrollParent, container } = makeScrollParent(180);
+    const { unmount } = render(
+      createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }),
+      { container },
+    );
+    expect(scrollParent.scrollTop).toBe(180);
+
+    scrollParent.scrollTop = 999; // drifted somehow while the Lightbox was open
+    unmount();
+    expect(scrollParent.scrollTop).toBe(180); // reverted to where the user had it
+
+    document.body.removeChild(scrollParent);
+  });
+});
+
 describe('MarkdownImg — regular (non-embed) markdown images', () => {
   it('renders inside the tap-to-open-Lightbox button and opens the Lightbox on click', () => {
     render(createElement(MarkdownImg, { src: 'https://example.com/plain.png', alt: 'plain shot' }));
