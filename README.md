@@ -231,6 +231,30 @@ All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
 
 ---
 
+## Inline media in transcripts (for control-session agents)
+
+Agent responses can embed screenshots and screen recordings directly in the
+chat transcript with self-closing blocks:
+
+```
+<embedded-image url="shot.png" size="lg" />
+<embedded-video url="runs/demo.webm" size="full" />
+```
+
+- `url` — either a path **relative to the media root**
+  (`~/.claude-control/media/`, override with `CLAUDE_CONTROL_MEDIA`), served
+  by the token-gated `/api/media/` route, or a full `http(s)` URL passed
+  through as-is. `file://` and every other scheme are rejected.
+- `size` — `sm` (240px) · `md` (420px, default) · `lg` (640px) · `full`
+  (bubble width). Missing/unknown sizes fall back to `md`.
+
+**Convention for control-session agents:** for SPA/UI changes (or any visual
+result), always capture screenshots and a short video into the media root and
+emit the embed blocks in your response, so the operator sees the change inline
+in the transcript without navigating to files.
+
+---
+
 ## How it works
 
 - **Discovery** — polls `tmux list-windows` every few seconds and matches each

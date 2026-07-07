@@ -7,6 +7,8 @@ import type {
 import type { TextMessagePartComponent } from '@assistant-ui/react';
 import remarkGfm from 'remark-gfm';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
+import { remarkEmbeds } from '../lib/embeds';
+import { MarkdownImg } from './EmbeddedMedia';
 import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
 
 /**
@@ -117,11 +119,14 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
 const MarkdownTextImpl: TextMessagePartComponent = () => (
   <MarkdownTextPrimitive
     className="aui-md"
-    remarkPlugins={[remarkGfm]}
+    remarkPlugins={[remarkGfm, remarkEmbeds]}
     components={{
       CodeHeader,
       SyntaxHighlighter: CodeHighlighter,
       table: TableWrap,
+      // <embedded-image|video …/> blocks (rewritten to image nodes by
+      // remarkEmbeds) render as real <img>/<video>; other images unchanged.
+      img: MarkdownImg,
     }}
   />
 );
