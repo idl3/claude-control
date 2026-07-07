@@ -164,7 +164,7 @@ function runClaudeChild(text, useStreamInput, { reportExitError = true } = {}) {
         '--permission-mode', permissionMode,
       ]
       : [
-        '-p', text,
+        '-p',
         '--output-format', 'stream-json',
         '--verbose',
         '--permission-mode', permissionMode,
@@ -175,6 +175,11 @@ function runClaudeChild(text, useStreamInput, { reportExitError = true } = {}) {
       turnArgs.push('--name', sessionName);
     }
     if (model) turnArgs.push('--model', model);
+    // Fallback (non-stream) mode only puts `text` on argv (stream mode sends
+    // it over stdin instead) — all flags must precede it, then `--`, then the
+    // positional text. Verified on-host: `claude -p "-x ..."` errors as an
+    // unknown option without this guard (same hazard as the tmux launch path).
+    if (!useStreamInput) turnArgs.push('--', text);
 
     const child = spawn(claudeBin, turnArgs, {
       cwd,
