@@ -27,7 +27,10 @@ import { buildBridgeCommand } from '../lib/claude-print.js';
 function launchFor(config, cwd, { prompt = '' } = {}) {
   const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
   const argv = args.map((a) => (a === cwd ? shellQuoteName(cwd) : a));
-  if (prompt) argv.push(shellQuoteName(prompt));
+  // `--` ends option parsing before the positional prompt — verified on-host
+  // that codex's clap-based parser (like claude's) treats a dash-prefixed
+  // prompt as an unknown option without it.
+  if (prompt) argv.push('--', shellQuoteName(prompt));
   return `${bin} ${argv.join(' ')}`;
 }
 
@@ -36,7 +39,10 @@ function launchFor(config, cwd, { prompt = '' } = {}) {
 function claudeLaunchFor(config, name, { model = null, prompt = '' } = {}) {
   let launch = `${config.launchCommand} --name ${shellQuoteName(name)}`;
   if (model) launch += ` --model ${shellQuoteName(model)}`;
-  if (prompt) launch += ` ${shellQuoteName(prompt)}`;
+  // `--` ends option parsing before the positional prompt — verified on-host:
+  // `claude -p --model haiku "-x reply with just ok"` errors as an unknown
+  // option without it; `claude -p --model haiku -- "-x ..."` works.
+  if (prompt) launch += ` -- ${shellQuoteName(prompt)}`;
   return launch;
 }
 
@@ -123,24 +129,35 @@ describe('handleSessionNew codex launch string', () => {
 // test/codex-rpc.test.js).
 
 describe('handleSessionNew codex launch string — initial prompt (tmux/TUI transport)', () => {
-  test('appends the quoted positional prompt after -C <cwd>', () => {
+  test('appends -- then the quoted positional prompt after -C <cwd>', () => {
     const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: 'fix the failing test' });
-    assert.equal(launch, `codex -C '/workspace' 'fix the failing test'`);
+    assert.equal(launch, `codex -C '/workspace' -- 'fix the failing test'`);
   });
 
-  test('omits the prompt arg entirely when no prompt is set (regression)', () => {
+  test('omits the prompt arg AND the -- guard entirely when no prompt is set (regression)', () => {
     const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace');
     assert.equal(launch, `codex -C '/workspace'`);
   });
 
   test('quotes a multi-line prompt safely (embedded newline stays inside the single-quote span)', () => {
     const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: 'line one\nline two' });
-    assert.equal(launch, `codex -C '/workspace' 'line one\nline two'`);
+    assert.equal(launch, `codex -C '/workspace' -- 'line one\nline two'`);
   });
 
   test('escapes an embedded single quote in the prompt', () => {
     const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: "it's broken" });
     assert.ok(launch.includes("it'\\''s broken"), 'single quote in prompt is escaped');
+  });
+
+  // Regression: a dash-prefixed prompt (e.g. a bullet point like "- fix the
+  // bug") must not be parsable as an option. codex's clap-based parser treats
+  // a lone `--` as end-of-options, same as claude's commander-based parser —
+  // parse-side behavior confirmed with `codex exec "-x hi"` (rejects as an
+  // unrecognized flag without `--`; not run against a real turn).
+  test('a dash-prefixed prompt sits after the -- guard, never immediately after -C <cwd>', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: '-x hi' });
+    assert.equal(launch, `codex -C '/workspace' -- '-x hi'`);
+    assert.ok(/ -- '-x hi'$/.test(launch), '-- guard immediately precedes the dash-prefixed prompt');
   });
 });
 
@@ -209,22 +226,22 @@ describe('handleSessionNew claude launch string — --model and initial prompt',
     assert.equal(launch, `claude --name 'my session' --model 'opus'`);
   });
 
-  test('appends the positional prompt after --model when both are set', () => {
+  test('appends -- then the positional prompt after --model when both are set', () => {
     const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', {
       model: 'sonnet',
       prompt: 'fix the failing test',
     });
-    assert.equal(launch, `claude --name 'my session' --model 'sonnet' 'fix the failing test'`);
+    assert.equal(launch, `claude --name 'my session' --model 'sonnet' -- 'fix the failing test'`);
   });
 
-  test('appends the positional prompt with no --model when model is unset', () => {
+  test('appends -- then the positional prompt with no --model when model is unset', () => {
     const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: 'hello' });
-    assert.equal(launch, `claude --name 'my session' 'hello'`);
+    assert.equal(launch, `claude --name 'my session' -- 'hello'`);
   });
 
   test('quotes a multi-line prompt safely (embedded newline stays inside the single-quote span)', () => {
     const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: 'line one\nline two' });
-    assert.equal(launch, `claude --name 'my session' 'line one\nline two'`);
+    assert.equal(launch, `claude --name 'my session' -- 'line one\nline two'`);
   });
 
   test('is byte-identical to the pre-existing shape when neither model nor prompt is set (regression)', () => {
@@ -234,7 +251,27 @@ describe('handleSessionNew claude launch string — --model and initial prompt',
 
   test('works with a custom launchCommand (yolo alias) plus model and prompt', () => {
     const launch = claudeLaunchFor({ launchCommand: 'yolo' }, 'feat', { model: 'haiku', prompt: 'go' });
-    assert.equal(launch, `yolo --name 'feat' --model 'haiku' 'go'`);
+    assert.equal(launch, `yolo --name 'feat' --model 'haiku' -- 'go'`);
+  });
+
+  // Regression (the whole reason for the `--` guard): verified on-host that
+  // `claude -p --model haiku "-x reply with just ok"` errors with "unknown
+  // option '-x reply with just ok'", while `claude -p --model haiku --
+  // "-x reply with just the word ok"` works. A prompt starting with `-`
+  // (e.g. a bullet point like "- fix the bug") must never land immediately
+  // after --model / --name without the `--` guard between it and the prompt.
+  test('a dash-prefixed prompt sits after the -- guard, never immediately after --model', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', {
+      model: 'haiku',
+      prompt: '-x reply with just ok',
+    });
+    assert.equal(launch, `claude --name 'my session' --model 'haiku' -- '-x reply with just ok'`);
+    assert.ok(/ -- '-x reply with just ok'$/.test(launch), '-- guard immediately precedes the dash-prefixed prompt');
+  });
+
+  test('a dash-prefixed prompt with no model still gets the -- guard after --name', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: '- fix the bug' });
+    assert.equal(launch, `claude --name 'my session' -- '- fix the bug'`);
   });
 });
 

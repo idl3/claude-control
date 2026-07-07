@@ -1065,10 +1065,14 @@ async function handleSessionNew(req, res) {
         // launch shape; the cwd arg is shell-quoted since the command is typed
         // into an interactive shell via sendText. An initial prompt is a
         // trivially-supported positional arg (`codex [OPTIONS] [PROMPT]`),
-        // appended last and shell-quoted like the cwd above.
+        // appended last, shell-quoted like the cwd above, and preceded by
+        // `--` to end option parsing (clap, like commander, treats a
+        // dash-prefixed positional as an unknown option without it — same
+        // hazard verified against `claude -p`; codex's own parser is clap-based
+        // and `--` is standard clap behavior).
         const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
         const argv = args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a));
-        if (prompt) argv.push(tmux.shellQuoteName(prompt));
+        if (prompt) argv.push('--', tmux.shellQuoteName(prompt));
         launch = `${bin} ${argv.join(' ')}`;
       }
     } else if (claudeTransport === 'print') {
@@ -1103,11 +1107,16 @@ async function handleSessionNew(req, res) {
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
       if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
-      // Positional prompt goes last (`claude [options] [command] [prompt]`).
-      // sendText pastes the whole multi-line command atomically (bracketed
-      // paste), so an embedded newline inside the single-quoted prompt is safe
-      // — it never prematurely submits the half-typed command.
-      if (prompt) launch += ` ${tmux.shellQuoteName(prompt)}`;
+      // Positional prompt goes last (`claude [options] [command] [prompt]`),
+      // preceded by `--` to end option parsing. Verified on-host this is load-
+      // bearing: `claude -p --model haiku "-x reply with just ok"` errors with
+      // "unknown option '-x reply with just ok'" (a prompt starting with `-`,
+      // e.g. a bullet like "- fix the bug", gets parsed as a flag); adding
+      // `--` before it fixes it. sendText pastes the whole multi-line command
+      // atomically (bracketed paste), so an embedded newline inside the
+      // single-quoted prompt is safe — it never prematurely submits the
+      // half-typed command.
+      if (prompt) launch += ` -- ${tmux.shellQuoteName(prompt)}`;
     }
 
     if (agent === 'codex') {
