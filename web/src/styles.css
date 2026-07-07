@@ -7252,6 +7252,15 @@ select.config-input {
   color: var(--muted, #999);
   background: rgba(127, 127, 127, 0.1);
 }
+/* Phase A (cloud-session-chat task A4): dormant/unknown liveness states. */
+.detail-action-pill--dormant {
+  color: #e0a020;
+  background: rgba(224, 160, 32, 0.1);
+}
+.detail-action-pill--unknown {
+  color: var(--muted, #999);
+  background: rgba(127, 127, 127, 0.1);
+}
 
 /* --- inline remote terminal panel (item 5) --- */
 .olam-terminal-panel {
