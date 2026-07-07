@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   dispatchSteer,
+  dispatchLiveSteer,
+  dispatchResume,
+  shouldSteerDoor,
   composerMode,
   isExecuteShaped,
   preSendGate,
@@ -13,6 +16,8 @@ function client(apiPost) {
   return { org: 'atlas', apiPost };
 }
 const res = (status, ok = status < 300) => ({ ok, status, text: async () => '' });
+/** A steer-door-shaped response that carries a parseable JSON body. */
+const jsonRes = (status, body, ok = status < 300) => ({ ok, status, json: async () => body, text: async () => JSON.stringify(body) });
 
 // --- composerMode (C2) ----------------------------------------------------------
 
@@ -179,4 +184,222 @@ test('default mode is soft', async () => {
   const c = client(async (_p, b) => { body = b; return res(202); });
   await dispatchSteer(c, { worldId: 'w', sessionId: 's', draft: 'x' });
   assert.equal(body.steer_mode, 'soft');
+});
+
+// --- shouldSteerDoor (Phase B, B3 routing predicate) -----------------------------
+
+test('shouldSteerDoor: execute-shaped + live → true', () => {
+  assert.equal(shouldSteerDoor({ pool: 'linear' }, { state: 'live' }), true);
+  assert.equal(shouldSteerDoor({}, { state: 'live', containerSessionId: 'c1' }), true);
+});
+
+test('shouldSteerDoor: execute-shaped + dormant/unknown/n-a/no-liveness → false (never steer door)', () => {
+  assert.equal(shouldSteerDoor({ pool: 'linear' }, { state: 'dormant' }), false);
+  assert.equal(shouldSteerDoor({ pool: 'linear' }, { state: 'unknown' }), false);
+  assert.equal(shouldSteerDoor({ pool: 'linear' }, { state: 'n/a' }), false);
+  assert.equal(shouldSteerDoor({ pool: 'linear' }, undefined), false);
+});
+
+test('shouldSteerDoor: a plan/chat (non execute-shaped) session is false even if liveness somehow reads live', () => {
+  assert.equal(shouldSteerDoor({}, { state: 'live' }), false);
+});
+
+// --- dispatchLiveSteer (Phase B, B3 routing decision) -----------------------------
+
+test('dispatchLiveSteer: routing decision table — execute+live→steer door; execute+dormant/unknown→dispatch; plan→dispatch', async () => {
+  const table = [
+    { label: 'execute + live', session: { pool: 'linear' }, liveness: { state: 'live' }, wantDoor: 'steer-live', wantPath: '/api/session-steer' },
+    { label: 'execute + dormant', session: { pool: 'linear' }, liveness: { state: 'dormant' }, wantDoor: 'dispatch', wantPath: '/api/cloud-dispatch' },
+    { label: 'execute + unknown', session: { pool: 'linear' }, liveness: { state: 'unknown' }, wantDoor: 'dispatch', wantPath: '/api/cloud-dispatch' },
+    { label: 'plan/chat, no liveness', session: {}, liveness: undefined, wantDoor: 'dispatch', wantPath: '/api/cloud-dispatch' },
+    { label: 'plan/chat, liveness live (defence-in-depth — never happens upstream since chat sessions have no mapping)', session: {}, liveness: { state: 'live' }, wantDoor: 'dispatch', wantPath: '/api/cloud-dispatch' },
+  ];
+  for (const { label, session, liveness, wantDoor, wantPath } of table) {
+    let sent = null;
+    const c = client(async (path, body) => { sent = { path, body }; return res(200); });
+    const r = await dispatchLiveSteer(c, { worldId: 'w1', sessionId: 's1', ...session }, liveness, 'x');
+    assert.equal(r.ok, true, label);
+    assert.equal(r.door, wantDoor, label);
+    assert.equal(sent.path, wantPath, label);
+  }
+});
+
+test('dispatchLiveSteer: steer-door body shape is {session_id, instruction, mode} — NOT the cloud-dispatch shape', async () => {
+  let sent = null;
+  const c = client(async (path, body) => { sent = { path, body }; return res(200); });
+  const r = await dispatchLiveSteer(c, { worldId: 'w1', sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'do the thing', 'hard');
+  assert.equal(r.ok, true);
+  assert.equal(sent.path, '/api/session-steer');
+  assert.deepEqual(sent.body, { session_id: 's1', instruction: 'do the thing', mode: 'hard' });
+});
+
+test('dispatchLiveSteer: dispatch-fallback body is byte-identical to dispatchSteer (plan-session acceptance)', async () => {
+  let sent = null;
+  const c = client(async (path, body) => { sent = { path, body }; return res(200); });
+  const r = await dispatchLiveSteer(c, { worldId: 'w1', sessionId: 's1' }, undefined, 'plan chat text', 'soft');
+  assert.equal(r.door, 'dispatch');
+  assert.equal(sent.path, '/api/cloud-dispatch');
+  assert.equal(sent.body.world_id, 'w1');
+  assert.equal(sent.body.session_id, 's1');
+  assert.deepEqual(sent.body.messages, [{ role: 'user', content: 'plan chat text' }]);
+  assert.equal(sent.body.executor, 'do');
+  assert.equal(sent.body.goal_mode, false);
+  assert.equal(sent.body.steer_mode, 'soft');
+});
+
+test('dispatchLiveSteer: never throws on a network error, either door', async () => {
+  const c = client(async () => { throw new Error('socket hang up'); });
+  const r = await dispatchLiveSteer(c, { worldId: 'w', sessionId: 's', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, null);
+  assert.match(r.error, /socket hang up/);
+  assert.equal(r.door, 'steer-live');
+});
+
+// --- steer door failure classes (Phase B, B3 DISPATCH_ERRORS extension) ----------
+
+test('steer door: 409 passes the body reason through verbatim', async () => {
+  const c = client(async () => jsonRes(409, { reason: 'a steer is already queued by another operator' }, false));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 409);
+  assert.equal(r.error, 'a steer is already queued by another operator');
+  assert.equal(r.door, 'steer-live');
+});
+
+test('steer door: 422 passes the body error field through verbatim', async () => {
+  const c = client(async () => jsonRes(422, { error: 'no live container mapped for this session' }, false));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 422);
+  assert.equal(r.error, 'no live container mapped for this session');
+});
+
+test('steer door: 409/422 with no parseable body reason falls back to DISPATCH_ERRORS.steerConflict/steerInvalid', async () => {
+  const c409 = client(async () => res(409, false));
+  const r409 = await dispatchLiveSteer(c409, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r409.error, DISPATCH_ERRORS.steerConflict);
+
+  const c422 = client(async () => res(422, false));
+  const r422 = await dispatchLiveSteer(c422, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r422.error, DISPATCH_ERRORS.steerInvalid);
+});
+
+test('steer door: 404 (not-owner) reuses the shared DISPATCH_ERRORS[404] entry, door-agnostic', async () => {
+  const c = client(async () => res(404, false));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+  assert.equal(r.error, DISPATCH_ERRORS[404]);
+});
+
+test('steer door: 429/402/502 infra failures reuse the shared DISPATCH_ERRORS map, same as cloud-dispatch', async () => {
+  for (const status of [429, 402, 502]) {
+    const c = client(async () => res(status, false));
+    const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+    assert.equal(r.error, DISPATCH_ERRORS[status]);
+  }
+});
+
+test('steer door: an unmapped status falls back to bounded body text, mirrors dispatchSteer', async () => {
+  const c = client(async () => ({ ok: false, status: 500, text: async () => 'internal boom' }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.match(r.error, /HTTP 500: internal boom/);
+});
+
+test('DISPATCH_ERRORS.steerConflict/steerInvalid are non-numeric keys, excluded from the numeric-status exhaustive test above', () => {
+  assert.equal(/^\d+$/.test('steerConflict'), false);
+  assert.equal(/^\d+$/.test('steerInvalid'), false);
+  assert.match(DISPATCH_ERRORS.steerConflict, /steer/);
+  assert.match(DISPATCH_ERRORS.steerInvalid, /steer/);
+});
+
+// --- dispatchResume (Phase C, task C5) -------------------------------------------
+
+test('dispatchResume: request body is {session_id, message} — no actorSub, identity is server-derived', async () => {
+  let sent = null;
+  const c = client(async (path, body) => { sent = { path, body }; return jsonRes(200, { ok: true, resumed: true, session_id: 's1', worldId: 'w1', containerSessionId: 'cs1' }); });
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'hi, please continue');
+  assert.equal(r.ok, true);
+  assert.equal(sent.path, '/api/cloud-resume');
+  assert.deepEqual(sent.body, { session_id: 's1', message: 'hi, please continue' });
+});
+
+test('dispatchResume: success parses worldId/containerSessionId off the response body', async () => {
+  const c = client(async () => jsonRes(200, { ok: true, resumed: true, session_id: 's1', worldId: 'w9', containerSessionId: 'cs9' }));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.resumed, true);
+  assert.equal(r.worldId, 'w9');
+  assert.equal(r.containerSessionId, 'cs9');
+});
+
+test('dispatchResume: success with a body lacking worldId/containerSessionId degrades to null, never throws', async () => {
+  const c = client(async () => jsonRes(200, {}));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.worldId, null);
+  assert.equal(r.containerSessionId, null);
+});
+
+test('dispatchResume: the 5 resume-specific DISPATCH_ERRORS classes are looked up by the body error field, not HTTP status', async () => {
+  const table = [
+    { error: 'pr_fix_in_flight', status: 409 },
+    { error: 'resume_in_flight', status: 409 },
+    { error: 'execute_in_flight', status: 409 },
+    { error: 'session_live', status: 409 },
+    { error: 'no_execute_state', status: 422 },
+  ];
+  for (const { error, status } of table) {
+    const c = client(async () => jsonRes(status, { error }, false));
+    const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+    assert.equal(r.ok, false, error);
+    assert.equal(r.status, status, error);
+    assert.match(r.error, new RegExp(DISPATCH_ERRORS[error].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), error);
+  }
+});
+
+test('dispatchResume: pr_fix_in_flight carries prUrl through as its own field and appends it to the message', async () => {
+  const c = client(async () => jsonRes(409, { error: 'pr_fix_in_flight', prUrl: 'https://github.com/org/repo/pull/42' }, false));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.prUrl, 'https://github.com/org/repo/pull/42');
+  assert.match(r.error, /https:\/\/github\.com\/org\/repo\/pull\/42/);
+});
+
+test('dispatchResume: pr_fix_in_flight with no prUrl in the body falls back to the plain DISPATCH_ERRORS copy, no prUrl field', async () => {
+  const c = client(async () => jsonRes(409, { error: 'pr_fix_in_flight' }, false));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.error, DISPATCH_ERRORS.pr_fix_in_flight);
+  assert.equal(r.prUrl, undefined);
+});
+
+test('dispatchResume: an unrecognised body error key falls back to the numeric-status branch', async () => {
+  const c = client(async () => jsonRes(429, { error: 'totally_unknown_key' }, false));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.error, DISPATCH_ERRORS[429]);
+});
+
+test('dispatchResume: an unparseable body degrades to the numeric-status branch, never throws', async () => {
+  const c = client(async () => ({ ok: false, status: 403, json: async () => { throw new Error('not json'); }, text: async () => 'forbidden' }));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+});
+
+test('dispatchResume: an unmapped status falls back to bounded body text, mirrors dispatchSteer/dispatchLiveSteer', async () => {
+  const c = client(async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => 'internal boom' }));
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /HTTP 500: internal boom/);
+});
+
+test('dispatchResume: network throw degrades to a typed failure result, not an exception (never-throw contract)', async () => {
+  const c = client(async () => { throw new Error('socket hang up'); });
+  const r = await dispatchResume(c, { sessionId: 's1' }, 'x');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, null);
+  assert.match(r.error, /socket hang up/);
 });
