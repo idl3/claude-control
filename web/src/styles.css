@@ -2874,14 +2874,15 @@ body.is-external-display .composer {
   background-image: linear-gradient(
     100deg,
     oklch(55% 0.03 240) 0%,
-    oklch(78% 0.05 235) 25%,
-    oklch(88% 0.02 220) 50%,
-    oklch(78% 0.05 235) 75%,
+    oklch(68% 0.05 235) 25%,
+    oklch(72% 0.04 230) 50%,
+    oklch(68% 0.05 235) 75%,
     oklch(55% 0.03 240) 100%
   );
   background-size: 200% auto;
   animation: shimmer-sweep 1.8s linear infinite;
-  color: oklch(95% 0.01 240);
+  color: oklch(97% 0.01 240);
+  text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
