@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../lib/api';
 import { Lightbox } from './AttachmentPreview';
-import { EMBED_WIDTH, type EmbedKind, type EmbedSize } from '../lib/embeds';
+import type { EmbedKind, EmbedSize } from '../lib/embeds';
+import { reservedAspectRatio, reservedBox, setCachedAspectRatio } from '../lib/mediaDimensions';
 
 /**
  * Renders one <embedded-image|video …/> transcript block as a real <img> /
@@ -14,6 +15,12 @@ import { EMBED_WIDTH, type EmbedKind, type EmbedSize } from '../lib/embeds';
  *  - bare/relative paths are fetched from /api/media/<path> with the bearer
  *    header (media elements can't send Authorization) and blob-URL'd, same
  *    pattern as AttachmentPreview's upload thumbnails.
+ *
+ * Layout shift: the container reserves a fixed box (EMBED_WIDTH cap + an
+ * aspect-ratio — the exact one once lib/mediaDimensions has seen this url
+ * load before, else a default) the moment it mounts, with a skeleton shimmer
+ * filling it until the asset's load event fires. The asset then object-fits
+ * within that same box, so nothing reflows when it finishes loading.
  */
 
 const HTTP_RE = /^https?:\/\//i;
@@ -65,27 +72,37 @@ export function EmbeddedMedia({
 }) {
   const { src, rejected } = useMediaSrc(url);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const width = EMBED_WIDTH[size] ?? EMBED_WIDTH.md;
+  const [loaded, setLoaded] = useState(false);
+  const box = reservedBox(size, url);
 
   if (rejected) {
     return <code className="embed-media-rejected">media url rejected: {url}</code>;
   }
 
+  const frameStyle = {
+    width: box.width,
+    maxWidth: '100%',
+    aspectRatio: box.aspectRatio,
+  };
+
   if (kind === 'video') {
-    return src ? (
-      // eslint-disable-next-line jsx-a11y/media-has-caption -- agent screen recordings have no caption track
-      <video
-        className="embed-media"
-        controls
-        src={src}
-        style={{ width, maxWidth: '100%' }}
-      />
-    ) : (
-      <span
-        className="embed-media embed-media-loading"
-        style={{ width, maxWidth: '100%' }}
-        aria-label="loading media"
-      />
+    return (
+      <span className="embed-media-frame" style={frameStyle}>
+        {src ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption -- agent screen recordings have no caption track
+          <video
+            className="embed-media"
+            controls
+            src={src}
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              setCachedAspectRatio(url, v.videoWidth, v.videoHeight);
+              setLoaded(true);
+            }}
+          />
+        ) : null}
+        {!loaded ? <span className="embed-media-skeleton" aria-label="loading media" /> : null}
+      </span>
     );
   }
 
@@ -93,17 +110,26 @@ export function EmbeddedMedia({
     <>
       <button
         type="button"
-        className="embed-media-btn"
-        style={{ width, maxWidth: '100%' }}
+        className="embed-media-btn embed-media-frame"
+        style={frameStyle}
         onClick={() => src && setLightboxOpen(true)}
         aria-label={`Preview ${url}`}
         title={url}
       >
         {src ? (
-          <img className="embed-media" src={src} alt={url} loading="lazy" />
-        ) : (
-          <span className="embed-media embed-media-loading" aria-hidden="true" />
-        )}
+          <img
+            className="embed-media"
+            src={src}
+            alt={url}
+            loading="lazy"
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setCachedAspectRatio(url, img.naturalWidth, img.naturalHeight);
+              setLoaded(true);
+            }}
+          />
+        ) : null}
+        {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
       </button>
       {lightboxOpen && src ? (
         <Lightbox src={src} alt={url} onClose={() => setLightboxOpen(false)} />
@@ -114,13 +140,36 @@ export function EmbeddedMedia({
 
 // react-markdown `img` component override: embed image nodes (planted by
 // remarkEmbeds, marked via data-embed) become EmbeddedMedia; every other
-// markdown image renders exactly as before.
+// markdown image gets the same reserved-box + skeleton treatment via
+// PlainMarkdownImage, at the bubble's full width (no size attribute to cap it).
 type MdImgProps = {
   node?: unknown;
   'data-embed'?: string;
   'data-size'?: string;
   'data-url'?: string;
 } & React.ImgHTMLAttributes<HTMLImageElement>;
+
+function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const aspectRatio = reservedAspectRatio(src);
+
+  return (
+    <span className="embed-media-frame" style={{ width: '100%', aspectRatio }}>
+      <img
+        className="embed-media"
+        src={src}
+        alt={alt ?? ''}
+        loading="lazy"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          setCachedAspectRatio(src, img.naturalWidth, img.naturalHeight);
+          setLoaded(true);
+        }}
+      />
+      {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
+    </span>
+  );
+}
 
 export function MarkdownImg(props: MdImgProps) {
   const {
@@ -139,5 +188,6 @@ export function MarkdownImg(props: MdImgProps) {
       />
     );
   }
-  return <img {...rest} />;
+  if (!rest.src) return <img {...rest} />;
+  return <PlainMarkdownImage src={rest.src} alt={rest.alt} />;
 }
