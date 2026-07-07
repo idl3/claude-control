@@ -73,7 +73,11 @@ export function EmbeddedMedia({
   const { src, rejected } = useMediaSrc(url);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const box = reservedBox(size, url);
+  // Frozen at mount: onLoad writes the real ratio into the cache, and reading
+  // it here would resize the frame the moment the asset lands — the exact
+  // first-load jump this reservation exists to prevent. Only the NEXT mount
+  // of this url gets the exact ratio.
+  const [box] = useState(() => reservedBox(size, url));
 
   if (rejected) {
     return <code className="embed-media-rejected">media url rejected: {url}</code>;
@@ -151,7 +155,8 @@ type MdImgProps = {
 
 function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
   const [loaded, setLoaded] = useState(false);
-  const aspectRatio = reservedAspectRatio(src);
+  // Frozen at mount — same reasoning as EmbeddedMedia's box above.
+  const [aspectRatio] = useState(() => reservedAspectRatio(src));
 
   return (
     <span className="embed-media-frame" style={{ width: '100%', aspectRatio }}>
