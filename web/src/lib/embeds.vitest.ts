@@ -4,10 +4,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
 import { parseEmbedAttrs, embedNodesFromHtml, remarkEmbeds } from './embeds';
 import { MarkdownImg } from '../components/EmbeddedMedia';
+import { DEFAULT_ASPECT_RATIO } from './mediaDimensions';
 
 // Render markdown through the same plugin + img override MarkdownText uses.
-// Static markup: effects never run, so relative-path embeds show their
-// loading placeholder — enough to assert kind/size/url made it into elements.
+// Static markup: effects never run, so relative-path embeds mount their
+// reserved-box frame + skeleton (no src fetched yet) — enough to assert
+// kind/size/url made it into elements.
 function render(md: string): string {
   return renderToStaticMarkup(
     createElement(ReactMarkdown, {
@@ -64,10 +66,13 @@ describe('markdown pipeline → element props', () => {
     expect(html).not.toContain('embedded-image'); // tag never leaks as text
   });
 
-  it('renders a relative video embed as a loading placeholder at md width', () => {
+  it('renders a relative video embed as a reserved-box skeleton at md width', () => {
     const html = render('<embedded-video url="runs/demo.webm" />');
-    expect(html).toContain('embed-media-loading');
+    expect(html).toContain('class="embed-media-frame"');
+    expect(html).toContain('class="embed-media-skeleton"');
     expect(html).toContain('width:420px'); // default md
+    expect(html).toContain(`aspect-ratio:${DEFAULT_ASPECT_RATIO}`); // no cached url yet
+    expect(html).not.toContain('<video'); // src not fetched yet in a static render
   });
 
   it('rejects file:// urls without emitting any media element', () => {
@@ -76,10 +81,13 @@ describe('markdown pipeline → element props', () => {
     expect(html).not.toContain('<img');
   });
 
-  it('leaves regular markdown images untouched', () => {
+  it('gives regular markdown images the same reserved-box + skeleton treatment', () => {
     const html = render('![alt](https://example.com/plain.png)');
     expect(html).toContain('src="https://example.com/plain.png"');
-    expect(html).not.toContain('embed-media');
+    expect(html).toContain('class="embed-media-frame"');
+    expect(html).toContain('class="embed-media-skeleton"');
+    expect(html).toContain('width:100%'); // no size attribute → fills the bubble
+    expect(html).toContain(`aspect-ratio:${DEFAULT_ASPECT_RATIO}`); // no cached url yet
   });
 
   it('leaves non-embed inline html escaped as before', () => {

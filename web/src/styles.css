@@ -2059,12 +2059,6 @@ body.is-external-display .rail {
   font-weight: 700;
   white-space: nowrap;
 }
-.aui-md img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-}
-
 /* ── Chain of thought ──────────────────────────────────────────────
    Collapsible group coalescing a run of reasoning + tool-call parts. Header
    shows a step count; while the session is actively generating this message it
@@ -4750,36 +4744,55 @@ select.config-input {
   border: 1px solid var(--line);
 }
 
-/* ── Inline media embeds (<embedded-image|video …/> in agent responses) ──── */
-.embed-media {
+/* ── Inline media embeds (<embedded-image|video …/> in agent responses,
+   and plain markdown images) — reserved-box layout, no scroll-jump ────────
+   .embed-media-frame is sized (width cap + aspect-ratio) the instant it
+   mounts (lib/mediaDimensions.ts reservedBox/reservedAspectRatio — exact
+   ratio once cached, else a default), so the transcript never reflows when
+   the asset finishes loading. The asset itself fills the frame absolutely
+   and object-fits within it; a skeleton shimmer sits on top until loaded. */
+.embed-media-frame {
+  position: relative;
   display: block;
-  width: 100%;
-  height: auto;
+  margin: 6px 0;
+  max-width: 100%;
+  overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.embed-media {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .embed-media-btn {
   background: none;
-  border: 0;
   padding: 0;
-  margin: 6px 0;
-  display: block;
   cursor: zoom-in;
 }
 .embed-media-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.embed-media-btn:hover .embed-media {
+.embed-media-btn:hover {
   border-color: var(--accent);
 }
-video.embed-media {
-  margin: 6px 0;
-  background: var(--bg-2);
+.embed-media-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-hover) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
 }
-.embed-media-loading {
-  min-height: 80px;
-  background: var(--bg-2);
+@media (prefers-reduced-motion: reduce) {
+  .embed-media-skeleton {
+    animation: none;
+    background: var(--bg-2);
+  }
 }
 .embed-media-rejected {
   color: var(--red);
