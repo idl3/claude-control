@@ -1,14 +1,17 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import type {
   CodeHeaderProps,
   SyntaxHighlighterProps,
 } from '@assistant-ui/react-markdown';
+import { useMessage } from '@assistant-ui/react';
 import type { TextMessagePartComponent } from '@assistant-ui/react';
 import remarkGfm from 'remark-gfm';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
 import { remarkEmbeds } from '../lib/embeds';
+import { remarkUltrathink } from '../lib/reservedTokens';
 import { MarkdownImg } from './EmbeddedMedia';
+import { UltrathinkText } from './ReservedTokens';
 import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
 
 /**
@@ -116,19 +119,35 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
   </div>
 );
 
-const MarkdownTextImpl: TextMessagePartComponent = () => (
-  <MarkdownTextPrimitive
-    className="aui-md"
-    remarkPlugins={[remarkGfm, remarkEmbeds]}
-    components={{
-      CodeHeader,
-      SyntaxHighlighter: CodeHighlighter,
-      table: TableWrap,
-      // <embedded-image|video …/> blocks (rewritten to image nodes by
-      // remarkEmbeds) render as real <img>/<video>; other images unchanged.
-      img: MarkdownImg,
-    }}
-  />
-);
+// The `ultrathink` rainbow highlight (lib/reservedTokens.ts remarkUltrathink)
+// only ever applies to USER messages — an assistant reply that happens to
+// contain the word is never repainted.
+const BASE_PLUGINS = [remarkGfm, remarkEmbeds];
+const USER_PLUGINS = [remarkGfm, remarkEmbeds, remarkUltrathink];
+
+const MarkdownTextImpl: TextMessagePartComponent = () => {
+  const role = useMessage((m) => m.role);
+  const remarkPlugins = useMemo(
+    () => (role === 'user' ? USER_PLUGINS : BASE_PLUGINS),
+    [role],
+  );
+  return (
+    <MarkdownTextPrimitive
+      className="aui-md"
+      remarkPlugins={remarkPlugins}
+      components={{
+        CodeHeader,
+        SyntaxHighlighter: CodeHighlighter,
+        table: TableWrap,
+        // <embedded-image|video …/> blocks (rewritten to image nodes by
+        // remarkEmbeds) render as real <img>/<video>; other images unchanged.
+        img: MarkdownImg,
+        // "ultrathink" (remarkUltrathink, user messages only) renders as an
+        // animated rainbow gradient <mark>.
+        mark: UltrathinkText,
+      }}
+    />
+  );
+};
 
 export const MarkdownText = memo(MarkdownTextImpl);

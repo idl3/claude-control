@@ -1399,6 +1399,14 @@ body.is-external-display .rail {
   background: var(--bg-1);
   color: var(--text);
 }
+/* Discard on a "Not delivered" bubble is destructive — stay as quiet as any
+   other act-btn at rest, but tint danger-red on hover/focus so it reads as
+   discoverable-but-deliberate rather than an accidental click target. */
+.act-btn-danger:hover,
+.act-btn-danger:focus-visible {
+  background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
+  color: var(--danger, #e5484d);
+}
 /* Toggle copy ↔ copied via the data-copied attribute assistant-ui sets. */
 .act-copy-idle {
   display: flex;
@@ -2051,12 +2059,6 @@ body.is-external-display .rail {
   font-weight: 700;
   white-space: nowrap;
 }
-.aui-md img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-}
-
 /* ── Chain of thought ──────────────────────────────────────────────
    Collapsible group coalescing a run of reasoning + tool-call parts. Header
    shows a step count; while the session is actively generating this message it
@@ -2185,6 +2187,38 @@ body.is-external-display .rail {
   animation: shimmer-sweep 1.6s linear infinite;
 }
 
+/* ── "ultrathink" reserved word (user messages only) ───────────────
+   Renders the literal word as an animated rainbow gradient — the same
+   text-clip + background-position sweep as the chain-of-thought flash above,
+   reused here with a full-spectrum stop list (lib/reservedTokens.ts /
+   components/ReservedTokens.tsx UltrathinkText). Unlike shimmer-text/
+   thinking-flash, reduced-motion here freezes the gradient rather than
+   collapsing to solid — the word should still read as "special", just still. */
+.ultrathink-text {
+  background-image: linear-gradient(
+    90deg,
+    oklch(70% 0.25 20),
+    oklch(75% 0.2 80),
+    oklch(78% 0.2 140),
+    oklch(72% 0.2 200),
+    oklch(68% 0.24 260),
+    oklch(70% 0.25 320),
+    oklch(70% 0.25 20)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-flash 2.2s linear infinite;
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ultrathink-text {
+    animation: none;
+  }
+}
+
 /* tool use + result — native tool-call part, expandable.
    The header is a single non-wrapping flex row. min-width:0 on the flex
    children is what stops the old one-letter-per-line wrap (a flex item's
@@ -2304,16 +2338,16 @@ details.block-tool[open] > summary .tool-arrow,
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
 }
-/* Mobile: drop the extra gap below the composer — keep only the system
-   home-indicator inset (0 in a browser tab), which removes the unnecessary
-   padding without letting the input sit under the home bar. */
+/* Mobile: keep ONLY the system home-indicator inset (0 in a browser tab) —
+   and keep it CONSTANT. A previous :focus-within override dropped it to 0
+   while typing (keyboard covers the home bar), but on iOS tapping any
+   composer button (mic, +) does not focus it, so leaving the textarea
+   blurred the composer and the padding snapped 0→inset — a visible jump.
+   A stable inset costs a small gap above the keyboard while typing;
+   stability wins (operator decision). */
 @media (max-width: 760px) {
   .composer {
     padding-bottom: env(safe-area-inset-bottom);
-  }
-  /* Focused (keyboard up): the on-screen keyboard covers the home indicator. */
-  .composer:focus-within {
-    padding-bottom: 0;
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the
@@ -4710,40 +4744,98 @@ select.config-input {
   border: 1px solid var(--line);
 }
 
-/* ── Inline media embeds (<embedded-image|video …/> in agent responses) ──── */
-.embed-media {
+/* ── Inline media embeds (<embedded-image|video …/> in agent responses,
+   and plain markdown images) — reserved-box layout, no scroll-jump ────────
+   .embed-media-frame is sized (width cap + aspect-ratio) the instant it
+   mounts (lib/mediaDimensions.ts reservedBox/reservedAspectRatio — exact
+   ratio once cached, else a default), so the transcript never reflows when
+   the asset finishes loading. The asset itself fills the frame absolutely
+   and object-fits within it; a skeleton shimmer sits on top until loaded. */
+.embed-media-frame {
+  position: relative;
   display: block;
-  width: 100%;
-  height: auto;
+  margin: 6px 0;
+  max-width: 100%;
+  overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.embed-media {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .embed-media-btn {
   background: none;
-  border: 0;
   padding: 0;
-  margin: 6px 0;
-  display: block;
   cursor: zoom-in;
 }
 .embed-media-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.embed-media-btn:hover .embed-media {
+.embed-media-btn:hover {
   border-color: var(--accent);
 }
-video.embed-media {
-  margin: 6px 0;
-  background: var(--bg-2);
+.embed-media-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-hover) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
 }
-.embed-media-loading {
-  min-height: 80px;
-  background: var(--bg-2);
+@media (prefers-reduced-motion: reduce) {
+  .embed-media-skeleton {
+    animation: none;
+    background: var(--bg-2);
+  }
 }
 .embed-media-rejected {
   color: var(--red);
   font-size: calc(12px * var(--ui-scale));
+}
+
+/* ── /goal reserved-token pill (user messages only) ─────────────────
+   `/goal` invocations render as a metallic silver-blue pill instead of plain
+   text — reuses the shimmer-sweep keyframe (Working… indicator, above) for
+   the flashing sweep, applied to the pill's own background rather than
+   text-clip, so it stays visually distinct from the .skill-chip pills below.
+   Args after the token render normally (see TextWithUltrathink). */
+.goal-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  margin-right: 4px;
+  border-radius: 999px;
+  border: 1px solid oklch(75% 0.03 240 / 0.5);
+  font-weight: 700;
+  font-size: 0.95em;
+  letter-spacing: 0.01em;
+  color: oklch(95% 0.01 240);
+  background-image: linear-gradient(
+    100deg,
+    oklch(55% 0.03 240) 0%,
+    oklch(78% 0.05 235) 25%,
+    oklch(88% 0.02 220) 50%,
+    oklch(78% 0.05 235) 75%,
+    oklch(55% 0.03 240) 100%
+  );
+  background-size: 200% auto;
+  animation: shimmer-sweep 1.8s linear infinite;
+  vertical-align: middle;
+}
+.goal-invocation-args {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+  .goal-pill {
+    animation: none;
+  }
 }
 
 /* ── Skill invocation chip ────────────────────────────────────────
