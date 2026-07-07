@@ -32,6 +32,7 @@ import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
 import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
+import { resolveMediaPath } from './lib/media.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -117,6 +118,10 @@ const CONFIG = {
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
+  // Media root for transcript inline embeds (<embedded-image|video …/>).
+  // The ONLY directory /api/media/ will ever serve from; created at startup.
+  mediaDir:
+    env('MEDIA') || path.join(os.homedir(), '.claude-control', 'media'),
   presentDir:
     env('PRESENT') || path.join(os.homedir(), '.claude-control', 'present'),
   uploadTtlHours: Number(env('UPLOAD_TTL_HOURS')) || 24,
@@ -171,6 +176,14 @@ const IMAGE_MIME = {
   '.heic': 'image/heic',
   '.heif': 'image/heif',
   '.svg': 'image/svg+xml',
+};
+
+// Video MIME types served inline from the media route (extensions → content-type).
+const VIDEO_MIME = {
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v',
 };
 
 // --- shared state -----------------------------------------------------------
@@ -559,6 +572,15 @@ const _handler = (req, res) => {
     return handleServeUpload(req, res, u);
   }
 
+  // Transcript inline media (<embedded-image|video …/> blocks in agent
+  // responses). Serves files ONLY from the media root (CONFIG.mediaDir) —
+  // path traversal and symlink escapes resolve to a uniform 404 — behind the
+  // same bearer auth as the rest of the API.
+  if (u.pathname.startsWith('/api/media/')) {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleServeMedia(res, u);
+  }
+
   // PWA home-screen icon. GET is token-FREE: the OS fetches manifest icons and
   // the apple-touch-icon with no Authorization header, so this surface must be
   // open (it only ever returns an image). POST/DELETE (replace/reset the custom
@@ -720,6 +742,33 @@ function handleServeUpload(req, res, u) {
     const imageMime = IMAGE_MIME[ext];
     const headers = imageMime
       ? { 'content-type': imageMime, 'cache-control': 'private, max-age=3600' }
+      : {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${basename}"`,
+          'cache-control': 'private, max-age=3600',
+        };
+    res.writeHead(200, headers);
+    fs.createReadStream(full).pipe(res);
+  });
+}
+
+// GET /api/media/<relative path> — serve a transcript-embedded media file from
+// the media root. Relative sub-paths are allowed (unlike uploads, which are
+// flat); confinement is realpath-based in resolveMediaPath (lib/media.js).
+// Anything absolute, traversing, symlinking out, or missing is a uniform 404
+// with no detail. Images/videos get an inline content-type; everything else is
+// an octet-stream attachment so the browser never executes a served file.
+function handleServeMedia(res, u) {
+  const raw = u.pathname.slice('/api/media/'.length);
+  const full = resolveMediaPath(raw, CONFIG.mediaDir);
+  if (!full) { res.writeHead(404); return res.end('not found'); }
+  fs.stat(full, (statErr, st) => {
+    if (statErr || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
+    const ext = path.extname(full).toLowerCase();
+    const mime = IMAGE_MIME[ext] || VIDEO_MIME[ext];
+    const basename = path.basename(full);
+    const headers = mime
+      ? { 'content-type': mime, 'cache-control': 'private, max-age=3600' }
       : {
           'content-type': 'application/octet-stream',
           'content-disposition': `attachment; filename="${basename}"`,
@@ -2956,6 +3005,10 @@ async function main() {
     console.log(`[olam] remote sessions enabled for orgs: ${OLAM.orgs.map((o) => o.org).join(', ')}`);
   }
   await registry.refresh().catch(() => {});
+
+  // Media root for transcript inline embeds — must exist so control-session
+  // agents can drop screenshots/videos into it (README "Inline media").
+  try { fs.mkdirSync(CONFIG.mediaDir, { recursive: true }); } catch { /* served as 404s */ }
 
   // Daily attachment cleanup: sweep at startup, then every 24h.
   runUploadSweep();
