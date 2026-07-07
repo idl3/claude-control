@@ -26,6 +26,18 @@ test('buildBridgeCommand quotes every shell argument', () => {
   );
 });
 
+test('buildBridgeCommand defaults to bypassPermissions (print mode cannot answer prompts)', () => {
+  const cmd = buildBridgeCommand({
+    nodeBin: '/usr/local/bin/node',
+    bridgePath: '/app/bin/claude-print-bridge.mjs',
+    socketPath: '/tmp/cc.sock',
+    cwd: '/workspace',
+    claudeBin: '/usr/local/bin/claude',
+    quote: shellQuoteName,
+  });
+  assert.match(cmd, /--permission-mode 'bypassPermissions'/);
+});
+
 test('ClaudePrintManager accepts bridge connection and normalizes user messages', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-claude-print-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
