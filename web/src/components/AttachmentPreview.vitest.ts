@@ -133,7 +133,8 @@ describe('MarkdownImg — regular (non-embed) markdown images', () => {
   it('renders inside the tap-to-open-Lightbox button and opens the Lightbox on click', () => {
     render(createElement(MarkdownImg, { src: 'https://example.com/plain.png', alt: 'plain shot' }));
 
-    // The <img> itself is unchanged (same src/alt the .aui-md img CSS still targets).
+    // The <img> itself carries the same src/alt, now inside the reserved-box
+    // frame (.embed-media-frame / .embed-media, see EmbeddedMedia.tsx).
     const img = screen.getByAltText('plain shot') as HTMLImageElement;
     expect(img.tagName).toBe('IMG');
     expect(img.src).toBe('https://example.com/plain.png');
@@ -152,19 +153,23 @@ describe('MarkdownImg — regular (non-embed) markdown images', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('leaves <embedded-image/> handling on the EmbeddedMedia path, not the new wrapper', () => {
+  it('leaves <embedded-image/> handling on the EmbeddedMedia path, not the plain-image wrapper', () => {
     render(
       createElement(MarkdownImg, {
         'data-embed': 'image',
-        'data-url': 'shot.png',
+        'data-url': 'shot.png', // relative path -> src stays null until a blob fetch resolves
         'data-size': 'md',
       }),
     );
-    // EmbeddedMedia's button carries its own class + aria-label shape — not
-    // the plain-markdown-image wrapper's.
-    expect(screen.getByRole('button', { name: 'Preview shot.png' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Preview shot\.png$/ })?.className).toBe(
-      'embed-media-btn',
-    );
+    const btn = screen.getByRole('button', { name: 'Preview shot.png' });
+    // EmbeddedMedia-only affordance PlainMarkdownImage never sets: a `title`
+    // mirroring the raw url (both buttons otherwise share the same
+    // `embed-media-btn embed-media-frame` classes post-refactor).
+    expect(btn.getAttribute('title')).toBe('shot.png');
+    // EmbeddedMedia also gates the click on a resolved `src` — a relative
+    // embed with no blob fetched yet makes the click a no-op, unlike
+    // PlainMarkdownImage which always opens on click.
+    fireEvent.click(btn);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

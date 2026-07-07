@@ -85,7 +85,6 @@ describe('markdown pipeline → element props', () => {
     const html = render('![alt text](https://example.com/plain.png)');
     expect(html).toContain('src="https://example.com/plain.png"');
     expect(html).toContain('alt="alt text"');
-    expect(html).toContain('class="embed-media-frame"');
     expect(html).toContain('class="embed-media-skeleton"');
     expect(html).toContain('width:100%'); // no size attribute → fills the bubble
     expect(html).toContain(`aspect-ratio:${DEFAULT_ASPECT_RATIO}`); // no cached url yet
