@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -26,6 +26,7 @@ import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import { StopIcon } from './icons';
 import { AskInline, type ActivePrompt } from './AskInline';
+import { composerHighlightSegments } from '../lib/composerHighlight';
 
 // Module-level per-session cache so the skill list (live, session-discovered
 // via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
@@ -1681,10 +1682,70 @@ export function Composer({
     return { nodes, hasPills };
   }
 
+  /**
+   * Layers live `/goal` + `ultrathink` reserved-token highlighting on top of
+   * renderMentions above, reusing the transcript's detectors
+   * (lib/composerHighlight.ts → lib/reservedTokens.ts) so the composer shows
+   * the same feedback while typing that the sent message renders with.
+   *
+   * `/goal` (only valid at the true start of the message) and `ultrathink`
+   * segments render as their own pill/highlight spans; every plain-text
+   * segment in between still goes through renderMentions unchanged, so
+   * committed /skill and @agent mentions keep working exactly as before.
+   *
+   * Disabled in terminal mode: composer text there is a raw shell-keystroke
+   * relay, not a prompt — "/goal"/"ultrathink" typed as shell input must
+   * never be repainted, so terminal mode falls back to renderMentions alone
+   * (identical to today's behavior).
+   *
+   * METRIC CONSTRAINT (see renderMentions above): .composer-goal-pill /
+   * .composer-ultrathink reuse the transcript's gradients (styles.css
+   * .goal-pill / .ultrathink-text) but drop the padding/margin/border/
+   * font-weight the transcript versions use, which would otherwise change
+   * glyph advance width and drift the overlay out of alignment.
+   */
+  function renderReservedAndMentions(
+    t: string,
+    knownSkills: Set<string>,
+    knownAgents: Set<string>,
+  ): { nodes: React.ReactNode[]; hasPills: boolean } {
+    const segments = composerHighlightSegments(t);
+    const nodes: React.ReactNode[] = [];
+    let hasPills = false;
+    let key = 0;
+    for (const seg of segments) {
+      if (seg.kind === 'goal') {
+        hasPills = true;
+        nodes.push(
+          <span key={key++} className="composer-goal-pill" aria-hidden="true">
+            {seg.text}
+          </span>,
+        );
+        continue;
+      }
+      if (seg.kind === 'ultrathink') {
+        hasPills = true;
+        nodes.push(
+          <span key={key++} className="composer-ultrathink" aria-hidden="true">
+            {seg.text}
+          </span>,
+        );
+        continue;
+      }
+      const mentions = renderMentions(seg.text, knownSkills, knownAgents);
+      if (mentions.hasPills) hasPills = true;
+      nodes.push(<Fragment key={key++}>{mentions.nodes}</Fragment>);
+    }
+    return { nodes, hasPills };
+  }
+
   const { nodes: overlayNodes, hasPills } = useMemo(
-    () => renderMentions(text, skillNames, agentNames),
+    () =>
+      terminal
+        ? renderMentions(text, skillNames, agentNames)
+        : renderReservedAndMentions(text, skillNames, agentNames),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [text, skillNames, agentNames],
+    [text, skillNames, agentNames, terminal],
   );
 
   // Sync overlay scroll to the textarea scroll after every text change.
@@ -1987,6 +2048,11 @@ export function Composer({
             ref={overlayRef}
           >
             {overlayNodes}
+            {/* A lone trailing "\n" collapses to zero extra height in a
+                white-space:pre-wrap block unless something follows it — this
+                zero-width space keeps the overlay's height matched to the
+                textarea's, which does render the trailing blank line. */}
+            {text.endsWith('\n') ? '\u200B' : null}
           </div>
           {terminal ? (
             <div className="composer-hint" aria-hidden="true">
