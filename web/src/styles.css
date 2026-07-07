@@ -4103,6 +4103,14 @@ select.rail-new-cwd {
 }
 
 /* Lightbox overlay */
+/* Belt-and-braces scroll lock while a Lightbox is mounted — see the mount
+   effect in AttachmentPreview.tsx's Lightbox for the class add/remove. */
+html.lightbox-open,
+html.lightbox-open body {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
 .lightbox-backdrop {
   position: fixed;
   inset: 0;
@@ -4113,6 +4121,8 @@ select.rail-new-cwd {
   justify-content: center;
   cursor: zoom-out;
   padding: 16px;
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 .lightbox-backdrop:focus {
   outline: none;

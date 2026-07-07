@@ -159,7 +159,8 @@ export function EmbeddedMedia({
 // react-markdown `img` component override: embed image nodes (planted by
 // remarkEmbeds, marked via data-embed) become EmbeddedMedia; every other
 // markdown image gets the same reserved-box + skeleton treatment via
-// PlainMarkdownImage, at the bubble's full width (no size attribute to cap it).
+// PlainMarkdownImage (bubble's full width, no size attribute to cap it),
+// wrapped in the same tap-to-open-Lightbox button as EmbeddedMedia.
 type MdImgProps = {
   node?: unknown;
   'data-embed'?: string;
@@ -170,6 +171,7 @@ type MdImgProps = {
 function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   // Frozen at mount — same reasoning as EmbeddedMedia's box above.
   const [aspectRatio] = useState(() => reservedAspectRatio(src));
 
@@ -178,21 +180,32 @@ function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
   }
 
   return (
-    <span className="embed-media-frame" style={{ width: '100%', aspectRatio }}>
-      <img
-        className="embed-media"
-        src={src}
-        alt={alt ?? ''}
-        loading="lazy"
-        onLoad={(e) => {
-          const img = e.currentTarget;
-          setCachedAspectRatio(src, img.naturalWidth, img.naturalHeight);
-          setLoaded(true);
-        }}
-        onError={() => setFailed(true)}
-      />
-      {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
-    </span>
+    <>
+      <button
+        type="button"
+        className="embed-media-btn embed-media-frame"
+        style={{ width: '100%', aspectRatio }}
+        onClick={() => setLightboxOpen(true)}
+        aria-label={alt ? `Preview ${alt}` : 'Preview image'}
+      >
+        <img
+          className="embed-media"
+          src={src}
+          alt={alt ?? ''}
+          loading="lazy"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            setCachedAspectRatio(src, img.naturalWidth, img.naturalHeight);
+            setLoaded(true);
+          }}
+          onError={() => setFailed(true)}
+        />
+        {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
+      </button>
+      {lightboxOpen ? (
+        <Lightbox src={src} alt={alt ?? ''} onClose={() => setLightboxOpen(false)} />
+      ) : null}
+    </>
   );
 }
 
