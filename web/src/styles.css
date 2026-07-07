@@ -4710,6 +4710,42 @@ select.config-input {
   border: 1px solid var(--line);
 }
 
+/* ── Inline media embeds (<embedded-image|video …/> in agent responses) ──── */
+.embed-media {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.embed-media-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 6px 0;
+  display: block;
+  cursor: zoom-in;
+}
+.embed-media-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.embed-media-btn:hover .embed-media {
+  border-color: var(--accent);
+}
+video.embed-media {
+  margin: 6px 0;
+  background: var(--bg-2);
+}
+.embed-media-loading {
+  min-height: 80px;
+  background: var(--bg-2);
+}
+.embed-media-rejected {
+  color: var(--red);
+  font-size: calc(12px * var(--ui-scale));
+}
+
 /* ── Skill invocation chip ────────────────────────────────────────
    Replaces the raw SKILL.md dump with a compact inline chip. Clicking
    opens a large modal showing the parsed skill definition. */
