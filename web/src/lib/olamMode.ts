@@ -5,7 +5,12 @@ import type { Session } from './types';
  * composer behaves for a remote (olam) session. Kept in lockstep with the
  * server helper (the server is authoritative; this drives the UI affordance).
  *
- *   steer      — running session; POST cloud-dispatch (soft/hard).
+ *   steer      — running session; POST cloud-dispatch (soft/hard), OR — when
+ *                shouldSteerDoor(session, liveness) is true (Phase B, B3) —
+ *                the steer door (POST /api/session-steer) instead. The
+ *                server (dispatchLiveSteer) is authoritative for the actual
+ *                routing; shouldSteerDoor here drives UI affordances only
+ *                (hard-steer toggle gating, next-turn-boundary composer copy).
  *   approve    — Linear session awaiting first reply; the operator's reply IS
  *                the approve.
  *   read-only  — shared (#ro) / unauthed session; no steer path — refuse.
@@ -46,6 +51,18 @@ export function isExecuteShaped(session: Session | null | undefined, liveness?: 
   if (liveness?.containerSessionId) return true;
   if ((session as { pool?: string | null } | null | undefined)?.pool) return true;
   return false;
+}
+
+/**
+ * The B3 routing predicate (cloud-session-chat Phase B) — mirrors
+ * lib/olam-transport.js's shouldSteerDoor exactly. An execute-shaped session
+ * routes composer sends through the steer door (POST /api/session-steer)
+ * instead of cloud-dispatch only when liveness is confirmed 'live'. The
+ * server (dispatchLiveSteer) makes the actual routing decision; this drives
+ * the hard-steer toggle's gating and the "next turn boundary" composer copy.
+ */
+export function shouldSteerDoor(session: Session | null | undefined, liveness?: SessionLiveness | null): boolean {
+  return isExecuteShaped(session, liveness) && liveness?.state === 'live';
 }
 
 export function remoteComposerMode(

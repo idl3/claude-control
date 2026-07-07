@@ -9,6 +9,7 @@ import {
   remoteComposerMode,
   remoteModeLabel,
   remoteModeTitle,
+  shouldSteerDoor,
   REMOTE_REFUSAL_MESSAGES,
   type SessionLiveness,
 } from './lib/olamMode';
@@ -422,8 +423,19 @@ function AppInner() {
         return;
       }
       // Deliberately "Queued", not "Sent": delivery is only confirmed when the
-      // server's ack for this reqId arrives (handled below).
-      showToast('Queued →', 'ok');
+      // server's ack for this reqId arrives (handled below). A SOFT steer-door
+      // send (Phase B, B3) queues onto the ledger rather than dispatching
+      // immediately — it's claimed (and actually applied) at the NEXT turn
+      // boundary, so the copy says so instead of implying instant delivery.
+      if (
+        selectedSession?.kind === 'remote' &&
+        !steerHardRef.current &&
+        shouldSteerDoor(selectedSession, remoteLivenessRef.current)
+      ) {
+        showToast('Queued → applies at the next turn boundary', 'ok');
+      } else {
+        showToast('Queued →', 'ok');
+      }
       if (sid) {
         // The displayed label mirrors what was sent so the bubble matches reality.
         const label =
@@ -1198,9 +1210,27 @@ function AppInner() {
     () => (selectedSession?.kind === 'remote' ? remoteComposerMode(selectedSession, remoteLiveness) : null),
     [selectedSession, remoteLiveness],
   );
+  // Phase B (task B3): the same routing predicate the server's
+  // dispatchLiveSteer uses to pick the steer door over cloud-dispatch. Drives
+  // the hard-steer toggle's gating (OQ6 — hard steer needs a live session)
+  // and the next-turn-boundary copy on a queued soft send.
+  const remoteLiveSteerDoor = useMemo(
+    () => (selectedSession?.kind === 'remote' ? shouldSteerDoor(selectedSession, remoteLiveness) : false),
+    [selectedSession, remoteLiveness],
+  );
   const [steerHard, setSteerHard] = useState(false);
   const steerHardRef = useRef(false);
   steerHardRef.current = steerHard;
+
+  // Selection changed: hard steer must never silently carry over from a
+  // previous live session into a newly-selected one. It now gates a real
+  // functional choice (Phase B) rather than being purely cosmetic, so a
+  // stale `true` shouldn't linger even though the disabled toggle already
+  // blocks re-enabling it on a non-live session. Mirrors the liveness reset
+  // effect above.
+  useEffect(() => {
+    setSteerHard(false);
+  }, [cockpit.selectedId]);
 
   // A session whose sandbox has very likely been torn down can't offer a
   // live terminal — the runner HMAC mint would just fail or point at a dead
@@ -1989,11 +2019,14 @@ function AppInner() {
                             className="detail-action detail-action--olam"
                             aria-pressed={steerHard}
                             data-on={steerHard ? 'true' : undefined}
+                            disabled={!remoteLiveSteerDoor}
                             aria-label={steerHard ? 'Hard steer on' : 'Hard steer off'}
                             title={
-                              steerHard
-                                ? `Hard steer on — replies interrupt ${selectedSession?.org ?? 'the agent'} immediately`
-                                : `Hard steer off — replies queue for ${selectedSession?.org ?? 'the agent'}`
+                              !remoteLiveSteerDoor
+                                ? 'Hard steer needs a confirmed-live session — replies queue as a soft steer until then'
+                                : steerHard
+                                  ? `Hard steer on — replies interrupt ${selectedSession?.org ?? 'the agent'} immediately`
+                                  : `Hard steer off — replies queue for ${selectedSession?.org ?? 'the agent'}`
                             }
                             onClick={() => setSteerHard((v) => !v)}
                           >
