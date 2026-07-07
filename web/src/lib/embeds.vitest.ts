@@ -81,13 +81,19 @@ describe('markdown pipeline → element props', () => {
     expect(html).not.toContain('<img');
   });
 
-  it('gives regular markdown images the same reserved-box + skeleton treatment', () => {
-    const html = render('![alt](https://example.com/plain.png)');
+  it('gives regular markdown images the same reserved-box + skeleton treatment, wrapped in the lightbox-opening button', () => {
+    const html = render('![alt text](https://example.com/plain.png)');
     expect(html).toContain('src="https://example.com/plain.png"');
+    expect(html).toContain('alt="alt text"');
     expect(html).toContain('class="embed-media-frame"');
     expect(html).toContain('class="embed-media-skeleton"');
     expect(html).toContain('width:100%'); // no size attribute → fills the bubble
     expect(html).toContain(`aspect-ratio:${DEFAULT_ASPECT_RATIO}`); // no cached url yet
+    // Wrapped in the same tap-to-open-Lightbox button as EmbeddedMedia.
+    expect(html).toContain('class="embed-media-btn embed-media-frame"');
+    expect(html).toContain('aria-label="Preview alt text"');
+    // Static render: lightboxOpen starts false, so no Lightbox markup yet.
+    expect(html).not.toContain('lightbox-backdrop');
   });
 
   it('leaves non-embed inline html escaped as before', () => {
