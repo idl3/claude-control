@@ -3,62 +3,68 @@ import { authFetch } from '../lib/api';
 import { Lightbox } from './AttachmentPreview';
 import type { EmbedKind, EmbedSize } from '../lib/embeds';
 import { reservedAspectRatio, reservedBox, setCachedAspectRatio } from '../lib/mediaDimensions';
+import { resolveMediaUrl } from '../lib/mediaUrl';
 
 /**
  * Renders one <embedded-image|video …/> transcript block as a real <img> /
  * <video controls> at the mapped width (lib/embeds.ts EMBED_WIDTH).
  *
- * url handling (trust boundary — keep in sync with the server route):
+ * url handling (trust boundary — see lib/mediaUrl.ts, kept in sync with the
+ * server route):
  *  - http(s) URLs go straight into src (same as any markdown image today).
- *  - any other scheme (file:, data:, javascript:, …) and protocol-relative
- *    "//host" urls are rejected — a small inline chip, nothing fetched.
+ *  - any other scheme (file:, data:, javascript:, …), protocol-relative
+ *    "//host" urls, and any other absolute path are rejected — a small
+ *    inline chip, nothing fetched.
  *  - bare/relative paths are fetched from /api/media/<path> with the bearer
  *    header (media elements can't send Authorization) and blob-URL'd, same
- *    pattern as AttachmentPreview's upload thumbnails.
+ *    pattern as AttachmentPreview's upload thumbnails. Urls already shaped
+ *    like /api/media/<path> are fetched as-is, never re-prefixed.
  *
  * Layout shift: the container reserves a fixed box (EMBED_WIDTH cap + an
  * aspect-ratio — the exact one once lib/mediaDimensions has seen this url
  * load before, else a default) the moment it mounts, with a skeleton shimmer
  * filling it until the asset's load event fires. The asset then object-fits
  * within that same box, so nothing reflows when it finishes loading.
+ *
+ * Failure: a failed fetch (network error, non-2xx) or a load-time <img>/
+ * <video> error both drop the skeleton and render the same rejected-chip
+ * treatment as an unsupported url — the skeleton never shimmers forever.
  */
 
-const HTTP_RE = /^https?:\/\//i;
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-
-function mediaServeUrl(rel: string): string {
-  return `/api/media/${encodeURIComponent(rel)}`;
-}
-
-function useMediaSrc(url: string): { src: string | null; rejected: boolean } {
-  const direct = HTTP_RE.test(url);
-  const rejected =
-    !direct && (!url || SCHEME_RE.test(url) || url.startsWith('//'));
+function useMediaSrc(url: string): { src: string | null; rejected: boolean; failed: boolean } {
+  const resolution = resolveMediaUrl(url);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (direct || rejected) return;
+    setFailed(false);
+    if (resolution.kind !== 'fetch') return;
     let alive = true;
     let objectUrl: string | null = null;
-    authFetch(mediaServeUrl(url))
-      .then((res) => (res.ok ? res.blob() : null))
+    authFetch(resolution.fetchUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
+        return res.blob();
+      })
       .then((blob) => {
-        if (!blob || !alive) return;
+        if (!alive) return;
         objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
       })
       .catch(() => {
-        /* leave null — the loading placeholder stays, acceptable for media */
+        if (alive) setFailed(true);
       });
     return () => {
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setBlobUrl(null);
     };
-  }, [url, direct, rejected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
-  if (direct) return { src: url, rejected: false };
-  return { src: blobUrl, rejected };
+  if (resolution.kind === 'direct') return { src: resolution.src, rejected: false, failed: false };
+  if (resolution.kind === 'rejected') return { src: null, rejected: true, failed: false };
+  return { src: blobUrl, rejected: false, failed };
 }
 
 export function EmbeddedMedia({
@@ -70,9 +76,12 @@ export function EmbeddedMedia({
   url: string;
   size: EmbedSize;
 }) {
-  const { src, rejected } = useMediaSrc(url);
+  const { src, rejected, failed } = useMediaSrc(url);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Set on an <img>/<video> load-time error event — a blob that fetched fine
+  // but the browser couldn't decode (corrupt/unsupported media).
+  const [elementFailed, setElementFailed] = useState(false);
   // Frozen at mount: onLoad writes the real ratio into the cache, and reading
   // it here would resize the frame the moment the asset lands — the exact
   // first-load jump this reservation exists to prevent. Only the NEXT mount
@@ -81,6 +90,9 @@ export function EmbeddedMedia({
 
   if (rejected) {
     return <code className="embed-media-rejected">media url rejected: {url}</code>;
+  }
+  if (failed || elementFailed) {
+    return <code className="embed-media-rejected">media unavailable: {url}</code>;
   }
 
   const frameStyle = {
@@ -103,6 +115,7 @@ export function EmbeddedMedia({
               setCachedAspectRatio(url, v.videoWidth, v.videoHeight);
               setLoaded(true);
             }}
+            onError={() => setElementFailed(true)}
           />
         ) : null}
         {!loaded ? <span className="embed-media-skeleton" aria-label="loading media" /> : null}
@@ -131,6 +144,7 @@ export function EmbeddedMedia({
               setCachedAspectRatio(url, img.naturalWidth, img.naturalHeight);
               setLoaded(true);
             }}
+            onError={() => setElementFailed(true)}
           />
         ) : null}
         {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
@@ -155,8 +169,13 @@ type MdImgProps = {
 
 function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   // Frozen at mount — same reasoning as EmbeddedMedia's box above.
   const [aspectRatio] = useState(() => reservedAspectRatio(src));
+
+  if (failed) {
+    return <code className="embed-media-rejected">media unavailable: {src}</code>;
+  }
 
   return (
     <span className="embed-media-frame" style={{ width: '100%', aspectRatio }}>
@@ -170,6 +189,7 @@ function PlainMarkdownImage({ src, alt }: { src: string; alt?: string }) {
           setCachedAspectRatio(src, img.naturalWidth, img.naturalHeight);
           setLoaded(true);
         }}
+        onError={() => setFailed(true)}
       />
       {!loaded ? <span className="embed-media-skeleton" aria-hidden="true" /> : null}
     </span>
