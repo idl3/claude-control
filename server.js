@@ -986,7 +986,7 @@ async function handleSessionNew(req, res) {
         cwd,
         claudeBin,
         name,
-        permissionMode: 'acceptEdits',
+        permissionMode: 'bypassPermissions',
         quote: tmux.shellQuoteName,
       });
     } else {
@@ -1784,11 +1784,16 @@ function ensureSubscription(id) {
   }
   let sub = subscriptions.get(id);
   if (sub) {
-    // Upgrade a previously tailer-less subscription once the session's
-    // transcript has been matched on a later refresh: tear it down so the
-    // block below recreates it WITH a tailer (clients re-subscribe).
+    // Recreate when a previously tailer-less subscription's transcript has
+    // been matched on a later refresh, or when the transcript moved to a new
+    // file (resume/fork writes a new jsonl) — tear it down so the block below
+    // recreates it against the current path (clients re-subscribe).
     const cur = sessionById(id);
-    if (sub.tailer === null && cur?.transcriptPath) {
+    const drifted = sub.tailer && cur?.transcriptPath && sub.tailer.filePath !== cur.transcriptPath;
+    if ((sub.tailer === null && cur?.transcriptPath) || drifted) {
+      if (sub.tailer) sub.tailer.stop();
+      if (sub.subagents) sub.subagents.stop();
+      if (sub.promptTimer) clearInterval(sub.promptTimer);
       subscriptions.delete(id);
     } else {
       return sub;
@@ -1926,12 +1931,18 @@ function sendSubscriptionSnapshot(ws, id, sub) {
 
 function upgradeSubscriptionIfTranscriptReady(id) {
   const old = subscriptions.get(id);
-  if (!old || old.tailer) return;
+  if (!old || old.remote) return;
   const session = sessionById(id);
   if (!session?.transcriptPath) return;
+  // Rebuild when there is no tailer yet, OR the session's transcript moved to
+  // a different file (a resume/fork writes a NEW jsonl; the old one stops
+  // growing, so a tailer pinned to it would freeze while the pane moves on).
+  if (old.tailer && old.tailer.filePath === session.transcriptPath) return;
 
   const clients = new Set(old.clients);
   if (old.promptTimer) clearInterval(old.promptTimer);
+  if (old.tailer) old.tailer.stop();
+  if (old.subagents) old.subagents.stop();
   subscriptions.delete(id);
 
   const next = ensureSubscription(id);

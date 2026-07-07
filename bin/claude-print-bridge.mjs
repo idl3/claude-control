@@ -43,7 +43,10 @@ const args = parseArgs(process.argv.slice(2));
 const socketPath = args.socket;
 const cwd = args.cwd || process.cwd();
 const claudeBin = args.bin || 'claude';
-const permissionMode = args['permission-mode'] || 'acceptEdits';
+// In -p (print) mode permission prompts can never be answered, so any
+// un-preapproved tool call auto-denies; bypassPermissions is the only mode
+// that leaves the session usable. Overridable via --permission-mode.
+const permissionMode = args['permission-mode'] || 'bypassPermissions';
 const sessionName = args.name || '';
 
 if (!socketPath) {

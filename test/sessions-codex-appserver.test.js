@@ -6,6 +6,16 @@ import path from 'node:path';
 
 import { SessionRegistry } from '../lib/sessions.js';
 
+// Build the codex date-dir path components the same way lib/codex.js's
+// datePath() does (local-date YYYY/MM/DD), so fixtures always land inside
+// the LOOKBACK_DAYS window regardless of the current date.
+function codexDateDir(date = new Date()) {
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return [yyyy, mm, dd];
+}
+
 function writeRollout(dir, cwd, sessionId, when) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `rollout-${sessionId}.jsonl`);
@@ -78,7 +88,7 @@ function makeRegistry({
 test('Codex app-server pane without marker is rpc and not bound to stale cwd fallback', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-appserver-session-'));
   const cwd = '/work/repo';
-  writeRollout(path.join(temp, '2026', '06', '23'), cwd, 'stale-session', new Date());
+  writeRollout(path.join(temp, ...codexDateDir()), cwd, 'stale-session', new Date());
   const pane = makePane({ cwd });
   const reg = makeRegistry({
     pane,
@@ -108,7 +118,7 @@ test('Codex app-server pane without marker is rpc and not bound to stale cwd fal
 test('Codex process endpoint is enough to classify rpc even if appServer flag is absent', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-appserver-endpoint-'));
   const cwd = '/work/repo';
-  writeRollout(path.join(temp, '2026', '06', '23'), cwd, 'stale-session', new Date());
+  writeRollout(path.join(temp, ...codexDateDir()), cwd, 'stale-session', new Date());
   const pane = makePane({ cwd, target: 'test:4.1', paneId: '%codexendpoint' });
   const reg = makeRegistry({
     pane,
@@ -133,7 +143,7 @@ test('Codex process endpoint is enough to classify rpc even if appServer flag is
 test('normal Codex pane still uses cwd fallback when no exact rollout is open', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-tui-session-'));
   const cwd = '/work/repo';
-  const rollout = writeRollout(path.join(temp, '2026', '06', '23'), cwd, 'live-session', new Date());
+  const rollout = writeRollout(path.join(temp, ...codexDateDir()), cwd, 'live-session', new Date());
   const pane = makePane({ cwd, target: 'test:2.1', paneId: '%codextui', windowName: 'codex-tui' });
   const reg = makeRegistry({
     pane,
