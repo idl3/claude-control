@@ -310,3 +310,68 @@ test('CodexRpcManager replaces stale or endpoint-changed clients on ensureAttach
     transcriptPath: '/tmp/rollout.jsonl',
   });
 });
+
+// ── submit() — draft-composer initial-prompt delivery over an attached
+// RPC thread (server.js's handleSessionNew calls this right after attach()
+// resolves, so threadId is already populated — no separate "ready" wait
+// needed, unlike the print-mode bridge socket). ────────────────────────────
+
+test('CodexRpcClient.submit sends turn/start with the text and cwd once a thread is open', async () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  client.threadId = 'thread-1'; // set by connect()/_openThread() in production
+  const calls = [];
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { turn: { id: 'turn-1' } };
+  };
+
+  await client.submit('build the feature', { cwd: '/workspace' });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'turn/start');
+  assert.deepEqual(calls[0].params, {
+    threadId: 'thread-1',
+    input: [{ type: 'text', text: 'build the feature', text_elements: [] }],
+    cwd: '/workspace',
+  });
+});
+
+test('CodexRpcClient.submit rejects before a thread is open (no threadId yet)', async () => {
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  await assert.rejects(() => client.submit('too early'), /thread is not ready/);
+});
+
+test('CodexRpcManager.submit forwards to the attached client for the target', async () => {
+  const manager = new CodexRpcManager();
+  const calls = [];
+  const client = new CodexRpcClient({ target: 's:0.0', endpoint: 'ws://127.0.0.1:1', cwd: '/workspace' });
+  client.threadId = 'thread-1';
+  client.ws = { readyState: 1, close: () => {}, terminate: () => {}, send: () => {} };
+  client._closed = false;
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return {};
+  };
+  manager.clients.set('s:0.0', client);
+
+  await manager.submit('s:0.0', 'initial prompt text', { cwd: '/workspace' });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].params.input[0].text, 'initial prompt text');
+});
+
+test('CodexRpcManager.submit rejects when no client is attached for the target', async () => {
+  const manager = new CodexRpcManager();
+  await assert.rejects(
+    () => manager.submit('missing:0.0', 'hello'),
+    /Codex RPC client is not attached/,
+  );
+});

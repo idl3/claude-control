@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
-import { filterTag, NewSessionForm, normalizeClaudeTransport, normalizeCodexTransport } from './NewSessionForm';
+import {
+  defaultAgentForFilter,
+  defaultName,
+  filterTag,
+  NewSessionForm,
+  normalizeClaudeTransport,
+  normalizeCodexTransport,
+} from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
+
+afterEach(cleanup);
 
 // ── filterTag ────────────────────────────────────────────────────────────────
 // Pure helper: returns the badge label for the filter funnel button.
@@ -23,6 +32,10 @@ describe('filterTag', () => {
 
   it('returns ">_" for "terminal"', () => {
     expect(filterTag('terminal')).toBe('>_');
+  });
+
+  it('returns "AI" for "agents"', () => {
+    expect(filterTag('agents')).toBe('AI');
   });
 });
 
@@ -60,39 +73,23 @@ describe('filter cycle (all → agents → claude → codex → terminal → all
   });
 });
 
-describe('filterTag includes agents', () => {
-  it('agents → AI', () => expect(filterTag('agents')).toBe('AI'));
+describe('defaultAgentForFilter', () => {
+  it('codex filter defaults to codex', () => {
+    expect(defaultAgentForFilter('codex')).toBe('codex');
+  });
+
+  it('every other filter defaults to claude', () => {
+    expect(defaultAgentForFilter('all')).toBe('claude');
+    expect(defaultAgentForFilter('agents')).toBe('claude');
+    expect(defaultAgentForFilter('claude')).toBe('claude');
+    expect(defaultAgentForFilter('terminal')).toBe('claude');
+  });
 });
 
-// ── Agent availability types ───────────────────────────────────────────────
-// Light type-level smoke test that the SpawnAgentInfo shape is correct.
-
-import type { SpawnAgentInfo } from '../lib/api';
-
-describe('SpawnAgentInfo type contract', () => {
-  it('claude available entry has no reason', () => {
-    const info: SpawnAgentInfo = { id: 'claude', available: true, defaultTransport: 'tmux', transports: ['tmux', 'print'] };
-    expect(info.id).toBe('claude');
-    expect(info.available).toBe(true);
-    expect(info.reason).toBeUndefined();
-    expect(info.transports).toEqual(['tmux', 'print']);
-  });
-
-  it('codex unavailable entry has a reason', () => {
-    const info: SpawnAgentInfo = { id: 'codex', available: false, reason: 'not found' };
-    expect(info.available).toBe(false);
-    expect(info.reason).toBe('not found');
-  });
-
-  it('codex entry may advertise per-session transports', () => {
-    const info: SpawnAgentInfo = {
-      id: 'codex',
-      available: true,
-      defaultTransport: 'rpc',
-      transports: ['rpc', 'tmux'],
-    };
-    expect(info.defaultTransport).toBe('rpc');
-    expect(info.transports).toEqual(['rpc', 'tmux']);
+describe('defaultName', () => {
+  it('is session-<short-ts> and varies over time', () => {
+    expect(defaultName(1_000_000_000_000)).toMatch(/^session-[0-9a-z]{1,6}$/);
+    expect(defaultName(1_000_000_000_000)).not.toBe(defaultName(1_000_000_001_000));
   });
 });
 
@@ -120,73 +117,45 @@ describe('normalizeClaudeTransport', () => {
   });
 });
 
-describe('NewSessionForm agent and Codex mode controls', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+// ── NewSessionForm (collapsed rail-head control) ─────────────────────────────
+// The expanded picker/composer UI moved to NewSessionDraft (see
+// NewSessionDraft.vitest.ts) — this component is now just the "+ New session"
+// button (opens the draft screen in the main content area) and the filter
+// funnel button, unchanged from before.
+
+describe('NewSessionForm', () => {
+  it('renders the collapsed rail-head button + filter button', () => {
+    render(createElement(NewSessionForm, {
+      onOpenDraft: () => {},
+      filter: 'all',
+      onCycleFilter: () => {},
+    }));
+    expect(screen.getByRole('button', { name: '+ New session' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Showing all panes/ })).toBeTruthy();
   });
 
-  it('keeps unavailable agent options selectable and shows Claude + Codex mode controls', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/api/spawn-agents')) {
-        return new Response(JSON.stringify({
-          agents: [
-            {
-              id: 'claude',
-              available: false,
-              reason: 'claude missing',
-              defaultTransport: 'print',
-              transports: ['tmux', 'print'],
-            },
-            {
-              id: 'codex',
-              available: false,
-              reason: 'codex missing',
-              defaultTransport: 'tmux',
-              transports: ['rpc', 'tmux'],
-            },
-          ],
-        }), { status: 200, headers: { 'content-type': 'application/json' } });
-      }
-      if (url.endsWith('/api/config')) {
-        return new Response(JSON.stringify({ defaultCwd: '/workspace' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return new Response('{}', { status: 404 });
-    }));
-
+  it('clicking "+ New session" calls onOpenDraft (no inline form expands)', () => {
+    const onOpenDraft = vi.fn();
     render(createElement(NewSessionForm, {
-      onToast: () => {},
+      onOpenDraft,
       filter: 'all',
       onCycleFilter: () => {},
     }));
     fireEvent.click(screen.getByRole('button', { name: '+ New session' }));
+    expect(onOpenDraft).toHaveBeenCalledTimes(1);
+    // Still just the two rail-head buttons — no expanded form appeared.
+    expect(screen.queryByRole('form', { name: 'Create session' })).toBeNull();
+  });
 
-    const claudeButton = await screen.findByRole('button', { name: 'Claude' });
-    const codexButton = await screen.findByRole('button', { name: 'Codex' });
-    expect((claudeButton as HTMLButtonElement).disabled).toBe(false);
-    expect((codexButton as HTMLButtonElement).disabled).toBe(false);
-
-    await waitFor(() => {
-      expect(screen.getByRole('group', { name: 'Claude mode' })).toBeTruthy();
-    });
-    const interactiveButton = screen.getByRole('button', { name: 'Interactive' }) as HTMLButtonElement;
-    const printButton = screen.getByRole('button', { name: 'Print mode' }) as HTMLButtonElement;
-    expect(interactiveButton.disabled).toBe(false);
-    expect(printButton.disabled).toBe(false);
-    expect(printButton.getAttribute('aria-pressed')).toBe('true');
-
-    fireEvent.click(codexButton);
-
-    await waitFor(() => {
-      expect(screen.getByRole('group', { name: 'Codex mode' })).toBeTruthy();
-    });
-    const rpcButton = screen.getByRole('button', { name: 'RPC' }) as HTMLButtonElement;
-    const tuiButton = screen.getByRole('button', { name: 'TUI' }) as HTMLButtonElement;
-    expect(rpcButton.disabled).toBe(false);
-    expect(tuiButton.disabled).toBe(false);
-    expect(tuiButton.getAttribute('aria-pressed')).toBe('true');
+  it('clicking the filter button calls onCycleFilter and shows the right badge', () => {
+    const onCycleFilter = vi.fn();
+    render(createElement(NewSessionForm, {
+      onOpenDraft: () => {},
+      filter: 'claude',
+      onCycleFilter,
+    }));
+    expect(screen.getByText('CC')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Showing Claude sessions/ }));
+    expect(onCycleFilter).toHaveBeenCalledTimes(1);
   });
 });

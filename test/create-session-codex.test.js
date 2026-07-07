@@ -24,9 +24,41 @@ import { buildBridgeCommand } from '../lib/claude-print.js';
 // arg is shell-quoted because the command is typed into an interactive shell.
 // Keeping this in lockstep with the server guards against the prior bug where
 // buildSpawnCommand's result was discarded (`void`) and the string hand-rolled.
-function launchFor(config, cwd) {
+function launchFor(config, cwd, { prompt = '' } = {}) {
   const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
-  return `${bin} ${args.map((a) => (a === cwd ? shellQuoteName(cwd) : a)).join(' ')}`;
+  const argv = args.map((a) => (a === cwd ? shellQuoteName(cwd) : a));
+  if (prompt) argv.push(shellQuoteName(prompt));
+  return `${bin} ${argv.join(' ')}`;
+}
+
+// Mirror of server.js handleSessionNew's Claude tmux launch construction
+// EXACTLY, including the new --model flag and positional initial prompt.
+function claudeLaunchFor(config, name, { model = null, prompt = '' } = {}) {
+  let launch = `${config.launchCommand} --name ${shellQuoteName(name)}`;
+  if (model) launch += ` --model ${shellQuoteName(model)}`;
+  if (prompt) launch += ` ${shellQuoteName(prompt)}`;
+  return launch;
+}
+
+// Mirror of server.js handleSessionNew's model selection: Claude-only,
+// unknown/absent values silently fall back to no flag (same silent-fallback
+// pattern as claudeTransport/codexTransport, not a 400).
+const ALLOWED_CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+function selectModel(body, agent) {
+  return agent === 'claude' && ALLOWED_CLAUDE_MODELS.has(body.model) ? body.model : null;
+}
+
+// Mirror of server.js handleSessionNew's prompt boundary validation: type
+// check, byte-length cap, and trim. Returns { error } or { prompt }.
+const MAX_PROMPT_BYTES = 100_000;
+function validatePrompt(body) {
+  if (body.prompt !== undefined && typeof body.prompt !== 'string') {
+    return { error: 'prompt must be a string' };
+  }
+  if (typeof body.prompt === 'string' && Buffer.byteLength(body.prompt, 'utf8') > MAX_PROMPT_BYTES) {
+    return { error: `prompt exceeds ${MAX_PROMPT_BYTES}-byte limit` };
+  }
+  return { prompt: typeof body.prompt === 'string' ? body.prompt.trim() : '' };
 }
 
 function appServerLaunchFor(config, endpoint) {
@@ -84,6 +116,34 @@ describe('handleSessionNew codex launch string', () => {
   });
 });
 
+// ── Draft-composer: Codex initial prompt (`codex [OPTIONS] [PROMPT]`) ──────
+// Verified on-host: `codex --help` shows a positional `[PROMPT]` argument for
+// the interactive TUI, so this is the "trivially supported" case the brief
+// calls for — wired for the tmux/TUI transport only (RPC uses submit(), see
+// test/codex-rpc.test.js).
+
+describe('handleSessionNew codex launch string — initial prompt (tmux/TUI transport)', () => {
+  test('appends the quoted positional prompt after -C <cwd>', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: 'fix the failing test' });
+    assert.equal(launch, `codex -C '/workspace' 'fix the failing test'`);
+  });
+
+  test('omits the prompt arg entirely when no prompt is set (regression)', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace');
+    assert.equal(launch, `codex -C '/workspace'`);
+  });
+
+  test('quotes a multi-line prompt safely (embedded newline stays inside the single-quote span)', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: 'line one\nline two' });
+    assert.equal(launch, `codex -C '/workspace' 'line one\nline two'`);
+  });
+
+  test('escapes an embedded single quote in the prompt', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { prompt: "it's broken" });
+    assert.ok(launch.includes("it'\\''s broken"), 'single quote in prompt is escaped');
+  });
+});
+
 describe('handleSessionNew claude launch string (byte-identical regression)', () => {
   test('claude launch string is `<launchCommand> --name <quoted-name>`', () => {
     const config = { launchCommand: 'claude' };
@@ -131,6 +191,112 @@ describe('handleSessionNew claude launch string (byte-identical regression)', ()
     assert.equal(
       launch,
       "'/usr/local/bin/node' '/app/bin/claude-print-bridge.mjs' --socket '/tmp/cc.sock' --cwd '/workspace' --bin '/usr/local/bin/claude' --permission-mode 'acceptEdits' --name 'my session'",
+    );
+  });
+});
+
+// ── Draft-composer: Claude initial prompt + model (tmux/interactive transport) ──
+// Verified on-host: `claude --help` shows `Usage: claude [options] [command]
+// [prompt]` plus `--model <model>`, so both are appended to the SAME launch
+// command that already carries --name — atomic with launch, no separate typed
+// step. Print-transport model plumbing (buildBridgeCommand) is covered in
+// test/claude-print.test.js; print-transport prompt delivery (socket submit)
+// is covered there too.
+
+describe('handleSessionNew claude launch string — --model and initial prompt', () => {
+  test('appends --model after --name when a model is set', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { model: 'opus' });
+    assert.equal(launch, `claude --name 'my session' --model 'opus'`);
+  });
+
+  test('appends the positional prompt after --model when both are set', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', {
+      model: 'sonnet',
+      prompt: 'fix the failing test',
+    });
+    assert.equal(launch, `claude --name 'my session' --model 'sonnet' 'fix the failing test'`);
+  });
+
+  test('appends the positional prompt with no --model when model is unset', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: 'hello' });
+    assert.equal(launch, `claude --name 'my session' 'hello'`);
+  });
+
+  test('quotes a multi-line prompt safely (embedded newline stays inside the single-quote span)', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: 'line one\nline two' });
+    assert.equal(launch, `claude --name 'my session' 'line one\nline two'`);
+  });
+
+  test('is byte-identical to the pre-existing shape when neither model nor prompt is set (regression)', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session');
+    assert.equal(launch, `claude --name 'my session'`);
+  });
+
+  test('works with a custom launchCommand (yolo alias) plus model and prompt', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'yolo' }, 'feat', { model: 'haiku', prompt: 'go' });
+    assert.equal(launch, `yolo --name 'feat' --model 'haiku' 'go'`);
+  });
+});
+
+describe('handleSessionNew model selection (Claude-only, silent-fallback validation)', () => {
+  test('accepts each allowed model for the claude agent', () => {
+    assert.equal(selectModel({ model: 'opus' }, 'claude'), 'opus');
+    assert.equal(selectModel({ model: 'sonnet' }, 'claude'), 'sonnet');
+    assert.equal(selectModel({ model: 'haiku' }, 'claude'), 'haiku');
+  });
+
+  test('"default", unknown strings, and absent model all resolve to null (no --model flag)', () => {
+    assert.equal(selectModel({ model: 'default' }, 'claude'), null);
+    assert.equal(selectModel({ model: 'gpt-5' }, 'claude'), null);
+    assert.equal(selectModel({}, 'claude'), null);
+    assert.equal(selectModel({ model: '' }, 'claude'), null);
+  });
+
+  test('model is ignored entirely for the codex agent, even a valid-looking value', () => {
+    assert.equal(selectModel({ model: 'opus' }, 'codex'), null);
+  });
+});
+
+describe('handleSessionNew prompt validation (boundary check)', () => {
+  test('missing prompt resolves to an empty string (no prompt)', () => {
+    assert.deepEqual(validatePrompt({}), { prompt: '' });
+  });
+
+  test('a whitespace-only prompt trims to empty (treated as no prompt)', () => {
+    assert.deepEqual(validatePrompt({ prompt: '   \n  ' }), { prompt: '' });
+  });
+
+  test('a non-string prompt is rejected with a boundary error', () => {
+    assert.deepEqual(validatePrompt({ prompt: 12345 }), { error: 'prompt must be a string' });
+    assert.deepEqual(validatePrompt({ prompt: { text: 'x' } }), { error: 'prompt must be a string' });
+    assert.deepEqual(validatePrompt({ prompt: ['x'] }), { error: 'prompt must be a string' });
+  });
+
+  test('a prompt at exactly the byte cap passes', () => {
+    const prompt = 'a'.repeat(MAX_PROMPT_BYTES);
+    assert.deepEqual(validatePrompt({ prompt }), { prompt });
+  });
+
+  test('a prompt one byte over the cap is rejected', () => {
+    const prompt = 'a'.repeat(MAX_PROMPT_BYTES + 1);
+    const result = validatePrompt({ prompt });
+    assert.equal(result.error, `prompt exceeds ${MAX_PROMPT_BYTES}-byte limit`);
+  });
+
+  test('the cap is measured in UTF-8 bytes, not JS string length (multi-byte chars)', () => {
+    // Each 🎉 is 4 UTF-8 bytes but counts as 2 UTF-16 code units in .length.
+    const emoji = '🎉';
+    const repeats = Math.floor(MAX_PROMPT_BYTES / 4) + 10; // over the byte cap
+    const prompt = emoji.repeat(repeats);
+    assert.ok(prompt.length < Buffer.byteLength(prompt, 'utf8'), 'JS length must undercount UTF-8 bytes here');
+    const result = validatePrompt({ prompt });
+    assert.equal(result.error, `prompt exceeds ${MAX_PROMPT_BYTES}-byte limit`);
+  });
+
+  test('a multi-line prompt is preserved (only outer whitespace trimmed)', () => {
+    assert.deepEqual(
+      validatePrompt({ prompt: '  line one\nline two  ' }),
+      { prompt: 'line one\nline two' },
     );
   });
 });

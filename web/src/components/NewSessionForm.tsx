@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, getConfig } from '../lib/api';
-import type { SpawnAgentInfo } from '../lib/api';
 import { FunnelIcon } from './icons';
 import type { SessionFilter } from './SessionRail';
 
-type CodexTransport = 'rpc' | 'tmux';
-type ClaudeTransport = 'tmux' | 'print';
+export type CodexTransport = 'rpc' | 'tmux';
+export type ClaudeTransport = 'tmux' | 'print';
 
 interface NewSessionFormProps {
-  onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
+  /** Opens the new-session draft screen in the main content area. */
+  onOpenDraft: () => void;
   /** Rail filter state + cycle (all → claude → codex → terminal). */
   filter: SessionFilter;
   onCycleFilter: () => void;
@@ -23,11 +21,11 @@ const FILTER_TITLE: Record<SessionFilter, string> = {
 };
 
 /** Client-side mirror of the server's `session-<short-ts>` default name. */
-function defaultName(now: number = Date.now()): string {
+export function defaultName(now: number = Date.now()): string {
   return `session-${now.toString(36).slice(-6)}`;
 }
 
-function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' {
+export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' {
   return filter === 'codex' ? 'codex' : 'claude';
 }
 
@@ -49,290 +47,34 @@ export function filterTag(filter: SessionFilter): string | null {
 }
 
 /**
- * Rail-head "new session" control. Collapsed it's a "+ New session" button;
- * expanded it reveals an agent toggle (Claude | Codex), a NAME field (Claude
- * only — Codex has no --name), a CWD field, and Create/Cancel actions. On
- * submit it POSTs to the server which names the tmux window and launches the
- * selected agent. The new window appears in the rail on the next registry
- * refresh.
+ * Rail-head "new session" control: a "+ New session" button that opens the
+ * draft-composer screen in the main content area (see NewSessionDraft.tsx —
+ * agent/transport/model/name/cwd pickers plus the initial-prompt composer all
+ * live there now, not in an inline rail form), and the filter funnel button
+ * (all → agents → Claude → Codex → terminals).
  */
-export function NewSessionForm({ onToast, filter, onCycleFilter }: NewSessionFormProps) {
-  const [open, setOpen] = useState(false);
-  const [agent, setAgent] = useState<'claude' | 'codex'>('claude');
-  const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
-  const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
-  const [name, setName] = useState('');
-  // Selected value in the project-dir dropdown: a path string, or '' to use
-  // defaultCwd, or the sentinel 'custom' to show the free-text input.
-  const [cwdChoice, setCwdChoice] = useState('');
-  const [cwdCustom, setCwdCustom] = useState('');
-  const [creating, setCreating] = useState(false);
-  // A fresh default each time the form opens, so the placeholder is current.
-  const [placeholder, setPlaceholder] = useState(defaultName);
-  const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
-  const [defaultCwd, setDefaultCwd] = useState('~');
-  const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
-
-  // On open: refresh default name, reset state, fetch agent availability + config.
-  useEffect(() => {
-    if (!open) return;
-    setPlaceholder(defaultName());
-    setName('');
-    setCwdChoice('');
-    setCwdCustom('');
-    setAgent(defaultAgentForFilter(filter));
-    setClaudeTransport('tmux');
-    setCodexTransport('rpc');
-    setAgentInfos([]);
-    fetchSpawnAgents()
-      .then((infos) => {
-        setAgentInfos(infos);
-        setClaudeTransport(normalizeClaudeTransport(infos.find((info) => info.id === 'claude')?.defaultTransport));
-        setCodexTransport(normalizeCodexTransport(infos.find((info) => info.id === 'codex')?.defaultTransport));
-      })
-      .catch(() => {
-        // Non-fatal: form still works, agents just won't show disabled state.
-      });
-    getConfig()
-      .then((cfg) => {
-        setDefaultCwd(cfg.defaultCwd || '~');
-        setProjectDirs(cfg.projectDirs ?? []);
-      })
-      .catch(() => {
-        // Non-fatal: placeholder falls back to '~'.
-      });
-    // Focus the name field after a tick (form mount).
-    setTimeout(() => nameInputRef.current?.focus(), 0);
-  }, [open, filter]);
-
-  const close = useCallback(() => {
-    setOpen(false);
-    setName('');
-    setCwdChoice('');
-    setCwdCustom('');
-  }, []);
-
-  const submit = useCallback(async () => {
-    if (creating) return;
-    setCreating(true);
-    // Required-with-default: blank name field falls back to the shown placeholder.
-    const resolvedName = agent === 'codex' ? undefined : (name.trim() || placeholder);
-    // Resolve the effective cwd: '' = use server default; 'custom' = free-text;
-    // otherwise the path from the selected dropdown option.
-    const resolvedCwd =
-      cwdChoice === 'custom'
-        ? cwdCustom.trim() || undefined
-        : cwdChoice || undefined;
-    onToast('Creating session…');
-    try {
-      const result = await createSession({
-        name: resolvedName,
-        cwd: resolvedCwd,
-        agent,
-        claudeTransport: agent === 'claude' ? claudeTransport : undefined,
-        codexTransport: agent === 'codex' ? codexTransport : undefined,
-      });
-      onToast(`Session created → ${result.name}`, 'ok');
-      close();
-    } catch (err) {
-      onToast(`New session failed: ${(err as Error).message}`, 'error');
-    } finally {
-      setCreating(false);
-    }
-  }, [creating, agent, claudeTransport, codexTransport, name, cwdChoice, cwdCustom, placeholder, onToast, close]);
-
-  // Helper: look up availability for an agent id.
-  function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
-    return agentInfos.find((a) => a.id === id);
-  }
-
-  if (!open) {
-    const tag = filterTag(filter);
-    return (
-      <div className="rail-head">
-        <button
-          type="button"
-          className="rail-new"
-          onClick={() => setOpen(true)}
-        >
-          + New session
-        </button>
-        <button
-          type="button"
-          className="rail-filter"
-          data-filter={filter}
-          aria-label={FILTER_TITLE[filter]}
-          title={FILTER_TITLE[filter]}
-          onClick={onCycleFilter}
-        >
-          <FunnelIcon size={15} />
-          {tag ? <span className="rail-filter-tag">{tag}</span> : null}
-        </button>
-      </div>
-    );
-  }
-
-  const claudeInfo = agentInfo('claude');
-  const codexInfo = agentInfo('codex');
-
+export function NewSessionForm({ onOpenDraft, filter, onCycleFilter }: NewSessionFormProps) {
+  const tag = filterTag(filter);
   return (
-    <form
-      className="rail-new-form"
-      aria-label="Create session"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      {/* Agent-type segmented control */}
-      <div className="rail-new-agent-seg" role="group" aria-label="Agent type">
-        {(['claude', 'codex'] as const).map((id) => {
-          const info = id === 'claude' ? claudeInfo : codexInfo;
-          const unavailable = info && !info.available;
-          const isActive = agent === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              className="rail-new-agent-seg-btn"
-              data-active={isActive ? 'true' : 'false'}
-              data-unavailable={unavailable ? 'true' : 'false'}
-              disabled={creating}
-              title={unavailable ? info?.reason : undefined}
-              aria-pressed={isActive}
-              onClick={() => setAgent(id)}
-            >
-              <span className="rail-new-agent-seg-label">
-                {id === 'claude' ? 'Claude' : 'Codex'}
-              </span>
-              {unavailable ? (
-                <span className="rail-new-agent-seg-hint" aria-hidden="true">unavailable</span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-
-      {agent === 'claude' ? (
-        <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
-          {([
-            ['tmux', 'Interactive'],
-            ['print', 'Print mode'],
-          ] as const).map(([id, label]) => {
-            const isActive = claudeTransport === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                className="rail-new-mode-seg-btn"
-                data-active={isActive ? 'true' : 'false'}
-                disabled={creating}
-                aria-pressed={isActive}
-                onClick={() => setClaudeTransport(id)}
-              >
-                <span className="rail-new-agent-seg-label">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {agent === 'codex' ? (
-        <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
-          {([
-            ['rpc', 'RPC'],
-            ['tmux', 'TUI'],
-          ] as const).map(([id, label]) => {
-            const isActive = codexTransport === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                className="rail-new-mode-seg-btn"
-                data-active={isActive ? 'true' : 'false'}
-                disabled={creating}
-                aria-pressed={isActive}
-                onClick={() => setCodexTransport(id)}
-              >
-                <span className="rail-new-agent-seg-label">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {/* Name field — Claude only; Codex has no --name flag */}
-      {agent === 'claude' ? (
-        <input
-          ref={nameInputRef}
-          className="rail-new-name"
-          type="text"
-          value={name}
-          placeholder={placeholder}
-          disabled={creating}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') { e.preventDefault(); close(); }
-          }}
-          aria-label="Session name"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-      ) : (
-        <div className="rail-new-name-note" aria-live="polite">
-          Codex has no session name
-        </div>
-      )}
-
-      {/* CWD: dropdown of project directories + Custom… option */}
-      <select
-        className="rail-new-cwd"
-        value={cwdChoice}
-        disabled={creating}
-        onChange={(e) => setCwdChoice(e.target.value)}
-        aria-label="Working directory"
+    <div className="rail-head">
+      <button
+        type="button"
+        className="rail-new"
+        onClick={onOpenDraft}
       >
-        <option value="">(default) {defaultCwd}</option>
-        {projectDirs.map((d) => (
-          <option key={d.path} value={d.path}>
-            {d.label}
-          </option>
-        ))}
-        <option value="custom">Custom…</option>
-      </select>
-      {cwdChoice === 'custom' ? (
-        <input
-          className="rail-new-cwd"
-          type="text"
-          value={cwdCustom}
-          placeholder="~/Projects/my-project"
-          disabled={creating}
-          onChange={(e) => setCwdCustom(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') { e.preventDefault(); close(); }
-          }}
-          aria-label="Custom working directory"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-      ) : null}
-
-      <div className="rail-new-actions">
-        <button
-          type="button"
-          className="rail-new-cancel"
-          onClick={close}
-          disabled={creating}
-        >
-          Cancel
-        </button>
-        <button type="submit" className="rail-new-create" disabled={creating}>
-          {creating ? 'Creating…' : 'Create'}
-        </button>
-      </div>
-    </form>
+        + New session
+      </button>
+      <button
+        type="button"
+        className="rail-filter"
+        data-filter={filter}
+        aria-label={FILTER_TITLE[filter]}
+        title={FILTER_TITLE[filter]}
+        onClick={onCycleFilter}
+      >
+        <FunnelIcon size={15} />
+        {tag ? <span className="rail-filter-tag">{tag}</span> : null}
+      </button>
+    </div>
   );
 }
