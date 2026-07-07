@@ -2338,16 +2338,16 @@ details.block-tool[open] > summary .tool-arrow,
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
 }
-/* Mobile: drop the extra gap below the composer — keep only the system
-   home-indicator inset (0 in a browser tab), which removes the unnecessary
-   padding without letting the input sit under the home bar. */
+/* Mobile: keep ONLY the system home-indicator inset (0 in a browser tab) —
+   and keep it CONSTANT. A previous :focus-within override dropped it to 0
+   while typing (keyboard covers the home bar), but on iOS tapping any
+   composer button (mic, +) does not focus it, so leaving the textarea
+   blurred the composer and the padding snapped 0→inset — a visible jump.
+   A stable inset costs a small gap above the keyboard while typing;
+   stability wins (operator decision). */
 @media (max-width: 760px) {
   .composer {
     padding-bottom: env(safe-area-inset-bottom);
-  }
-  /* Focused (keyboard up): the on-screen keyboard covers the home indicator. */
-  .composer:focus-within {
-    padding-bottom: 0;
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the
