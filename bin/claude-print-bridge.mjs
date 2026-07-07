@@ -48,6 +48,9 @@ const claudeBin = args.bin || 'claude';
 // that leaves the session usable. Overridable via --permission-mode.
 const permissionMode = args['permission-mode'] || 'bypassPermissions';
 const sessionName = args.name || '';
+// Applied on every turn (not just the first) since print mode spawns a fresh
+// `claude -p` child per turn — the model choice must survive across resumes.
+const model = args.model || '';
 
 if (!socketPath) {
   console.error('claude-print-bridge: --socket is required');
@@ -161,7 +164,7 @@ function runClaudeChild(text, useStreamInput, { reportExitError = true } = {}) {
         '--permission-mode', permissionMode,
       ]
       : [
-        '-p', text,
+        '-p',
         '--output-format', 'stream-json',
         '--verbose',
         '--permission-mode', permissionMode,
@@ -171,6 +174,12 @@ function runClaudeChild(text, useStreamInput, { reportExitError = true } = {}) {
     } else if (sessionName) {
       turnArgs.push('--name', sessionName);
     }
+    if (model) turnArgs.push('--model', model);
+    // Fallback (non-stream) mode only puts `text` on argv (stream mode sends
+    // it over stdin instead) — all flags must precede it, then `--`, then the
+    // positional text. Verified on-host: `claude -p "-x ..."` errors as an
+    // unknown option without this guard (same hazard as the tmux launch path).
+    if (!useStreamInput) turnArgs.push('--', text);
 
     const child = spawn(claudeBin, turnArgs, {
       cwd,

@@ -445,6 +445,12 @@ export interface CreateSessionResult {
  * types the configured launch command into it. The new window shows up in the
  * rail on the next ~4s registry refresh — no optimistic insert needed. A blank
  * `name` is fine: the server fills a `session-<ts>` default and returns it.
+ *
+ * `prompt` (optional, may be multi-line) travels with the launch atomically —
+ * either as a positional arg on the launch command (tmux transports) or over
+ * the print/RPC socket once the agent signals ready — instead of the older
+ * create-then-type flow. `model` is Claude-only; omit or pass 'default' to
+ * use the agent's own default (no --model flag is sent).
  */
 export async function createSession(opts?: {
   cwd?: string;
@@ -455,6 +461,10 @@ export async function createSession(opts?: {
   claudeTransport?: 'tmux' | 'print';
   /** Codex-only transport. Defaults to the server's configured transport. */
   codexTransport?: 'tmux' | 'rpc';
+  /** Claude-only model override. Omitted/'default' → agent's own default. */
+  model?: 'opus' | 'sonnet' | 'haiku';
+  /** Initial prompt, submitted atomically with session creation. */
+  prompt?: string;
 }): Promise<CreateSessionResult> {
   const res = await authFetch('/api/session/new', {
     method: 'POST',

@@ -3944,6 +3944,49 @@ select.rail-new-cwd {
   line-height: 1.4;
 }
 
+/* ── New-session draft screen (main content area) ────────────────
+   Replaces the old inline rail form: the same agent/transport/model/name/cwd
+   pickers (rail-new-* controls above, unchanged) plus a composer-styled
+   initial-prompt textarea, shown in place of the transcript. The root mirrors
+   .thread-root's flex/scroll shape so it fills the same space in .detail. */
+.new-session-draft {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+.new-session-draft-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.new-session-draft-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: calc(640px * var(--ui-scale));
+  margin-inline: auto;
+  padding: 24px 16px 32px;
+  box-sizing: border-box;
+}
+.new-session-draft-heading {
+  margin: 0 0 4px;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.new-session-draft-composer {
+  margin-top: 4px;
+}
+.new-session-draft-actions {
+  margin-top: 4px;
+}
+
 /* ── Transcript inline attachment previews ────────────────────── */
 /*
  * Thumbnails and file chips rendered below a message text part when the
