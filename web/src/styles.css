@@ -4809,6 +4809,21 @@ select.config-input {
   font-size: calc(12px * var(--ui-scale));
 }
 
+/* ── Live micro-app embeds (<embedded-app url="…" height="…" />) ────────
+   Reuses .embed-media-frame's box/frame/skeleton chrome as-is (border,
+   radius, background, left-aligned margin) — the box height is fixed from
+   the tag's `height` attr instead of an aspect-ratio (an iframe has no
+   intrinsic media dimensions to reserve for), so no override is needed here
+   beyond the iframe filling the frame the same way .embed-media does. */
+.embed-app {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 /* ── /goal reserved-token pill (user messages only) ─────────────────
    `/goal` invocations render as a metallic silver-blue pill instead of plain
    text — reuses the shimmer-sweep keyframe (Working… indicator, above) for
