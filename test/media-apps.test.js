@@ -39,10 +39,13 @@ test('isoStamp strips milliseconds and colons, keeping the trailing Z', () => {
 
 // ── listVersions ──────────────────────────────────────────────────────────
 
-let root;
-
-before(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
+// Fixture root is created at MODULE EVAL time, not in before(): the route
+// section below must set CLAUDE_CONTROL_MEDIA before importing server.js,
+// and hook-vs-module-eval ordering differs across Node versions (Node >=25
+// runs module-scope before() eagerly; Node 20 runs it at test start — which
+// left the env var as the string "undefined" in CI).
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
+{
   const appDir = path.join(root, 'apps', 'widget');
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(appDir, '2026-07-01T10-00-00Z.html'), '<html>v1</html>');
@@ -59,7 +62,7 @@ before(() => {
   // An app dir that exists but has no recognizable version files and no
   // latest pointer yet.
   fs.mkdirSync(path.join(root, 'apps', 'empty'));
-});
+}
 
 after(() => {
   fs.rmSync(root, { recursive: true, force: true });
