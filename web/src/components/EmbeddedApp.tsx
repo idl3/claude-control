@@ -67,3 +67,54 @@ export function EmbeddedApp({ url, height }: { url: string; height: number }) {
     />
   );
 }
+
+function ReloadIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 4v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M4.5 15a8 8 0 1 0 2-8.5L4 10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Dispatches `cockpit:app-reload` — the same window-CustomEvent idiom as
+ * cockpit:ack / cockpit:pending-retry (see Messages.tsx's
+ * dispatchPendingAction) — carrying the app's url in `detail`.
+ * AppFrameLayer.tsx owns the actual reload (re-fetch, srcdoc replace, iframe
+ * remount); this button only ever signals intent, the same division of
+ * labor as the pending-send Retry button.
+ *
+ * Rendered by AppFrameLayer, not by EmbeddedApp's in-flow placeholder above:
+ * AppFrameLayer's hoisted portal layer paints on top of the placeholder at
+ * the exact same screen position (see AppFrameLayer.tsx's module doc
+ * comment), so a control placed on the placeholder itself would be visually
+ * covered and unclickable. This file only owns the button's presentation;
+ * AppFrameLayer composes it into the actually-visible frame.
+ *
+ * `quiet` (default) renders a small icon-only corner affordance meant to sit
+ * unobtrusively over a healthy iframe; the crashed strip passes
+ * `quiet={false}` for a labeled, primary "Reload" CTA.
+ */
+export function AppReloadButton({ url, quiet = true }: { url: string; quiet?: boolean }) {
+  const onClick = () => {
+    window.dispatchEvent(new CustomEvent('cockpit:app-reload', { detail: { url } }));
+  };
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-reload-btn${quiet ? '' : ' embed-app-reload-btn-labeled'}`}
+      aria-label="Reload app"
+      onClick={onClick}
+    >
+      <ReloadIcon />
+      {quiet ? null : 'Reload'}
+    </button>
+  );
+}

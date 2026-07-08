@@ -371,6 +371,138 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(document.querySelector('.embed-app-hoist')).toBeTruthy();
   });
+
+  // B2: reload button + crash beacon, both owned by AppFrameLayer (see its
+  // module doc comment). These exercise the real cockpit:app-reload +
+  // message listeners end-to-end, not just the pure appBeacon.ts helpers
+  // (appBeacon.vitest.ts already covers those in isolation).
+  describe('B2: reload + crash beacon (AppFrameLayer message/cockpit:app-reload listeners)', () => {
+    it('manual reload works with no beacon ever having fired', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>v1</body></html>'),
+      });
+
+      mount(
+        createElement(
+          Fragment,
+          null,
+          createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/reload-me.html' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      const iframe1 = (await screen.findByTitle('apps/reload-me.html')) as HTMLIFrameElement;
+      expect(iframe1.getAttribute('srcdoc')).toBe('<html><body>v1</body></html>');
+      expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>v2</body></html>'),
+      });
+      window.dispatchEvent(
+        new CustomEvent('cockpit:app-reload', { detail: { url: 'apps/reload-me.html' } }),
+      );
+
+      await vi.waitFor(() => {
+        const iframe2 = screen.getByTitle('apps/reload-me.html') as HTMLIFrameElement;
+        expect(iframe2.getAttribute('srcdoc')).toBe('<html><body>v2</body></html>');
+      });
+      expect(authFetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('a validated cc-app-error beacon from the tracked iframe marks the slot crashed', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>hi</body></html>'),
+      });
+
+      mount(
+        createElement(
+          Fragment,
+          null,
+          createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/crashme.html' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      const iframe = (await screen.findByTitle('apps/crashme.html')) as HTMLIFrameElement;
+      const win = iframe.contentWindow;
+      expect(win).toBeTruthy();
+
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'cc-app-error', message: 'boom' }, source: win }),
+      );
+
+      expect(await screen.findByText('app crashed: apps/crashme.html')).toBeTruthy();
+      expect(screen.queryByTitle('apps/crashme.html')).toBeNull();
+    });
+
+    it('ignores a spoofed-source beacon — same shape, wrong window', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>hi</body></html>'),
+      });
+
+      mount(
+        createElement(
+          Fragment,
+          null,
+          createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/nospoof.html' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      await screen.findByTitle('apps/nospoof.html');
+
+      // window (the top frame itself) is never the tracked iframe's
+      // contentWindow — a same-shape message from it must be ignored.
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'cc-app-error' }, source: window }));
+
+      // Give any (incorrect) crash handling a tick to land, then assert it didn't.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(screen.queryByText(/app crashed/)).toBeNull();
+      expect(screen.getByTitle('apps/nospoof.html')).toBeTruthy();
+    });
+
+    it('reload recovers a crashed slot back to a live iframe', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>v1</body></html>'),
+      });
+
+      mount(
+        createElement(
+          Fragment,
+          null,
+          createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/recover.html' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      const iframe = (await screen.findByTitle('apps/recover.html')) as HTMLIFrameElement;
+      const win = iframe.contentWindow;
+
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'cc-app-error' }, source: win }),
+      );
+      await screen.findByText('app crashed: apps/recover.html');
+
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>recovered</body></html>'),
+      });
+      window.dispatchEvent(
+        new CustomEvent('cockpit:app-reload', { detail: { url: 'apps/recover.html' } }),
+      );
+
+      await vi.waitFor(() => {
+        expect(screen.queryByText(/app crashed/)).toBeNull();
+      });
+      const recoveredIframe = (await screen.findByTitle('apps/recover.html')) as HTMLIFrameElement;
+      expect(recoveredIframe.getAttribute('srcdoc')).toBe('<html><body>recovered</body></html>');
+    });
+  });
 });
 
 function waitForHoist(): Promise<HTMLElement> {
