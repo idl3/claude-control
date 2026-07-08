@@ -1,0 +1,42 @@
+{
+  "slug": "cockpit-churn-spike",
+  "viewport": {
+    "width": 1400,
+    "height": 900
+  },
+  "states": [
+    {
+      "name": "end-state-counters",
+      "selector": "[data-testid=churn-counters]",
+      "pre": [
+        {
+          "action": "wait",
+          "ms": 13000
+        }
+      ]
+    },
+    {
+      "name": "end-state-full",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    }
+  ],
+  "video": {
+    "name": "churn-run",
+    "steps": [
+      {
+        "action": "waitFor",
+        "selector": "[data-testid=churn-counters]"
+      },
+      {
+        "action": "wait",
+        "ms": 13500
+      }
+    ]
+  }
+}
