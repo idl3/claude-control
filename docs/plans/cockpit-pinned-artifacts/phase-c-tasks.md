@@ -62,6 +62,59 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 - Verification: full suite 595/595 green (unchanged from C3 — C4 touched no `src/` files), `npx tsc -b --pretty false` clean (the new harness `.tsx`/`.mts` files under `web/scratch/` don't affect the build graph, same as the pre-existing scratch dirs), `npm run build` green (same pre-existing >500kB chunk-size warning, unrelated).
 - Deviations: (1) the tracker's file list for C4 named only `web/src/styles.css, capture harness spec` — no styles.css changes were needed (C1-C3's chrome/CSS already matched the cockpit aesthetic; C4 found nothing to adjust visually). (2) the churn-spike harness fix (2 files) was not in C4's anticipated scope but was required to actually execute the phase's own explicitly-deferred VERIFY-pass regression check — a mechanical unblock (missing provider wrap + a screenshot-mechanics swap), not a design change, so folded into this commit rather than opening a new task. Neither HALT condition triggered at any point across the full phase.
 
+<!-- CP0 log: CP3-C: verdict (b); 2 HIGH + 1 MEDIUM fixed in a93a19f —
+     panel-context hosts are now exempt from AppFrameLayer's zero-rect
+     eviction check (AppFrameLayer.tsx: the mobile back-nav
+     `.detail{display:none}` collapse used to zero-rect a pinned app's panel
+     placeholder same as any transcript embed, and the eviction loop
+     unconditionally evicted on zero-rect — silently destroying every
+     pinned app's live iframe on every back navigation; a panel zero-rect
+     now routes through the existing hide-not-evict path unchanged,
+     transcript embeds keep the Phase-A evict-on-view-exit behavior).
+     `wasLive` tracking (ArtifactPanel.tsx's new `everLiveIds` set)
+     distinguishes "suspended — tap to reload" (state was discarded on cap
+     demotion) from "tap to open" (never loaded) on the suspended-app
+     button. MEDIUM: C2 chip copy "active in panel ↗" → "open in panel ↗"
+     (state-agnostic — a hidden/inactive panel tab is still the host per
+     `pickHost`'s unconditional context rule, so "active" was a lie).
+     LOW: dead `pin()`/`unpin()` exports removed from ArtifactContext (zero
+     production call sites — pinning is `open({pinned:true})`, unpinning is
+     `close()`); `setPinnedReducer` removed alongside (its only caller,
+     and would otherwise trip `noUnusedLocals`). ArtifactContext.vitest.ts's
+     2 dead-reducer tests deleted, plus a 3rd LRU re-eligibility test
+     deleted outright: it depended on `setPinnedReducer`'s in-place,
+     non-reordering unpin flip, and isn't safely rewritable via `open()`
+     (`openReducer`'s re-open path always moves the artifact to MRU-front,
+     which would invert that test's eviction-order assertion) — accepted as
+     a YAGNI consequence, revisit if Phase D needs unpin-without-close.
+     LOW: added the missing hidden-panel-host arbitration test (a hidden/
+     inactive panel tab still out-arbitrates a visible transcript
+     placeholder — chip shows, click still focuses the tab). New coverage:
+     embeds.vitest.ts +2 (panel-survives-back-nav-collapse both-sides test;
+     hidden-panel-host-still-arbitrates test), ArtifactPanel.vitest.ts +1
+     (demoted-from-live app shows "tap to reload" and wakes with exactly
+     one re-fetch — this test's first draft caught a real timing gotcha:
+     AppFrameLayer's own hoisted slot for a demoted app stays mounted,
+     hidden, until GRACE_MS elapses, even after ArtifactAppStack unmounts
+     the app's placeholder — the `queryByTitle(...).toBeNull()` assertion
+     had to move to after the grace-period wait, not before). Net test
+     count unchanged (595 → 595: -3 dead ArtifactContext tests, +1
+     ArtifactPanel test, +2 embeds tests). Design-doc seam line added
+     (Principles & Seams: "pinned panel apps survive mobile back-nav
+     (hide-not-evict, cap-bounded); transcript embeds keep the documented
+     evict-on-view-exit exception"). Files: AppFrameLayer.tsx,
+     ArtifactContext.tsx, ArtifactPanel.tsx, ArtifactContext.vitest.ts,
+     ArtifactPanel.vitest.ts, embeds.vitest.ts, this tracker, design doc.
+     595/595 vitest, tsc clean, build green. Bookkeeping note: a commit
+     cannot embed its own resulting sha (the sha is a hash of the tree/
+     message/parent, so writing it into the tree changes the tree, which
+     changes the sha — confirmed the hard way this round: an initial
+     commit-then-amend attempt landed a stale sha, since amending the tree
+     to inject the sha necessarily produces a *different* sha). This log
+     line therefore lands in a separate doc-only commit after a93a19f, not
+     folded into it — matching this file's own established CP3-B precedent
+     (b41f7fd fix commit + fe0cc8f doc-only tracker-sync commit above). -->
+
 ## Audit item coverage
 | Task | Rubric |
 |---|---|
@@ -81,7 +134,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 ### C2 — Mount-ordered app frame container in ArtifactPanel
 > **Goal**: app bodies render in a persistent container ordered by mount (NOT tab/reducer order); tab switching toggles visibility only; non-app kinds keep active-only rendering (ArtifactPanel.tsx:232).
 > **Files**: web/src/components/ArtifactPanel.tsx, web/src/styles.css
-> **Acceptance**: with 3 pinned apps, switching tabs + re-opening artifacts (reducer move-to-front) produces ZERO iframe reloads (stateful-app evidence); mounted-app cap 6 with placeholder beyond; MULTI-PLACEHOLDER ARBITRATION (CP3-A MEDIUM follow-up): slots stay url-keyed single-instance — a deterministic priority rule picks the hosting placeholder (panel > transcript, else first visible) and non-hosting placeholders render a quiet 'active in panel' chip instead of a silent empty box.
+> **Acceptance**: with 3 pinned apps, switching tabs + re-opening artifacts (reducer move-to-front) produces ZERO iframe reloads (stateful-app evidence); mounted-app cap 6 with placeholder beyond; MULTI-PLACEHOLDER ARBITRATION (CP3-A MEDIUM follow-up): slots stay url-keyed single-instance — a deterministic priority rule picks the hosting placeholder (panel > transcript, else first visible) and non-hosting placeholders render a quiet 'open in panel' chip instead of a silent empty box.
 > **Verification**: cd web && npx vitest run && npx tsc -b --pretty false && npm run build
 > **Depends on**: C1
 > **Reversibility**: load-bearing
