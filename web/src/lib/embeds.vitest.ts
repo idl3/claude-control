@@ -267,7 +267,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(iframe.getAttribute('srcdoc')).toBe('<html><body>hi</body></html>');
-    expect(authFetchMock).toHaveBeenCalledWith('/api/media/apps/counter.html');
+    expect(authFetchMock).toHaveBeenCalledWith('/api/media/apps/counter.html', { cache: 'reload' });
   });
 
   it('renders the "app unavailable" chip on a non-ok fetch, never an iframe', async () => {
@@ -522,6 +522,28 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
       const recoveredIframe = (await screen.findByTitle('apps/recover.html')) as HTMLIFrameElement;
       expect(recoveredIframe.getAttribute('srcdoc')).toBe('<html><body>recovered</body></html>');
     });
+  });
+});
+
+describe('D cache-bypass (capstone follow-up)', () => {
+  beforeEach(() => {
+    authFetchMock.mockReset();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it('app html fetches always pass cache:"reload" — same-URL reloads must not serve the browser cache', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: async () => '<html>fresh</html>' });
+    mount(
+      createElement(ArtifactPanelProvider, null,
+        createElement(EmbeddedApp, { url: 'apps/cachetest.html', height: 360, context: 'panel' as const }),
+        createElement(AppFrameLayer, null),
+      ),
+    );
+    await vi.waitFor(() => expect(authFetchMock).toHaveBeenCalled());
+    const [, init] = authFetchMock.mock.calls[0];
+    expect(init).toMatchObject({ cache: 'reload' });
   });
 });
 
