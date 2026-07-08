@@ -1,14 +1,18 @@
-// Inline media embeds in transcript markdown.
+// Inline media + micro-app embeds in transcript markdown.
 //
 // Agent responses may contain self-closing blocks:
 //   <embedded-image url="…" size="sm|md|lg|full" />
 //   <embedded-video url="…" size="sm|md|lg|full" />
+//   <embedded-app url="…" height="160-800" />
 // react-markdown (no rehype-raw) renders raw HTML as escaped literal text, so
 // remarkEmbeds() rewrites the mdast `html` nodes into `image` nodes carrying
-// data-embed / data-size / data-url props. MarkdownText maps `img` to
-// EmbeddedMedia (components/EmbeddedMedia.tsx), which renders a real <img> /
-// <video controls> — no raw HTML is ever injected. Text around the tags (and
-// html that contains no embed tag) renders exactly as before.
+// data-embed / data-size|data-height / data-url props. MarkdownText maps
+// `img` to MarkdownImg (components/EmbeddedMedia.tsx), which renders a real
+// <img> / <video controls> for image|video and a sandboxed <iframe> for app —
+// no raw HTML is ever injected into the transcript DOM directly (the app's
+// HTML is set via `srcDoc` on an opaque-origin sandboxed iframe, never
+// dangerouslySetInnerHTML'd into the page). Text around the tags (and html
+// that contains no embed tag) renders exactly as before.
 
 export type EmbedKind = 'image' | 'video';
 export type EmbedSize = 'sm' | 'md' | 'lg' | 'full';
@@ -21,7 +25,15 @@ export const EMBED_WIDTH: Record<EmbedSize, string> = {
   full: '100%',
 };
 
-const TAG_RE = /<embedded-(image|video)\b([^<>]*?)\/>/g;
+// <embedded-app height="…"> bounds (px). Missing/invalid/out-of-range → default.
+export const APP_HEIGHT_MIN = 160;
+export const APP_HEIGHT_MAX = 800;
+export const APP_HEIGHT_DEFAULT = 360;
+// Reserved-frame width cap for app embeds — same cap as the `lg` media size,
+// wide enough for a real widget without blowing out the transcript bubble.
+export const APP_FRAME_MAX_WIDTH = '640px';
+
+const TAG_RE = /<embedded-(image|video|app)\b([^<>]*?)\/>/g;
 
 // Minimal mdast shape — enough to walk and rewrite without pulling in @types/mdast.
 interface MdNode {
@@ -43,6 +55,24 @@ export function parseEmbedAttrs(
   return { url, size: size ?? 'md' };
 }
 
+/**
+ * Parse an `<embedded-app>` tag's attribute string. Returns null when there
+ * is no url. `height` is clamped to [APP_HEIGHT_MIN, APP_HEIGHT_MAX]; a
+ * missing or non-numeric value falls back to APP_HEIGHT_DEFAULT.
+ */
+export function parseEmbedAppAttrs(
+  attrs: string,
+): { url: string; height: number } | null {
+  const url = /(?:^|\s)url="([^"]+)"/.exec(attrs)?.[1];
+  if (!url) return null;
+  const raw = /(?:^|\s)height="(-?\d+)"/.exec(attrs)?.[1];
+  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : NaN;
+  const height = Number.isFinite(parsed)
+    ? Math.min(APP_HEIGHT_MAX, Math.max(APP_HEIGHT_MIN, parsed))
+    : APP_HEIGHT_DEFAULT;
+  return { url, height };
+}
+
 // mdast image node carrying the embed props. The raw url rides in data-url
 // (react-markdown percent-encodes `src` via its urlTransform; the component
 // needs the untouched value to build the /api/media/ fetch or reject schemes).
@@ -52,6 +82,21 @@ function embedNode(kind: EmbedKind, url: string, size: EmbedSize): MdNode {
     url,
     alt: '',
     data: { hProperties: { dataEmbed: kind, dataSize: size, dataUrl: url } },
+  };
+}
+
+// Same node-planting mechanism as embedNode, distinct data-embed='app'.
+// height rides as a string (like dataSize) — MarkdownImg re-parses it, so
+// there is one source of truth for "what does an invalid/missing value mean"
+// (parseEmbedAppAttrs) rather than relying on hProperties value-type passthrough.
+function embedAppNode(url: string, height: number): MdNode {
+  return {
+    type: 'image',
+    url,
+    alt: '',
+    data: {
+      hProperties: { dataEmbed: 'app', dataHeight: String(height), dataUrl: url },
+    },
   };
 }
 
@@ -70,11 +115,21 @@ export function embedNodesFromHtml(value: string): MdNode[] | null {
   while ((m = TAG_RE.exec(value)) !== null) {
     const before = value.slice(last, m.index);
     if (before.trim()) out.push({ type: 'text', value: before });
-    const parsed = parseEmbedAttrs(m[2]);
-    if (parsed) {
-      out.push(embedNode(m[1] as EmbedKind, parsed.url, parsed.size));
+    const tag = m[1];
+    if (tag === 'app') {
+      const parsed = parseEmbedAppAttrs(m[2]);
+      out.push(
+        parsed
+          ? embedAppNode(parsed.url, parsed.height)
+          : { type: 'text', value: m[0] }, // malformed (no url) — keep visible
+      );
     } else {
-      out.push({ type: 'text', value: m[0] }); // malformed (no url) — keep visible
+      const parsed = parseEmbedAttrs(m[2]);
+      out.push(
+        parsed
+          ? embedNode(tag as EmbedKind, parsed.url, parsed.size)
+          : { type: 'text', value: m[0] }, // malformed (no url) — keep visible
+      );
     }
     last = m.index + m[0].length;
   }

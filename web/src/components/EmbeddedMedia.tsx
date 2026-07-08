@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../lib/api';
 import { Lightbox } from './AttachmentPreview';
-import type { EmbedKind, EmbedSize } from '../lib/embeds';
+import { APP_FRAME_MAX_WIDTH, APP_HEIGHT_DEFAULT, type EmbedKind, type EmbedSize } from '../lib/embeds';
 import { reservedAspectRatio, reservedBox, setCachedAspectRatio } from '../lib/mediaDimensions';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 
@@ -156,15 +156,112 @@ export function EmbeddedMedia({
   );
 }
 
+/**
+ * Renders one <embedded-app url="…" height="…" /> transcript block as a
+ * sandboxed, isolated live iframe micro-app.
+ *
+ * url handling — STRICTER than EmbeddedMedia. Apps get real code execution
+ * inside the transcript surface, so only local media-root content (operator-
+ * trusted, same trust boundary as any other file under ~/.claude-control/media)
+ * is allowed: bare/relative paths and urls already shaped like /api/media/…
+ * (resolveMediaUrl's 'fetch' branch). http(s) urls — which EmbeddedMedia
+ * allows straight through as a hotlinked <img src> — are REJECTED here too: a
+ * remote iframe would run arbitrary third-party code inside the cockpit
+ * origin's tab, an exfil/XSS surface media elements don't have. Every other
+ * scheme, absolute path, or traversal segment is rejected the same as media.
+ *
+ * The HTML is fetched with authFetch (an <iframe src> can't send the bearer
+ * header — the same reason EmbeddedMedia blob-fetches instead of using
+ * <img src> directly for relative urls) and set via `srcDoc` on an
+ * `sandbox="allow-scripts"` iframe. Deliberately NOT `allow-same-origin`:
+ * srcdoc + sandbox WITHOUT allow-same-origin gives the iframe an opaque
+ * (null) origin, so the embedded app cannot reach the parent DOM, the
+ * cockpit's localStorage bearer token, or any cookie — even though its JS
+ * runs. Do not add allow-same-origin here.
+ *
+ * Layout: like EmbeddedMedia, a reserved box (width capped, fixed height
+ * from the `height` attr — already clamped by parseEmbedAppAttrs) is present
+ * from mount so there is no scroll jump; a skeleton shimmer fills it until
+ * the fetch resolves. A failed/non-ok fetch renders the same rejected-chip
+ * treatment as an unsupported url.
+ */
+function useAppHtml(url: string): { html: string | null; rejected: boolean; failed: boolean } {
+  const resolution = resolveMediaUrl(url);
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    setHtml(null);
+    if (resolution.kind !== 'fetch') return;
+    let alive = true;
+    authFetch(resolution.fetchUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error(`app fetch failed: ${res.status}`);
+        return res.text();
+      })
+      .then((text) => {
+        if (alive) setHtml(text);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
+  // resolveMediaUrl's 'direct' branch is media's allowance for http(s)
+  // hotlinking — app embeds reject that branch too (see doc comment above),
+  // not just 'rejected', so only 'fetch' (local media-root) proceeds.
+  if (resolution.kind !== 'fetch') return { html: null, rejected: true, failed: false };
+  return { html, rejected: false, failed };
+}
+
+export function EmbeddedApp({ url, height }: { url: string; height: number }) {
+  const { html, rejected, failed } = useAppHtml(url);
+
+  if (rejected) {
+    return <code className="embed-media-rejected">app url rejected: {url}</code>;
+  }
+  if (failed) {
+    return <code className="embed-media-rejected">app unavailable: {url}</code>;
+  }
+
+  const frameStyle = {
+    width: '100%',
+    maxWidth: APP_FRAME_MAX_WIDTH,
+    height: `${height}px`,
+  };
+
+  return (
+    <span className="embed-media-frame embed-app-frame" style={frameStyle}>
+      {html != null ? (
+        <iframe
+          className="embed-app"
+          sandbox="allow-scripts"
+          srcDoc={html}
+          title={url}
+        />
+      ) : (
+        <span className="embed-media-skeleton" aria-label="loading app" />
+      )}
+    </span>
+  );
+}
+
 // react-markdown `img` component override: embed image nodes (planted by
-// remarkEmbeds, marked via data-embed) become EmbeddedMedia; every other
-// markdown image gets the same reserved-box + skeleton treatment via
-// PlainMarkdownImage (bubble's full width, no size attribute to cap it),
-// wrapped in the same tap-to-open-Lightbox button as EmbeddedMedia.
+// remarkEmbeds, marked via data-embed) become EmbeddedMedia (image|video) or
+// EmbeddedApp (app); every other markdown image gets the same reserved-box +
+// skeleton treatment via PlainMarkdownImage (bubble's full width, no size
+// attribute to cap it), wrapped in the same tap-to-open-Lightbox button as
+// EmbeddedMedia.
 type MdImgProps = {
   node?: unknown;
   'data-embed'?: string;
   'data-size'?: string;
+  'data-height'?: string;
   'data-url'?: string;
 } & React.ImgHTMLAttributes<HTMLImageElement>;
 
@@ -214,6 +311,7 @@ export function MarkdownImg(props: MdImgProps) {
     node: _node,
     'data-embed': kind,
     'data-size': size,
+    'data-height': height,
     'data-url': rawUrl,
     ...rest
   } = props;
@@ -223,6 +321,15 @@ export function MarkdownImg(props: MdImgProps) {
         kind={kind}
         url={rawUrl ?? rest.src ?? ''}
         size={(size ?? 'md') as EmbedSize}
+      />
+    );
+  }
+  if (kind === 'app') {
+    const parsedHeight = Number.parseInt(height ?? '', 10);
+    return (
+      <EmbeddedApp
+        url={rawUrl ?? rest.src ?? ''}
+        height={Number.isFinite(parsedHeight) ? parsedHeight : APP_HEIGHT_DEFAULT}
       />
     );
   }
