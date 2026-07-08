@@ -21,6 +21,7 @@ import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
+import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
@@ -3009,6 +3010,20 @@ async function main() {
   // Media root for transcript inline embeds — must exist so control-session
   // agents can drop screenshots/videos into it (README "Inline media").
   try { fs.mkdirSync(CONFIG.mediaDir, { recursive: true }); } catch { /* served as 404s */ }
+
+  // D2/D3: watch the media apps subdir so a rebuilt micro-app (producer
+  // rewrites apps/<name>.html, or drops a new apps/<name>/<version>.html) can
+  // push a live WS frame to track-latest panel tabs instead of requiring a
+  // manual reload. See lib/media-watch.js for the rename-tolerant watch+poll
+  // design and docs/plans/cockpit-pinned-artifacts/phase-d-tasks.md, D1.
+  const mediaAppsWatcher = new MediaAppWatcher(path.join(CONFIG.mediaDir, 'apps'));
+  mediaAppsWatcher.on('change', ({ path: relPath, mtime }) => {
+    broadcast({ type: 'media-app-changed', path: relPath, mtime });
+  });
+  mediaAppsWatcher.on('error', (err) => {
+    console.error('[media-app-watch]', err?.message || err);
+  });
+  mediaAppsWatcher.start();
 
   // Daily attachment cleanup: sweep at startup, then every 24h.
   runUploadSweep();
