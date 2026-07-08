@@ -54,6 +54,26 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
      no HALT was triggered since every task independently passed its own
      acceptance + verification gates and every deviation is justified
      above, not silent. Final: 563/563 vitest, tsc clean, build green. -->
+<!-- CP0 log: CP3-B: verdict (b); 2 MEDIUM + 2 LOW fixed in b41f7fd — clamp
+     chrome into clip (clampChromeInsets, AppFrameLayer.tsx, tested in
+     AppFrameLayer.vitest.ts), crash beacon message surfaced
+     (slot.lastCrashMessage, capped 200 chars, text content only), real-click
+     reload test (fireEvent.click on the rendered button, not the raw
+     CustomEvent), and the vacuous embeds.vitest.ts:279 IFRAME-role assertion
+     replaced with a real DOM query. File-list note: AppFrameLayer.vitest.ts
+     (not in the dispatch's literal touch-list) was also touched — the
+     dispatch's own Fix 1 wording named it as the required test location for
+     the extracted clampChromeInsets helper, so it's treated as in-scope
+     alongside the 4 listed files. 5 files, +163/-12. 567/567 vitest, tsc
+     clean, build green. Bookkeeping note: this log line lands in a separate
+     doc-only commit after b41f7fd, not folded into it — a commit cannot
+     embed its own resulting sha (the sha is a hash of the tree/message/
+     parent, so writing it into the tree changes the tree, which changes the
+     sha), matching this file's own established precedent (B1/B2/B3's code
+     commits vs. this tracker's separate f7fccc7 doc commit). Harness
+     re-verified: ~/.claude-control/media/prototypes/
+     cockpit-counter-beacon-2026-07-08T12-46-51/ (crashed-state screenshot
+     shows both the beacon message and a visible Reload CTA). -->
 
 ## Audit item coverage
 | Task | Rubric |
