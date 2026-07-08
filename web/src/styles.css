@@ -4880,6 +4880,31 @@ select.config-input {
   gap: 4px;
 }
 
+/* Phase C, C2: the "active in panel ↗" chip — replaces a non-host (shadow)
+   placeholder's would-be live iframe when the same url's host placeholder is
+   pinned into the panel. Portaled to document.body as position: fixed,
+   sized/positioned to the shadow placeholder's own rect (AppFrameLayer.tsx),
+   same z-index tier as .embed-app-hoist since it stands in for one. */
+.embed-app-panel-chip {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: var(--txt-meta);
+  cursor: pointer;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s, border-color var(--ease) 0.15s;
+}
+.embed-app-panel-chip:hover,
+.embed-app-panel-chip:focus-visible {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
 /* B2: crash strip — same failure-chip color/size treatment as
    .embed-media-rejected, laid out as a centered stack over the whole frame
    so the retry CTA sits with the message rather than floating in a corner. */
@@ -5380,6 +5405,10 @@ select.config-input {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* Phase C, C2: positioning ancestor for .artifact-app-stack, which overlays
+     this box absolutely so every open app artifact stays mounted (never torn
+     down on a tab switch) without shifting the in-flow skill/code body. */
+  position: relative;
 }
 .artifact-body-wrap {
   min-height: 100%;
@@ -5411,6 +5440,54 @@ select.config-input {
   color: var(--text-faint);
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
+}
+
+/* ── Phase C, C2: always-mounted panel app stack ─────────────────────────
+   Every open 'app' artifact gets a slot here, all absolutely positioned over
+   .artifact-panel-body (which supplies `position: relative` above) so a tab
+   switch only ever toggles visibility — never mounts/unmounts a placeholder,
+   the whole point of the never-reload seam AppFrameLayer.tsx owns. The stack
+   itself is pointer-events: none so it never blocks the in-flow skill/code
+   body underneath when a non-app tab is active (every slot is hidden then);
+   only the active app's own slot re-enables pointer events. */
+.artifact-app-stack {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.artifact-app-slot {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+.artifact-app-slot[data-active='true'] {
+  visibility: visible;
+  pointer-events: auto;
+}
+/* EmbeddedApp's placeholder carries .embed-media-frame's transcript-oriented
+   margin/border/radius/width-cap — override to fill the slot exactly instead. */
+.artifact-app-slot .embed-app-frame {
+  margin: 0;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+}
+.artifact-app-suspended {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: var(--txt-meta);
+  cursor: pointer;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
+}
+.artifact-app-suspended:hover,
+.artifact-app-suspended:focus-visible {
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 /* ── Agent chip: name + model tag ──────────────────────────────────

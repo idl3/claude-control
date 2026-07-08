@@ -18,9 +18,16 @@ import { useArtifactPanel, type Artifact } from './ArtifactContext';
 import { useIsNarrow } from '../hooks/useIsNarrow';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
 import { AssistantMessage, UserMessage } from './Messages';
+import { EmbeddedApp } from './EmbeddedApp';
+import { APP_HEIGHT_DEFAULT } from '../lib/embeds';
 
 // ── Size cap for highlighting ────────────────────────────────────────────────
 const HIGHLIGHT_SIZE_CAP = 256 * 1024; // 256 KB
+
+// Phase C, C2: cap on simultaneously-live (fetched, real-iframe) pinned app
+// artifacts in the panel — an unbounded pin count must not mean an unbounded
+// iframe count. See selectLiveAppIds below.
+const LIVE_APP_CAP = 6;
 
 // ── Sheet drag constants ─────────────────────────────────────────────────────
 const SNAP_PEEK = 40; // dvh units
@@ -213,6 +220,71 @@ function ArtifactBody({ language, content, artifactId }: ArtifactBodyProps) {
   );
 }
 
+// ── App stack: always-mounted panel bodies for every open 'app' artifact ────
+
+/**
+ * Which pinned app artifacts get a real, fetched iframe this render vs. a
+ * "suspended — tap to wake" placeholder. `mruAppIds` is already MRU-first
+ * (ArtifactContext's own ordering) — the first `cap` are live by default,
+ * covering the common case (a handful of pinned apps, all recently touched)
+ * with zero clicks. `wokenIds` adds anything the user explicitly tapped to
+ * wake, regardless of its MRU position, so a wake survives its app being
+ * pushed past the cap by newer opens.
+ *
+ * Deliberately does NOT also live-promote the currently active tab: if it
+ * did, switching to a suspended tab would silently fetch it, defeating the
+ * whole point of "tap to wake" as a user-initiated, visible gesture (and
+ * making the cap easy to blow through by just clicking across tabs).
+ */
+export function selectLiveAppIds(mruAppIds: string[], wokenIds: Set<string>, cap = LIVE_APP_CAP): Set<string> {
+  const live = new Set(mruAppIds.slice(0, cap));
+  for (const id of wokenIds) {
+    if (mruAppIds.includes(id)) live.add(id);
+  }
+  return live;
+}
+
+interface ArtifactAppStackProps {
+  appArtifacts: Artifact[];
+  activeId: string | null;
+  liveAppIds: Set<string>;
+  onWake: (id: string) => void;
+}
+
+/**
+ * Renders EVERY open app artifact's placeholder simultaneously (visibility
+ * toggled per-slot, never display:none — see EmbeddedApp's doc comment for
+ * why), stacked via CSS absolute positioning over `.artifact-panel-body` so
+ * tab switches never tear a placeholder down (that would reload the iframe).
+ * A no-op (renders nothing) when there are no open app artifacts.
+ */
+function ArtifactAppStack({ appArtifacts, activeId, liveAppIds, onWake }: ArtifactAppStackProps) {
+  if (appArtifacts.length === 0) return null;
+  return (
+    <div className="artifact-app-stack">
+      {appArtifacts.map((a) => {
+        const isActiveTab = a.id === activeId;
+        return (
+          <div key={a.id} className="artifact-app-slot" data-active={isActiveTab ? 'true' : 'false'}>
+            {liveAppIds.has(a.id) ? (
+              <EmbeddedApp
+                url={a.appUrl ?? ''}
+                height={a.appHeight ?? APP_HEIGHT_DEFAULT}
+                context="panel"
+                hidden={!isActiveTab}
+              />
+            ) : (
+              <button type="button" className="artifact-app-suspended" onClick={() => onWake(a.id)}>
+                suspended — tap to wake
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── ArtifactPanel ────────────────────────────────────────────────────────────
 
 export function ArtifactPanel() {
@@ -231,6 +303,20 @@ export function ArtifactPanel() {
 
   const activeArtifact = artifacts.find((a) => a.id === activeId) ?? null;
   const isOpen = activeArtifact !== null;
+
+  // Phase C, C2: app artifacts get an always-mounted placeholder stack (see
+  // ArtifactAppStack) instead of the plain code/skill body — kept separate
+  // from `artifacts` so its identity is stable across renders that don't
+  // touch app artifacts at all.
+  const appArtifacts = useMemo(() => artifacts.filter((a) => a.kind === 'app'), [artifacts]);
+  const [wokenIds, setWokenIds] = useState<Set<string>>(new Set());
+  const onWakeApp = useCallback((id: string) => {
+    setWokenIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
+  const liveAppIds = useMemo(
+    () => selectLiveAppIds(appArtifacts.map((a) => a.id), wokenIds),
+    [appArtifacts, wokenIds],
+  );
 
   // Reset sheet height to peek when a new artifact opens.
   useEffect(() => {
@@ -402,7 +488,13 @@ export function ArtifactPanel() {
             aria-labelledby={`artifact-tab-${activeArtifact.id}`}
             className="artifact-panel-body"
           >
-            {activeArtifact.kind === 'skill' ? (
+            <ArtifactAppStack
+              appArtifacts={appArtifacts}
+              activeId={activeId}
+              liveAppIds={liveAppIds}
+              onWake={onWakeApp}
+            />
+            {activeArtifact.kind === 'app' ? null : activeArtifact.kind === 'skill' ? (
               <SkillLegend artifact={activeArtifact} />
             ) : (
               <ArtifactBody
@@ -497,11 +589,19 @@ export function ArtifactPanel() {
           aria-labelledby={`artifact-tab-${activeArtifact.id}`}
           className="artifact-panel-body"
         >
-          <ArtifactBody
-            language={activeArtifact.language}
-            content={activeArtifact.content}
-            artifactId={activeArtifact.id}
+          <ArtifactAppStack
+            appArtifacts={appArtifacts}
+            activeId={activeId}
+            liveAppIds={liveAppIds}
+            onWake={onWakeApp}
           />
+          {activeArtifact.kind !== 'app' && (
+            <ArtifactBody
+              language={activeArtifact.language}
+              content={activeArtifact.content}
+              artifactId={activeArtifact.id}
+            />
+          )}
         </div>
       )}
     </div>

@@ -7,6 +7,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createElement } from 'react';
 import { render, cleanup } from '@testing-library/react';
 import { AppFrameLayer, computePaneClip, clampChromeInsets, shouldKeepPolling, type RectLike } from './AppFrameLayer';
+// C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
+// rAF-gating test below needs a provider ancestor.
+import { ArtifactPanelProvider } from './ArtifactContext';
 
 afterEach(cleanup);
 
@@ -122,7 +125,7 @@ describe('AppFrameLayer rAF gating (A3 audit follow-up, FIX 3, mounted)', () => 
       return realRaf(cb);
     });
 
-    render(createElement(AppFrameLayer));
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
 
     // Give the MutationObserver + any (unexpected) tick a few real frames to
     // fire, then assert the count never left zero — the mount-time guess

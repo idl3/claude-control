@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { authFetch } from '../lib/api';
 import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
+import { appArtifactId, useArtifactPanel } from './ArtifactContext';
 import { AppReloadButton } from './EmbeddedApp';
 
 /**
@@ -69,10 +70,37 @@ import { AppReloadButton } from './EmbeddedApp';
  * FIX 2 stores the validated crash beacon's own `message` on the slot and
  * renders it as plain text content (never markup) in the crashed strip, so
  * an app's actual crash reason is visible instead of just its url.
+ *
+ * Phase C, C2 (always-mounted panel bodies + multi-placeholder arbitration)
+ * layers on top of B/B2, also unchanged design elsewhere: a url can now have
+ * MORE THAN ONE placeholder in the DOM at once — one in the transcript
+ * (EmbeddedApp, context='transcript') and one in the panel's always-mounted
+ * app stack (ArtifactPanel, context='panel', rendered for every open app
+ * artifact regardless of which tab is active). Still exactly one live iframe
+ * per url (SLOT_SELECTOR/Slot are unchanged), so tick() now groups found
+ * placeholders by url and picks a single deterministic HOST per url each
+ * frame: panel-context always wins over transcript, else first in document
+ * order (readSlotEls/querySelectorAll already yields document order) — see
+ * pickHost. The host's own rect/context/explicit-hidden attribute drive the
+ * slot exactly as before (this is a strict generalization: the pre-Phase-C
+ * single-placeholder-per-url case has exactly one candidate, so pickHost
+ * always returns it unchanged). Non-host ("shadow") placeholders for the
+ * same url don't get their own iframe — instead their live rects are tracked
+ * separately (shadowsRef) and rendered as a quiet "active in panel ↗" chip
+ * (see the render function below) so the transcript position isn't left as a
+ * silent empty box once the app is pinned into the panel.
+ *
+ * The panel's inactive-tab placeholders declare themselves hidden via
+ * `data-embed-app-hidden="true"` (EmbeddedApp's `hidden` prop) rather than
+ * `display:none`, specifically so their rect stays non-zero and FIX 2's
+ * zero-rect eviction never fires on a tab switch — tick() folds this
+ * explicit flag into the same `paneHidden` (hide via visibility, never
+ * evict) treatment FIX 1 already uses for a scrolled-out-of-pane
+ * placeholder, so switching panel tabs (or scrolling the transcript
+ * placeholder out of view) never reloads the iframe either way.
  */
 
 const GRACE_MS = 250;
-// One live iframe per url; multi-placeholder arbitration lands in Phase C.
 const SLOT_SELECTOR = '[data-embed-app-url]';
 // B audit follow-up (CP3-B, FIX 2): cap the beacon's app-controlled crash
 // message so a misbehaving app can't blow up the crashed strip's layout.
@@ -223,21 +251,51 @@ type Slot = {
   lastSeen: number;
 };
 
-function readSlotEls(): { url: string; height: number; el: HTMLElement }[] {
-  const out: { url: string; height: number; el: HTMLElement }[] = [];
+type SlotEl = {
+  url: string;
+  height: number;
+  el: HTMLElement;
+  context: 'panel' | 'transcript';
+  explicitlyHidden: boolean;
+};
+
+function readSlotEls(): SlotEl[] {
+  const out: SlotEl[] = [];
   document.querySelectorAll<HTMLElement>(SLOT_SELECTOR).forEach((el) => {
     const url = el.dataset.embedAppUrl;
     if (!url) return;
     const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
-    out.push({ url, height: Number.isFinite(height) ? height : 360, el });
+    const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
+    const explicitlyHidden = el.dataset.embedAppHidden === 'true';
+    out.push({ url, height: Number.isFinite(height) ? height : 360, el, context, explicitlyHidden });
   });
   return out;
+}
+
+/**
+ * Multi-placeholder host arbitration (C2): given every placeholder currently
+ * in the DOM for one url (in document order), pick the single one whose rect
+ * the live iframe follows this frame. Panel-context always wins over
+ * transcript — once an app is pinned, the panel is the durable home for it
+ * regardless of which panel tab happens to be active right now (an inactive-
+ * but-pinned tab still hosts; its transcript placeholder shows the "active in
+ * panel" chip instead of a live, invisible-anyway iframe). Falls back to
+ * first-in-document-order, which is the only candidate in the pre-Phase-C
+ * (single placeholder) case, so this is a strict generalization.
+ */
+function pickHost(entries: SlotEl[]): SlotEl {
+  return entries.find((e) => e.context === 'panel') ?? entries[0];
 }
 
 export function AppFrameLayer() {
   const [, forceRender] = useState(0);
   const slotsRef = useRef<Map<string, Slot>>(new Map());
   const fetchingRef = useRef<Set<string>>(new Set());
+  // C2: non-host ("shadow") placeholder rects for the current frame, keyed by
+  // url — purely presentational (the "active in panel ↗" chip overlay), no
+  // grace/eviction semantics of its own; recomputed fresh every tick.
+  const shadowsRef = useRef<Map<string, DOMRect>>(new Map());
+  const { setActive } = useArtifactPanel();
 
   useEffect(() => {
     let alive = true;
@@ -301,13 +359,27 @@ export function AppFrameLayer() {
       if (!alive) return;
       const now = performance.now();
       const found = readSlotEls();
+
+      // C2: group by url (readSlotEls/querySelectorAll already yields
+      // document order, which pickHost's fallback tier relies on) so
+      // multi-placeholder arbitration can run before anything below treats
+      // a url as having exactly one candidate rect.
+      const byUrl = new Map<string, SlotEl[]>();
+      for (const entry of found) {
+        const list = byUrl.get(entry.url);
+        if (list) list.push(entry);
+        else byUrl.set(entry.url, [entry]);
+      }
+
       // Placeholders matched by the selector AND not hidden-ancestor (FIX 2)
       // — the "genuinely present" set eviction/FIX-3-gating both key off.
       const presentUrls = new Set<string>();
+      const nextShadows = new Map<string, DOMRect>();
       let changed = false;
 
-      for (const { url, height, el } of found) {
-        const rect = el.getBoundingClientRect();
+      for (const [url, entries] of byUrl) {
+        const host = pickHost(entries);
+        const rect = host.el.getBoundingClientRect();
 
         // FIX 2 (hidden-ancestor eviction): a zero-sized rect means some
         // ancestor collapsed this placeholder out of layout (mobile back-nav
@@ -326,15 +398,37 @@ export function AppFrameLayer() {
 
         presentUrls.add(url);
 
+        // C2: track every non-host placeholder's rect for the "active in
+        // panel" chip overlay (render function below) — but only when the
+        // host is genuinely IN the panel. Two transcript-context duplicates
+        // of the same url (host = first-in-doc-order, per pickHost's
+        // fallback tier) is a pre-existing, unremarkable edge case with no
+        // panel to point at; showing "active in panel" there would be a lie.
+        // A shadow with its own zero rect (e.g. scrolled/hidden-ancestor)
+        // just doesn't get a chip this frame — no grace window needed, it's
+        // purely decorative.
+        if (host.context === 'panel') {
+          for (const e of entries) {
+            if (e === host) continue;
+            const shadowRect = e.el.getBoundingClientRect();
+            if (shadowRect.width === 0 && shadowRect.height === 0) continue;
+            nextShadows.set(url, shadowRect);
+          }
+        }
+
         // FIX 1 (pane clipping): see computePaneClip's doc comment.
-        const ancestorEl = el.closest('.thread-viewport');
+        const ancestorEl = host.el.closest('.thread-viewport');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
-        const { paneHidden, clip } = computePaneClip(rect, ancestorRect);
+        const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
+        // C2: an explicitly-hidden host (inactive panel tab) hides exactly
+        // like a geometrically-clipped-out placeholder — visibility only,
+        // never eviction.
+        const paneHidden = geometryHidden || host.explicitlyHidden;
 
         let slot = slotsRef.current.get(url);
         if (!slot) {
           slot = {
-            height,
+            height: host.height,
             rect,
             paneHidden,
             clip,
@@ -362,7 +456,7 @@ export function AppFrameLayer() {
             changed = true;
           }
           slot.rect = rect;
-          slot.height = height;
+          slot.height = host.height;
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
@@ -384,6 +478,31 @@ export function AppFrameLayer() {
           changed = true;
         }
       }
+
+      // C2: diff the shadow-chip map the same way slot rects are diffed
+      // above, so a shadow placeholder appearing/moving/disappearing (e.g.
+      // the transcript scrolls) re-renders the chip's overlay position.
+      for (const [url, rect] of nextShadows) {
+        const prev = shadowsRef.current.get(url);
+        if (
+          !prev ||
+          prev.top !== rect.top ||
+          prev.left !== rect.left ||
+          prev.width !== rect.width ||
+          prev.height !== rect.height
+        ) {
+          changed = true;
+        }
+      }
+      if (!changed) {
+        for (const url of shadowsRef.current.keys()) {
+          if (!nextShadows.has(url)) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      shadowsRef.current = nextShadows;
 
       if (changed) forceRender((n) => n + 1);
 
@@ -466,10 +585,28 @@ export function AppFrameLayer() {
   }, []);
 
   const slots = Array.from(slotsRef.current.entries());
-  if (slots.length === 0) return null;
+  const shadows = Array.from(shadowsRef.current.entries());
+  if (slots.length === 0 && shadows.length === 0) return null;
 
   return createPortal(
     <>
+      {shadows.map(([url, rect]) => (
+        <button
+          key={`chip-${url}`}
+          type="button"
+          className="embed-app-panel-chip"
+          style={{
+            position: 'fixed',
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          }}
+          onClick={() => setActive(appArtifactId(url))}
+        >
+          active in panel ↗
+        </button>
+      ))}
       {slots.map(([url, slot]) => {
         const r = slot.rect;
         // FIX 1: hidden whenever the placeholder isn't currently found
