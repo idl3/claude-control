@@ -24,6 +24,47 @@
           "ms": 500
         }
       ]
+    },
+    {
+      "name": "fix1-pane-clip",
+      "pre": [
+        {
+          "action": "scrollIntoView",
+          "selector": "[data-panel=stable] [data-embed-app-url]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "fix2-evicted",
+      "selector": "[data-testid=churn-counters]",
+      "pre": [
+        {
+          "action": "click",
+          "selector": "[data-testid=toggle-hide-stable]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "fix2-reappeared",
+      "selector": "[data-testid=churn-counters]",
+      "pre": [
+        {
+          "action": "click",
+          "selector": "[data-testid=toggle-hide-stable]"
+        },
+        {
+          "action": "wait",
+          "ms": 800
+        }
+      ]
     }
   ],
   "video": {

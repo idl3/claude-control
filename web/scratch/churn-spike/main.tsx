@@ -209,8 +209,30 @@ function Panel({ variant }: { variant: Variant }) {
   );
 }
 
+// A3 audit follow-up (CP3-A) re-run additions ------------------------------
+// FIX 2 evidence: a manual toggle wraps the 'stable' panel (embed included)
+// in display:none, matching the real trigger this fix targets — mobile
+// back-nav hides the WHOLE detail pane via `.detail { display: none }` while
+// every descendant, including the embed placeholder, stays mounted. Toggling
+// it off then on past GRACE_MS must evict then re-fetch (one extra load),
+// never leak the slot forever. `hoist-count` gives a live, directly
+// assertable DOM signal (screenshot-legible number) instead of relying on
+// visual absence alone.
+function useHoistCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCount(document.querySelectorAll('.embed-app-hoist').length);
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+  return count;
+}
+
 function App() {
   const [counts, setCounts] = useState<Record<Variant, number>>({ stable: 0, unstable: 0 });
+  const [hideStable, setHideStable] = useState(false);
+  const hoistCount = useHoistCount();
 
   useEffect(() => {
     // 'load' does not bubble, but capture-phase listeners on an ancestor DO
@@ -241,6 +263,14 @@ function App() {
   return (
     <div className="churn-stage" data-testid="stage">
       <div className="proto-label">cockpit churn-survival spike — Phase A / A3 re-run (post-fix)</div>
+      {/* Stand-ins for real chrome outside .thread-viewport (detail-head sits
+          above the scroll pane, composer below) — reused verbatim from
+          styles.css so the FIX-1 clip screenshot below proves a hoisted
+          iframe scrolled to the pane edge stays clipped underneath them
+          (z-index 2 vs the hoist layer's z-index 1), never bleeds over. */}
+      <div className="detail-head">
+        <strong data-testid="fake-header">fake .detail-head — must stay on top, unobscured</strong>
+      </div>
       <div className="churn-counters" data-testid="churn-counters">
         <span>
           <span className="count-label">stable iframe loads:</span>
@@ -254,10 +284,27 @@ function App() {
             {counts.unstable}
           </span>
         </span>
+        <span>
+          <span className="count-label">live hoist count:</span>
+          <span className="count-value" data-testid="hoist-count">
+            {hoistCount}
+          </span>
+        </span>
+        <button type="button" data-testid="toggle-hide-stable" onClick={() => setHideStable((h) => !h)}>
+          {hideStable ? 'show' : 'hide'} stable pane (FIX 2 hidden-ancestor probe)
+        </button>
       </div>
       <div className="churn-columns">
-        <Panel variant="stable" />
+        {/* display:none here — not unmount — is the whole point: it
+            reproduces the mobile `.detail { display: none }` case FIX 2
+            targets (placeholder stays mounted, rect collapses to zero). */}
+        <div style={{ display: hideStable ? 'none' : undefined }} data-testid="stable-wrap">
+          <Panel variant="stable" />
+        </div>
         <Panel variant="unstable" />
+      </div>
+      <div className="composer">
+        <span data-testid="fake-composer">fake .composer — must stay on top, unobscured</span>
       </div>
       <AppFrameLayer />
     </div>

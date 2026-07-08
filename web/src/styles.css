@@ -660,6 +660,15 @@ body.is-external-display .rail {
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
+  /* A3 audit follow-up (CP3-A, FIX 1): outrank .embed-app-hoist's
+     position:fixed hoisted iframes (z-index 1) — this header sits outside
+     .thread-viewport, so a hoisted iframe must never paint over or
+     intercept clicks meant for it. Pane-clipping already keeps a live
+     iframe's own rect from extending past its scroll pane; this is the
+     stacking-order belt-and-suspenders for any transient/future case where
+     it does. */
+  position: relative;
+  z-index: 2;
 }
 .back-btn {
   font-size: 22px;
@@ -2337,6 +2346,10 @@ details.block-tool[open] > summary .tool-arrow,
   background: transparent;
   flex: 0 0 auto;
   position: relative; /* anchor for the floating skill autocomplete */
+  /* A3 audit follow-up (CP3-A, FIX 1): outrank .embed-app-hoist's
+     position:fixed hoisted iframes (z-index 1) — see .detail-head's
+     matching comment above for the full invariant. */
+  z-index: 2;
 }
 /* Mobile: keep ONLY the system home-indicator inset (0 in a browser tab) —
    and keep it CONSTANT. A previous :focus-within override dropped it to 0
@@ -4822,6 +4835,17 @@ select.config-input {
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+/* A3 audit follow-up (CP3-A, FIX 1): explicit stacking for the hoisted,
+   position:fixed portal layer (AppFrameLayer.tsx) — kept below chrome that
+   lives outside the scroll pane (.detail-head, .composer both claim
+   z-index: 2) so a live app iframe can never paint over or intercept
+   clicks meant for the header, composer, or any modal. Pane-clipping
+   (computePaneClip in AppFrameLayer.tsx) is the primary defense — this is
+   the belt-and-suspenders should a rect transiently extend past its pane. */
+.embed-app-hoist {
+  z-index: 1;
 }
 
 /* ── /goal reserved-token pill (user messages only) ─────────────────
