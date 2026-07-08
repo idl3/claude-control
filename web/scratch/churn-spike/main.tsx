@@ -23,12 +23,14 @@ import {
 } from '@assistant-ui/react';
 import { UserMessage, AssistantMessage } from '../../src/components/Messages';
 import { ArtifactPanelProvider } from '../../src/components/ArtifactContext';
+import { AppFrameLayer } from '../../src/components/AppFrameLayer';
 
 /**
- * A2 churn-survival spike (Phase A, OQ3): does identity-stabilization alone
- * stop <embedded-app> iframes from remounting under transcript churn, or does
- * assistant-ui move/rewrap row DOM regardless (forcing the hoisted-portal
- * fallback)? See docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md (A2).
+ * A2 churn-survival spike (Phase A, OQ3), re-run post-A3-fix: does
+ * identity-stabilization alone stop <embedded-app> iframes from remounting
+ * under transcript churn, or does assistant-ui move/rewrap row DOM
+ * regardless (forcing the hoisted-portal fallback)? See
+ * docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md (A2/A3).
  *
  * Two independent thread instances render side-by-side, seeded identically,
  * driven by the SAME churn schedule, differing only in how the underlying
@@ -40,15 +42,22 @@ import { ArtifactPanelProvider } from '../../src/components/ArtifactContext';
  *               which rebuilds the whole array from scratch whenever
  *               cockpit.messages gets a new reference).
  *
- * A host-level capture-phase 'load' listener (load events on <iframe> don't
- * bubble, but DO fire during capture) counts every load fired by the
- * `.embed-app` iframe in each column, split by variant via the closest
- * `[data-panel]` ancestor.
+ * A2 verdict was HOIST-LAYER (both variants reloaded ~equally, far above a
+ * 1-load steady state) — EmbeddedApp/AppFrameLayer are now the A3 fix, so
+ * this re-run exercises the real fixed components unmodified. Each panel
+ * embeds a distinct url (?panel=stable / ?panel=unstable) so AppFrameLayer's
+ * url-keyed registry — shared across both panels, as it is in production —
+ * tracks them as separate slots instead of colliding onto one. A host-level
+ * capture-phase 'load' listener (load events on <iframe> don't bubble, but
+ * DO fire during capture) counts every load fired by the hoisted `.embed-app`
+ * iframe, split by variant via its `title` (AppFrameLayer sets title=url) —
+ * `closest('[data-panel]')` no longer works post-fix since the live iframe is
+ * portaled to document.body, outside the panel's own DOM subtree.
  */
 
 type Variant = 'stable' | 'unstable';
 
-const EMBED_URL = '/api/media/proof/app.html';
+const EMBED_URL = (variant: Variant) => `/api/media/proof/app.html?panel=${variant}`;
 const PLAIN_BEFORE = 128;
 const PLAIN_AFTER = 20;
 const TOTAL_STEPS = 24;
@@ -68,7 +77,7 @@ function plainMessage(i: number): ThreadMessageLike {
 
 // The one stateful embed under test — placed ~20 messages from the end of the
 // 149-message base transcript so it stays in the (unwindowed) rendered range.
-function embedMessage(): ThreadMessageLike {
+function embedMessage(variant: Variant): ThreadMessageLike {
   return {
     role: 'assistant',
     id: 'm-embed',
@@ -78,17 +87,17 @@ function embedMessage(): ThreadMessageLike {
         type: 'text',
         text:
           'Stateful counter app under churn:\n\n' +
-          `<embedded-app url="${EMBED_URL}" height="320" />`,
+          `<embedded-app url="${EMBED_URL(variant)}" height="320" />`,
       },
     ],
     metadata: { custom: { cockpitRole: 'assistant' } },
   } as ThreadMessageLike;
 }
 
-function makeBaseCore(): ThreadMessageLike[] {
+function makeBaseCore(variant: Variant): ThreadMessageLike[] {
   const arr: ThreadMessageLike[] = [];
   for (let i = 0; i < PLAIN_BEFORE; i++) arr.push(plainMessage(i));
-  arr.push(embedMessage());
+  arr.push(embedMessage(variant));
   for (let i = PLAIN_BEFORE; i < PLAIN_BEFORE + PLAIN_AFTER; i++) arr.push(plainMessage(i));
   return arr;
 }
@@ -122,7 +131,7 @@ function pendingBubble(): ThreadMessageLike {
  * 6th tick also toggles a trailing pending-send bubble.
  */
 function useChurn(variant: Variant): { rendered: ThreadMessageLike[]; step: number } {
-  const [core, setCore] = useState<ThreadMessageLike[]>(() => makeBaseCore());
+  const [core, setCore] = useState<ThreadMessageLike[]>(() => makeBaseCore(variant));
   const [workingOn, setWorkingOn] = useState(false);
   const [pendingOn, setPendingOn] = useState(false);
   const [step, setStep] = useState(0);
@@ -211,8 +220,17 @@ function App() {
       const target = e.target;
       if (!(target instanceof HTMLIFrameElement)) return;
       if (!target.classList.contains('embed-app')) return;
-      const panelEl = target.closest('[data-panel]') as HTMLElement | null;
-      const variant = panelEl?.dataset.panel as Variant | undefined;
+      // Post-fix, the live iframe is hoisted by AppFrameLayer to a portal
+      // under document.body — no longer a descendant of [data-panel]. Its
+      // title is set to the embed url (see AppFrameLayer.tsx), which now
+      // carries ?panel=<variant> (see EMBED_URL above) as the attribution
+      // signal instead of DOM ancestry.
+      const title = target.title;
+      const variant = title.includes('panel=stable')
+        ? 'stable'
+        : title.includes('panel=unstable')
+          ? 'unstable'
+          : undefined;
       if (variant !== 'stable' && variant !== 'unstable') return;
       setCounts((c) => ({ ...c, [variant]: c[variant] + 1 }));
     };
@@ -222,7 +240,7 @@ function App() {
 
   return (
     <div className="churn-stage" data-testid="stage">
-      <div className="proto-label">cockpit churn-survival spike — Phase A / A2 (OQ3)</div>
+      <div className="proto-label">cockpit churn-survival spike — Phase A / A3 re-run (post-fix)</div>
       <div className="churn-counters" data-testid="churn-counters">
         <span>
           <span className="count-label">stable iframe loads:</span>
@@ -241,6 +259,7 @@ function App() {
         <Panel variant="stable" />
         <Panel variant="unstable" />
       </div>
+      <AppFrameLayer />
     </div>
   );
 }

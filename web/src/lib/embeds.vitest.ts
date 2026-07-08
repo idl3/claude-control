@@ -6,7 +6,7 @@
 // (fetch → setHtml) that renderToStaticMarkup never runs. jsdom is harmless
 // to the rest of this file: renderToStaticMarkup needs no DOM at all.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createElement } from 'react';
+import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { render as mount, screen, cleanup } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
@@ -20,6 +20,7 @@ import {
   APP_HEIGHT_DEFAULT,
 } from './embeds';
 import { MarkdownImg } from '../components/EmbeddedMedia';
+import { AppFrameLayer } from '../components/AppFrameLayer';
 import { DEFAULT_ASPECT_RATIO } from './mediaDimensions';
 
 // EmbeddedApp fetches its html via authFetch (lib/api) — stub only that
@@ -163,12 +164,14 @@ describe('markdown pipeline → element props', () => {
     expect(html).toContain('&lt;b&gt;');
   });
 
-  it('renders a local embedded-app as a reserved-box skeleton at the fixed height before the fetch resolves', () => {
+  it('renders a local embedded-app as a reserved-box placeholder at the fixed height — AppFrameLayer owns the fetch/skeleton/iframe (A3 hoist fix)', () => {
     const html = render('<embedded-app url="apps/counter.html" height="420" />');
     expect(html).toContain('class="embed-media-frame embed-app-frame"');
     expect(html).toContain('height:420px');
-    expect(html).toContain('class="embed-media-skeleton"');
-    expect(html).not.toContain('<iframe'); // fetch not resolved in a static render
+    expect(html).toContain('data-embed-app-url="apps/counter.html"');
+    expect(html).toContain('data-embed-app-height="420"');
+    expect(html).not.toContain('class="embed-media-skeleton"'); // AppFrameLayer renders the skeleton now
+    expect(html).not.toContain('<iframe'); // AppFrameLayer renders the live iframe now
   });
 
   it('clamps and defaults embedded-app height in the reserved frame', () => {
@@ -201,10 +204,13 @@ describe('markdown pipeline → element props', () => {
   });
 });
 
-// Mounted (jsdom) render — the only way to observe the post-fetch iframe:
-// renderToStaticMarkup above never runs effects, so useAppHtml's fetch never
-// resolves there. These tests mount for real and control authFetchMock.
-describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
+// Mounted (jsdom) render — the only way to observe the post-fetch iframe.
+// Post-A3 (hoist fix), EmbeddedApp itself only renders a placeholder
+// (data-embed-app-url/-height); the fetch/skeleton/iframe/failed-chip all
+// live in AppFrameLayer, which polls the DOM for placeholders (see
+// AppFrameLayer.tsx) — so it must be mounted alongside MarkdownImg to
+// observe any of that behavior.
+describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (mounted)', () => {
   afterEach(() => {
     cleanup();
     authFetchMock.mockReset();
@@ -217,11 +223,16 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
     });
 
     mount(
-      createElement(MarkdownImg, {
-        'data-embed': 'app',
-        'data-url': 'apps/counter.html',
-        'data-height': '420',
-      }),
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, {
+          'data-embed': 'app',
+          'data-url': 'apps/counter.html',
+          'data-height': '420',
+        }),
+        createElement(AppFrameLayer),
+      ),
     );
 
     const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
@@ -235,7 +246,14 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
   it('renders the "app unavailable" chip on a non-ok fetch, never an iframe', async () => {
     authFetchMock.mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') });
 
-    mount(createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/missing.html' }));
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/missing.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
 
     expect(await screen.findByText('app unavailable: apps/missing.html')).toBeTruthy();
     expect(screen.queryByRole('IFRAME')).toBeNull();
@@ -244,7 +262,14 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
   it('renders the "app unavailable" chip when authFetch itself rejects (network error)', async () => {
     authFetchMock.mockRejectedValue(new Error('network down'));
 
-    mount(createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/counter.html' }));
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/counter.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
 
     expect(await screen.findByText('app unavailable: apps/counter.html')).toBeTruthy();
   });

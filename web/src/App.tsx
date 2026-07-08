@@ -45,6 +45,7 @@ import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
+import { AppFrameLayer } from './components/AppFrameLayer';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -2448,6 +2449,7 @@ function AppInner() {
         ) : null}
 
         <HotkeyHints />
+        <AppFrameLayer />
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>

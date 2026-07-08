@@ -184,49 +184,26 @@ export function EmbeddedMedia({
  * from mount so there is no scroll jump; a skeleton shimmer fills it until
  * the fetch resolves. A failed/non-ok fetch renders the same rejected-chip
  * treatment as an unsupported url.
+ *
+ * The live iframe itself does NOT live here. Transcript row DOM churns on
+ * every message-list update (A2 churn-spike verdict — see
+ * docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md, A3), and a moved/
+ * reparented iframe reloads by spec regardless of why it moved. This
+ * component renders only a placeholder (a `data-embed-app-url`/
+ * `data-embed-app-height` span, cheap to remount) that AppFrameLayer.tsx
+ * tracks from a single always-mounted portal layer — the fetch, the
+ * skeleton, and the failed-chip for fetch errors all happen there. The
+ * rejected-url check stays here since it's synchronous and belongs inline
+ * in the transcript flow, not floating in the hoisted layer.
  */
-function useAppHtml(url: string): { html: string | null; rejected: boolean; failed: boolean } {
+export function EmbeddedApp({ url, height }: { url: string; height: number }) {
   const resolution = resolveMediaUrl(url);
-  const [html, setHtml] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-    setHtml(null);
-    if (resolution.kind !== 'fetch') return;
-    let alive = true;
-    authFetch(resolution.fetchUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error(`app fetch failed: ${res.status}`);
-        return res.text();
-      })
-      .then((text) => {
-        if (alive) setHtml(text);
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
 
   // resolveMediaUrl's 'direct' branch is media's allowance for http(s)
   // hotlinking — app embeds reject that branch too (see doc comment above),
   // not just 'rejected', so only 'fetch' (local media-root) proceeds.
-  if (resolution.kind !== 'fetch') return { html: null, rejected: true, failed: false };
-  return { html, rejected: false, failed };
-}
-
-export function EmbeddedApp({ url, height }: { url: string; height: number }) {
-  const { html, rejected, failed } = useAppHtml(url);
-
-  if (rejected) {
+  if (resolution.kind !== 'fetch') {
     return <code className="embed-media-rejected">app url rejected: {url}</code>;
-  }
-  if (failed) {
-    return <code className="embed-media-rejected">app unavailable: {url}</code>;
   }
 
   const frameStyle = {
@@ -236,18 +213,13 @@ export function EmbeddedApp({ url, height }: { url: string; height: number }) {
   };
 
   return (
-    <span className="embed-media-frame embed-app-frame" style={frameStyle}>
-      {html != null ? (
-        <iframe
-          className="embed-app"
-          sandbox="allow-scripts"
-          srcDoc={html}
-          title={url}
-        />
-      ) : (
-        <span className="embed-media-skeleton" aria-label="loading app" />
-      )}
-    </span>
+    <span
+      className="embed-media-frame embed-app-frame"
+      style={frameStyle}
+      data-embed-app-url={url}
+      data-embed-app-height={height}
+      aria-label="embedded app"
+    />
   );
 }
 
