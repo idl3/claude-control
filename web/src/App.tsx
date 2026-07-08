@@ -819,11 +819,12 @@ function AppInner() {
   // In-transcript search (⌘/).
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Raw-terminal escape hatch with an LRU of warm ttyd panels. The server caps
-  // ttyd at 4 live (and self-evicts its oldest), so we keep at most the 4 most-
-  // recently-used terminals mounted in the background — reopening a recent one
-  // is instant; older ones unmount (the server reaps them). `terminalShown`
-  // toggles the CURRENT session's panel; switching sessions hides it.
+  // Raw-terminal escape hatch with an LRU of warm ttyd panels. To avoid
+  // leaving background ttyd/tmux attaches around when the terminal is closed,
+  // we only keep panels mounted while the raw terminal is actually visible.
+  // Switching sessions while terminalShown=true can still keep a small warm
+  // set for instant reopen, but closing the surface drops the cache so the
+  // server can reap the processes promptly.
   const TERM_WARM_MAX = 4;
   const [warmTerms, setWarmTerms] = useState<string[]>([]);
   const [terminalShown, setTerminalShown] = useState(false);
@@ -836,11 +837,13 @@ function AppInner() {
     });
   }, []);
 
-  // Preload the selected session's terminal in the background WHEN there's room
-  // (≤4 live), debounced so fast switching doesn't thrash ttyd. Once 4 are warm,
-  // browsing further doesn't preload — opening one then evicts the oldest.
+  // Keep only the visible terminal hot. When the terminal is closed, clear the
+  // warm cache so hidden ttyd iframes don't keep consuming resources.
   useEffect(() => {
-    setTerminalShown(false);
+    if (!terminalShown) {
+      setWarmTerms([]);
+      return;
+    }
     const id = cockpit.selectedId;
     if (!id) return;
     const t = setTimeout(() => {
@@ -851,7 +854,7 @@ function AppInner() {
       });
     }, 500);
     return () => clearTimeout(t);
-  }, [cockpit.selectedId]);
+  }, [cockpit.selectedId, terminalShown]);
 
   // Open: ensure the current session's panel is warm + visible. Toggle: same key
   // (⌘J) flips it back out. Close keeps it warm for an instant reopen.
