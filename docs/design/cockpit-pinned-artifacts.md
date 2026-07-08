@@ -31,3 +31,37 @@ Seam: placeholders unmounted by the thread's render cap ("Load earlier") or evic
 
 ## Unwind cost
 Dedicated PrototypePanel extraction (~4–6 files) if ArtifactPanel resists; embeds/transport/version layers carry over unchanged.
+
+## Artifact contract (Phase B, B3)
+
+Any HTML shipped under `~/.claude-control/media/apps/` for an
+`<embedded-app url="…" height="…" />` embed must satisfy:
+
+- **Single-file HTML.** No external `<script src>`/`<link rel=stylesheet>` —
+  the artifact loads via `srcDoc` on the host iframe, which has no base URL,
+  so any relative or absolute external reference silently fails to load. CSS
+  and JS must be inlined (see `web/scratch/counter-app/build.mjs` for the
+  esbuild-IIFE + inline-`<style>` reference build).
+- **Sandbox `allow-scripts` only.** The host always sets
+  `sandbox="allow-scripts"` with no `allow-same-origin`, giving the frame an
+  opaque (`null`) origin: it can run its own JS but cannot reach the parent
+  DOM, `localStorage`, or cookies. Artifacts must not assume same-origin
+  access to anything outside the frame.
+- **OPTIONAL `cc-app-error` crash beacon.** An artifact MAY report an
+  in-frame crash it has already contained (e.g. inside its own error
+  boundary) by calling
+  `window.parent.postMessage({ type: 'cc-app-error', message: String(error) }, '*')`.
+  The host (`AppFrameLayer.tsx`) validates this against the exact shape
+  `{ type: 'cc-app-error', message?: string }` and the beacon's `event.source`
+  against the specific iframe's own `contentWindow` (see T2 above —
+  `event.origin` is always the literal string `'null'` for this sandbox
+  configuration and is never consulted). A validated beacon marks the slot
+  crashed and shows a reload affordance; an unvalidated or absent beacon
+  changes nothing — a user-triggered reload (`cockpit:app-reload`) works
+  identically whether or not an artifact ever posts one. This is a one-way,
+  best-effort signal, not a required part of the contract: an artifact with
+  no error boundary and no beacon simply shows as a blank/broken frame with
+  no automatic crashed-strip, same as before Phase B.
+- **Reference implementation:** `web/scratch/counter-app/counter.tsx` +
+  `build.mjs` — a React app with its own root, own error boundary, and a
+  `componentDidCatch` that posts the beacon above.

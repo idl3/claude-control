@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { authFetch } from '../lib/api';
+import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
+import { AppReloadButton } from './EmbeddedApp';
 
 /**
  * Hoists <embedded-app> iframes out of the transcript row DOM into one
  * always-mounted layer, portaled to document.body and positioned over each
- * app's in-flow placeholder (rendered by EmbeddedApp in EmbeddedMedia.tsx).
+ * app's in-flow placeholder (rendered by EmbeddedApp in EmbeddedApp.tsx).
  *
  * Why: A2's churn-survival spike (docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md)
  * measured that assistant-ui remounts message row DOM on nearly every
@@ -42,11 +44,39 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * gates the rAF loop itself so it only runs while there's a slot or a
  * placeholder to track, per the HotkeyHints precedent this file already
  * cites above. See the doc comments on the helpers below for each.
+ *
+ * B2 (reload + crash beacon) layers on top of the above, also unchanged
+ * design: `reload(url)` is the only path that ever clears `slot.html` /
+ * bumps `slot.iframeKey` outside of the initial fetch — it fires exclusively
+ * from an explicit `cockpit:app-reload` window CustomEvent (dispatched by
+ * AppReloadButton, EmbeddedApp.tsx), never from tick()'s positioning/polling
+ * loop, so a reload is always an INTENTIONAL, user-requested reload and
+ * never a side effect of the churn/repositioning this layer exists to
+ * survive — the never-reload seam above is preserved. A `message` listener
+ * marks a slot `crashed` when the app iframe itself posts a validated
+ * `{type:'cc-app-error'}` beacon (see lib/appBeacon.ts) — `event.origin` is
+ * always the literal string 'null' for an opaque-origin (sandbox, no
+ * allow-same-origin) srcdoc iframe, so `event.source === slot.win` (the
+ * iframe's own contentWindow, captured via ref) is the only usable trust
+ * discriminator. The beacon is entirely optional: manual reload via
+ * AppReloadButton works identically whether or not an app ever posts one.
+ *
+ * B audit follow-ups (CP3-B) layer on top of B2, also unchanged design:
+ * FIX 1 (clampChromeInsets) fixes the corner reload button and the crashed
+ * strip's CTA rendering out of reach when FIX 1's clip (above) is partial —
+ * both used to position against the un-clipped placeholder box, so a
+ * partial clip could land them in the invisible, non-hit-testable region;
+ * FIX 2 stores the validated crash beacon's own `message` on the slot and
+ * renders it as plain text content (never markup) in the crashed strip, so
+ * an app's actual crash reason is visible instead of just its url.
  */
 
 const GRACE_MS = 250;
 // One live iframe per url; multi-placeholder arbitration lands in Phase C.
 const SLOT_SELECTOR = '[data-embed-app-url]';
+// B audit follow-up (CP3-B, FIX 2): cap the beacon's app-controlled crash
+// message so a misbehaving app can't blow up the crashed strip's layout.
+const CRASH_MESSAGE_MAX_LEN = 200;
 
 // ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
 // DOM-free so they're unit-testable without a real layout engine — jsdom
@@ -102,6 +132,42 @@ export function computePaneClip(
   return { paneHidden: false, clip: { top, right, bottom, left } };
 }
 
+// B audit follow-up (CP3-B, FIX 1): matches .embed-app-reload-btn's CSS
+// top/right (styles.css) — the base corner offset before any clip is
+// accounted for.
+const RELOAD_CORNER_OFFSET = 6;
+
+type ChromeClamp = { cornerTop: number; cornerRight: number; crashedInset: ClipInsets };
+
+/**
+ * FIX 1 (clamp chrome into the visible clip): computePaneClip's clip insets
+ * describe how much of the placeholder's edges are clipped away by its
+ * scroll pane, but the corner reload button (.embed-app-reload-btn,
+ * top:6/right:6) and the crashed strip's CTA (.embed-app-crashed) both
+ * position against the FULL, un-clipped placeholder box in the render
+ * below — with a partial clip, either can land entirely inside the
+ * clipped-away (invisible, non-hit-testable) region. This maps a clip into
+ * where each piece of chrome should actually render:
+ *  - cornerTop/cornerRight: the reload button's offset from the top-right
+ *    corner, pushed inward by however much of the top/right edge is
+ *    clipped away. Used for the healthy-iframe and failed-fetch corner
+ *    button, both of which sit directly in the un-clipped hoist box.
+ *  - crashedInset: the .embed-app-crashed strip's own inset, shrunk from
+ *    the default 0 (full box) down to the clip — its flex-centered message
+ *    then centers within the VISIBLE slice, and its own reload button
+ *    (also top:6/right:6, but now relative to this shrunk box) lands in
+ *    the visible corner too, with no separate offset needed.
+ * Returns the identity result (no adjustment) when there's no clip.
+ */
+export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
+  const c = clip ?? { top: 0, right: 0, bottom: 0, left: 0 };
+  return {
+    cornerTop: RELOAD_CORNER_OFFSET + c.top,
+    cornerRight: RELOAD_CORNER_OFFSET + c.right,
+    crashedInset: c,
+  };
+}
+
 function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -135,6 +201,25 @@ type Slot = {
   clip: ClipInsets | null;
   html: string | null;
   failed: boolean;
+  // B2: set only by a validated cc-app-error beacon (see lib/appBeacon.ts)
+  // or cleared by an explicit reload() — never touched by tick().
+  crashed: boolean;
+  // B audit follow-up (CP3-B, FIX 2): the beacon's own `message`, if it sent
+  // one (capped to CRASH_MESSAGE_MAX_LEN). null when no beacon has fired
+  // (crashed via some other path never exists today, but keeps the type
+  // honest) or after reload() clears it. Rendered as plain text content —
+  // never markup — in the crashed strip.
+  lastCrashMessage: string | null;
+  // B2: the live iframe's own contentWindow, captured via ref so the
+  // `message` listener can check `event.source === win` — the only trust
+  // discriminator available for an opaque-origin srcdoc iframe. null
+  // whenever no iframe is currently mounted for this slot (loading/failed/
+  // crashed/mid-reload).
+  win: Window | null;
+  // B2: bumped by reload() only. Used as part of the iframe's React key so
+  // a reload always mounts a genuinely new iframe element rather than
+  // mutating srcDoc on the existing one.
+  iframeKey: number;
   lastSeen: number;
 };
 
@@ -190,6 +275,27 @@ export function AppFrameLayer() {
         });
     }
 
+    // B2: user-requested reload — re-fetch the url from scratch, drop the
+    // current srcdoc/window/failed/crashed state, and bump iframeKey so the
+    // render below mounts a genuinely new <iframe>. The intermediate render
+    // (html: null) unmounts the current iframe first, so the remount happens
+    // regardless of how fast the re-fetch resolves. Never called from tick()
+    // — only from the cockpit:app-reload listener below, which only ever
+    // fires from an explicit AppReloadButton click. That's what keeps this
+    // exempt from, rather than a violation of, the never-reload seam.
+    function reload(url: string) {
+      const slot = slotsRef.current.get(url);
+      if (!slot) return;
+      slot.crashed = false;
+      slot.lastCrashMessage = null;
+      slot.failed = false;
+      slot.html = null;
+      slot.win = null;
+      slot.iframeKey += 1;
+      forceRender((n) => n + 1);
+      fetchHtml(url);
+    }
+
     function tick() {
       rafId = null;
       if (!alive) return;
@@ -227,7 +333,19 @@ export function AppFrameLayer() {
 
         let slot = slotsRef.current.get(url);
         if (!slot) {
-          slot = { height, rect, paneHidden, clip, html: null, failed: false, lastSeen: now };
+          slot = {
+            height,
+            rect,
+            paneHidden,
+            clip,
+            html: null,
+            failed: false,
+            crashed: false,
+            lastCrashMessage: null,
+            win: null,
+            iframeKey: 0,
+            lastSeen: now,
+          };
           slotsRef.current.set(url, slot);
           fetchHtml(url);
           changed = true;
@@ -300,6 +418,36 @@ export function AppFrameLayer() {
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
 
+    // B2: cockpit:app-reload is the only trigger for reload() — see reload's
+    // doc comment above for why this keeps the never-reload seam intact.
+    function onAppReload(ev: Event) {
+      const url = (ev as CustomEvent<{ url?: string }>).detail?.url;
+      if (typeof url === 'string') reload(url);
+    }
+    window.addEventListener('cockpit:app-reload', onAppReload);
+
+    // B2: crash beacon. Checks every tracked slot's captured contentWindow
+    // against event.source — see isValidAppErrorBeacon's doc comment for why
+    // event.origin (always 'null' here) is never consulted.
+    function onMessage(event: MessageEvent) {
+      if (!alive) return;
+      for (const slot of slotsRef.current.values()) {
+        if (slot.crashed) continue;
+        if (isValidAppErrorBeacon(event.source, slot.win, event.data)) {
+          slot.crashed = true;
+          // Shape-validated above (isAppErrorBeaconShape requires `message`,
+          // if present, to be a string) — still narrow defensively here
+          // rather than trusting the cast.
+          const rawMessage = (event.data as { message?: unknown }).message;
+          slot.lastCrashMessage =
+            typeof rawMessage === 'string' ? rawMessage.slice(0, CRASH_MESSAGE_MAX_LEN) : null;
+          forceRender((n) => n + 1);
+          break;
+        }
+      }
+    }
+    window.addEventListener('message', onMessage);
+
     // Cheap initial guess (raw match, not the hidden-ancestor-filtered
     // "present" count tick() computes) — good enough to decide whether to
     // schedule the first tick at all; tick() re-evaluates precisely and
@@ -311,6 +459,8 @@ export function AppFrameLayer() {
     return () => {
       alive = false;
       observer.disconnect();
+      window.removeEventListener('cockpit:app-reload', onAppReload);
+      window.removeEventListener('message', onMessage);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, []);
@@ -330,6 +480,10 @@ export function AppFrameLayer() {
           r && !slot.paneHidden && slot.clip
             ? `inset(${slot.clip.top}px ${slot.clip.right}px ${slot.clip.bottom}px ${slot.clip.left}px)`
             : undefined;
+        // B audit follow-up (CP3-B, FIX 1): see clampChromeInsets' doc
+        // comment — clamps the corner reload button and the crashed strip
+        // into the visible slice of a partially-clipped placeholder.
+        const chrome = clampChromeInsets(slot.clip);
         return (
           <span
             key={url}
@@ -345,10 +499,49 @@ export function AppFrameLayer() {
               clipPath,
             }}
           >
-            {slot.failed ? (
-              <code className="embed-media-rejected">app unavailable: {url}</code>
+            {slot.crashed ? (
+              <div
+                className="embed-app-crashed"
+                style={{
+                  top: chrome.crashedInset.top,
+                  right: chrome.crashedInset.right,
+                  bottom: chrome.crashedInset.bottom,
+                  left: chrome.crashedInset.left,
+                }}
+              >
+                <code className="embed-media-rejected embed-app-crashed-msg">app crashed: {url}</code>
+                {/* B audit follow-up (CP3-B, FIX 2): the beacon's own message,
+                    if it sent one — rendered as plain text content (React
+                    escapes it same as any other child), never innerHTML, and
+                    already capped to CRASH_MESSAGE_MAX_LEN at capture time. */}
+                {slot.lastCrashMessage ? (
+                  <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
+                ) : null}
+                <AppReloadButton url={url} quiet={false} />
+              </div>
+            ) : slot.failed ? (
+              <>
+                <code className="embed-media-rejected">app unavailable: {url}</code>
+                <AppReloadButton
+                  url={url}
+                  quiet={false}
+                  style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
+                />
+              </>
             ) : slot.html != null ? (
-              <iframe className="embed-app" sandbox="allow-scripts" srcDoc={slot.html} title={url} />
+              <>
+                <iframe
+                  key={slot.iframeKey}
+                  ref={(el) => {
+                    slot.win = el?.contentWindow ?? null;
+                  }}
+                  className="embed-app"
+                  sandbox="allow-scripts"
+                  srcDoc={slot.html}
+                  title={url}
+                />
+                <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
+              </>
             ) : (
               <span className="embed-media-skeleton" aria-label="loading app" />
             )}

@@ -4848,6 +4848,67 @@ select.config-input {
   z-index: 1;
 }
 
+/* B2: quiet corner reload affordance for a live/failed app iframe, and the
+   crashed-strip retry CTA — reuses .act-btn's icon-button idiom (msg-actions)
+   rather than inventing new button chrome. Absolutely positioned against
+   .embed-app-hoist's own position:fixed box (set inline in AppFrameLayer.tsx),
+   so no extra positioning wrapper is needed. */
+.embed-app-reload-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-1) 82%, transparent);
+  color: var(--text-faint);
+  opacity: 0.55;
+  transition:
+    opacity var(--ease) 0.15s,
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.embed-app-reload-btn:hover,
+.embed-app-reload-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-1);
+  color: var(--text);
+}
+.embed-app-reload-btn-labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* B2: crash strip — same failure-chip color/size treatment as
+   .embed-media-rejected, laid out as a centered stack over the whole frame
+   so the retry CTA sits with the message rather than floating in a corner. */
+.embed-app-crashed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  text-align: center;
+  background: var(--bg-2);
+}
+.embed-app-crashed-msg {
+  overflow-wrap: anywhere;
+  max-width: 90%;
+}
+/* B audit follow-up (CP3-B, FIX 2): the beacon's own crash message (capped
+   to 200 chars in AppFrameLayer.tsx), rendered as a second, de-emphasized
+   line under the "app crashed: {url}" chip. */
+.embed-app-crashed-detail {
+  overflow-wrap: anywhere;
+  max-width: 90%;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-faint);
+}
+
 /* ── /goal reserved-token pill (user messages only) ─────────────────
    `/goal` invocations render as a metallic silver-blue pill instead of plain
    text — reuses the shimmer-sweep keyframe (Working… indicator, above) for
