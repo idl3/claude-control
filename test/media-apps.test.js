@@ -64,6 +64,21 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
   fs.mkdirSync(path.join(root, 'apps', 'empty'));
 }
 
+// The server import happens BEFORE any test() registration: under Node 20,
+// a top-level `await` suspends module eval and the runner starts executing
+// already-registered tests — then fires the file-scope after() hook (deleting
+// the fixture root) before eval resumes to register the route tests. Import
+// order, not hook order, is what makes this file version-proof.
+// ── route level (_handler) ───────────────────────────────────────────────
+// Configure env BEFORE importing server.js: token-gated, hermetic media root
+// so the route reads real fixture data instead of the operator's actual
+// ~/.claude-control/media.
+
+process.env.CLAUDE_CONTROL_TOKEN = 'test-token-media-apps';
+process.env.CLAUDE_CONTROL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-data-'));
+process.env.CLAUDE_CONTROL_MEDIA = root;
+const { _handler } = await import('../server.js');
+
 after(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -109,15 +124,6 @@ test('returns null (rejects) for an invalid name — traversal never reaches the
   assert.equal(listVersions(root, '..'), null);
 });
 
-// ── route level (_handler) ───────────────────────────────────────────────
-// Configure env BEFORE importing server.js: token-gated, hermetic media root
-// so the route reads real fixture data instead of the operator's actual
-// ~/.claude-control/media.
-
-process.env.CLAUDE_CONTROL_TOKEN = 'test-token-media-apps';
-process.env.CLAUDE_CONTROL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-data-'));
-process.env.CLAUDE_CONTROL_MEDIA = root;
-const { _handler } = await import('../server.js');
 
 function mockReq(url, headers = {}) {
   return { url, method: 'GET', headers };
