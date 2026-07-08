@@ -74,6 +74,7 @@ describe('clampChromeInsets (B audit follow-up, FIX 1: clamp chrome into the vis
     expect(clampChromeInsets(null)).toEqual({
       cornerTop: 6,
       cornerRight: 6,
+      cornerLeft: 6,
       crashedInset: { top: 0, right: 0, bottom: 0, left: 0 },
     });
   });
@@ -83,13 +84,19 @@ describe('clampChromeInsets (B audit follow-up, FIX 1: clamp chrome into the vis
     expect(clampChromeInsets(clip)).toEqual({
       cornerTop: 46,
       cornerRight: 21,
+      cornerLeft: 6,
       crashedInset: clip,
     });
   });
 
-  it('leaves the corner offset at its CSS default when only bottom/left are clipped', () => {
+  it('leaves the corner offset at its CSS default when only bottom/left are clipped, except cornerLeft (Phase C, C3 pin button)', () => {
     const clip = { top: 0, right: 0, bottom: 30, left: 25 };
-    expect(clampChromeInsets(clip)).toEqual({ cornerTop: 6, cornerRight: 6, crashedInset: clip });
+    expect(clampChromeInsets(clip)).toEqual({
+      cornerTop: 6,
+      cornerRight: 6,
+      cornerLeft: 31,
+      crashedInset: clip,
+    });
   });
 
   it('passes the full clip through as the crashed strip inset unchanged', () => {

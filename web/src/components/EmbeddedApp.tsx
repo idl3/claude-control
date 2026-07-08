@@ -168,3 +168,62 @@ export function AppReloadButton({
     </button>
   );
 }
+
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 21s7-7.58 7-12A7 7 0 1 0 5 9c0 4.42 7 12 7 12Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        fill={filled ? 'currentColor' : 'none'}
+      />
+    </svg>
+  );
+}
+
+/**
+ * Phase C, C3: "pin to panel" affordance — rendered by AppFrameLayer next to
+ * AppReloadButton in every chrome state (healthy iframe corner, failed strip,
+ * crashed strip), same presentation/composition split as AppReloadButton
+ * above: this file owns only the button's look; AppFrameLayer owns the
+ * action, since only it has both `useArtifactPanel()` and the slot's actual
+ * reserved height.
+ *
+ * Deliberately NOT a toggle — clicking always calls `onClick` unconditionally,
+ * which AppFrameLayer wires to `open({ ..., pinned: true })`. Pinning an
+ * already-pinned app is a no-op-that-focuses (openReducer's re-open path
+ * moves it to MRU-front + activates it — see ArtifactContext.tsx's
+ * OpenArtifactInput doc comment), never a click-to-unpin. Unpinning only ever
+ * happens from the panel side (tab close). `pinned` only drives the visual
+ * (filled icon + aria-pressed) so the control still reads as a real toggle to
+ * the user even though the click handler is one-directional.
+ */
+export function AppPinButton({
+  pinned,
+  onClick,
+  quiet = true,
+  style,
+}: {
+  pinned: boolean;
+  onClick: () => void;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-pin-btn${quiet ? '' : ' embed-app-pin-btn-labeled'}${
+        pinned ? ' embed-app-pin-btn-active' : ''
+      }`}
+      aria-label={pinned ? 'Pinned to panel' : 'Pin to panel'}
+      aria-pressed={pinned}
+      onClick={onClick}
+      style={style}
+    >
+      <PinIcon filled={pinned} />
+      {quiet ? null : pinned ? 'Pinned' : 'Pin'}
+    </button>
+  );
+}

@@ -4,7 +4,15 @@ import { authFetch } from '../lib/api';
 import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
-import { AppReloadButton } from './EmbeddedApp';
+import { AppReloadButton, AppPinButton } from './EmbeddedApp';
+
+/** Phase C, C3: title for a freshly-pinned app artifact — last path segment
+ * of its url, falling back to the full url for a bare filename or a
+ * trailing-slash edge case. */
+function basename(url: string): string {
+  const seg = url.split('/').filter(Boolean).pop();
+  return seg && seg.length > 0 ? seg : url;
+}
 
 /**
  * Hoists <embedded-app> iframes out of the transcript row DOM into one
@@ -165,26 +173,33 @@ export function computePaneClip(
 // accounted for.
 const RELOAD_CORNER_OFFSET = 6;
 
-type ChromeClamp = { cornerTop: number; cornerRight: number; crashedInset: ClipInsets };
+type ChromeClamp = {
+  cornerTop: number;
+  cornerRight: number;
+  cornerLeft: number;
+  crashedInset: ClipInsets;
+};
 
 /**
  * FIX 1 (clamp chrome into the visible clip): computePaneClip's clip insets
  * describe how much of the placeholder's edges are clipped away by its
  * scroll pane, but the corner reload button (.embed-app-reload-btn,
- * top:6/right:6) and the crashed strip's CTA (.embed-app-crashed) both
+ * top:6/right:6), the corner pin button (.embed-app-pin-btn, top:6/left:6 —
+ * Phase C, C3), and the crashed strip's CTA (.embed-app-crashed) all
  * position against the FULL, un-clipped placeholder box in the render
- * below — with a partial clip, either can land entirely inside the
+ * below — with a partial clip, any of them can land entirely inside the
  * clipped-away (invisible, non-hit-testable) region. This maps a clip into
  * where each piece of chrome should actually render:
- *  - cornerTop/cornerRight: the reload button's offset from the top-right
- *    corner, pushed inward by however much of the top/right edge is
- *    clipped away. Used for the healthy-iframe and failed-fetch corner
- *    button, both of which sit directly in the un-clipped hoist box.
+ *  - cornerTop/cornerRight/cornerLeft: the reload/pin buttons' offset from
+ *    the top-right/top-left corner respectively, pushed inward by however
+ *    much of the top/right/left edge is clipped away. Used for the
+ *    healthy-iframe and failed-fetch corner buttons, both of which sit
+ *    directly in the un-clipped hoist box.
  *  - crashedInset: the .embed-app-crashed strip's own inset, shrunk from
  *    the default 0 (full box) down to the clip — its flex-centered message
- *    then centers within the VISIBLE slice, and its own reload button
- *    (also top:6/right:6, but now relative to this shrunk box) lands in
- *    the visible corner too, with no separate offset needed.
+ *    then centers within the VISIBLE slice, and its own reload/pin buttons
+ *    (also top:6/right:6 and top:6/left:6, but now relative to this shrunk
+ *    box) land in their visible corners too, with no separate offset needed.
  * Returns the identity result (no adjustment) when there's no clip.
  */
 export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
@@ -192,6 +207,7 @@ export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
   return {
     cornerTop: RELOAD_CORNER_OFFSET + c.top,
     cornerRight: RELOAD_CORNER_OFFSET + c.right,
+    cornerLeft: RELOAD_CORNER_OFFSET + c.left,
     crashedInset: c,
   };
 }
@@ -295,7 +311,24 @@ export function AppFrameLayer() {
   // url — purely presentational (the "active in panel ↗" chip overlay), no
   // grace/eviction semantics of its own; recomputed fresh every tick.
   const shadowsRef = useRef<Map<string, DOMRect>>(new Map());
-  const { setActive } = useArtifactPanel();
+  const { setActive, open, artifacts } = useArtifactPanel();
+
+  // Phase C, C3: pin-to-panel — always an idempotent open({..., pinned:
+  // true}), never a toggle-to-unpin (see AppPinButton's doc comment). `open`
+  // is stable (useCallback in ArtifactPanelProvider); `height` comes from
+  // the hosting slot's own tracked height so the panel reserves the same box
+  // the transcript embed declared.
+  function onPinClick(url: string, height: number) {
+    open({
+      id: appArtifactId(url),
+      kind: 'app',
+      title: basename(url),
+      content: '',
+      appUrl: url,
+      appHeight: height,
+      pinned: true,
+    });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -621,6 +654,10 @@ export function AppFrameLayer() {
         // comment — clamps the corner reload button and the crashed strip
         // into the visible slice of a partially-clipped placeholder.
         const chrome = clampChromeInsets(slot.clip);
+        // Phase C, C3: whether this url is already pinned — drives the pin
+        // button's filled-icon/aria-pressed visual only (see AppPinButton's
+        // doc comment for why the click handler itself never toggles).
+        const pinned = artifacts.some((a) => a.id === appArtifactId(url) && a.pinned);
         return (
           <span
             key={url}
@@ -655,6 +692,7 @@ export function AppFrameLayer() {
                   <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
                 ) : null}
                 <AppReloadButton url={url} quiet={false} />
+                <AppPinButton pinned={pinned} quiet={false} onClick={() => onPinClick(url, slot.height)} />
               </div>
             ) : slot.failed ? (
               <>
@@ -663,6 +701,12 @@ export function AppFrameLayer() {
                   url={url}
                   quiet={false}
                   style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
+                />
+                <AppPinButton
+                  pinned={pinned}
+                  quiet={false}
+                  onClick={() => onPinClick(url, slot.height)}
+                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
                 />
               </>
             ) : slot.html != null ? (
@@ -678,6 +722,11 @@ export function AppFrameLayer() {
                   title={url}
                 />
                 <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
+                <AppPinButton
+                  pinned={pinned}
+                  onClick={() => onPinClick(url, slot.height)}
+                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                />
               </>
             ) : (
               <span className="embed-media-skeleton" aria-label="loading app" />

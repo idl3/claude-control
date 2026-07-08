@@ -22,6 +22,7 @@ import {
 import { MarkdownImg } from '../components/EmbeddedMedia';
 import { EmbeddedApp } from '../components/EmbeddedApp';
 import { AppFrameLayer } from '../components/AppFrameLayer';
+import { ArtifactPanel } from '../components/ArtifactPanel';
 // C2: AppFrameLayer now calls useArtifactPanel() (host-arbitration chip
 // click-through), so every mount below needs a provider ancestor —
 // ArtifactPanelProvider substitutes 1:1 for the Fragment these mounts used
@@ -650,6 +651,89 @@ describe('C2: multi-placeholder host arbitration + panel chip (mounted)', () => 
     // No panel placeholder exists for this url — the second transcript
     // duplicate must NOT claim "active in panel" (that would be a lie).
     expect(screen.queryByText('active in panel ↗')).toBeNull();
+  });
+});
+
+// Phase C, C3: the pin-to-panel affordance rendered by AppFrameLayer next to
+// AppReloadButton. Mounts the real trio a thread mounts — EmbeddedApp
+// (transcript), AppFrameLayer, and ArtifactPanel — so the acceptance bar
+// ("pinning from transcript creates/focuses the app tab; pinning twice
+// focuses (no duplicate); transcript embed stays functional independently")
+// is proven end-to-end through the actual pin button + panel UI, not by
+// calling useArtifactPanel().open() directly.
+describe('C3: pin-to-panel affordance (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // ArtifactPanel calls useIsNarrow() (matchMedia) — not needed by any
+    // other suite in this file since none of them mount ArtifactPanel.
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+  });
+
+  afterEach(() => {
+    cleanup();
+    authFetchMock.mockReset();
+    rectSpy.mockRestore();
+  });
+
+  it('pinning from the transcript creates+focuses a panel tab; pinning again focuses without duplicating; unpinning keeps the transcript embed working with no extra fetch', async () => {
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/pin1.html', height: 320, context: 'transcript' }),
+        createElement(AppFrameLayer),
+        createElement(ArtifactPanel),
+      ),
+    );
+
+    await screen.findByTitle('apps/pin1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+    // No artifact pinned yet — no panel, no tab.
+    expect(screen.queryByRole('tab')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Pin to panel'));
+
+    // A panel tab appears, titled from the url's basename, and is focused.
+    const tab = await screen.findByRole('tab', { name: 'pin1.html' });
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    // Host arbitration hands the iframe to the (now-mounted) panel
+    // placeholder; the transcript placeholder becomes a shadow with the
+    // click-to-focus chip — still exactly one live iframe for the url.
+    expect(await screen.findByText('active in panel ↗')).toBeTruthy();
+    expect(screen.getAllByTitle('apps/pin1.html')).toHaveLength(1);
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // pinning never re-fetches
+    expect(screen.getByLabelText('Pinned to panel')).toBeTruthy(); // button reflects pinned state
+
+    // Pin again — idempotent focus, no duplicate tab, no extra fetch.
+    fireEvent.click(screen.getByLabelText('Pinned to panel'));
+    expect(screen.getAllByRole('tab', { name: 'pin1.html' })).toHaveLength(1);
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Unpin via the panel's own close control — the transcript embed keeps
+    // functioning: host arbitration falls back to it (still the SAME
+    // tracked slot, no new fetch), and the "active in panel" chip goes away.
+    fireEvent.click(screen.getByLabelText('Close pin1.html'));
+    await vi.waitFor(() => {
+      expect(screen.queryByText('active in panel ↗')).toBeNull();
+    });
+    expect(await screen.findByTitle('apps/pin1.html')).toBeTruthy();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Pin to panel')).toBeTruthy(); // back to unpinned state
   });
 });
 
