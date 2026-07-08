@@ -520,8 +520,17 @@ export function Composer({
   // Pre-render strategy: VoiceInline is ALWAYS mounted (the shell is in the DOM
   // while idle). When idle the .voice-inline-body is display:none so it adds
   // zero height to the composer. `voice` = logical/desired state (mic gated).
-  // The VoiceInline receives `active={voice}` — mic is acquired ONLY when true.
+  // The VoiceInline receives `active={voice && voiceMicOn}` — mic is acquired
+  // ONLY once the ENTER morph has finished (see voiceMicOn below).
   const [voice, setVoice] = useState(false);
+  // TRIGGER-LAG FIX: gate mic acquisition on morph completion. getUserMedia +
+  // AudioContext init do real synchronous main-thread work; when they run in
+  // parallel with the ENTER morph (as `active={voice}` did) they starve the
+  // rAF ticker — the GSAP timeline visibly freezes mid-tween, then time-jumps
+  // to its end state when the thread unblocks (measured ~0.8s on a cold mic).
+  // Flipped true by ENTER Phase 2's onComplete (or immediately on the
+  // reduced-motion path); reset by the effect below whenever voice drops.
+  const [voiceMicOn, setVoiceMicOn] = useState(false);
   // Ref for the .composer-card so we can reach into it for animation targets.
   const composerCardRef = useRef<HTMLDivElement>(null);
   // Guard: only one in-flight timeline at a time (avoids enter/exit overlap).
@@ -554,6 +563,12 @@ export function Composer({
     if (askActive) return; // inline prompt has priority
     setVoice(true);
   }, [disabled, askActive]);
+
+  // Mic gate follows voice down: any exit (Cancel, Esc, session switch resetting
+  // voice) immediately de-activates the mic so VoiceInline tears the stream down.
+  useEffect(() => {
+    if (!voice) setVoiceMicOn(false);
+  }, [voice]);
 
   const exitVoice = useCallback(() => {
     // FIX A: Pin the card to its current rendered height BEFORE flipping voice
@@ -614,13 +629,14 @@ export function Composer({
   // ── Timing constants — production tempo. ────────────────────────────────────
   // All durations in seconds; all stagger values are per-element delays.
   // Ratios are preserved from the original slow values so phasing reads the same.
-  // Values are ~45% faster than the previous set (×0.55 scale factor).
+  // Values are ×0.85 of the previous set (15% faster; cumulatively ~0.47 of the
+  // original slow tempo).
   const T = {
-    fade:       0.11,   // per-element fade duration (in or out)
-    height:     0.12,   // card height tween duration (ENTER)
-    btnStagger: 0.02,   // delay between successive button reveals/hides
-    topStagger: 0.017,  // delay between status / wave / hint reveals
-    gap:        0.045,  // pause between Phase 1 completion and Phase 2 start
+    fade:       0.094,  // per-element fade duration (in or out)
+    height:     0.102,  // card height tween duration (ENTER)
+    btnStagger: 0.017,  // delay between successive button reveals/hides
+    topStagger: 0.014,  // delay between status / wave / hint reveals
+    gap:        0.038,  // pause between Phase 1 completion and Phase 2 start
     enterEase:  ANIM.enterEase,
     exitEase:   ANIM.exitEase,
   } as const;
@@ -672,10 +688,12 @@ export function Composer({
       const toolbar     = card.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
       const inputWrap   = card.querySelector<HTMLElement>('.composer-input-wrap');
 
-      // Reduced-motion: instant swap — no tweens.
+      // Reduced-motion: instant swap — no tweens. Mic can start right away
+      // (there is no timeline to starve).
       if (prefersReducedMotion()) {
         if (voiceBody) voiceBody.style.display = 'flex';
         if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+        setVoiceMicOn(true);
         return;
       }
 
@@ -759,10 +777,13 @@ export function Composer({
         ? Array.from(toolbar.querySelectorAll<HTMLElement>('button, label, [role="button"]'))
         : [];
 
-      // ── Phase 2 builder: reveal voice elements ───────────────────────────────
+      // ── Phase 2 builder: reveal voice action buttons ─────────────────────────
       // Called from Phase 1b's onComplete after the T.gap settle delay so that
       // overflow:hidden is fully cleared and height is auto before any button
-      // tries to render outside the previous clipped bounds.
+      // tries to render outside the previous clipped bounds. The top group
+      // (status/wave/hint) is NOT revealed here — it comes in DURING the Phase
+      // 1b height tween (see runPhase1b) so the transcriber appears the moment
+      // the card starts morphing instead of after the full settle chain.
       //
       // PAUSE-ORDER FIX: re-query voice buttons fresh at Phase 2 run-time (not
       // at closure-capture time) so that a Pause button that mounted late
@@ -792,29 +813,17 @@ export function Composer({
             // Signal that Phase 2 has fully completed — VoiceInline's Pause
             // mount guard reads this to decide whether to self-animate.
             phase2DoneRef.current = true;
+            // Morph is fully settled — NOW start the mic. getUserMedia /
+            // AudioContext init block the main thread; running them here (not
+            // at tap time) keeps the enter timeline stall-free.
+            setVoiceMicOn(true);
           },
         });
 
-        // Reveal top group (status → wave → hint) first, with stagger.
-        if (topTargets.length) {
-          phase2.to(
-            topTargets,
-            {
-              opacity: 1, y: 0,
-              duration: T.fade, ease: T.enterEase,
-              stagger: T.topStagger,
-            },
-            0,
-          );
-        }
-
-        // Then reveal each voice button in explicit order Cancel → Stop → Pause.
-        // Targets individual buttons, NOT the container — avoids clip.
+        // Reveal each voice button in explicit order Cancel → Stop → Pause.
+        // Targets individual buttons, NOT the container — avoids clip. (The top
+        // group is already in from Phase 1b, so buttons start immediately.)
         if (orderedVoiceBtns.length) {
-          const topDuration = topTargets.length
-            ? T.fade + T.topStagger * (topTargets.length - 1)
-            : 0;
-          const btnsStart = topTargets.length ? topDuration * 0.5 : 0;
           phase2.to(
             orderedVoiceBtns,
             {
@@ -822,37 +831,49 @@ export function Composer({
               duration: T.fade, ease: T.enterEase,
               stagger: T.btnStagger,
             },
-            btnsStart,
+            0,
           );
         } else if (voiceToolbar) {
           phase2.to(
             voiceToolbar,
             { opacity: 1, y: 0, duration: T.fade, ease: T.enterEase },
-            topTargets.length ? T.topStagger * topTargets.length : 0,
+            0,
           );
         }
 
         voiceAnimRef.current = phase2;
       };
 
-      // ── Phase 1b: height collapse ────────────────────────────────────────────
+      // ── Phase 1b: height morph + top-group reveal ────────────────────────────
       // Called when 1a (buttons/input out) is complete. At this point there is no
       // visible content that could be clipped, so it is safe to apply
-      // overflow:hidden and tween the card height down to the voice-only size.
+      // overflow:hidden and tween the card height to the voice-only size.
+      //
+      // TRIGGER-LAG FIX: the transcriber top group (status / wave / hint) is
+      // revealed HERE, in parallel with the height tween — not in Phase 2. It
+      // sits at the TOP of the card so the morphing bottom edge can never clip
+      // it, and inputWrap is taken out of flow at 1b start (it is already fully
+      // invisible after 1a) so the top group renders at its final layout
+      // position from the first frame — no post-settle jump. Only the bottom
+      // action buttons still wait for the T.gap settle (Phase 2): they are the
+      // ones that would clip against the tweening bottom edge.
       const runPhase1b = () => {
-        // All composer content is now invisible — lock overflow for the height tween.
+        // All composer content is now invisible — take the input out of flow so
+        // the in-flow layout matches the measured heightTo, and lock overflow
+        // for the height tween. (toolbar keeps its flow slot, as before — only
+        // its already-invisible children were animated.)
+        if (inputWrap) gsap.set(inputWrap, { display: 'none' });
+        if (toolbar)   gsap.set(toolbar,   { clearProps: 'opacity,y' });
         card.style.overflow = 'hidden';
         void card.offsetHeight; // force reflow so the new overflow takes effect
 
         const phase1b = gsap.timeline({
           onComplete: () => {
-            // Frame has settled — restore card to auto height, clear overflow lock
-            // (MUST happen before Phase 2 so buttons aren't clipped), then take
-            // inputWrap/toolbar out of flow. After T.gap, fire Phase 2.
+            // Frame has settled — restore card to auto height, clear overflow
+            // lock (MUST happen before Phase 2 so buttons aren't clipped).
+            // After T.gap, fire Phase 2 (action-button reveal).
             card.style.height   = '';
             card.style.overflow = '';
-            if (inputWrap) gsap.set(inputWrap, { display: 'none' });
-            if (toolbar)   gsap.set(toolbar,   { clearProps: 'opacity,y' });
             gsap.delayedCall(T.gap, runPhase2Enter);
           },
         });
@@ -862,6 +883,20 @@ export function Composer({
           { height: heightTo, duration: T.height, ease: T.exitEase },
           0,
         );
+
+        // Top group in DURING the morph — this is the moment the transcriber
+        // visibly "arrives"; previously it waited for height + gap to settle.
+        if (topTargets.length) {
+          phase1b.to(
+            topTargets,
+            {
+              opacity: 1, y: 0,
+              duration: T.fade, ease: T.enterEase,
+              stagger: T.topStagger,
+            },
+            0,
+          );
+        }
 
         voiceAnimRef.current = phase1b;
       };
@@ -1829,10 +1864,11 @@ export function Composer({
             enter animation runs — the layout effect pre-hides targets before
             paint and the animation REVEALS existing nodes (no mount-flash).
             The shell is display:none when idle (zero height, zero layout impact).
-            `active={voice}` gates mic acquisition — mic is never grabbed while
-            the shell is pre-rendered-idle. */}
+            `active={voice && voiceMicOn}` gates mic acquisition — never while
+            pre-rendered-idle, and only AFTER the enter morph settles (mic init
+            blocks the main thread and would freeze the timeline mid-tween). */}
         <VoiceInline
-          active={voice}
+          active={voice && voiceMicOn}
           bodyRef={voiceBodyRef}
           onCommit={commitVoice}
           onClose={exitVoice}
@@ -2345,7 +2381,7 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRe
       { opacity: 0, y: 8 },
       {
         opacity: 1, y: 0,
-        duration: 0.11,    // matches T.fade in the parent morph driver
+        duration: 0.094,   // matches T.fade in the parent morph driver
         ease: ANIM.enterEase,
       },
     );
