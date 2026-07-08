@@ -181,3 +181,14 @@ test('a raw ".." name segment does not even match the route (falls through to 40
   _handler(mockReq('/api/media-apps/../versions', AUTH), res);
   assert.notEqual(res._code, 200);
 });
+
+test('a poisoned latest pointer is surfaced as null, never raw', () => {
+  const dir = path.join(root, 'apps', 'evil');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '2026-07-08T00-00-00Z.html'), '<!doctype html>ok');
+  fs.writeFileSync(path.join(dir, 'latest'), '../../../etc/passwd');
+  const listing = listVersions(root, 'evil');
+  assert.equal(listing.latest, null);
+  assert.equal(listing.versions.length, 1);
+  assert.equal(listing.versions[0].latest, false);
+});
