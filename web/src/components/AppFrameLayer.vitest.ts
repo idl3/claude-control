@@ -3,13 +3,30 @@
 // jsdom is needed only for the mounted rAF-gating test at the bottom — the
 // computePaneClip/shouldKeepPolling suites above it are pure, DOM-free
 // functions and would pass equally under the bare 'node' environment.
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement } from 'react';
-import { render, cleanup } from '@testing-library/react';
-import { AppFrameLayer, computePaneClip, clampChromeInsets, shouldKeepPolling, type RectLike } from './AppFrameLayer';
+import { render, cleanup, screen, act, waitFor } from '@testing-library/react';
+import {
+  AppFrameLayer,
+  computePaneClip,
+  clampChromeInsets,
+  shouldKeepPolling,
+  shouldReloadOnFrame,
+  type RectLike,
+} from './AppFrameLayer';
 // C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
 // rAF-gating test below needs a provider ancestor.
 import { ArtifactPanelProvider } from './ArtifactContext';
+import { EmbeddedApp } from './EmbeddedApp';
+
+// D2: mounted tests below drive real fetches through AppFrameLayer's
+// fetchHtml -> authFetch — mock it out the same way ArtifactPanel.vitest.ts
+// does, rather than letting jsdom attempt a real network fetch.
+const authFetchMock = vi.fn();
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>();
+  return { ...actual, authFetch: (...args: Parameters<typeof actual.authFetch>) => authFetchMock(...args) };
+});
 
 afterEach(cleanup);
 
@@ -142,5 +159,142 @@ describe('AppFrameLayer rAF gating (A3 audit follow-up, FIX 3, mounted)', () => 
     expect(rafCalls).toBe(0);
 
     rafSpy.mockRestore();
+  });
+});
+
+describe('shouldReloadOnFrame (D2: track-latest hot reload gate, pure)', () => {
+  const panelSlot = { context: 'panel' as const, trackLatest: true, lastMtime: null as number | null };
+  const frame = { path: 'apps/widget.html', mtime: 100 };
+
+  it('reloads a panel, track-latest slot on a matching, newer frame', () => {
+    expect(shouldReloadOnFrame(panelSlot, 'apps/widget.html', frame)).toBe(true);
+  });
+
+  it('DESIGN RULE: never reloads a transcript-context slot, regardless of trackLatest — a transcript is a reading surface, a manual reload button exists there instead', () => {
+    expect(shouldReloadOnFrame({ ...panelSlot, context: 'transcript' }, 'apps/widget.html', frame)).toBe(false);
+  });
+
+  it('never reloads a pin-version slot (trackLatest: false) even in panel context (D4)', () => {
+    expect(shouldReloadOnFrame({ ...panelSlot, trackLatest: false }, 'apps/widget.html', frame)).toBe(false);
+  });
+
+  it('ignores a frame for a different url (slotFramePath mismatch)', () => {
+    expect(shouldReloadOnFrame(panelSlot, 'apps/other.html', frame)).toBe(false);
+  });
+
+  it('ignores a frame when this slot url does not resolve to a media-root fetch path', () => {
+    expect(shouldReloadOnFrame(panelSlot, null, frame)).toBe(false);
+  });
+
+  it('ignores a duplicate/stale frame whose mtime is not newer than the slot\'s last applied mtime', () => {
+    expect(shouldReloadOnFrame({ ...panelSlot, lastMtime: 100 }, 'apps/widget.html', frame)).toBe(false);
+    expect(shouldReloadOnFrame({ ...panelSlot, lastMtime: 150 }, 'apps/widget.html', frame)).toBe(false);
+  });
+
+  it('accepts a frame strictly newer than the slot\'s last applied mtime', () => {
+    expect(shouldReloadOnFrame({ ...panelSlot, lastMtime: 50 }, 'apps/widget.html', frame)).toBe(true);
+  });
+
+  it('accepts the first-ever frame (lastMtime still null)', () => {
+    expect(shouldReloadOnFrame({ ...panelSlot, lastMtime: null }, 'apps/widget.html', frame)).toBe(true);
+  });
+});
+
+describe('D2: track-latest hot reload — cockpit:media-app-changed (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    // jsdom implements no layout — see the identical stub in
+    // ArtifactPanel.vitest.ts for the full rationale.
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function mountApp(context: 'panel' | 'transcript' | undefined, url: string, trackLatest?: boolean) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320, context, trackLatest }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  function dispatchFrame(path: string, mtime: number) {
+    return act(async () => {
+      window.dispatchEvent(new CustomEvent('cockpit:media-app-changed', { detail: { path, mtime } }));
+    });
+  }
+
+  it('a panel-context, track-latest slot reloads when a matching frame arrives', async () => {
+    mountApp('panel', 'apps/widget.html');
+    await screen.findByTitle('apps/widget.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await dispatchFrame('apps/widget.html', 111);
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('a transcript-context slot (the default host) never reloads on a matching frame', async () => {
+    mountApp(undefined, 'apps/widget2.html');
+    await screen.findByTitle('apps/widget2.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await dispatchFrame('apps/widget2.html', 111);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a panel-context slot with trackLatest=false (D4 pin-version) never reloads from a frame', async () => {
+    mountApp('panel', 'apps/widget3.html', false);
+    await screen.findByTitle('apps/widget3.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await dispatchFrame('apps/widget3.html', 111);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a duplicate/stale frame (mtime not newer than the last applied) does not reload again', async () => {
+    mountApp('panel', 'apps/widget4.html');
+    await screen.findByTitle('apps/widget4.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await dispatchFrame('apps/widget4.html', 200);
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2));
+
+    await dispatchFrame('apps/widget4.html', 200);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('an unrelated frame (different path) never reloads a slot it does not match', async () => {
+    mountApp('panel', 'apps/widget5.html');
+    await screen.findByTitle('apps/widget5.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await dispatchFrame('apps/other.html', 111);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
   });
 });

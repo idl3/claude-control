@@ -21,6 +21,7 @@ import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
+import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
@@ -33,6 +34,7 @@ import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js'
 import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
+import { isValidAppName, listVersions } from './lib/media-apps.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -581,6 +583,18 @@ const _handler = (req, res) => {
     return handleServeMedia(res, u);
   }
 
+  // GET /api/media-apps/<name>/versions — D3: list a media micro-app's
+  // filesystem versions (see lib/media-apps.js for the apps/<name>/
+  // <stamp>.html + latest-pointer convention this reads). Same bearer auth as
+  // the rest of /api; <name> is re-validated against the strict
+  // [a-z0-9-]+ rule inside handleMediaAppVersions before it ever reaches the
+  // filesystem, same defense-in-depth posture as handleServeUpload's basename.
+  const mediaAppVersionsMatch = MEDIA_APP_VERSIONS_RE.exec(u.pathname);
+  if (mediaAppVersionsMatch) {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleMediaAppVersions(res, mediaAppVersionsMatch[1]);
+  }
+
   // PWA home-screen icon. GET is token-FREE: the OS fetches manifest icons and
   // the apple-touch-icon with no Authorization header, so this surface must be
   // open (it only ever returns an image). POST/DELETE (replace/reset the custom
@@ -777,6 +791,29 @@ function handleServeMedia(res, u) {
     res.writeHead(200, headers);
     fs.createReadStream(full).pipe(res);
   });
+}
+
+// D3: matches GET /api/media-apps/<name>/versions — <name> is captured
+// URL-encoded (as-is off the URL) and decoded/validated inside the handler,
+// same split as handleServeUpload's rawSegment/basename.
+const MEDIA_APP_VERSIONS_RE = /^\/api\/media-apps\/([^/]+)\/versions$/;
+
+// GET /api/media-apps/<name>/versions — see lib/media-apps.js's listVersions
+// doc comment for the layout this reads. Deliberately returns 200 with an
+// empty `versions: []` for a syntactically-valid but unknown/flat-only app
+// name (same uniform-response, no-existence-leak posture as the rest of the
+// media surface) — 400 is reserved for a name that fails isValidAppName
+// outright, since that's a client-input error, not an existence question.
+function handleMediaAppVersions(res, rawName) {
+  let name;
+  try {
+    name = decodeURIComponent(rawName);
+  } catch {
+    return endJson(res, 400, { error: 'invalid name' });
+  }
+  if (!isValidAppName(name)) return endJson(res, 400, { error: 'invalid name' });
+  const listing = listVersions(CONFIG.mediaDir, name);
+  return endJson(res, 200, listing || { name, versions: [], latest: null });
 }
 
 // Read a small JSON request body with a hard size cap (control payloads are
@@ -3009,6 +3046,20 @@ async function main() {
   // Media root for transcript inline embeds — must exist so control-session
   // agents can drop screenshots/videos into it (README "Inline media").
   try { fs.mkdirSync(CONFIG.mediaDir, { recursive: true }); } catch { /* served as 404s */ }
+
+  // D2/D3: watch the media apps subdir so a rebuilt micro-app (producer
+  // rewrites apps/<name>.html, or drops a new apps/<name>/<version>.html) can
+  // push a live WS frame to track-latest panel tabs instead of requiring a
+  // manual reload. See lib/media-watch.js for the rename-tolerant watch+poll
+  // design and docs/plans/cockpit-pinned-artifacts/phase-d-tasks.md, D1.
+  const mediaAppsWatcher = new MediaAppWatcher(path.join(CONFIG.mediaDir, 'apps'));
+  mediaAppsWatcher.on('change', ({ path: relPath, mtime }) => {
+    broadcast({ type: 'media-app-changed', path: relPath, mtime });
+  });
+  mediaAppsWatcher.on('error', (err) => {
+    console.error('[media-app-watch]', err?.message || err);
+  });
+  mediaAppsWatcher.start();
 
   // Daily attachment cleanup: sweep at startup, then every 24h.
   runUploadSweep();

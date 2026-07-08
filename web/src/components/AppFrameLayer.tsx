@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { authFetch } from '../lib/api';
 import { isValidAppErrorBeacon } from '../lib/appBeacon';
-import { resolveMediaUrl } from '../lib/mediaUrl';
+import { mediaAppFramePath, resolveMediaUrl } from '../lib/mediaUrl';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
 import { AppReloadButton, AppPinButton } from './EmbeddedApp';
 
@@ -236,6 +236,33 @@ export function shouldKeepPolling(slotCount: number, presentPlaceholderCount: nu
   return slotCount > 0 || presentPlaceholderCount > 0;
 }
 
+// ── D2 pure helper ──────────────────────────────────────────────────────
+/**
+ * D2 (track-latest hot reload): pure gate deciding whether an incoming
+ * `media-app-changed` WS frame should trigger reload() for one tracked slot.
+ *
+ * DESIGN RULE (authoritative): auto-reload applies ONLY when the slot's
+ * current winning host (see pickHost) is panel-context. A transcript embed
+ * is a reading surface — the agent's own turn narrated against a specific
+ * build — so a live rebuild silently swapping its content out from under a
+ * user mid-read would be surprising; a manual reload button already exists
+ * there (AppReloadButton) for that. Panel tabs are where "give me the live
+ * app" lives, so a track-latest panel slot hot-reloads; a track-latest
+ * transcript-only slot does not, and a D4 pin-version slot (`trackLatest:
+ * false`) never reloads from a frame regardless of context.
+ */
+export function shouldReloadOnFrame(
+  slot: { context: 'panel' | 'transcript'; trackLatest: boolean; lastMtime: number | null },
+  slotFramePath: string | null,
+  frame: { path: string; mtime: number },
+): boolean {
+  if (slot.context !== 'panel') return false;
+  if (!slot.trackLatest) return false;
+  if (slotFramePath == null || slotFramePath !== frame.path) return false;
+  if (slot.lastMtime != null && frame.mtime <= slot.lastMtime) return false;
+  return true;
+}
+
 type Slot = {
   height: number;
   rect: DOMRect | null;
@@ -265,6 +292,17 @@ type Slot = {
   // mutating srcDoc on the existing one.
   iframeKey: number;
   lastSeen: number;
+  // D2: the winning host's context this tick (see pickHost) — the input to
+  // shouldReloadOnFrame's panel-only gate. Kept on the slot (not derived at
+  // frame-handling time) because by the time a frame arrives, tick() may not
+  // have run again since the last host change.
+  context: 'panel' | 'transcript';
+  // D2/D4: whether this slot should hot-reload on a matching frame. Mirrors
+  // the winning host's data-embed-app-track-latest (default true).
+  trackLatest: boolean;
+  // D2: mtime of the last frame (or explicit reload) applied to this slot —
+  // guards against reloading again for a stale/duplicate/out-of-order frame.
+  lastMtime: number | null;
 };
 
 type SlotEl = {
@@ -273,6 +311,7 @@ type SlotEl = {
   el: HTMLElement;
   context: 'panel' | 'transcript';
   explicitlyHidden: boolean;
+  trackLatest: boolean;
 };
 
 function readSlotEls(): SlotEl[] {
@@ -283,7 +322,15 @@ function readSlotEls(): SlotEl[] {
     const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
     const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
     const explicitlyHidden = el.dataset.embedAppHidden === 'true';
-    out.push({ url, height: Number.isFinite(height) ? height : 360, el, context, explicitlyHidden });
+    const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
+    out.push({
+      url,
+      height: Number.isFinite(height) ? height : 360,
+      el,
+      context,
+      explicitlyHidden,
+      trackLatest,
+    });
   });
   return out;
 }
@@ -370,11 +417,15 @@ export function AppFrameLayer() {
     // current srcdoc/window/failed/crashed state, and bump iframeKey so the
     // render below mounts a genuinely new <iframe>. The intermediate render
     // (html: null) unmounts the current iframe first, so the remount happens
-    // regardless of how fast the re-fetch resolves. Never called from tick()
-    // — only from the cockpit:app-reload listener below, which only ever
-    // fires from an explicit AppReloadButton click. That's what keeps this
-    // exempt from, rather than a violation of, the never-reload seam.
-    function reload(url: string) {
+    // regardless of how fast the re-fetch resolves. Called from the
+    // cockpit:app-reload listener (explicit AppReloadButton click, no
+    // mtime) and — D2 — from the cockpit:media-app-changed listener below
+    // (frame-triggered, passes the frame's mtime so slot.lastMtime tracks
+    // it and a stale/duplicate frame doesn't reload again). That's what
+    // keeps this exempt from, rather than a violation of, the never-reload
+    // seam: every call here traces back to an explicit user action or an
+    // explicit track-latest opt-in gated by shouldReloadOnFrame.
+    function reload(url: string, mtime?: number) {
       const slot = slotsRef.current.get(url);
       if (!slot) return;
       slot.crashed = false;
@@ -383,6 +434,7 @@ export function AppFrameLayer() {
       slot.html = null;
       slot.win = null;
       slot.iframeKey += 1;
+      if (mtime != null) slot.lastMtime = mtime;
       forceRender((n) => n + 1);
       fetchHtml(url);
     }
@@ -487,6 +539,9 @@ export function AppFrameLayer() {
             win: null,
             iframeKey: 0,
             lastSeen: now,
+            context: host.context,
+            trackLatest: host.trackLatest,
+            lastMtime: null,
           };
           slotsRef.current.set(url, slot);
           fetchHtml(url);
@@ -508,6 +563,11 @@ export function AppFrameLayer() {
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
+          // D2: the winning host can change context/trackLatest tick-to-tick
+          // (e.g. a panel pin/unpin, or D4 flipping a tab's mode) — no re-
+          // render needed for this alone, it only feeds shouldReloadOnFrame.
+          slot.context = host.context;
+          slot.trackLatest = host.trackLatest;
         }
       }
 
@@ -593,6 +653,25 @@ export function AppFrameLayer() {
     }
     window.addEventListener('cockpit:app-reload', onAppReload);
 
+    // D2: track-latest hot reload. useCockpit.ts relays the server's
+    // 'media-app-changed' WS frame as this CustomEvent (same decoupling
+    // idiom as cockpit:ack/cockpit:app-reload). Every tracked slot whose url
+    // resolves to the frame's path gets shouldReloadOnFrame's panel-only,
+    // track-latest-only gate applied — see that function's doc comment for
+    // the authoritative design rule (transcript embeds never auto-reload).
+    function onMediaAppChanged(ev: Event) {
+      const frame = (ev as CustomEvent<{ path?: string; mtime?: number }>).detail;
+      if (!frame || typeof frame.path !== 'string' || typeof frame.mtime !== 'number') return;
+      const framePayload = { path: frame.path, mtime: frame.mtime };
+      for (const [url, slot] of slotsRef.current) {
+        const slotFramePath = mediaAppFramePath(url);
+        if (shouldReloadOnFrame(slot, slotFramePath, framePayload)) {
+          reload(url, frame.mtime);
+        }
+      }
+    }
+    window.addEventListener('cockpit:media-app-changed', onMediaAppChanged);
+
     // B2: crash beacon. Checks every tracked slot's captured contentWindow
     // against event.source — see isValidAppErrorBeacon's doc comment for why
     // event.origin (always 'null' here) is never consulted.
@@ -627,6 +706,7 @@ export function AppFrameLayer() {
       alive = false;
       observer.disconnect();
       window.removeEventListener('cockpit:app-reload', onAppReload);
+      window.removeEventListener('cockpit:media-app-changed', onMediaAppChanged);
       window.removeEventListener('message', onMessage);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };

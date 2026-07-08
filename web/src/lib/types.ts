@@ -252,7 +252,14 @@ export type ServerMessage =
   // permission / trust / plan / custom menu) appearing or disappearing on
   // the Claude pane's visible screen.  open:true = picker is ON SCREEN right now.
   | { type: 'picker'; id: string; open: boolean }
-  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string };
+  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string }
+  // D2: pushed whenever lib/media-watch.js's MediaAppWatcher observes a
+  // settled write under the media apps/ dir (a rebuilt/versioned micro-app).
+  // `path` is media-root-relative ("apps/<name>.html" or
+  // "apps/<name>/<version>.html"); `mtime` is the file's mtimeMs. Consumed by
+  // AppFrameLayer via the 'cockpit:media-app-changed' CustomEvent (see
+  // useCockpit.ts) to hot-reload track-latest panel app tabs.
+  | { type: 'media-app-changed'; path: string; mtime: number };
 
 // Client -> server WebSocket frames.
 export type ClientMessage =
