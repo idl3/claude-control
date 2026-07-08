@@ -392,7 +392,13 @@ export function AppFrameLayer() {
         return;
       }
       fetchingRef.current.add(url);
-      authFetch(resolution.fetchUrl)
+      // cache: 'reload' — the media route serves cache-control: max-age=3600
+      // with no validators, so a same-URL re-fetch (reload button, D2 hot
+      // reload of the flat alias) would happily return the browser's stale
+      // copy for an hour. App HTML must always reflect the artifact on disk;
+      // proven live by the capstone webwright run (rebuild -> reload served
+      // old bytes). Images/videos keep normal caching — this is app-only.
+      authFetch(resolution.fetchUrl, { cache: 'reload' })
         .then((res) => {
           if (!res.ok) throw new Error(`app fetch failed: ${res.status}`);
           return res.text();
