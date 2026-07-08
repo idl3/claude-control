@@ -20,7 +20,8 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 | todo | (none — phase D complete) |
 | done | D1, D2, D3, D4, D5 |
 
-<!-- CP0 log: emitted by /100x:commit-plan 2026-07-08 -->
+<!-- CP0 log: emitted by /100x:commit-plan 2026-07-08 CP3-D: verdict (a) — no gating findings; MEDIUM latest-pointer API validation + LOW O(changed) poll sweep landed post-audit (see next commit); server tests 926/926.
+-->
 
 <!-- CP0 log -->
 ### D1 — done (sha 4f10001)
