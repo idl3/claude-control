@@ -26,7 +26,7 @@ export interface Artifact {
   /**
    * Phase C: pinned artifacts are exempt from LRU eviction (see capUnpinnedOverflow
    * below) — the cap governs the unpinned subset only. `close()` still removes a
-   * pinned artifact outright; pin only protects against the *automatic* LRU cap.
+   * pinned artifact outright; pinned only protects against the *automatic* LRU cap.
    */
   pinned: boolean;
 }
@@ -77,8 +77,6 @@ export interface ArtifactPanelValue {
   open: (a: OpenArtifactInput) => void;
   setActive: (id: string) => void;
   close: (id: string) => void;
-  pin: (id: string) => void;
-  unpin: (id: string) => void;
 }
 
 const ArtifactPanelContext = createContext<ArtifactPanelValue | null>(null);
@@ -101,8 +99,9 @@ interface PanelState {
  * of everything kept — pinned artifacts are never dropped by this pass,
  * regardless of how many there are or where they sit in the list. `list`
  * must already be MRU-ordered (most-recently-opened/touched first); this is
- * re-run after every open/pin/unpin so the invariant holds at every state
- * transition, not just "eventually, on the next open."
+ * re-run after every open() call (including pin-flag changes on re-open) so
+ * the invariant holds at every state transition, not just "eventually, on
+ * the next open."
  */
 function capUnpinnedOverflow(list: Artifact[]): Artifact[] {
   let unpinnedKept = 0;
@@ -139,18 +138,6 @@ function openReducer(state: PanelState, a: OpenArtifactInput): PanelState {
   const created: Artifact = { ...a, pinned: a.pinned ?? false };
   const next = [created, ...state.artifacts];
   return { artifacts: capUnpinnedOverflow(next), activeId: a.id };
-}
-
-/** Sets (or clears) `pinned` on one artifact by id; re-applies the unpinned
- * LRU cap immediately afterward so the "cap governs unpinned only" invariant
- * never has a stale window — unpinning an artifact that pushes the unpinned
- * subset back over LRU_CAP evicts the least-recently-used unpinned one right
- * away, not just on the next open(). No-op if `id` isn't currently open. */
-function setPinnedReducer(state: PanelState, id: string, pinned: boolean): PanelState {
-  const idx = state.artifacts.findIndex((x) => x.id === id);
-  if (idx < 0 || state.artifacts[idx].pinned === pinned) return state;
-  const next = state.artifacts.map((a, i) => (i === idx ? { ...a, pinned } : a));
-  return { ...state, artifacts: capUnpinnedOverflow(next) };
 }
 
 function closeReducer(state: PanelState, id: string): PanelState {
@@ -196,14 +183,6 @@ export function ArtifactPanelProvider({ children }: ArtifactPanelProviderProps) 
     setState((prev) => closeReducer(prev, id));
   }, []);
 
-  const pin = useCallback((id: string) => {
-    setState((prev) => setPinnedReducer(prev, id, true));
-  }, []);
-
-  const unpin = useCallback((id: string) => {
-    setState((prev) => setPinnedReducer(prev, id, false));
-  }, []);
-
   const value = useMemo<ArtifactPanelValue>(
     () => ({
       artifacts: state.artifacts,
@@ -211,10 +190,8 @@ export function ArtifactPanelProvider({ children }: ArtifactPanelProviderProps) 
       open,
       setActive,
       close,
-      pin,
-      unpin,
     }),
-    [state, open, setActive, close, pin, unpin],
+    [state, open, setActive, close],
   );
 
   return (

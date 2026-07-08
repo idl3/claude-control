@@ -248,6 +248,7 @@ interface ArtifactAppStackProps {
   appArtifacts: Artifact[];
   activeId: string | null;
   liveAppIds: Set<string>;
+  everLiveIds: Set<string>;
   onWake: (id: string) => void;
 }
 
@@ -258,7 +259,7 @@ interface ArtifactAppStackProps {
  * tab switches never tear a placeholder down (that would reload the iframe).
  * A no-op (renders nothing) when there are no open app artifacts.
  */
-function ArtifactAppStack({ appArtifacts, activeId, liveAppIds, onWake }: ArtifactAppStackProps) {
+function ArtifactAppStack({ appArtifacts, activeId, liveAppIds, everLiveIds, onWake }: ArtifactAppStackProps) {
   if (appArtifacts.length === 0) return null;
   return (
     <div className="artifact-app-stack">
@@ -275,7 +276,10 @@ function ArtifactAppStack({ appArtifacts, activeId, liveAppIds, onWake }: Artifa
               />
             ) : (
               <button type="button" className="artifact-app-suspended" onClick={() => onWake(a.id)}>
-                suspended — tap to wake
+                {/* CP3-C FIX 2: distinguish "was live, state discarded on cap
+                    demotion" from "never loaded" — honest about whether
+                    waking re-fetches fresh vs. re-fetches lost state. */}
+                {everLiveIds.has(a.id) ? 'suspended — tap to reload' : 'tap to open'}
               </button>
             )}
           </div>
@@ -317,6 +321,27 @@ export function ArtifactPanel() {
     () => selectLiveAppIds(appArtifacts.map((a) => a.id), wokenIds),
     [appArtifacts, wokenIds],
   );
+  // CP3-C FIX 2: accumulate every app id that has EVER been live, so a
+  // cap-demoted-then-suspended app can tell the user their state was
+  // discarded ("tap to reload") rather than lying that it's a fresh,
+  // never-opened app ("tap to open"). Accumulate-only (mirrors wokenIds'
+  // pattern) but keyed off the computed `liveAppIds`, not a user click —
+  // needs its own effect since it must react to demotion/promotion, not
+  // just onWake.
+  const [everLiveIds, setEverLiveIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setEverLiveIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of liveAppIds) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [liveAppIds]);
 
   // Reset sheet height to peek when a new artifact opens.
   useEffect(() => {
@@ -492,6 +517,7 @@ export function ArtifactPanel() {
               appArtifacts={appArtifacts}
               activeId={activeId}
               liveAppIds={liveAppIds}
+              everLiveIds={everLiveIds}
               onWake={onWakeApp}
             />
             {activeArtifact.kind === 'app' ? null : activeArtifact.kind === 'skill' ? (
@@ -593,6 +619,7 @@ export function ArtifactPanel() {
             appArtifacts={appArtifacts}
             activeId={activeId}
             liveAppIds={liveAppIds}
+            everLiveIds={everLiveIds}
             onWake={onWakeApp}
           />
           {activeArtifact.kind !== 'app' && (

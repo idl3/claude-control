@@ -117,7 +117,7 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
     return () => api;
   }
 
-  it('3 pinned apps: tab switches + reorder-via-reopen + pin/unpin cause zero additional fetches', async () => {
+  it('3 pinned apps: tab switches + reorder-via-reopen cause zero additional fetches', async () => {
     const getApi = mount();
 
     await act(async () => {
@@ -147,13 +147,6 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
     });
     expect(authFetchMock).toHaveBeenCalledTimes(3);
 
-    // Pin/unpin roundtrip.
-    await act(async () => {
-      getApi().unpin('app1');
-      getApi().pin('app1');
-    });
-    expect(authFetchMock).toHaveBeenCalledTimes(3);
-
     // All three iframes are still present (always-mounted, never evicted).
     expect(screen.getByTitle('apps/app1.html')).toBeTruthy();
     expect(screen.getByTitle('apps/app2.html')).toBeTruthy();
@@ -177,7 +170,11 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
       fireEvent.click(screen.getByRole('tab', { name: 'app1' }));
     });
     expect(authFetchMock).toHaveBeenCalledTimes(6);
-    const wakeBtn = screen.getByRole('button', { name: 'suspended — tap to wake' });
+    // app1 was part of the SAME batched act() as the other 6 opens (React 18
+    // collapses same-tick setState calls into one commit), so it never had
+    // an interim live render — this is the genuine "never loaded" case, not
+    // a demote-from-live case (see the dedicated test below for that one).
+    const wakeBtn = screen.getByRole('button', { name: 'tap to open' });
     expect(wakeBtn).toBeTruthy();
 
     // Tapping the suspended chip wakes it — a user-initiated fetch is allowed.
@@ -186,6 +183,55 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
     });
     await screen.findByTitle('apps/app1.html');
     expect(authFetchMock).toHaveBeenCalledTimes(7);
+  });
+
+  it('a demoted-from-live app shows "tap to reload" (not "tap to open") and wakes with exactly one re-fetch', async () => {
+    const getApi = mount();
+
+    // Pin app1 ALONE first, in its own act(), so it gets a genuine interim
+    // live render (React 18 batches same-tick opens into one commit — see
+    // the "beyond the 6-live cap" test above, where app1 is opened together
+    // with 6 others in a single batch and therefore NEVER goes live at all;
+    // this test's separate act() calls are what make app1's live history real).
+    await act(async () => {
+      getApi().open(appInput('app1'));
+    });
+    await screen.findByTitle('apps/app1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Pin 6 more, pushing app1 (now the least-recently-opened) past the cap.
+    await act(async () => {
+      for (let i = 2; i <= 7; i++) getApi().open(appInput(`app${i}`));
+    });
+    await screen.findByTitle('apps/app7.html');
+
+    // Advance past AppFrameLayer's GRACE_MS (250ms) so the demoted slot's
+    // cached html is actually dropped — waking before grace would silently
+    // reuse the still-alive slot and produce zero additional fetches,
+    // masking the very re-fetch this test exists to prove. Until grace
+    // elapses, AppFrameLayer's own hoisted iframe for app1 is still mounted
+    // (hidden, not yet evicted) even though ArtifactAppStack already
+    // unmounted app1's placeholder — hence the queryByTitle check comes
+    // AFTER this wait, not before (unlike the "beyond the 6-live cap" test
+    // above, where app1 never went live in the first place and so never had
+    // a slot to begin with).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByTitle('apps/app1.html')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'app1' }));
+    });
+    const wakeBtn = screen.getByRole('button', { name: 'suspended — tap to reload' });
+    expect(wakeBtn).toBeTruthy();
+
+    const fetchCountBeforeWake = authFetchMock.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(wakeBtn);
+    });
+    await screen.findByTitle('apps/app1.html');
+    expect(authFetchMock.mock.calls.length - fetchCountBeforeWake).toBe(1);
   });
 
   it('non-app artifacts (code/skill) render their existing body, not the app stack', async () => {

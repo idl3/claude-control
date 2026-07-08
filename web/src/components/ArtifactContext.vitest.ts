@@ -2,10 +2,12 @@
 //
 // Phase C, C1: pin semantics + LRU pin-exemption on ArtifactPanelProvider's
 // reducer. Drives the reducer only through the public hook surface
-// (open/setActive/close/pin/unpin) via renderHook + act, mirroring
-// useCockpit.vitest.ts's pattern — no reducer internals are imported
-// directly, so these tests exercise exactly what real callers (ToolPart,
-// CodeHeader, the C3 pin affordance) can do.
+// (open/setActive/close — pin/unpin were removed in CP3-C, see
+// ArtifactContext.tsx's pinned-field doc comment; pinning goes through
+// open({pinned:true}), unpinning through close()) via renderHook + act,
+// mirroring useCockpit.vitest.ts's pattern — no reducer internals are
+// imported directly, so these tests exercise exactly what real callers
+// (ToolPart, CodeHeader, the C3 pin affordance) can do.
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { ArtifactPanelProvider, useArtifactPanel, type OpenArtifactInput } from './ArtifactContext';
@@ -75,30 +77,10 @@ describe('ArtifactContext — C1: pinned defaults + basic pin/unpin', () => {
     expect(result.current.artifacts[0].pinned).toBe(true);
   });
 
-  it('pin()/unpin() toggle an open artifact by id', () => {
-    const { result } = setup();
-    act(() => result.current.open(codeArtifact('a')));
-    expect(result.current.artifacts[0].pinned).toBe(false);
-
-    act(() => result.current.pin('a'));
-    expect(result.current.artifacts[0].pinned).toBe(true);
-
-    act(() => result.current.unpin('a'));
-    expect(result.current.artifacts[0].pinned).toBe(false);
-  });
-
-  it('pin()/unpin() on an id that is not open is a no-op', () => {
-    const { result } = setup();
-    act(() => result.current.open(codeArtifact('a')));
-    const before = result.current.artifacts;
-    act(() => result.current.pin('does-not-exist'));
-    expect(result.current.artifacts).toBe(before); // same reference: reducer bailed out
-  });
-
   it('re-opening a still-open artifact with pinned:true re-pins it (the C3 re-click case)', () => {
     const { result } = setup();
     act(() => result.current.open(appArtifact('app1', true)));
-    act(() => result.current.unpin('app1'));
+    act(() => result.current.open(appArtifact('app1', false)));
     expect(result.current.artifacts[0].pinned).toBe(false);
 
     act(() => result.current.open(appArtifact('app1', true)));
@@ -153,29 +135,6 @@ describe('ArtifactContext — C1: LRU pin-exemption', () => {
     const ids = result.current.artifacts.map((a) => a.id);
     expect(ids).toEqual(expect.arrayContaining(['p1', 'p2', 'p3']));
     expect(ids).toHaveLength(11); // 3 pinned + 8 unpinned (cap)
-  });
-
-  it('unpinning an artifact makes it re-eligible for eviction on a subsequent open', () => {
-    const { result } = setup();
-    act(() => result.current.open(appArtifact('p1', true)));
-    act(() => {
-      for (let i = 0; i < 7; i++) result.current.open(codeArtifact(`u${i}`));
-    });
-    // 1 pinned + 7 unpinned = 8, well under the unpinned cap — nothing evicted.
-    expect(result.current.artifacts).toHaveLength(8);
-
-    act(() => result.current.unpin('p1'));
-    // Unpinning alone doesn't evict anything here — p1 becomes the 8th
-    // unpinned entry, still exactly at (not over) the cap.
-    expect(result.current.artifacts).toHaveLength(8);
-    expect(result.current.artifacts.map((a) => a.id)).toContain('p1');
-
-    act(() => result.current.open(codeArtifact('u7')));
-    // Now 9 unpinned before capping. p1 — never refreshed to the front by a
-    // re-open, and now stripped of pin-immunity — is the least-recently-used
-    // entry and is the one evicted, proving unpin() re-exposed it to the cap.
-    expect(result.current.artifacts).toHaveLength(8);
-    expect(result.current.artifacts.map((a) => a.id)).not.toContain('p1');
   });
 
   it('close() removes a pinned artifact outright, regardless of pin state', () => {

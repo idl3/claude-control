@@ -94,7 +94,7 @@ function basename(url: string): string {
  * single-placeholder-per-url case has exactly one candidate, so pickHost
  * always returns it unchanged). Non-host ("shadow") placeholders for the
  * same url don't get their own iframe — instead their live rects are tracked
- * separately (shadowsRef) and rendered as a quiet "active in panel ↗" chip
+ * separately (shadowsRef) and rendered as a quiet "open in panel ↗" chip
  * (see the render function below) so the transcript position isn't left as a
  * silent empty box once the app is pinned into the panel.
  *
@@ -294,7 +294,7 @@ function readSlotEls(): SlotEl[] {
  * the live iframe follows this frame. Panel-context always wins over
  * transcript — once an app is pinned, the panel is the durable home for it
  * regardless of which panel tab happens to be active right now (an inactive-
- * but-pinned tab still hosts; its transcript placeholder shows the "active in
+ * but-pinned tab still hosts; its transcript placeholder shows the "open in
  * panel" chip instead of a live, invisible-anyway iframe). Falls back to
  * first-in-document-order, which is the only candidate in the pre-Phase-C
  * (single placeholder) case, so this is a strict generalization.
@@ -308,7 +308,7 @@ export function AppFrameLayer() {
   const slotsRef = useRef<Map<string, Slot>>(new Map());
   const fetchingRef = useRef<Set<string>>(new Set());
   // C2: non-host ("shadow") placeholder rects for the current frame, keyed by
-  // url — purely presentational (the "active in panel ↗" chip overlay), no
+  // url — purely presentational (the "open in panel ↗" chip overlay), no
   // grace/eviction semantics of its own; recomputed fresh every tick.
   const shadowsRef = useRef<Map<string, DOMRect>>(new Map());
   const { setActive, open, artifacts } = useArtifactPanel();
@@ -427,16 +427,31 @@ export function AppFrameLayer() {
         // position:fixed element can legitimately have a null offsetParent,
         // but these placeholders never are one) — so this is the cheaper of
         // the two equivalent signals the audit flagged.
-        if (rect.width === 0 && rect.height === 0) continue;
+        //
+        // CP3-C FIX 1: panel-context hosts are EXEMPT from this eviction —
+        // don't `continue` on a panel zero-rect. The same mobile back-nav
+        // `display:none` collapse zero-rects a pinned app's PANEL placeholder
+        // too (it lives in the same collapsed `.detail` pane as any
+        // transcript embed), and this loop used to evict it unconditionally,
+        // silently destroying every pinned app's live iframe on every back
+        // navigation. computePaneClip naturally returns `paneHidden: true`
+        // for any zero-rect regardless of ancestor, so simply not skipping
+        // here routes a panel zero-rect through the existing hide-not-evict
+        // path below with no other logic changes. This is deliberate and
+        // safe specifically because panel apps are pinned by explicit user
+        // intent and bounded by LIVE_APP_CAP, so keep-alive is safe;
+        // transcript embeds stay on the Phase-A evict path (unbounded,
+        // leak-prone).
+        if (rect.width === 0 && rect.height === 0 && host.context !== 'panel') continue;
 
         presentUrls.add(url);
 
-        // C2: track every non-host placeholder's rect for the "active in
+        // C2: track every non-host placeholder's rect for the "open in
         // panel" chip overlay (render function below) — but only when the
         // host is genuinely IN the panel. Two transcript-context duplicates
         // of the same url (host = first-in-doc-order, per pickHost's
         // fallback tier) is a pre-existing, unremarkable edge case with no
-        // panel to point at; showing "active in panel" there would be a lie.
+        // panel to point at; showing "open in panel" there would be a lie.
         // A shadow with its own zero rect (e.g. scrolled/hidden-ancestor)
         // just doesn't get a chip this frame — no grace window needed, it's
         // purely decorative.
@@ -637,7 +652,7 @@ export function AppFrameLayer() {
           }}
           onClick={() => setActive(appArtifactId(url))}
         >
-          active in panel ↗
+          open in panel ↗
         </button>
       ))}
       {slots.map(([url, slot]) => {
