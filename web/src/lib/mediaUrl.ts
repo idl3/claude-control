@@ -42,3 +42,27 @@ export function resolveMediaUrl(url: string): MediaUrlResolution {
     MEDIA_ROUTE_PREFIX + url.split('/').map(encodeURIComponent).join('/');
   return { kind: 'fetch', fetchUrl };
 }
+
+/**
+ * D2: derive the server's canonical media-root-relative path for an app
+ * embed's `url` prop, for comparing against a `media-app-changed` WS frame's
+ * `path` field (server.js broadcasts media-root-relative paths, e.g.
+ * "apps/counter.html" — see lib/media-watch.js).
+ *
+ * Reuses resolveMediaUrl so both forms an app can legally be embedded with
+ * normalize to the same value: a bare relative url ("apps/counter.html")
+ * IS already that path, while an already-prefixed url
+ * ("/api/media/apps/counter.html") is decoded back to it. Returns null for
+ * anything that doesn't resolve to a local media-root fetch (http(s) or
+ * rejected urls never match a frame).
+ */
+export function mediaAppFramePath(url: string): string | null {
+  const resolution = resolveMediaUrl(url);
+  if (resolution.kind !== 'fetch') return null;
+  const tail = resolution.fetchUrl.slice(MEDIA_ROUTE_PREFIX.length);
+  try {
+    return tail.split('/').map(decodeURIComponent).join('/');
+  } catch {
+    return null;
+  }
+}

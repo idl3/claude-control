@@ -41,7 +41,7 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * rejected-url check stays here since it's synchronous and belongs inline
  * in the transcript flow, not floating in the hoisted layer.
  *
- * Phase C, C2: two new optional props feed AppFrameLayer's multi-placeholder
+ * Phase C, C2: two optional props feed AppFrameLayer's multi-placeholder
  * host arbitration and always-mounted panel bodies —
  *  - `context` ('transcript' default): rides as `data-embed-app-context` so
  *    AppFrameLayer can pick a single deterministic host per url when the same
@@ -57,17 +57,28 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  *    rides as `data-embed-app-hidden="true"` so AppFrameLayer folds it into
  *    the same paneHidden (hide, never evict) treatment as a scrolled-out-of-
  *    pane placeholder.
+ *
+ * D2/D4: `trackLatest` (true default) rides as `data-embed-app-track-latest`
+ * (only emitted when false, so the common case adds zero DOM weight).
+ * AppFrameLayer's shouldReloadOnFrame gate reads it to decide whether a
+ * `media-app-changed` WS frame should hot-reload this url's slot — the
+ * mechanism is built entirely in D2 (unused, defaults true, everyone keeps
+ * today's behavior); D4 is the first caller to ever pass `false`, from a
+ * per-tab "pin to this version" choice (a pinned version must never get
+ * silently replaced by a newer rebuild's frame).
  */
 export function EmbeddedApp({
   url,
   height,
   context = 'transcript',
   hidden = false,
+  trackLatest = true,
 }: {
   url: string;
   height: number;
   context?: 'panel' | 'transcript';
   hidden?: boolean;
+  trackLatest?: boolean;
 }) {
   const resolution = resolveMediaUrl(url);
 
@@ -98,6 +109,7 @@ export function EmbeddedApp({
       data-embed-app-height={height}
       data-embed-app-context={context}
       data-embed-app-hidden={hidden ? 'true' : undefined}
+      data-embed-app-track-latest={trackLatest === false ? 'false' : undefined}
       aria-label="embedded app"
     />
   );
