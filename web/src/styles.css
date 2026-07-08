@@ -5433,6 +5433,28 @@ select.config-input {
   color: var(--text);
 }
 
+/* D4: per-tab app version picker — a quiet inline select in the panel head,
+   between the tab strip and the close button. */
+.app-version-picker {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 4px;
+  max-width: 150px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.app-version-picker:hover,
+.app-version-picker:focus-visible {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
 /* Panel body: scrollable code area */
 .artifact-panel-body {
   flex: 1 1 auto;

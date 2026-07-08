@@ -10,9 +10,15 @@
 // matter how many times its tab/visibility toggles.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement } from 'react';
-import { render, cleanup, screen, fireEvent, act } from '@testing-library/react';
-import { ArtifactPanel, selectLiveAppIds } from './ArtifactPanel';
-import { ArtifactPanelProvider, useArtifactPanel, type OpenArtifactInput } from './ArtifactContext';
+import { render, cleanup, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import {
+  ArtifactPanel,
+  selectLiveAppIds,
+  loadAppTabVersion,
+  saveAppTabVersion,
+  effectiveAppUrl,
+} from './ArtifactPanel';
+import { ArtifactPanelProvider, useArtifactPanel, type Artifact, type OpenArtifactInput } from './ArtifactContext';
 import { AppFrameLayer } from './AppFrameLayer';
 
 const authFetchMock = vi.fn();
@@ -36,6 +42,44 @@ function mockNarrow(narrow: boolean): void {
     })),
   });
 }
+
+// D4: this Node/vitest/jsdom combo runs with Node's own experimental global
+// `localStorage` (see the `--localstorage-file` warning at test-run time)
+// shadowing jsdom's — and that global stub implements neither getItem nor
+// setItem. No existing test in this repo ever exercised bare `localStorage`
+// (App.tsx's loadDrafts/saveDrafts included) so nothing caught this before
+// D4. Stub a minimal real Storage in-memory so loadAppTabVersion/
+// saveAppTabVersion — which use bare `localStorage`, matching App.tsx's own
+// established convention — are actually exercised, not just silently
+// swallowed by their own try/catch. Scoped to this file only.
+class FakeLocalStorage {
+  private store = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  key(i: number): string | null {
+    return Array.from(this.store.keys())[i] ?? null;
+  }
+  get length(): number {
+    return this.store.size;
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', new FakeLocalStorage());
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('selectLiveAppIds (pure)', () => {
   it('all ids are live when under cap and nothing woken', () => {
@@ -286,5 +330,175 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, mobile sheet)'
     await screen.findByTitle('apps/app1.html');
     expect(document.querySelector('.artifact-app-stack')).toBeTruthy();
     expect(document.querySelector('.artifact-pre')).toBeNull();
+  });
+});
+
+// ── D4: per-tab version pin / track-latest picker ───────────────────────────
+
+function art(appUrl?: string): Artifact {
+  return { id: 'x', kind: 'app', title: 'x', content: '', appUrl, appHeight: 320, pinned: true };
+}
+
+describe('D4: loadAppTabVersion / saveAppTabVersion (pure, localStorage)', () => {
+  // File-level beforeEach (above) already gives each test a fresh FakeLocalStorage.
+
+  it('defaults to latest when nothing is persisted', () => {
+    expect(loadAppTabVersion('never-saved')).toEqual({ kind: 'latest' });
+  });
+
+  it('round-trips a pinned mode through localStorage', () => {
+    saveAppTabVersion('tabA', { kind: 'pinned', filename: '2026-07-08T23-32-05Z.html' });
+    expect(loadAppTabVersion('tabA')).toEqual({ kind: 'pinned', filename: '2026-07-08T23-32-05Z.html' });
+    // A different artifact id never sees another tab's pin.
+    expect(loadAppTabVersion('tabB')).toEqual({ kind: 'latest' });
+  });
+
+  it('falls back to latest on corrupt/unparsable persisted JSON', () => {
+    localStorage.setItem('cc_app_tab_version:tabC', '{not json');
+    expect(loadAppTabVersion('tabC')).toEqual({ kind: 'latest' });
+  });
+
+  it('falls back to latest on a well-formed but malformed-shape value', () => {
+    localStorage.setItem('cc_app_tab_version:tabD', JSON.stringify({ kind: 'pinned' })); // no filename
+    expect(loadAppTabVersion('tabD')).toEqual({ kind: 'latest' });
+  });
+});
+
+describe('D4: effectiveAppUrl (pure)', () => {
+  it('latest mode always resolves to the artifact\'s own appUrl, trackLatest on', () => {
+    expect(effectiveAppUrl(art('apps/widget.html'), { kind: 'latest' })).toEqual({
+      url: 'apps/widget.html',
+      trackLatest: true,
+    });
+  });
+
+  it('pinned mode resolves to the concrete versioned url, trackLatest off', () => {
+    expect(effectiveAppUrl(art('apps/widget.html'), { kind: 'pinned', filename: '2026-07-08T23-32-05Z.html' })).toEqual({
+      url: 'apps/widget/2026-07-08T23-32-05Z.html',
+      trackLatest: false,
+    });
+  });
+
+  it('pinned mode on an already-versioned appUrl still resolves off the app name, not the current file', () => {
+    expect(
+      effectiveAppUrl(art('apps/widget/2026-07-01T10-00-00Z.html'), { kind: 'pinned', filename: 'v2.html' }),
+    ).toEqual({ url: 'apps/widget/v2.html', trackLatest: false });
+  });
+
+  it('pinned mode safely falls back to latest behavior when the appUrl is not a recognizable media-apps url', () => {
+    expect(effectiveAppUrl(art('https://example.com/x.html'), { kind: 'pinned', filename: 'v1.html' })).toEqual({
+      url: 'https://example.com/x.html',
+      trackLatest: true,
+    });
+  });
+
+  it('handles a missing appUrl (defensive — should never happen for a real app artifact)', () => {
+    expect(effectiveAppUrl(art(undefined), { kind: 'latest' })).toEqual({ url: '', trackLatest: true });
+  });
+});
+
+describe('D4: version picker + pin/track-latest (mounted, desktop)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockNarrow(false);
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/media-apps/')) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              name: 'widget',
+              versions: [
+                { filename: 'v1.html', version: 'v1', label: null, url: 'apps/widget/v1.html', latest: false },
+              ],
+              latest: 'v2.html',
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) });
+    });
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(
+      (() => {
+        const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0 };
+        return { ...r, right: r.width, bottom: r.height, toJSON: () => r } as DOMRect;
+      })(),
+    );
+  });
+  afterEach(() => {
+    cleanup();
+    rectSpy.mockRestore();
+  });
+
+  function Api({ onReady }: { onReady: (api: ReturnType<typeof useArtifactPanel>) => void }) {
+    const api = useArtifactPanel();
+    onReady(api);
+    return null;
+  }
+
+  function mount() {
+    let api!: ReturnType<typeof useArtifactPanel>;
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(Api, { onReady: (a) => (api = a) }),
+        createElement(ArtifactPanel),
+        createElement(AppFrameLayer),
+      ),
+    );
+    return () => api;
+  }
+
+  it('acceptance: pin v1 via the picker, then a rebuild-latest frame leaves the pinned tab untouched while a sibling latest-mode tab reloads', async () => {
+    const getApi = mount();
+
+    // A pinned mode set BEFORE mount (mirrors a persisted pin from a prior
+    // session) so 'tabPin' opens directly on v1 — 'tabLatest' opens on the
+    // flat/latest url and stays there throughout.
+    saveAppTabVersion('tabPin', { kind: 'pinned', filename: 'v1.html' });
+
+    await act(async () => {
+      getApi().open({ id: 'tabLatest', kind: 'app', title: 'widget latest', content: '', appUrl: 'apps/widget.html', appHeight: 320, pinned: true });
+      getApi().open({ id: 'tabPin', kind: 'app', title: 'widget v1', content: '', appUrl: 'apps/widget.html', appHeight: 320, pinned: true });
+    });
+
+    await screen.findByTitle('apps/widget/v1.html');
+    await screen.findByTitle('apps/widget.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('cockpit:media-app-changed', { detail: { path: 'apps/widget.html', mtime: 111 } }),
+      );
+    });
+
+    // tabLatest reloads (one more fetch); tabPin's own url never matches the
+    // frame's path AND has trackLatest off, so it is untouched either way.
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByTitle('apps/widget/v1.html')).toBeTruthy();
+    expect(screen.getByTitle('apps/widget.html')).toBeTruthy();
+  });
+
+  it('the version picker fetches lazily on first focus, then pinning a version through it swaps the tab to the versioned url', async () => {
+    const getApi = mount();
+
+    await act(async () => {
+      getApi().open({ id: 'tabA', kind: 'app', title: 'widget', content: '', appUrl: 'apps/widget.html', appHeight: 320, pinned: true });
+    });
+    await screen.findByTitle('apps/widget.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // iframe only — no eager versions probe
+
+    const select = screen.getByLabelText('App version') as HTMLSelectElement;
+    fireEvent.focus(select);
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2)); // versions probe, on focus
+
+    await screen.findByRole('option', { name: 'v1' });
+    fireEvent.change(select, { target: { value: 'v1.html' } });
+
+    await screen.findByTitle('apps/widget/v1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(3); // new url -> new fetch
+    expect(loadAppTabVersion('tabA')).toEqual({ kind: 'pinned', filename: 'v1.html' });
   });
 });
