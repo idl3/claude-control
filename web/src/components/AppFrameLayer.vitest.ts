@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createElement } from 'react';
 import { render, cleanup } from '@testing-library/react';
-import { AppFrameLayer, computePaneClip, shouldKeepPolling, type RectLike } from './AppFrameLayer';
+import { AppFrameLayer, computePaneClip, clampChromeInsets, shouldKeepPolling, type RectLike } from './AppFrameLayer';
 
 afterEach(cleanup);
 
@@ -63,6 +63,35 @@ describe('computePaneClip (A3 audit follow-up, FIX 1: pane-intersection geometry
   it('treats a zero-size rect as hidden', () => {
     const rect: RectLike = { top: 200, left: 200, width: 0, height: 0 };
     expect(computePaneClip(rect, ancestor).paneHidden).toBe(true);
+  });
+});
+
+describe('clampChromeInsets (B audit follow-up, FIX 1: clamp chrome into the visible clip)', () => {
+  it('is the identity offset (matches the CSS default 6px/6px, zero crashed inset) with no clip', () => {
+    expect(clampChromeInsets(null)).toEqual({
+      cornerTop: 6,
+      cornerRight: 6,
+      crashedInset: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+  });
+
+  it('pushes the corner offset inward by the clipped top/right edges', () => {
+    const clip = { top: 40, right: 15, bottom: 0, left: 0 };
+    expect(clampChromeInsets(clip)).toEqual({
+      cornerTop: 46,
+      cornerRight: 21,
+      crashedInset: clip,
+    });
+  });
+
+  it('leaves the corner offset at its CSS default when only bottom/left are clipped', () => {
+    const clip = { top: 0, right: 0, bottom: 30, left: 25 };
+    expect(clampChromeInsets(clip)).toEqual({ cornerTop: 6, cornerRight: 6, crashedInset: clip });
+  });
+
+  it('passes the full clip through as the crashed strip inset unchanged', () => {
+    const clip = { top: 10, right: 20, bottom: 30, left: 40 };
+    expect(clampChromeInsets(clip).crashedInset).toEqual(clip);
   });
 });
 

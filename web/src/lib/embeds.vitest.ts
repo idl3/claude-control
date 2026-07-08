@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { render as mount, screen, cleanup } from '@testing-library/react';
+import { render as mount, screen, cleanup, fireEvent } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
 import {
   parseEmbedAttrs,
@@ -266,7 +266,14 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
   it('renders the "app unavailable" chip on a non-ok fetch, never an iframe', async () => {
     authFetchMock.mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') });
 
-    mount(
+    // B audit follow-up (CP3-B, FIX 4): the original `screen.queryByRole('IFRAME')`
+    // was unconditionally null — 'IFRAME' (uppercase) is never a valid ARIA
+    // role name, so the query can never match regardless of what actually
+    // renders. AppFrameLayer's hoisted iframe portals to document.body, not
+    // into `render()`'s own `container` div (a sibling under body) — a real
+    // DOM query needs `baseElement` (defaults to document.body, so it covers
+    // both the placeholder's container and the portal) to be able to fail.
+    const { baseElement } = mount(
       createElement(
         Fragment,
         null,
@@ -276,7 +283,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
     );
 
     expect(await screen.findByText('app unavailable: apps/missing.html')).toBeTruthy();
-    expect(screen.queryByRole('IFRAME')).toBeNull();
+    expect(baseElement.querySelector('iframe')).toBeNull();
   });
 
   it('renders the "app unavailable" chip when authFetch itself rejects (network error)', async () => {
@@ -377,7 +384,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
   // message listeners end-to-end, not just the pure appBeacon.ts helpers
   // (appBeacon.vitest.ts already covers those in isolation).
   describe('B2: reload + crash beacon (AppFrameLayer message/cockpit:app-reload listeners)', () => {
-    it('manual reload works with no beacon ever having fired', async () => {
+    it('manual reload works with no beacon ever having fired — via a real click on the rendered button', async () => {
       authFetchMock.mockResolvedValue({
         ok: true,
         text: () => Promise.resolve('<html><body>v1</body></html>'),
@@ -400,9 +407,12 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
         ok: true,
         text: () => Promise.resolve('<html><body>v2</body></html>'),
       });
-      window.dispatchEvent(
-        new CustomEvent('cockpit:app-reload', { detail: { url: 'apps/reload-me.html' } }),
-      );
+      // B audit follow-up (CP3-B, FIX 2): click the real rendered
+      // AppReloadButton instead of dispatching the cockpit:app-reload
+      // CustomEvent directly, so the event-name string + detail:{url} wiring
+      // between the button and AppFrameLayer's listener is covered
+      // end-to-end, not just AppFrameLayer's listener in isolation.
+      fireEvent.click(screen.getByLabelText('Reload app'));
 
       await vi.waitFor(() => {
         const iframe2 = screen.getByTitle('apps/reload-me.html') as HTMLIFrameElement;
@@ -436,6 +446,9 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
       expect(await screen.findByText('app crashed: apps/crashme.html')).toBeTruthy();
       expect(screen.queryByTitle('apps/crashme.html')).toBeNull();
+      // B audit follow-up (CP3-B, FIX 3): the beacon's own message is now
+      // surfaced in the crashed strip, not just the url.
+      expect(screen.getByText('boom')).toBeTruthy();
     });
 
     it('ignores a spoofed-source beacon — same shape, wrong window', async () => {

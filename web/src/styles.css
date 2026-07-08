@@ -4899,6 +4899,15 @@ select.config-input {
   overflow-wrap: anywhere;
   max-width: 90%;
 }
+/* B audit follow-up (CP3-B, FIX 2): the beacon's own crash message (capped
+   to 200 chars in AppFrameLayer.tsx), rendered as a second, de-emphasized
+   line under the "app crashed: {url}" chip. */
+.embed-app-crashed-detail {
+  overflow-wrap: anywhere;
+  max-width: 90%;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-faint);
+}
 
 /* ── /goal reserved-token pill (user messages only) ─────────────────
    `/goal` invocations render as a metallic silver-blue pill instead of plain

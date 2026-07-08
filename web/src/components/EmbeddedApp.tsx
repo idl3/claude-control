@@ -101,8 +101,22 @@ function ReloadIcon() {
  * `quiet` (default) renders a small icon-only corner affordance meant to sit
  * unobtrusively over a healthy iframe; the crashed strip passes
  * `quiet={false}` for a labeled, primary "Reload" CTA.
+ *
+ * `style` (B audit follow-up, CP3-B, FIX 1): optional inline override for
+ * the button's CSS `top`/`right` (styles.css .embed-app-reload-btn defaults
+ * to 6px/6px). AppFrameLayer passes a clamped top/right — see
+ * clampChromeInsets — so the button stays inside the visible slice of a
+ * partially clip-pane-clipped placeholder instead of the un-clipped box.
  */
-export function AppReloadButton({ url, quiet = true }: { url: string; quiet?: boolean }) {
+export function AppReloadButton({
+  url,
+  quiet = true,
+  style,
+}: {
+  url: string;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
   const onClick = () => {
     window.dispatchEvent(new CustomEvent('cockpit:app-reload', { detail: { url } }));
   };
@@ -112,6 +126,7 @@ export function AppReloadButton({ url, quiet = true }: { url: string; quiet?: bo
       className={`act-btn embed-app-reload-btn${quiet ? '' : ' embed-app-reload-btn-labeled'}`}
       aria-label="Reload app"
       onClick={onClick}
+      style={style}
     >
       <ReloadIcon />
       {quiet ? null : 'Reload'}
