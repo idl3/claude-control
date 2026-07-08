@@ -6,7 +6,7 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
 /**
  * Hoists <embedded-app> iframes out of the transcript row DOM into one
  * always-mounted layer, portaled to document.body and positioned over each
- * app's in-flow placeholder (rendered by EmbeddedApp in EmbeddedMedia.tsx).
+ * app's in-flow placeholder (rendered by EmbeddedApp in EmbeddedApp.tsx).
  *
  * Why: A2's churn-survival spike (docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md)
  * measured that assistant-ui remounts message row DOM on nearly every
