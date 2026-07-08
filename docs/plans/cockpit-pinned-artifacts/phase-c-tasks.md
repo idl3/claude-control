@@ -41,7 +41,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 ### C2 — Mount-ordered app frame container in ArtifactPanel
 > **Goal**: app bodies render in a persistent container ordered by mount (NOT tab/reducer order); tab switching toggles visibility only; non-app kinds keep active-only rendering (ArtifactPanel.tsx:232).
 > **Files**: web/src/components/ArtifactPanel.tsx, web/src/styles.css
-> **Acceptance**: with 3 pinned apps, switching tabs + re-opening artifacts (reducer move-to-front) produces ZERO iframe reloads (stateful-app evidence); mounted-app cap 6 with placeholder beyond.
+> **Acceptance**: with 3 pinned apps, switching tabs + re-opening artifacts (reducer move-to-front) produces ZERO iframe reloads (stateful-app evidence); mounted-app cap 6 with placeholder beyond; MULTI-PLACEHOLDER ARBITRATION (CP3-A MEDIUM follow-up): slots stay url-keyed single-instance — a deterministic priority rule picks the hosting placeholder (panel > transcript, else first visible) and non-hosting placeholders render a quiet 'active in panel' chip instead of a silent empty box.
 > **Verification**: cd web && npx vitest run && npx tsc -b --pretty false && npm run build
 > **Depends on**: C1
 > **Reversibility**: load-bearing

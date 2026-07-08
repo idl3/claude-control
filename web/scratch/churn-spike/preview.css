@@ -1,0 +1,59 @@
+@import '../../src/styles.css';
+
+/* Frame two side-by-side threads like the real app body without mounting the
+   whole shell. Each column is a stateful embedded-app under independent
+   churn variants (identity-stable vs identity-unstable). */
+body {
+  margin: 0;
+}
+#root {
+  min-height: 100vh;
+}
+.churn-stage {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 20px 20px 60px;
+}
+.proto-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 16px 0 8px;
+}
+.churn-counters {
+  display: flex;
+  gap: 24px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  padding: 10px 14px;
+  border: 1px solid #3b465c;
+  border-radius: 8px;
+  background: #161b26;
+  color: #e6e9ef;
+  margin-bottom: 16px;
+}
+.churn-counters .count-label {
+  opacity: 0.6;
+  margin-right: 4px;
+}
+.churn-counters .count-value {
+  font-weight: 700;
+  font-size: 16px;
+}
+.churn-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.churn-panel {
+  border: 1px solid #2a3040;
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 0;
+}
+.churn-panel .thread-viewport {
+  max-height: 640px;
+  overflow-y: auto;
+}

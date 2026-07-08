@@ -5,8 +5,8 @@
 // mounts via @testing-library/react and needs a real effect lifecycle
 // (fetch → setHtml) that renderToStaticMarkup never runs. jsdom is harmless
 // to the rest of this file: renderToStaticMarkup needs no DOM at all.
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createElement } from 'react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { render as mount, screen, cleanup } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
@@ -20,6 +20,7 @@ import {
   APP_HEIGHT_DEFAULT,
 } from './embeds';
 import { MarkdownImg } from '../components/EmbeddedMedia';
+import { AppFrameLayer } from '../components/AppFrameLayer';
 import { DEFAULT_ASPECT_RATIO } from './mediaDimensions';
 
 // EmbeddedApp fetches its html via authFetch (lib/api) — stub only that
@@ -163,12 +164,14 @@ describe('markdown pipeline → element props', () => {
     expect(html).toContain('&lt;b&gt;');
   });
 
-  it('renders a local embedded-app as a reserved-box skeleton at the fixed height before the fetch resolves', () => {
+  it('renders a local embedded-app as a reserved-box placeholder at the fixed height — AppFrameLayer owns the fetch/skeleton/iframe (A3 hoist fix)', () => {
     const html = render('<embedded-app url="apps/counter.html" height="420" />');
     expect(html).toContain('class="embed-media-frame embed-app-frame"');
     expect(html).toContain('height:420px');
-    expect(html).toContain('class="embed-media-skeleton"');
-    expect(html).not.toContain('<iframe'); // fetch not resolved in a static render
+    expect(html).toContain('data-embed-app-url="apps/counter.html"');
+    expect(html).toContain('data-embed-app-height="420"');
+    expect(html).not.toContain('class="embed-media-skeleton"'); // AppFrameLayer renders the skeleton now
+    expect(html).not.toContain('<iframe'); // AppFrameLayer renders the live iframe now
   });
 
   it('clamps and defaults embedded-app height in the reserved frame', () => {
@@ -201,13 +204,36 @@ describe('markdown pipeline → element props', () => {
   });
 });
 
-// Mounted (jsdom) render — the only way to observe the post-fetch iframe:
-// renderToStaticMarkup above never runs effects, so useAppHtml's fetch never
-// resolves there. These tests mount for real and control authFetchMock.
-describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
+// Mounted (jsdom) render — the only way to observe the post-fetch iframe.
+// Post-A3 (hoist fix), EmbeddedApp itself only renders a placeholder
+// (data-embed-app-url/-height); the fetch/skeleton/iframe/failed-chip all
+// live in AppFrameLayer, which polls the DOM for placeholders (see
+// AppFrameLayer.tsx) — so it must be mounted alongside MarkdownImg to
+// observe any of that behavior.
+function mockRect(over: Partial<DOMRect>): DOMRect {
+  const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+  return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+}
+
+describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // jsdom implements no layout at all — every real element's
+    // getBoundingClientRect() is always 0x0x0x0. AppFrameLayer's tick()
+    // (A3 audit follow-up, FIX 2) treats a zero-sized rect as a
+    // hidden-ancestor placeholder and skips tracking it, so without this
+    // stub every placeholder in this suite would look "hidden" and never
+    // fetch. Default: a plausible on-screen, in-pane rect so the existing
+    // fetch/skeleton/iframe/failed-chip tests below exercise that path
+    // unchanged; individual tests override via rectSpy.mockReturnValue(...).
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+
   afterEach(() => {
     cleanup();
     authFetchMock.mockReset();
+    rectSpy.mockRestore();
   });
 
   it('fetches via authFetch and renders a sandbox="allow-scripts" iframe with NO allow-same-origin', async () => {
@@ -217,11 +243,16 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
     });
 
     mount(
-      createElement(MarkdownImg, {
-        'data-embed': 'app',
-        'data-url': 'apps/counter.html',
-        'data-height': '420',
-      }),
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, {
+          'data-embed': 'app',
+          'data-url': 'apps/counter.html',
+          'data-height': '420',
+        }),
+        createElement(AppFrameLayer),
+      ),
     );
 
     const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
@@ -235,7 +266,14 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
   it('renders the "app unavailable" chip on a non-ok fetch, never an iframe', async () => {
     authFetchMock.mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') });
 
-    mount(createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/missing.html' }));
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/missing.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
 
     expect(await screen.findByText('app unavailable: apps/missing.html')).toBeTruthy();
     expect(screen.queryByRole('IFRAME')).toBeNull();
@@ -244,7 +282,14 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
   it('renders the "app unavailable" chip when authFetch itself rejects (network error)', async () => {
     authFetchMock.mockRejectedValue(new Error('network down'));
 
-    mount(createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/counter.html' }));
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/counter.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
 
     expect(await screen.findByText('app unavailable: apps/counter.html')).toBeTruthy();
   });
@@ -259,4 +304,84 @@ describe('EmbeddedApp — live sandboxed micro-app rendering (mounted)', () => {
     expect(screen.getByText(/app url rejected/)).toBeTruthy();
     expect(authFetchMock).not.toHaveBeenCalled();
   });
+
+  // A3 audit follow-up (CP3-A, FIX 2): a hidden-ancestor placeholder (mobile
+  // back-nav's display:none on the whole detail pane — the placeholder stays
+  // mounted) reports a zero-sized rect in a real browser. tick() must treat
+  // that exactly like a removed placeholder and evict through the same
+  // GRACE_MS path, not leak the slot (and its live iframe) forever.
+  it('FIX 2: evicts the slot after grace once the placeholder rect collapses to zero (hidden ancestor)', async () => {
+    authFetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<html><body>hi</body></html>'),
+    });
+
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/hideme.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    await screen.findByTitle('apps/hideme.html');
+    expect(document.querySelector('.embed-app-hoist')).toBeTruthy();
+
+    // Simulate the ancestor going display:none — every rect on this element
+    // collapses to zero, same as a real browser under a hidden ancestor.
+    rectSpy.mockReturnValue(mockRect({ width: 0, height: 0 }));
+
+    // GRACE_MS is 250ms (AppFrameLayer.tsx) — wait comfortably past it. Real
+    // rAF (jsdom polyfills it on a ~16ms timer) keeps tick() running since
+    // the slot is still alive during the grace window (FIX 3).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(document.querySelector('.embed-app-hoist')).toBeNull();
+  });
+
+  // A3 audit follow-up (CP3-A, FIX 1): a placeholder scrolled fully outside
+  // its clipping pane must hide (no paint-over/click-through onto chrome
+  // outside the pane) WITHOUT evicting — scrolling back into view must not
+  // reload it, the whole point of the hoist layer.
+  it('FIX 1: hides (not evicts) a slot whose placeholder sits entirely outside its pane', async () => {
+    authFetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<html><body>hi</body></html>'),
+    });
+    // No .thread-viewport ancestor here, so computePaneClip falls back to the
+    // layout viewport (window.innerWidth/Height, jsdom defaults to
+    // 1024x768) — a rect far above it never intersects.
+    rectSpy.mockReturnValue(mockRect({ top: -5000, left: 0, width: 300, height: 200 }));
+
+    mount(
+      createElement(
+        Fragment,
+        null,
+        createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/offpane.html' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    const hoist = await waitForHoist();
+    expect(hoist.style.visibility).toBe('hidden');
+    expect(hoist.style.pointerEvents).toBe('none');
+
+    // Still alive well past GRACE_MS — paneHidden must never trigger eviction.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(document.querySelector('.embed-app-hoist')).toBeTruthy();
+  });
 });
+
+function waitForHoist(): Promise<HTMLElement> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + 2000;
+    const poll = () => {
+      const el = document.querySelector<HTMLElement>('.embed-app-hoist');
+      if (el) return resolve(el);
+      if (Date.now() > deadline) return reject(new Error('.embed-app-hoist never appeared'));
+      setTimeout(poll, 20);
+    };
+    poll();
+  });
+}

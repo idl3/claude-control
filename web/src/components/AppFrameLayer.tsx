@@ -1,0 +1,361 @@
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { authFetch } from '../lib/api';
+import { resolveMediaUrl } from '../lib/mediaUrl';
+
+/**
+ * Hoists <embedded-app> iframes out of the transcript row DOM into one
+ * always-mounted layer, portaled to document.body and positioned over each
+ * app's in-flow placeholder (rendered by EmbeddedApp in EmbeddedMedia.tsx).
+ *
+ * Why: A2's churn-survival spike (docs/plans/cockpit-pinned-artifacts/phase-a-tasks.md)
+ * measured that assistant-ui remounts message row DOM on nearly every
+ * transcript update regardless of message object identity — a stable-refs
+ * variant showed the same iframe reload count as a fully-rebuilt-refs
+ * variant (18-22 reloads over a 24-step churn run each; reference stability
+ * alone gave zero protection). An <iframe> reloads whenever it is detached
+ * and reattached to the DOM (spec behavior on any node move), so as long as
+ * the live iframe element lives inside row DOM that churns, no amount of
+ * React identity/memo work saves it. The fix: never let the iframe live
+ * inside row DOM. EmbeddedApp now renders only a lightweight placeholder
+ * (same reserved-box dimensions as before, zero layout shift) — cheap to
+ * remount. This layer tracks one persistent <iframe> per url, keyed by url
+ * so React never tears it down across this component's own re-renders, and
+ * repositions it over its current placeholder's live bounding rect.
+ *
+ * ponytail: DOM-attribute scan + rAF poll (mirrors the existing
+ * HotkeyHints.tsx precedent: scan a data-attribute, portal, position:fixed)
+ * rather than a context/registry — a transcript realistically carries a
+ * handful of concurrent embedded apps at most, and polling sidesteps any
+ * race between a placeholder's mount/unmount effects and this layer's
+ * registry. Swap to a MutationObserver if profiling ever shows this
+ * mattering. A brief placeholder absence (a same-tick churn remount) is
+ * bridged by GRACE_MS; a placeholder gone past that window (session switch)
+ * drops its iframe and re-fetches if it ever comes back.
+ *
+ * A3 audit follow-ups (CP3-A) layered on top of the above, unchanged design:
+ * FIX 1 clips each iframe to its scroll pane + gives it an explicit stacking
+ * position so it can never bleed over the header/composer; FIX 2 treats a
+ * hidden-ancestor placeholder (mobile back-nav's `display:none` on the whole
+ * detail pane — elements stay mounted) as NOT FOUND so it evicts through the
+ * same grace path as a truly-removed one instead of leaking forever; FIX 3
+ * gates the rAF loop itself so it only runs while there's a slot or a
+ * placeholder to track, per the HotkeyHints precedent this file already
+ * cites above. See the doc comments on the helpers below for each.
+ */
+
+const GRACE_MS = 250;
+// One live iframe per url; multi-placeholder arbitration lands in Phase C.
+const SLOT_SELECTOR = '[data-embed-app-url]';
+
+// ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
+// DOM-free so they're unit-testable without a real layout engine — jsdom
+// implements no layout at all, so these can't be exercised by mounting
+// components (see AppFrameLayer.vitest.ts, which unit-tests these directly;
+// the DOM-dependent end-to-end behavior is exercised by the churn-spike
+// harness instead, a real browser via the prototype-component runner).
+export type RectLike = { top: number; left: number; width: number; height: number };
+type ClipInsets = { top: number; right: number; bottom: number; left: number };
+
+/**
+ * FIX 1 (pane clipping): intersects an app placeholder's live bounding rect
+ * against its clipping scroll pane's rect (`.thread-viewport`, or the layout
+ * viewport as a fallback when no such ancestor exists) and reports how the
+ * hoisted iframe standing in for it should be visually clipped so it can
+ * never bleed over chrome that sits outside the scroll pane (header,
+ * composer, modals).
+ *  - paneHidden: true when the two rects don't overlap at all — the
+ *    placeholder has scrolled fully out of its pane. The caller must hide
+ *    the iframe (visibility + pointer-events) WITHOUT evicting its slot:
+ *    scrolling back into view must not reload it — that's the whole seam.
+ *  - clip: non-null CSS `inset()` values (px, top/right/bottom/left order,
+ *    relative to the placeholder's own box) to apply when the overlap is
+ *    partial; null when the placeholder sits entirely inside the ancestor
+ *    (no clip needed) or is fully hidden (clip is moot — visibility covers
+ *    it).
+ */
+export function computePaneClip(
+  rect: RectLike,
+  ancestor: RectLike,
+): { paneHidden: boolean; clip: ClipInsets | null } {
+  const rectRight = rect.left + rect.width;
+  const rectBottom = rect.top + rect.height;
+  const ancestorRight = ancestor.left + ancestor.width;
+  const ancestorBottom = ancestor.top + ancestor.height;
+
+  const ixLeft = Math.max(rect.left, ancestor.left);
+  const ixTop = Math.max(rect.top, ancestor.top);
+  const ixRight = Math.min(rectRight, ancestorRight);
+  const ixBottom = Math.min(rectBottom, ancestorBottom);
+
+  if (ixRight <= ixLeft || ixBottom <= ixTop) {
+    return { paneHidden: true, clip: null };
+  }
+
+  const top = ixTop - rect.top;
+  const right = rectRight - ixRight;
+  const bottom = rectBottom - ixBottom;
+  const left = ixLeft - rect.left;
+  if (top === 0 && right === 0 && bottom === 0 && left === 0) {
+    return { paneHidden: false, clip: null };
+  }
+  return { paneHidden: false, clip: { top, right, bottom, left } };
+}
+
+function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
+}
+
+function viewportRect(): RectLike {
+  return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
+}
+
+/**
+ * FIX 3 (gated rAF loop): pure arm/disarm decision for the polling loop —
+ * keep polling only while there is something to track: a live slot (mid-
+ * fetch, mid grace-window, or simply on-screen) or at least one currently-
+ * visible placeholder in the DOM. Deliberately excludes hidden-ancestor
+ * placeholders (FIX 2 already treats those as NOT FOUND) so a permanently
+ * `display:none` pane with an evicted slot doesn't keep the loop spinning
+ * at ~60fps forever with nothing left to do — the deviation the audit
+ * flagged against the HotkeyHints gating precedent.
+ */
+export function shouldKeepPolling(slotCount: number, presentPlaceholderCount: number): boolean {
+  return slotCount > 0 || presentPlaceholderCount > 0;
+}
+
+type Slot = {
+  height: number;
+  rect: DOMRect | null;
+  // FIX 1: is the placeholder currently scrolled fully outside its clipping
+  // ancestor? Render-only — never affects eviction. See computePaneClip.
+  paneHidden: boolean;
+  clip: ClipInsets | null;
+  html: string | null;
+  failed: boolean;
+  lastSeen: number;
+};
+
+function readSlotEls(): { url: string; height: number; el: HTMLElement }[] {
+  const out: { url: string; height: number; el: HTMLElement }[] = [];
+  document.querySelectorAll<HTMLElement>(SLOT_SELECTOR).forEach((el) => {
+    const url = el.dataset.embedAppUrl;
+    if (!url) return;
+    const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
+    out.push({ url, height: Number.isFinite(height) ? height : 360, el });
+  });
+  return out;
+}
+
+export function AppFrameLayer() {
+  const [, forceRender] = useState(0);
+  const slotsRef = useRef<Map<string, Slot>>(new Map());
+  const fetchingRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    let alive = true;
+    // null == not currently scheduled (FIX 3 gate). Distinct from the old
+    // always-scheduled `number` — the loop now stops entirely when idle.
+    let rafId: number | null = null;
+
+    function fetchHtml(url: string) {
+      if (fetchingRef.current.has(url)) return;
+      const resolution = resolveMediaUrl(url);
+      if (resolution.kind !== 'fetch') {
+        const slot = slotsRef.current.get(url);
+        if (slot) slot.failed = true;
+        return;
+      }
+      fetchingRef.current.add(url);
+      authFetch(resolution.fetchUrl)
+        .then((res) => {
+          if (!res.ok) throw new Error(`app fetch failed: ${res.status}`);
+          return res.text();
+        })
+        .then((text) => {
+          if (!alive) return;
+          const slot = slotsRef.current.get(url);
+          if (slot) slot.html = text;
+        })
+        .catch(() => {
+          if (!alive) return;
+          const slot = slotsRef.current.get(url);
+          if (slot) slot.failed = true;
+        })
+        .finally(() => {
+          fetchingRef.current.delete(url);
+          if (alive) forceRender((n) => n + 1);
+        });
+    }
+
+    function tick() {
+      rafId = null;
+      if (!alive) return;
+      const now = performance.now();
+      const found = readSlotEls();
+      // Placeholders matched by the selector AND not hidden-ancestor (FIX 2)
+      // — the "genuinely present" set eviction/FIX-3-gating both key off.
+      const presentUrls = new Set<string>();
+      let changed = false;
+
+      for (const { url, height, el } of found) {
+        const rect = el.getBoundingClientRect();
+
+        // FIX 2 (hidden-ancestor eviction): a zero-sized rect means some
+        // ancestor collapsed this placeholder out of layout (mobile back-nav
+        // hides the whole detail pane via `display:none` — the placeholder
+        // itself stays mounted by design, so the selector above still
+        // matches it). Treat it exactly like a genuinely-missing placeholder
+        // so it flows through the same GRACE_MS eviction path below, rather
+        // than leaking a slot (and its live iframe) forever. A zero-rect
+        // check alone is sufficient: `offsetParent === null` would catch the
+        // same `display:none` case for these in-flow placeholder spans, but
+        // tells us nothing the rect we already measured doesn't (a
+        // position:fixed element can legitimately have a null offsetParent,
+        // but these placeholders never are one) — so this is the cheaper of
+        // the two equivalent signals the audit flagged.
+        if (rect.width === 0 && rect.height === 0) continue;
+
+        presentUrls.add(url);
+
+        // FIX 1 (pane clipping): see computePaneClip's doc comment.
+        const ancestorEl = el.closest('.thread-viewport');
+        const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
+        const { paneHidden, clip } = computePaneClip(rect, ancestorRect);
+
+        let slot = slotsRef.current.get(url);
+        if (!slot) {
+          slot = { height, rect, paneHidden, clip, html: null, failed: false, lastSeen: now };
+          slotsRef.current.set(url, slot);
+          fetchHtml(url);
+          changed = true;
+        } else {
+          if (
+            !slot.rect ||
+            slot.rect.top !== rect.top ||
+            slot.rect.left !== rect.left ||
+            slot.rect.width !== rect.width ||
+            slot.rect.height !== rect.height ||
+            slot.paneHidden !== paneHidden ||
+            !clipEquals(slot.clip, clip)
+          ) {
+            changed = true;
+          }
+          slot.rect = rect;
+          slot.height = height;
+          slot.paneHidden = paneHidden;
+          slot.clip = clip;
+          slot.lastSeen = now;
+        }
+      }
+
+      // Drop slots whose placeholder has been missing (or hidden-ancestor,
+      // FIX 2) past the grace window (genuinely gone — session switch,
+      // hidden pane — not a same-tick churn remount or a brief blip).
+      for (const [url, slot] of slotsRef.current) {
+        if (presentUrls.has(url)) continue;
+        if (now - slot.lastSeen > GRACE_MS) {
+          slotsRef.current.delete(url);
+          changed = true;
+        } else if (slot.rect !== null) {
+          slot.rect = null; // hide until it reappears or the grace window drops it
+          slot.paneHidden = false;
+          slot.clip = null;
+          changed = true;
+        }
+      }
+
+      if (changed) forceRender((n) => n + 1);
+
+      // FIX 3: only keep polling while there's something left to track.
+      if (shouldKeepPolling(slotsRef.current.size, presentUrls.size)) {
+        rafId = requestAnimationFrame(tick);
+      }
+      // else: stop scheduling — the MutationObserver below re-arms the loop
+      // next time the DOM changes (a new placeholder mounts, or a hidden
+      // pane's ancestor flips back to visible).
+    }
+
+    // FIX 3 (gated loop): arm/disarm via a MutationObserver on document.body
+    // rather than polling unconditionally at ~60fps forever. The callback is
+    // deliberately trivial — just "(re)start the loop if it's stopped" — NOT
+    // a re-scan for `[data-embed-app-url]` itself; tick()'s own
+    // querySelectorAll on the very next frame is the real, authoritative
+    // check, and immediately re-stops the loop if nothing relevant actually
+    // appeared. `attributes: true` is included (beyond the minimal
+    // childList-only shape) because the mobile hidden-pane case this file's
+    // FIX 2 targets is a pure CSS `display:none` driven by an ancestor
+    // attribute toggle (no node is added/removed), so a childList-only
+    // observer would never notice the pane — and therefore the now-visible-
+    // again placeholder — coming back. Under heavy unrelated DOM/attribute
+    // churn (e.g. transcript remounts) this costs at most one extra,
+    // self-stopping rAF tick per observer-coalesced mutation batch —
+    // nowhere near the unconditional 60fps this replaces — while a
+    // genuinely idle DOM (no embeds, no mutations) schedules zero further
+    // frames, which is the acceptance bar.
+    const observer = new MutationObserver(() => {
+      if (rafId === null && alive) rafId = requestAnimationFrame(tick);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+    // Cheap initial guess (raw match, not the hidden-ancestor-filtered
+    // "present" count tick() computes) — good enough to decide whether to
+    // schedule the first tick at all; tick() re-evaluates precisely and
+    // self-corrects within one frame either way.
+    if (shouldKeepPolling(slotsRef.current.size, document.querySelectorAll(SLOT_SELECTOR).length)) {
+      rafId = requestAnimationFrame(tick);
+    }
+
+    return () => {
+      alive = false;
+      observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  const slots = Array.from(slotsRef.current.entries());
+  if (slots.length === 0) return null;
+
+  return createPortal(
+    <>
+      {slots.map(([url, slot]) => {
+        const r = slot.rect;
+        // FIX 1: hidden whenever the placeholder isn't currently found
+        // (pre-existing grace-hide behavior) OR it's found but scrolled
+        // fully outside its pane (paneHidden) — either way, no eviction.
+        const hidden = !r || slot.paneHidden;
+        const clipPath =
+          r && !slot.paneHidden && slot.clip
+            ? `inset(${slot.clip.top}px ${slot.clip.right}px ${slot.clip.bottom}px ${slot.clip.left}px)`
+            : undefined;
+        return (
+          <span
+            key={url}
+            className="embed-app-hoist"
+            style={{
+              position: 'fixed',
+              top: r ? r.top : -99999,
+              left: r ? r.left : -99999,
+              width: r ? r.width : 1,
+              height: r ? r.height : 1,
+              visibility: hidden ? 'hidden' : 'visible',
+              pointerEvents: hidden ? 'none' : 'auto',
+              clipPath,
+            }}
+          >
+            {slot.failed ? (
+              <code className="embed-media-rejected">app unavailable: {url}</code>
+            ) : slot.html != null ? (
+              <iframe className="embed-app" sandbox="allow-scripts" srcDoc={slot.html} title={url} />
+            ) : (
+              <span className="embed-media-skeleton" aria-label="loading app" />
+            )}
+          </span>
+        );
+      })}
+    </>,
+    document.body,
+  );
+}

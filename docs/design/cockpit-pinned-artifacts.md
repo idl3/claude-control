@@ -27,6 +27,7 @@
 
 ## Principles & Seams
 Seam: pinned apps are ArtifactPanel tabs whose iframes live in a permanently-mounted, mount-ordered container with visibility toggling and LRU pin-exemption.
+Seam: placeholders unmounted by the thread's render cap ("Load earlier") or evicted after hidden-ancestor grace DO cold-reload on return — the never-reload guarantee covers in-view churn, tab switches, and (Phase C) pin moves, not explicit view exits.
 
 ## Unwind cost
 Dedicated PrototypePanel extraction (~4–6 files) if ArtifactPanel resists; embeds/transport/version layers carry over unchanged.
