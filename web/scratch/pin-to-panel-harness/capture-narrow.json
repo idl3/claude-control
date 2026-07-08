@@ -1,0 +1,20 @@
+{
+  "slug": "cockpit-pin-to-panel-narrow",
+  "viewport": { "width": 390, "height": 844 },
+  "states": [
+    {
+      "name": "01-initial-transcript",
+      "fullPage": true,
+      "pre": [{ "action": "waitFor", "selector": "iframe[title=\"apps/counter.html\"]" }, { "action": "wait", "ms": 500 }]
+    },
+    {
+      "name": "02-pinned-first-sheet-peek",
+      "fullPage": true,
+      "pre": [
+        { "action": "click", "selector": "[aria-label=\"Pin to panel\"]" },
+        { "action": "waitFor", "selector": ".artifact-panel[data-mode=\"sheet\"]" },
+        { "action": "wait", "ms": 500 }
+      ]
+    }
+  ]
+}
