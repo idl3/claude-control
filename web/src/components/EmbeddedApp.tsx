@@ -40,8 +40,35 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * skeleton, and the failed-chip for fetch errors all happen there. The
  * rejected-url check stays here since it's synchronous and belongs inline
  * in the transcript flow, not floating in the hoisted layer.
+ *
+ * Phase C, C2: two new optional props feed AppFrameLayer's multi-placeholder
+ * host arbitration and always-mounted panel bodies —
+ *  - `context` ('transcript' default): rides as `data-embed-app-context` so
+ *    AppFrameLayer can pick a single deterministic host per url when the same
+ *    app is embedded in both the transcript AND pinned into the panel
+ *    (panel-context always wins — see AppFrameLayer's tick()).
+ *  - `hidden` (false default): the panel renders EVERY open app artifact's
+ *    placeholder simultaneously so tab switches never tear one down (that
+ *    would reload the iframe), but only the ACTIVE tab's should actually be
+ *    visible. Setting `hidden` applies `visibility: hidden` + disables
+ *    pointer events on the placeholder itself — deliberately NOT
+ *    `display: none`, which would collapse the rect to zero and trip
+ *    AppFrameLayer's FIX-2 zero-rect eviction (see AppFrameLayer.tsx) — and
+ *    rides as `data-embed-app-hidden="true"` so AppFrameLayer folds it into
+ *    the same paneHidden (hide, never evict) treatment as a scrolled-out-of-
+ *    pane placeholder.
  */
-export function EmbeddedApp({ url, height }: { url: string; height: number }) {
+export function EmbeddedApp({
+  url,
+  height,
+  context = 'transcript',
+  hidden = false,
+}: {
+  url: string;
+  height: number;
+  context?: 'panel' | 'transcript';
+  hidden?: boolean;
+}) {
   const resolution = resolveMediaUrl(url);
 
   // resolveMediaUrl's 'direct' branch is media's allowance for http(s)
@@ -51,18 +78,26 @@ export function EmbeddedApp({ url, height }: { url: string; height: number }) {
     return <code className="embed-media-rejected">app url rejected: {url}</code>;
   }
 
-  const frameStyle = {
-    width: '100%',
-    maxWidth: APP_FRAME_MAX_WIDTH,
-    height: `${height}px`,
-  };
+  // Panel context fills its slot exactly (ArtifactPanel/.artifact-app-slot
+  // sizes the box); transcript context keeps the reserved-box width cap +
+  // fixed height from the tag's `height` attr.
+  const frameStyle =
+    context === 'panel'
+      ? { width: '100%', height: '100%' }
+      : { width: '100%', maxWidth: APP_FRAME_MAX_WIDTH, height: `${height}px` };
 
   return (
     <span
       className="embed-media-frame embed-app-frame"
-      style={frameStyle}
+      style={{
+        ...frameStyle,
+        visibility: hidden ? 'hidden' : undefined,
+        pointerEvents: hidden ? 'none' : undefined,
+      }}
       data-embed-app-url={url}
       data-embed-app-height={height}
+      data-embed-app-context={context}
+      data-embed-app-hidden={hidden ? 'true' : undefined}
       aria-label="embedded app"
     />
   );
@@ -130,6 +165,65 @@ export function AppReloadButton({
     >
       <ReloadIcon />
       {quiet ? null : 'Reload'}
+    </button>
+  );
+}
+
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 21s7-7.58 7-12A7 7 0 1 0 5 9c0 4.42 7 12 7 12Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        fill={filled ? 'currentColor' : 'none'}
+      />
+    </svg>
+  );
+}
+
+/**
+ * Phase C, C3: "pin to panel" affordance — rendered by AppFrameLayer next to
+ * AppReloadButton in every chrome state (healthy iframe corner, failed strip,
+ * crashed strip), same presentation/composition split as AppReloadButton
+ * above: this file owns only the button's look; AppFrameLayer owns the
+ * action, since only it has both `useArtifactPanel()` and the slot's actual
+ * reserved height.
+ *
+ * Deliberately NOT a toggle — clicking always calls `onClick` unconditionally,
+ * which AppFrameLayer wires to `open({ ..., pinned: true })`. Pinning an
+ * already-pinned app is a no-op-that-focuses (openReducer's re-open path
+ * moves it to MRU-front + activates it — see ArtifactContext.tsx's
+ * OpenArtifactInput doc comment), never a click-to-unpin. Unpinning only ever
+ * happens from the panel side (tab close). `pinned` only drives the visual
+ * (filled icon + aria-pressed) so the control still reads as a real toggle to
+ * the user even though the click handler is one-directional.
+ */
+export function AppPinButton({
+  pinned,
+  onClick,
+  quiet = true,
+  style,
+}: {
+  pinned: boolean;
+  onClick: () => void;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-pin-btn${quiet ? '' : ' embed-app-pin-btn-labeled'}${
+        pinned ? ' embed-app-pin-btn-active' : ''
+      }`}
+      aria-label={pinned ? 'Pinned to panel' : 'Pin to panel'}
+      aria-pressed={pinned}
+      onClick={onClick}
+      style={style}
+    >
+      <PinIcon filled={pinned} />
+      {quiet ? null : pinned ? 'Pinned' : 'Pin'}
     </button>
   );
 }

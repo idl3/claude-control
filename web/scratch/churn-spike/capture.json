@@ -7,7 +7,7 @@
   "states": [
     {
       "name": "end-state-counters",
-      "selector": "[data-testid=churn-counters]",
+      "fullPage": true,
       "pre": [
         {
           "action": "wait",
@@ -40,7 +40,7 @@
     },
     {
       "name": "fix2-evicted",
-      "selector": "[data-testid=churn-counters]",
+      "fullPage": true,
       "pre": [
         {
           "action": "click",
@@ -54,7 +54,7 @@
     },
     {
       "name": "fix2-reappeared",
-      "selector": "[data-testid=churn-counters]",
+      "fullPage": true,
       "pre": [
         {
           "action": "click",

@@ -6,7 +6,7 @@
 // (fetch → setHtml) that renderToStaticMarkup never runs. jsdom is harmless
 // to the rest of this file: renderToStaticMarkup needs no DOM at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createElement, Fragment } from 'react';
+import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { render as mount, screen, cleanup, fireEvent } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
@@ -20,7 +20,14 @@ import {
   APP_HEIGHT_DEFAULT,
 } from './embeds';
 import { MarkdownImg } from '../components/EmbeddedMedia';
+import { EmbeddedApp } from '../components/EmbeddedApp';
 import { AppFrameLayer } from '../components/AppFrameLayer';
+import { ArtifactPanel } from '../components/ArtifactPanel';
+// C2: AppFrameLayer now calls useArtifactPanel() (host-arbitration chip
+// click-through), so every mount below needs a provider ancestor —
+// ArtifactPanelProvider substitutes 1:1 for the Fragment these mounts used
+// to wrap their placeholder + AppFrameLayer children in.
+import { ArtifactPanelProvider, appArtifactId, useArtifactPanel } from '../components/ArtifactContext';
 import { DEFAULT_ASPECT_RATIO } from './mediaDimensions';
 
 // EmbeddedApp fetches its html via authFetch (lib/api) — stub only that
@@ -244,7 +251,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
     mount(
       createElement(
-        Fragment,
+        ArtifactPanelProvider,
         null,
         createElement(MarkdownImg, {
           'data-embed': 'app',
@@ -275,7 +282,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
     // both the placeholder's container and the portal) to be able to fail.
     const { baseElement } = mount(
       createElement(
-        Fragment,
+        ArtifactPanelProvider,
         null,
         createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/missing.html' }),
         createElement(AppFrameLayer),
@@ -291,7 +298,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
     mount(
       createElement(
-        Fragment,
+        ArtifactPanelProvider,
         null,
         createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/counter.html' }),
         createElement(AppFrameLayer),
@@ -325,7 +332,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
     mount(
       createElement(
-        Fragment,
+        ArtifactPanelProvider,
         null,
         createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/hideme.html' }),
         createElement(AppFrameLayer),
@@ -363,7 +370,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
     mount(
       createElement(
-        Fragment,
+        ArtifactPanelProvider,
         null,
         createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/offpane.html' }),
         createElement(AppFrameLayer),
@@ -392,7 +399,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
       mount(
         createElement(
-          Fragment,
+          ArtifactPanelProvider,
           null,
           createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/reload-me.html' }),
           createElement(AppFrameLayer),
@@ -429,7 +436,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
       mount(
         createElement(
-          Fragment,
+          ArtifactPanelProvider,
           null,
           createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/crashme.html' }),
           createElement(AppFrameLayer),
@@ -459,7 +466,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
       mount(
         createElement(
-          Fragment,
+          ArtifactPanelProvider,
           null,
           createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/nospoof.html' }),
           createElement(AppFrameLayer),
@@ -486,7 +493,7 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
 
       mount(
         createElement(
-          Fragment,
+          ArtifactPanelProvider,
           null,
           createElement(MarkdownImg, { 'data-embed': 'app', 'data-url': 'apps/recover.html' }),
           createElement(AppFrameLayer),
@@ -515,6 +522,343 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
       const recoveredIframe = (await screen.findByTitle('apps/recover.html')) as HTMLIFrameElement;
       expect(recoveredIframe.getAttribute('srcdoc')).toBe('<html><body>recovered</body></html>');
     });
+  });
+});
+
+describe('C audit follow-up (CP3-C, FIX 1): panel hosts survive a mobile back-nav (display:none) collapse', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // Mirrors App.tsx's `.detail{display:none}` mobile back-nav toggle: a
+    // placeholder inside a `[data-collapsed="true"]` ancestor zero-rects,
+    // same as it would under a real `display:none` in a real browser (jsdom
+    // computes no layout at all, so this is the same simulation technique
+    // the existing "FIX 2: evicts..." test above already uses).
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.closest('[data-collapsed="true"]')) return mockRect({ width: 0, height: 0 });
+      return mockRect({});
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    authFetchMock.mockReset();
+    rectSpy.mockRestore();
+  });
+
+  it('a panel-context host survives a mobile back-nav collapse (hide, not evict) with no re-fetch on un-hide, while a transcript-context host under the identical collapse still evicts (Phase A behavior intact)', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    function callsFor(url: string): number {
+      return authFetchMock.mock.calls.filter((args) => args[0] === `/api/media/${url}`).length;
+    }
+
+    function Scene({ collapsed }: { collapsed: boolean }) {
+      return createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(
+          'div',
+          { 'data-collapsed': collapsed ? 'true' : 'false' },
+          createElement(EmbeddedApp, { url: 'apps/pinned-panel.html', height: 320, context: 'panel' }),
+          createElement(EmbeddedApp, { url: 'apps/transcript-only.html', height: 320, context: 'transcript' }),
+        ),
+        createElement(AppFrameLayer),
+      );
+    }
+
+    const { rerender } = mount(createElement(Scene, { collapsed: false }));
+
+    await screen.findByTitle('apps/pinned-panel.html');
+    await screen.findByTitle('apps/transcript-only.html');
+    expect(callsFor('apps/pinned-panel.html')).toBe(1);
+    expect(callsFor('apps/transcript-only.html')).toBe(1);
+
+    // Mobile back-nav: App.tsx's `.detail` flips to display:none. Both
+    // placeholders stay mounted (App.tsx never unmounts them, only the CSS
+    // toggles) but their rects collapse to zero — exactly the real-world
+    // trigger for this bug.
+    rerender(createElement(Scene, { collapsed: true }));
+
+    // Past GRACE_MS (250ms).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Panel host: hidden via visibility, slot survives — no re-fetch.
+    const panelIframe = screen.getByTitle('apps/pinned-panel.html') as HTMLIFrameElement;
+    const panelHoist = panelIframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(panelHoist.style.visibility).toBe('hidden');
+    expect(panelHoist.style.pointerEvents).toBe('none');
+    expect(callsFor('apps/pinned-panel.html')).toBe(1);
+
+    // Transcript host: evicted — Phase A's unbounded-embed leak guard is untouched.
+    expect(screen.queryByTitle('apps/transcript-only.html')).toBeNull();
+
+    // Un-hide (mobile nav returns to the detail pane).
+    rerender(createElement(Scene, { collapsed: false }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByTitle('apps/transcript-only.html')).toBeTruthy();
+    });
+    const revealedPanelHoist = (screen.getByTitle('apps/pinned-panel.html') as HTMLElement).closest(
+      '.embed-app-hoist',
+    ) as HTMLElement;
+    expect(revealedPanelHoist.style.visibility).toBe('visible');
+
+    expect(callsFor('apps/pinned-panel.html')).toBe(1); // never re-fetched
+    expect(callsFor('apps/transcript-only.html')).toBe(2); // evicted -> re-fetched on return
+  });
+});
+
+// Phase C, C2: multi-placeholder host arbitration + the "open in panel"
+// chip. Mounts EmbeddedApp directly (rather than via MarkdownImg's
+// transcript-only remark pipeline) so a test can put a `context: 'panel'`
+// placeholder in the DOM alongside a `context: 'transcript'` one for the
+// same url — the real-world shape once an app is pinned (ArtifactPanel
+// renders the panel placeholder; the original transcript embed keeps
+// rendering its own, per AppFrameLayer.tsx's module doc comment).
+describe('C2: multi-placeholder host arbitration + panel chip (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // Discriminate by the placeholder's own data-embed-app-context attribute
+    // so a panel-context and a transcript-context placeholder for the same
+    // url get distinguishable, non-zero rects — proving tick() follows the
+    // HOST's rect (panel wins), not whichever happened to be found first.
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.dataset?.embedAppContext === 'panel') {
+        return mockRect({ top: 500, left: 500, width: 300, height: 300 });
+      }
+      return mockRect({});
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    authFetchMock.mockReset();
+    rectSpy.mockRestore();
+  });
+
+  it('a panel-context placeholder hosts the iframe over a transcript-context placeholder for the same url', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/dual.html', height: 320, context: 'transcript' }),
+        createElement(EmbeddedApp, { url: 'apps/dual.html', height: 320, context: 'panel' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    const iframe = (await screen.findByTitle('apps/dual.html')) as HTMLIFrameElement;
+    // Exactly one live iframe for the url, regardless of two placeholders.
+    expect(screen.getAllByTitle('apps/dual.html')).toHaveLength(1);
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    // Follows the PANEL placeholder's rect (500/500), not the transcript
+    // one's (0/0) — proving panel-context won host arbitration.
+    expect(hoist.style.top).toBe('500px');
+    expect(hoist.style.left).toBe('500px');
+
+    // The non-host (transcript) placeholder gets a click-to-focus chip
+    // instead of a second, invisible-anyway iframe.
+    expect(await screen.findByText('open in panel ↗')).toBeTruthy();
+  });
+
+  it('clicking the chip calls setActive(appArtifactId(url)) to focus the panel tab', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    function ActiveIdProbe() {
+      const { activeId } = useArtifactPanel();
+      return createElement('div', { 'data-testid': 'active-id' }, activeId ?? 'none');
+    }
+
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(ActiveIdProbe),
+        createElement(EmbeddedApp, { url: 'apps/dual2.html', height: 320, context: 'transcript' }),
+        createElement(EmbeddedApp, { url: 'apps/dual2.html', height: 320, context: 'panel' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    await screen.findByTitle('apps/dual2.html');
+    const chip = await screen.findByText('open in panel ↗');
+    fireEvent.click(chip);
+
+    expect(screen.getByTestId('active-id').textContent).toBe(appArtifactId('apps/dual2.html'));
+  });
+
+  it('an explicitly-hidden (inactive panel tab) placeholder hides the iframe via visibility, never evicts it', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/hiddentab.html', height: 320, context: 'panel', hidden: true }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    const iframe = (await screen.findByTitle('apps/hiddentab.html')) as HTMLIFrameElement;
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoist.style.visibility).toBe('hidden');
+    expect(hoist.style.pointerEvents).toBe('none');
+
+    // Still alive well past GRACE_MS — hidden must never trigger eviction,
+    // the same "hide, never evict" contract as FIX 1's pane-clipping case
+    // (tick() folds data-embed-app-hidden into the same paneHidden flag).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(screen.queryByTitle('apps/hiddentab.html')).toBeTruthy();
+  });
+
+  // CP3-C FIX 5: pickHost's panel-always-wins rule is UNCONDITIONAL on
+  // explicitlyHidden (an inactive-but-pinned panel tab still hosts — see
+  // pickHost's doc comment in AppFrameLayer.tsx). Guard that a hidden panel
+  // host still correctly out-arbitrates a visible transcript placeholder:
+  // the chip must show (not a silent duplicate iframe) and must still focus
+  // the right tab.
+  it('a hidden (inactive-tab) panel host still yields its host role — the transcript chip shows and clicking it still focuses the tab', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    function ActiveIdProbe() {
+      const { activeId } = useArtifactPanel();
+      return createElement('div', { 'data-testid': 'active-id' }, activeId ?? 'none');
+    }
+
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(ActiveIdProbe),
+        createElement(EmbeddedApp, { url: 'apps/hidden-host.html', height: 320, context: 'transcript' }),
+        createElement(EmbeddedApp, {
+          url: 'apps/hidden-host.html',
+          height: 320,
+          context: 'panel',
+          hidden: true, // inactive panel tab — still the HOST, per pickHost's unconditional context rule
+        }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    await screen.findByTitle('apps/hidden-host.html');
+    expect(screen.getAllByTitle('apps/hidden-host.html')).toHaveLength(1);
+
+    const chip = await screen.findByText('open in panel ↗');
+    fireEvent.click(chip);
+
+    expect(screen.getByTestId('active-id').textContent).toBe(appArtifactId('apps/hidden-host.html'));
+  });
+
+  it('falls back to first-in-document-order for two transcript-context duplicates and renders no misleading "panel" chip', async () => {
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/twice.html', height: 320, context: 'transcript' }),
+        createElement(EmbeddedApp, { url: 'apps/twice.html', height: 320, context: 'transcript' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    await screen.findByTitle('apps/twice.html');
+    expect(screen.getAllByTitle('apps/twice.html')).toHaveLength(1);
+    // No panel placeholder exists for this url — the second transcript
+    // duplicate must NOT claim "open in panel" (that would be a lie).
+    expect(screen.queryByText('open in panel ↗')).toBeNull();
+  });
+});
+
+// Phase C, C3: the pin-to-panel affordance rendered by AppFrameLayer next to
+// AppReloadButton. Mounts the real trio a thread mounts — EmbeddedApp
+// (transcript), AppFrameLayer, and ArtifactPanel — so the acceptance bar
+// ("pinning from transcript creates/focuses the app tab; pinning twice
+// focuses (no duplicate); transcript embed stays functional independently")
+// is proven end-to-end through the actual pin button + panel UI, not by
+// calling useArtifactPanel().open() directly.
+describe('C3: pin-to-panel affordance (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // ArtifactPanel calls useIsNarrow() (matchMedia) — not needed by any
+    // other suite in this file since none of them mount ArtifactPanel.
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+    authFetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html><body>hi</body></html>') });
+  });
+
+  afterEach(() => {
+    cleanup();
+    authFetchMock.mockReset();
+    rectSpy.mockRestore();
+  });
+
+  it('pinning from the transcript creates+focuses a panel tab; pinning again focuses without duplicating; unpinning keeps the transcript embed working with no extra fetch', async () => {
+    mount(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/pin1.html', height: 320, context: 'transcript' }),
+        createElement(AppFrameLayer),
+        createElement(ArtifactPanel),
+      ),
+    );
+
+    await screen.findByTitle('apps/pin1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+    // No artifact pinned yet — no panel, no tab.
+    expect(screen.queryByRole('tab')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Pin to panel'));
+
+    // A panel tab appears, titled from the url's basename, and is focused.
+    const tab = await screen.findByRole('tab', { name: 'pin1.html' });
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    // Host arbitration hands the iframe to the (now-mounted) panel
+    // placeholder; the transcript placeholder becomes a shadow with the
+    // click-to-focus chip — still exactly one live iframe for the url.
+    expect(await screen.findByText('open in panel ↗')).toBeTruthy();
+    expect(screen.getAllByTitle('apps/pin1.html')).toHaveLength(1);
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // pinning never re-fetches
+    expect(screen.getByLabelText('Pinned to panel')).toBeTruthy(); // button reflects pinned state
+
+    // Pin again — idempotent focus, no duplicate tab, no extra fetch.
+    fireEvent.click(screen.getByLabelText('Pinned to panel'));
+    expect(screen.getAllByRole('tab', { name: 'pin1.html' })).toHaveLength(1);
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Unpin via the panel's own close control — the transcript embed keeps
+    // functioning: host arbitration falls back to it (still the SAME
+    // tracked slot, no new fetch), and the "open in panel" chip goes away.
+    fireEvent.click(screen.getByLabelText('Close pin1.html'));
+    await vi.waitFor(() => {
+      expect(screen.queryByText('open in panel ↗')).toBeNull();
+    });
+    expect(await screen.findByTitle('apps/pin1.html')).toBeTruthy();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Pin to panel')).toBeTruthy(); // back to unpinned state
   });
 });
 

@@ -3,7 +3,16 @@ import { createPortal } from 'react-dom';
 import { authFetch } from '../lib/api';
 import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
-import { AppReloadButton } from './EmbeddedApp';
+import { appArtifactId, useArtifactPanel } from './ArtifactContext';
+import { AppReloadButton, AppPinButton } from './EmbeddedApp';
+
+/** Phase C, C3: title for a freshly-pinned app artifact — last path segment
+ * of its url, falling back to the full url for a bare filename or a
+ * trailing-slash edge case. */
+function basename(url: string): string {
+  const seg = url.split('/').filter(Boolean).pop();
+  return seg && seg.length > 0 ? seg : url;
+}
 
 /**
  * Hoists <embedded-app> iframes out of the transcript row DOM into one
@@ -69,10 +78,37 @@ import { AppReloadButton } from './EmbeddedApp';
  * FIX 2 stores the validated crash beacon's own `message` on the slot and
  * renders it as plain text content (never markup) in the crashed strip, so
  * an app's actual crash reason is visible instead of just its url.
+ *
+ * Phase C, C2 (always-mounted panel bodies + multi-placeholder arbitration)
+ * layers on top of B/B2, also unchanged design elsewhere: a url can now have
+ * MORE THAN ONE placeholder in the DOM at once — one in the transcript
+ * (EmbeddedApp, context='transcript') and one in the panel's always-mounted
+ * app stack (ArtifactPanel, context='panel', rendered for every open app
+ * artifact regardless of which tab is active). Still exactly one live iframe
+ * per url (SLOT_SELECTOR/Slot are unchanged), so tick() now groups found
+ * placeholders by url and picks a single deterministic HOST per url each
+ * frame: panel-context always wins over transcript, else first in document
+ * order (readSlotEls/querySelectorAll already yields document order) — see
+ * pickHost. The host's own rect/context/explicit-hidden attribute drive the
+ * slot exactly as before (this is a strict generalization: the pre-Phase-C
+ * single-placeholder-per-url case has exactly one candidate, so pickHost
+ * always returns it unchanged). Non-host ("shadow") placeholders for the
+ * same url don't get their own iframe — instead their live rects are tracked
+ * separately (shadowsRef) and rendered as a quiet "open in panel ↗" chip
+ * (see the render function below) so the transcript position isn't left as a
+ * silent empty box once the app is pinned into the panel.
+ *
+ * The panel's inactive-tab placeholders declare themselves hidden via
+ * `data-embed-app-hidden="true"` (EmbeddedApp's `hidden` prop) rather than
+ * `display:none`, specifically so their rect stays non-zero and FIX 2's
+ * zero-rect eviction never fires on a tab switch — tick() folds this
+ * explicit flag into the same `paneHidden` (hide via visibility, never
+ * evict) treatment FIX 1 already uses for a scrolled-out-of-pane
+ * placeholder, so switching panel tabs (or scrolling the transcript
+ * placeholder out of view) never reloads the iframe either way.
  */
 
 const GRACE_MS = 250;
-// One live iframe per url; multi-placeholder arbitration lands in Phase C.
 const SLOT_SELECTOR = '[data-embed-app-url]';
 // B audit follow-up (CP3-B, FIX 2): cap the beacon's app-controlled crash
 // message so a misbehaving app can't blow up the crashed strip's layout.
@@ -137,26 +173,33 @@ export function computePaneClip(
 // accounted for.
 const RELOAD_CORNER_OFFSET = 6;
 
-type ChromeClamp = { cornerTop: number; cornerRight: number; crashedInset: ClipInsets };
+type ChromeClamp = {
+  cornerTop: number;
+  cornerRight: number;
+  cornerLeft: number;
+  crashedInset: ClipInsets;
+};
 
 /**
  * FIX 1 (clamp chrome into the visible clip): computePaneClip's clip insets
  * describe how much of the placeholder's edges are clipped away by its
  * scroll pane, but the corner reload button (.embed-app-reload-btn,
- * top:6/right:6) and the crashed strip's CTA (.embed-app-crashed) both
+ * top:6/right:6), the corner pin button (.embed-app-pin-btn, top:6/left:6 —
+ * Phase C, C3), and the crashed strip's CTA (.embed-app-crashed) all
  * position against the FULL, un-clipped placeholder box in the render
- * below — with a partial clip, either can land entirely inside the
+ * below — with a partial clip, any of them can land entirely inside the
  * clipped-away (invisible, non-hit-testable) region. This maps a clip into
  * where each piece of chrome should actually render:
- *  - cornerTop/cornerRight: the reload button's offset from the top-right
- *    corner, pushed inward by however much of the top/right edge is
- *    clipped away. Used for the healthy-iframe and failed-fetch corner
- *    button, both of which sit directly in the un-clipped hoist box.
+ *  - cornerTop/cornerRight/cornerLeft: the reload/pin buttons' offset from
+ *    the top-right/top-left corner respectively, pushed inward by however
+ *    much of the top/right/left edge is clipped away. Used for the
+ *    healthy-iframe and failed-fetch corner buttons, both of which sit
+ *    directly in the un-clipped hoist box.
  *  - crashedInset: the .embed-app-crashed strip's own inset, shrunk from
  *    the default 0 (full box) down to the clip — its flex-centered message
- *    then centers within the VISIBLE slice, and its own reload button
- *    (also top:6/right:6, but now relative to this shrunk box) lands in
- *    the visible corner too, with no separate offset needed.
+ *    then centers within the VISIBLE slice, and its own reload/pin buttons
+ *    (also top:6/right:6 and top:6/left:6, but now relative to this shrunk
+ *    box) land in their visible corners too, with no separate offset needed.
  * Returns the identity result (no adjustment) when there's no clip.
  */
 export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
@@ -164,6 +207,7 @@ export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
   return {
     cornerTop: RELOAD_CORNER_OFFSET + c.top,
     cornerRight: RELOAD_CORNER_OFFSET + c.right,
+    cornerLeft: RELOAD_CORNER_OFFSET + c.left,
     crashedInset: c,
   };
 }
@@ -223,21 +267,68 @@ type Slot = {
   lastSeen: number;
 };
 
-function readSlotEls(): { url: string; height: number; el: HTMLElement }[] {
-  const out: { url: string; height: number; el: HTMLElement }[] = [];
+type SlotEl = {
+  url: string;
+  height: number;
+  el: HTMLElement;
+  context: 'panel' | 'transcript';
+  explicitlyHidden: boolean;
+};
+
+function readSlotEls(): SlotEl[] {
+  const out: SlotEl[] = [];
   document.querySelectorAll<HTMLElement>(SLOT_SELECTOR).forEach((el) => {
     const url = el.dataset.embedAppUrl;
     if (!url) return;
     const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
-    out.push({ url, height: Number.isFinite(height) ? height : 360, el });
+    const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
+    const explicitlyHidden = el.dataset.embedAppHidden === 'true';
+    out.push({ url, height: Number.isFinite(height) ? height : 360, el, context, explicitlyHidden });
   });
   return out;
+}
+
+/**
+ * Multi-placeholder host arbitration (C2): given every placeholder currently
+ * in the DOM for one url (in document order), pick the single one whose rect
+ * the live iframe follows this frame. Panel-context always wins over
+ * transcript — once an app is pinned, the panel is the durable home for it
+ * regardless of which panel tab happens to be active right now (an inactive-
+ * but-pinned tab still hosts; its transcript placeholder shows the "open in
+ * panel" chip instead of a live, invisible-anyway iframe). Falls back to
+ * first-in-document-order, which is the only candidate in the pre-Phase-C
+ * (single placeholder) case, so this is a strict generalization.
+ */
+function pickHost(entries: SlotEl[]): SlotEl {
+  return entries.find((e) => e.context === 'panel') ?? entries[0];
 }
 
 export function AppFrameLayer() {
   const [, forceRender] = useState(0);
   const slotsRef = useRef<Map<string, Slot>>(new Map());
   const fetchingRef = useRef<Set<string>>(new Set());
+  // C2: non-host ("shadow") placeholder rects for the current frame, keyed by
+  // url — purely presentational (the "open in panel ↗" chip overlay), no
+  // grace/eviction semantics of its own; recomputed fresh every tick.
+  const shadowsRef = useRef<Map<string, DOMRect>>(new Map());
+  const { setActive, open, artifacts } = useArtifactPanel();
+
+  // Phase C, C3: pin-to-panel — always an idempotent open({..., pinned:
+  // true}), never a toggle-to-unpin (see AppPinButton's doc comment). `open`
+  // is stable (useCallback in ArtifactPanelProvider); `height` comes from
+  // the hosting slot's own tracked height so the panel reserves the same box
+  // the transcript embed declared.
+  function onPinClick(url: string, height: number) {
+    open({
+      id: appArtifactId(url),
+      kind: 'app',
+      title: basename(url),
+      content: '',
+      appUrl: url,
+      appHeight: height,
+      pinned: true,
+    });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -301,13 +392,27 @@ export function AppFrameLayer() {
       if (!alive) return;
       const now = performance.now();
       const found = readSlotEls();
+
+      // C2: group by url (readSlotEls/querySelectorAll already yields
+      // document order, which pickHost's fallback tier relies on) so
+      // multi-placeholder arbitration can run before anything below treats
+      // a url as having exactly one candidate rect.
+      const byUrl = new Map<string, SlotEl[]>();
+      for (const entry of found) {
+        const list = byUrl.get(entry.url);
+        if (list) list.push(entry);
+        else byUrl.set(entry.url, [entry]);
+      }
+
       // Placeholders matched by the selector AND not hidden-ancestor (FIX 2)
       // — the "genuinely present" set eviction/FIX-3-gating both key off.
       const presentUrls = new Set<string>();
+      const nextShadows = new Map<string, DOMRect>();
       let changed = false;
 
-      for (const { url, height, el } of found) {
-        const rect = el.getBoundingClientRect();
+      for (const [url, entries] of byUrl) {
+        const host = pickHost(entries);
+        const rect = host.el.getBoundingClientRect();
 
         // FIX 2 (hidden-ancestor eviction): a zero-sized rect means some
         // ancestor collapsed this placeholder out of layout (mobile back-nav
@@ -322,19 +427,56 @@ export function AppFrameLayer() {
         // position:fixed element can legitimately have a null offsetParent,
         // but these placeholders never are one) — so this is the cheaper of
         // the two equivalent signals the audit flagged.
-        if (rect.width === 0 && rect.height === 0) continue;
+        //
+        // CP3-C FIX 1: panel-context hosts are EXEMPT from this eviction —
+        // don't `continue` on a panel zero-rect. The same mobile back-nav
+        // `display:none` collapse zero-rects a pinned app's PANEL placeholder
+        // too (it lives in the same collapsed `.detail` pane as any
+        // transcript embed), and this loop used to evict it unconditionally,
+        // silently destroying every pinned app's live iframe on every back
+        // navigation. computePaneClip naturally returns `paneHidden: true`
+        // for any zero-rect regardless of ancestor, so simply not skipping
+        // here routes a panel zero-rect through the existing hide-not-evict
+        // path below with no other logic changes. This is deliberate and
+        // safe specifically because panel apps are pinned by explicit user
+        // intent and bounded by LIVE_APP_CAP, so keep-alive is safe;
+        // transcript embeds stay on the Phase-A evict path (unbounded,
+        // leak-prone).
+        if (rect.width === 0 && rect.height === 0 && host.context !== 'panel') continue;
 
         presentUrls.add(url);
 
+        // C2: track every non-host placeholder's rect for the "open in
+        // panel" chip overlay (render function below) — but only when the
+        // host is genuinely IN the panel. Two transcript-context duplicates
+        // of the same url (host = first-in-doc-order, per pickHost's
+        // fallback tier) is a pre-existing, unremarkable edge case with no
+        // panel to point at; showing "open in panel" there would be a lie.
+        // A shadow with its own zero rect (e.g. scrolled/hidden-ancestor)
+        // just doesn't get a chip this frame — no grace window needed, it's
+        // purely decorative.
+        if (host.context === 'panel') {
+          for (const e of entries) {
+            if (e === host) continue;
+            const shadowRect = e.el.getBoundingClientRect();
+            if (shadowRect.width === 0 && shadowRect.height === 0) continue;
+            nextShadows.set(url, shadowRect);
+          }
+        }
+
         // FIX 1 (pane clipping): see computePaneClip's doc comment.
-        const ancestorEl = el.closest('.thread-viewport');
+        const ancestorEl = host.el.closest('.thread-viewport');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
-        const { paneHidden, clip } = computePaneClip(rect, ancestorRect);
+        const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
+        // C2: an explicitly-hidden host (inactive panel tab) hides exactly
+        // like a geometrically-clipped-out placeholder — visibility only,
+        // never eviction.
+        const paneHidden = geometryHidden || host.explicitlyHidden;
 
         let slot = slotsRef.current.get(url);
         if (!slot) {
           slot = {
-            height,
+            height: host.height,
             rect,
             paneHidden,
             clip,
@@ -362,7 +504,7 @@ export function AppFrameLayer() {
             changed = true;
           }
           slot.rect = rect;
-          slot.height = height;
+          slot.height = host.height;
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
@@ -384,6 +526,31 @@ export function AppFrameLayer() {
           changed = true;
         }
       }
+
+      // C2: diff the shadow-chip map the same way slot rects are diffed
+      // above, so a shadow placeholder appearing/moving/disappearing (e.g.
+      // the transcript scrolls) re-renders the chip's overlay position.
+      for (const [url, rect] of nextShadows) {
+        const prev = shadowsRef.current.get(url);
+        if (
+          !prev ||
+          prev.top !== rect.top ||
+          prev.left !== rect.left ||
+          prev.width !== rect.width ||
+          prev.height !== rect.height
+        ) {
+          changed = true;
+        }
+      }
+      if (!changed) {
+        for (const url of shadowsRef.current.keys()) {
+          if (!nextShadows.has(url)) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      shadowsRef.current = nextShadows;
 
       if (changed) forceRender((n) => n + 1);
 
@@ -466,10 +633,28 @@ export function AppFrameLayer() {
   }, []);
 
   const slots = Array.from(slotsRef.current.entries());
-  if (slots.length === 0) return null;
+  const shadows = Array.from(shadowsRef.current.entries());
+  if (slots.length === 0 && shadows.length === 0) return null;
 
   return createPortal(
     <>
+      {shadows.map(([url, rect]) => (
+        <button
+          key={`chip-${url}`}
+          type="button"
+          className="embed-app-panel-chip"
+          style={{
+            position: 'fixed',
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          }}
+          onClick={() => setActive(appArtifactId(url))}
+        >
+          open in panel ↗
+        </button>
+      ))}
       {slots.map(([url, slot]) => {
         const r = slot.rect;
         // FIX 1: hidden whenever the placeholder isn't currently found
@@ -484,6 +669,10 @@ export function AppFrameLayer() {
         // comment — clamps the corner reload button and the crashed strip
         // into the visible slice of a partially-clipped placeholder.
         const chrome = clampChromeInsets(slot.clip);
+        // Phase C, C3: whether this url is already pinned — drives the pin
+        // button's filled-icon/aria-pressed visual only (see AppPinButton's
+        // doc comment for why the click handler itself never toggles).
+        const pinned = artifacts.some((a) => a.id === appArtifactId(url) && a.pinned);
         return (
           <span
             key={url}
@@ -518,6 +707,7 @@ export function AppFrameLayer() {
                   <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
                 ) : null}
                 <AppReloadButton url={url} quiet={false} />
+                <AppPinButton pinned={pinned} quiet={false} onClick={() => onPinClick(url, slot.height)} />
               </div>
             ) : slot.failed ? (
               <>
@@ -526,6 +716,12 @@ export function AppFrameLayer() {
                   url={url}
                   quiet={false}
                   style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
+                />
+                <AppPinButton
+                  pinned={pinned}
+                  quiet={false}
+                  onClick={() => onPinClick(url, slot.height)}
+                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
                 />
               </>
             ) : slot.html != null ? (
@@ -541,6 +737,11 @@ export function AppFrameLayer() {
                   title={url}
                 />
                 <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
+                <AppPinButton
+                  pinned={pinned}
+                  onClick={() => onPinClick(url, slot.height)}
+                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                />
               </>
             ) : (
               <span className="embed-media-skeleton" aria-label="loading app" />

@@ -193,18 +193,16 @@ function Panel({ variant }: { variant: Variant }) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ArtifactPanelProvider>
-        <div className="churn-panel" data-panel={variant} data-testid={`panel-${variant}`}>
-          <div className="proto-label">
-            variant: {variant} — step {step}/{TOTAL_STEPS}
-          </div>
-          <ThreadPrimitive.Root className="thread-root">
-            <ThreadPrimitive.Viewport className="thread-viewport">
-              <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
-            </ThreadPrimitive.Viewport>
-          </ThreadPrimitive.Root>
+      <div className="churn-panel" data-panel={variant} data-testid={`panel-${variant}`}>
+        <div className="proto-label">
+          variant: {variant} — step {step}/{TOTAL_STEPS}
         </div>
-      </ArtifactPanelProvider>
+        <ThreadPrimitive.Root className="thread-root">
+          <ThreadPrimitive.Viewport className="thread-viewport">
+            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
+      </div>
     </AssistantRuntimeProvider>
   );
 }
@@ -261,8 +259,16 @@ function App() {
   }, []);
 
   return (
-    <div className="churn-stage" data-testid="stage">
-      <div className="proto-label">cockpit churn-survival spike — Phase A / A3 re-run (post-fix)</div>
+    // C4 phase-end re-run: AppFrameLayer now calls useArtifactPanel() (C2),
+    // so it needs a shared provider ancestor with whatever renders the
+    // <embedded-app> DOM markers it scrapes. Hoisted here (was: one nested
+    // provider per Panel, invisible to this sibling AppFrameLayer) — the
+    // per-panel isolation the nested providers gave doesn't matter for this
+    // harness's actual assertions (hoist/fetch-count survival), only for pin
+    // state, which this spike doesn't touch.
+    <ArtifactPanelProvider>
+      <div className="churn-stage" data-testid="stage">
+        <div className="proto-label">cockpit churn-survival spike — Phase A / A3 re-run (post-fix)</div>
       {/* Stand-ins for real chrome outside .thread-viewport (detail-head sits
           above the scroll pane, composer below) — reused verbatim from
           styles.css so the FIX-1 clip screenshot below proves a hoisted
@@ -307,7 +313,8 @@ function App() {
         <span data-testid="fake-composer">fake .composer — must stay on top, unobscured</span>
       </div>
       <AppFrameLayer />
-    </div>
+      </div>
+    </ArtifactPanelProvider>
   );
 }
 
