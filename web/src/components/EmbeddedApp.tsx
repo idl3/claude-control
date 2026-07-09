@@ -66,6 +66,18 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * today's behavior); D4 is the first caller to ever pass `false`, from a
  * per-tab "pin to this version" choice (a pinned version must never get
  * silently replaced by a newer rebuild's frame).
+ *
+ * H2 (Codex review): `suspended` (false default) rides as
+ * `data-embed-app-suspended="true"`. ArtifactAppStack renders a marker with
+ * this prop set for a cap-suspended app INSTEAD of a live `context="panel"`
+ * placeholder — it never fetches or hosts anything itself, it only tells
+ * AppFrameLayer's host arbitration "this url is suspended in the panel right
+ * now". AppFrameLayer bars hosting for a url entirely while ANY placeholder
+ * for it carries this marker (see AppFrameLayer.tsx's tick()), which is the
+ * fix for the bug where a suspended-past-cap app would silently fall back to
+ * hosting its live iframe in a transcript placeholder instead — defeating the
+ * live-frame cap. A transcript placeholder for the same url renders the
+ * existing non-host "open in panel" chip, relabeled "suspended in panel".
  */
 export function EmbeddedApp({
   url,
@@ -73,12 +85,14 @@ export function EmbeddedApp({
   context = 'transcript',
   hidden = false,
   trackLatest = true,
+  suspended = false,
 }: {
   url: string;
   height: number;
   context?: 'panel' | 'transcript';
   hidden?: boolean;
   trackLatest?: boolean;
+  suspended?: boolean;
 }) {
   const resolution = resolveMediaUrl(url);
 
@@ -110,6 +124,7 @@ export function EmbeddedApp({
       data-embed-app-context={context}
       data-embed-app-hidden={hidden ? 'true' : undefined}
       data-embed-app-track-latest={trackLatest === false ? 'false' : undefined}
+      data-embed-app-suspended={suspended ? 'true' : undefined}
       aria-label="embedded app"
     />
   );
