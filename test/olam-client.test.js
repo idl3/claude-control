@@ -84,6 +84,37 @@ test('listSessions normalises rows on the ADR-062 identity', async () => {
   assert.equal(listCall.init.headers.Authorization, 'Bearer app-bearer-1');
 });
 
+test('readOnly: a session owned via CF Access SUB (not email) is steerable, org-mate is not', async () => {
+  // The SPA returns `owner_email` as the owner's CF Access SUB. A real-shaped JWT
+  // carrying both email + sub lets operatorSub() resolve. An owned session
+  // (matches our sub OR email) must be steerable; a genuine org-mate's read-only.
+  const payload = Buffer.from(
+    JSON.stringify({ email: 'me@atlas.kitchen', sub: 'sub-me-123' }),
+  ).toString('base64url');
+  const jwt = `h.${payload}.s`;
+  const execFileImpl = (cmd, args, opts, cb) => {
+    if (cmd === 'cloudflared') return cb(null, `${jwt}\n`);
+    if (cmd === 'gcloud') return cb(null, 'runner-tok\n');
+    cb(new Error(`unexpected ${cmd}`), '');
+  };
+  const { impl: fetchImpl } = fetchStub([
+    BOOT_ROUTE,
+    ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [
+      { ...LIST_ROW, session_id: 'own-by-sub', owner_email: 'sub-me-123' },
+      { ...LIST_ROW, session_id: 'own-by-email', owner_email: 'me@atlas.kitchen' },
+      { ...LIST_ROW, session_id: 'org-mate', owner_email: 'sub-other-999' },
+    ] })],
+  ]);
+  const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
+  const rows = await c.listSessions();
+  const bySub = rows.find((r) => r.sessionId === 'own-by-sub');
+  const byEmail = rows.find((r) => r.sessionId === 'own-by-email');
+  const mate = rows.find((r) => r.sessionId === 'org-mate');
+  assert.equal(bySub.readOnly, false); // owner_email === our sub → steerable
+  assert.equal(byEmail.readOnly, false); // owner_email === our email → steerable
+  assert.equal(mate.readOnly, true); // matches neither → org-mate, read-only
+});
+
 test('missing Access session surfaces a typed NoAccessSession, not a crash', async () => {
   const { impl: execFileImpl } = execStub({ jwt: null });
   const { impl: fetchImpl } = fetchStub([]);
