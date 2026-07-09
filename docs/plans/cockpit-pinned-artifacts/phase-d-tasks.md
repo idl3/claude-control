@@ -135,3 +135,5 @@ D1 → D2; D3 → D4 (needs D2 too); D3 → D5. D1 and D3 can run in parallel.
 - `cd web && npm run build`: green (pre-existing >500kB `index` chunk-size warning, unrelated to this phase, not touched).
 - Churn-spike seam guard (`web/scratch/churn-spike/`, the Phase A hoist-survival regression harness Phase C had to repair): re-run clean after all of D1–D5 — `stable iframe loads: 1`, `unstable iframe loads: 1`, `live hoist count: 2`, matching the FIX-2 contract exactly (screenshots read back and visually confirmed, not embedded unverified).
 - D5's producer-side changes touch zero files in this repository (confirmed via `git status` in this worktree showing no changes attributable to D5) — outside the scope of any of the above checks by construction.
+
+<!-- Codex review: 3H/3M/2L fixed in 6c04dc2, 6c8dcd7 -->

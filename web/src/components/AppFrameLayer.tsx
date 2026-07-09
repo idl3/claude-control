@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { authFetch } from '../lib/api';
 import { isValidAppErrorBeacon } from '../lib/appBeacon';
-import { mediaAppFramePath, resolveMediaUrl } from '../lib/mediaUrl';
+import { resolveMediaUrl } from '../lib/mediaUrl';
+import { appNameFromUrl } from '../lib/appVersion';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
 import { AppReloadButton, AppPinButton } from './EmbeddedApp';
 
@@ -250,15 +251,42 @@ export function shouldKeepPolling(slotCount: number, presentPlaceholderCount: nu
  * app" lives, so a track-latest panel slot hot-reloads; a track-latest
  * transcript-only slot does not, and a D4 pin-version slot (`trackLatest:
  * false`) never reloads from a frame regardless of context.
+ *
+ * H3 (Codex review): matching is by app NAME, not exact path equality. The
+ * bug this fixes — a producer that only ever writes `apps/<name>/<stamp>.html`
+ * + refreshes the `latest` pointer (never re-touching the flat compat alias
+ * file's own mtime in the same write... well, it does refresh the alias too,
+ * see below) used to never match a flat-url track-latest slot's exact-path
+ * check, so that tab's "Latest (auto-reload)" mode silently never reloaded.
+ * `appNameFromUrl` (web/src/lib/appVersion.ts) already extracts the same
+ * name from any of the three frame shapes a version write can broadcast — a
+ * concrete version file, the `latest` pointer file, or the flat alias — and
+ * from either url shape a slot can legally be embedded with (bare relative
+ * or `/api/media/`-prefixed, per M3's normalization). A track-latest PANEL
+ * slot now reloads whenever the frame's name matches the slot's own name,
+ * regardless of which of those three files the frame names.
+ *
+ * On a name-matching reload for a flat-url slot, the caller (onMediaAppChanged
+ * below, via reload()/fetchHtml) re-fetches the FLAT url exactly as before —
+ * deliberately not the version-file/latest url the frame itself named. This
+ * is safe (not stale) because the D5 producer contract (documented at
+ * docs/plans/cockpit-pinned-artifacts/phase-d-tasks.md D5) refreshes the flat
+ * compat alias on EVERY version write, so `cache:'reload'`-fetching the flat
+ * url always returns current bytes; wiring the async D3 listing endpoint
+ * (GET /api/media-apps/<name>/versions) into this synchronous WS-frame path
+ * instead would add a network round-trip and a real race window for no
+ * benefit over the alias the producer already guarantees.
  */
 export function shouldReloadOnFrame(
   slot: { context: 'panel' | 'transcript'; trackLatest: boolean; lastMtime: number | null },
-  slotFramePath: string | null,
+  slotUrl: string,
   frame: { path: string; mtime: number },
 ): boolean {
   if (slot.context !== 'panel') return false;
   if (!slot.trackLatest) return false;
-  if (slotFramePath == null || slotFramePath !== frame.path) return false;
+  const slotName = appNameFromUrl(slotUrl);
+  const frameName = appNameFromUrl(frame.path);
+  if (slotName == null || frameName == null || slotName !== frameName) return false;
   if (slot.lastMtime != null && frame.mtime <= slot.lastMtime) return false;
   return true;
 }
@@ -303,6 +331,25 @@ type Slot = {
   // D2: mtime of the last frame (or explicit reload) applied to this slot —
   // guards against reloading again for a stale/duplicate/out-of-order frame.
   lastMtime: number | null;
+  // H1 (Codex review): the mtime a reload() wants to become `lastMtime`
+  // once ITS generation's fetch actually commits — never applied early. See
+  // fetchGen below for why "early" was the bug.
+  pendingMtime: number | null;
+  // H1 (Codex review): bumped by reload() only. fetchHtml tags each request
+  // with the slot's gen at launch time and, on resolve, commits (html +
+  // pendingMtime -> lastMtime) ONLY if the slot's CURRENT gen still equals
+  // the request's gen. The bug this fixes: a frame-triggered reload landing
+  // while an earlier fetch for the same url was still in flight used to hit
+  // fetchHtml's `fetchingRef.current.has(url)` early-return and get silently
+  // dropped — yet reload() had already advanced `lastMtime` to the new
+  // frame's mtime, so the (never-fetched) newer content was lost AND a
+  // future identical frame would be suppressed by the already-advanced
+  // watermark. Now: a reload always bumps the gen (cheap, no network call by
+  // itself); if a fetch is already in flight, that in-flight fetch's own
+  // `.finally()` notices the gen no longer matches what it launched with and
+  // re-fetches itself — no reload is ever lost, and `lastMtime` only moves
+  // when the generation that owns it actually lands.
+  fetchGen: number;
 };
 
 type SlotEl = {
@@ -312,6 +359,10 @@ type SlotEl = {
   context: 'panel' | 'transcript';
   explicitlyHidden: boolean;
   trackLatest: boolean;
+  // H2 (Codex review): true for the marker placeholder EmbeddedApp renders
+  // for a cap-suspended app (`suspended` prop -> data-embed-app-suspended).
+  // See tick()'s per-url loop below for what this bars.
+  suspended: boolean;
 };
 
 function readSlotEls(): SlotEl[] {
@@ -323,6 +374,7 @@ function readSlotEls(): SlotEl[] {
     const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
     const explicitlyHidden = el.dataset.embedAppHidden === 'true';
     const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
+    const suspended = el.dataset.embedAppSuspended === 'true';
     out.push({
       url,
       height: Number.isFinite(height) ? height : 360,
@@ -330,6 +382,7 @@ function readSlotEls(): SlotEl[] {
       context,
       explicitlyHidden,
       trackLatest,
+      suspended,
     });
   });
   return out;
@@ -350,14 +403,38 @@ function pickHost(entries: SlotEl[]): SlotEl {
   return entries.find((e) => e.context === 'panel') ?? entries[0];
 }
 
+// C2/L1 (Codex review): a shadow (non-host) placeholder's overlay chip. L1
+// fix — this used to be a single DOMRect per url, so a second transcript
+// duplicate of the same url silently lost its chip (Map.set overwrote the
+// first). Now an array per url, one entry per non-host placeholder that
+// currently wants a chip. `suspended` (H2) swaps the chip's label from
+// "open in panel ↗" to "suspended in panel" — see the tick() suspendedMarker
+// branch below.
+type ShadowEntry = { rect: DOMRect; suspended: boolean };
+
+function shadowRectEquals(a: DOMRect, b: DOMRect): boolean {
+  return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+}
+
+function shadowArraysEqual(a: ShadowEntry[] | undefined, b: ShadowEntry[]): boolean {
+  if (!a) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].suspended !== b[i].suspended || !shadowRectEquals(a[i].rect, b[i].rect)) return false;
+  }
+  return true;
+}
+
 export function AppFrameLayer() {
   const [, forceRender] = useState(0);
   const slotsRef = useRef<Map<string, Slot>>(new Map());
   const fetchingRef = useRef<Set<string>>(new Set());
   // C2: non-host ("shadow") placeholder rects for the current frame, keyed by
-  // url — purely presentational (the "open in panel ↗" chip overlay), no
-  // grace/eviction semantics of its own; recomputed fresh every tick.
-  const shadowsRef = useRef<Map<string, DOMRect>>(new Map());
+  // url — purely presentational (the "open in panel ↗" / "suspended in
+  // panel" chip overlay), no grace/eviction semantics of its own; recomputed
+  // fresh every tick. L1: array per url (see ShadowEntry) so multiple
+  // transcript duplicates of one url each keep their own chip.
+  const shadowsRef = useRef<Map<string, ShadowEntry[]>>(new Map());
   const { setActive, open, artifacts } = useArtifactPanel();
 
   // Phase C, C3: pin-to-panel — always an idempotent open({..., pinned:
@@ -384,6 +461,11 @@ export function AppFrameLayer() {
     let rafId: number | null = null;
 
     function fetchHtml(url: string) {
+      // H1: an in-flight fetch for this url is never dropped by a reload
+      // that lands mid-flight — reload() just bumps the slot's fetchGen,
+      // and this in-flight request's own .finally() below notices the
+      // mismatch and re-fetches itself once it clears the in-flight set.
+      // Starting a second concurrent request here would race the first.
       if (fetchingRef.current.has(url)) return;
       const resolution = resolveMediaUrl(url);
       if (resolution.kind !== 'fetch') {
@@ -391,6 +473,7 @@ export function AppFrameLayer() {
         if (slot) slot.failed = true;
         return;
       }
+      const gen = slotsRef.current.get(url)?.fetchGen ?? 0;
       fetchingRef.current.add(url);
       // cache: 'reload' — the media route serves cache-control: max-age=3600
       // with no validators, so a same-URL re-fetch (reload button, D2 hot
@@ -406,16 +489,31 @@ export function AppFrameLayer() {
         .then((text) => {
           if (!alive) return;
           const slot = slotsRef.current.get(url);
-          if (slot) slot.html = text;
+          // H1: a newer reload() bumped fetchGen while this request was in
+          // flight — never commit a stale response over content a
+          // subsequent reload already superseded. The finally() below
+          // re-fetches for the current generation instead.
+          if (!slot || slot.fetchGen !== gen) return;
+          slot.html = text;
+          if (slot.pendingMtime != null) slot.lastMtime = slot.pendingMtime;
         })
         .catch(() => {
           if (!alive) return;
           const slot = slotsRef.current.get(url);
-          if (slot) slot.failed = true;
+          // Same generation guard as the success path — a fetch failure for
+          // an already-superseded generation must not flash "unavailable"
+          // for content nobody's waiting on anymore; the retry below covers it.
+          if (slot && slot.fetchGen === gen) slot.failed = true;
         })
         .finally(() => {
           fetchingRef.current.delete(url);
-          if (alive) forceRender((n) => n + 1);
+          if (!alive) return;
+          const slot = slotsRef.current.get(url);
+          if (slot && slot.fetchGen !== gen) {
+            fetchHtml(url); // superseded while in flight — re-fetch for the current generation
+            return;
+          }
+          forceRender((n) => n + 1);
         });
     }
 
@@ -440,7 +538,14 @@ export function AppFrameLayer() {
       slot.html = null;
       slot.win = null;
       slot.iframeKey += 1;
-      if (mtime != null) slot.lastMtime = mtime;
+      // H1: record the desired mtime but do NOT advance lastMtime yet — it
+      // only moves once THIS generation's fetch actually commits (see
+      // fetchHtml). Bumping fetchGen here is what makes this reload
+      // impossible to silently lose: even if fetchHtml no-ops below because
+      // a previous fetch for this url is still in flight, that in-flight
+      // fetch's own .finally() will see the bumped gen and re-fetch itself.
+      if (mtime != null) slot.pendingMtime = mtime;
+      slot.fetchGen += 1;
       forceRender((n) => n + 1);
       fetchHtml(url);
     }
@@ -465,10 +570,35 @@ export function AppFrameLayer() {
       // Placeholders matched by the selector AND not hidden-ancestor (FIX 2)
       // — the "genuinely present" set eviction/FIX-3-gating both key off.
       const presentUrls = new Set<string>();
-      const nextShadows = new Map<string, DOMRect>();
+      const nextShadows = new Map<string, ShadowEntry[]>();
       let changed = false;
 
       for (const [url, entries] of byUrl) {
+        // H2 (Codex review): a suspended marker placeholder (ArtifactAppStack
+        // rendering `<EmbeddedApp suspended />` for a cap-suspended app — see
+        // EmbeddedApp.tsx's doc comment) BARS this url from hosting anywhere,
+        // full stop — never call pickHost, never create/update a real slot,
+        // never add url to presentUrls. Bug this fixes: previously the panel
+        // tab claimed "suspended" while the transcript placeholder's
+        // still-mounted iframe kept hosting the live app, defeating
+        // LIVE_APP_CAP. Not adding to presentUrls means any EXISTING slot
+        // ages out through the ordinary GRACE_MS eviction path just below —
+        // no separate teardown logic needed. Transcript-context placeholders
+        // for the same url still get a shadow chip (relabeled "suspended in
+        // panel" by the render function) so there's a visible affordance to
+        // wake it instead of a live iframe silently reappearing there.
+        if (entries.some((e) => e.suspended)) {
+          const arr: ShadowEntry[] = [];
+          for (const e of entries) {
+            if (e.context !== 'transcript') continue;
+            const shadowRect = e.el.getBoundingClientRect();
+            if (shadowRect.width === 0 && shadowRect.height === 0) continue;
+            arr.push({ rect: shadowRect, suspended: true });
+          }
+          if (arr.length > 0) nextShadows.set(url, arr);
+          continue;
+        }
+
         const host = pickHost(entries);
         const rect = host.el.getBoundingClientRect();
 
@@ -514,12 +644,14 @@ export function AppFrameLayer() {
         // just doesn't get a chip this frame — no grace window needed, it's
         // purely decorative.
         if (host.context === 'panel') {
+          const arr: ShadowEntry[] = [];
           for (const e of entries) {
             if (e === host) continue;
             const shadowRect = e.el.getBoundingClientRect();
             if (shadowRect.width === 0 && shadowRect.height === 0) continue;
-            nextShadows.set(url, shadowRect);
+            arr.push({ rect: shadowRect, suspended: false });
           }
+          if (arr.length > 0) nextShadows.set(url, arr);
         }
 
         // FIX 1 (pane clipping): see computePaneClip's doc comment.
@@ -548,6 +680,8 @@ export function AppFrameLayer() {
             context: host.context,
             trackLatest: host.trackLatest,
             lastMtime: null,
+            pendingMtime: null,
+            fetchGen: 0,
           };
           slotsRef.current.set(url, slot);
           fetchHtml(url);
@@ -596,15 +730,8 @@ export function AppFrameLayer() {
       // C2: diff the shadow-chip map the same way slot rects are diffed
       // above, so a shadow placeholder appearing/moving/disappearing (e.g.
       // the transcript scrolls) re-renders the chip's overlay position.
-      for (const [url, rect] of nextShadows) {
-        const prev = shadowsRef.current.get(url);
-        if (
-          !prev ||
-          prev.top !== rect.top ||
-          prev.left !== rect.left ||
-          prev.width !== rect.width ||
-          prev.height !== rect.height
-        ) {
+      for (const [url, arr] of nextShadows) {
+        if (!shadowArraysEqual(shadowsRef.current.get(url), arr)) {
           changed = true;
         }
       }
@@ -670,8 +797,7 @@ export function AppFrameLayer() {
       if (!frame || typeof frame.path !== 'string' || typeof frame.mtime !== 'number') return;
       const framePayload = { path: frame.path, mtime: frame.mtime };
       for (const [url, slot] of slotsRef.current) {
-        const slotFramePath = mediaAppFramePath(url);
-        if (shouldReloadOnFrame(slot, slotFramePath, framePayload)) {
+        if (shouldReloadOnFrame(slot, url, framePayload)) {
           reload(url, frame.mtime);
         }
       }
@@ -719,14 +845,19 @@ export function AppFrameLayer() {
   }, []);
 
   const slots = Array.from(slotsRef.current.entries());
-  const shadows = Array.from(shadowsRef.current.entries());
-  if (slots.length === 0 && shadows.length === 0) return null;
+  // L1: flatMap so multiple transcript duplicates of the same url each keep
+  // their own chip (was a single Map<url, DOMRect>, so a second dupe's rect
+  // silently overwrote the first's — see ShadowEntry's doc comment).
+  const shadowChips = Array.from(shadowsRef.current.entries()).flatMap(([url, arr]) =>
+    arr.map((entry, i) => ({ url, i, ...entry })),
+  );
+  if (slots.length === 0 && shadowChips.length === 0) return null;
 
   return createPortal(
     <>
-      {shadows.map(([url, rect]) => (
+      {shadowChips.map(({ url, i, rect, suspended }) => (
         <button
-          key={`chip-${url}`}
+          key={`chip-${url}-${i}`}
           type="button"
           className="embed-app-panel-chip"
           style={{
@@ -738,7 +869,7 @@ export function AppFrameLayer() {
           }}
           onClick={() => setActive(appArtifactId(url))}
         >
-          open in panel ↗
+          {suspended ? 'suspended in panel' : 'open in panel ↗'}
         </button>
       ))}
       {slots.map(([url, slot]) => {

@@ -128,6 +128,27 @@ describe('MediaAppWatcher', () => {
     assert.equal(result.length, 0, `expected no startup-seed frame, got ${JSON.stringify(result)}`);
   });
 
+  test('L2 (Codex review): a deleted file is pruned from _mtimes on the next poll sweep', async () => {
+    const target = path.join(appsDir, 'counter.html');
+    atomicWrite(target, '<html>v1</html>');
+
+    watcher = new MediaAppWatcher(appsDir, { debounceMs: 100, pollMs: 100 });
+    watcher.start();
+    await new Promise((r) => setTimeout(r, 50)); // seed walk settles before deletion
+
+    assert.equal(watcher._mtimes.has('counter.html'), true, 'seed walk should have recorded the pre-existing file');
+
+    fs.rmSync(target);
+    // Let at least one poll sweep (pollMs=100) run past the deletion.
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.equal(
+      watcher._mtimes.has('counter.html'),
+      false,
+      'deleted file must be pruned from _mtimes on the next sweep, not linger for the process lifetime',
+    );
+  });
+
   test('stop() prevents any further emission', async () => {
     watcher = new MediaAppWatcher(appsDir, { debounceMs: 100, pollMs: 100 });
     watcher.start();

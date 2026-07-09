@@ -20,6 +20,7 @@ import {
 } from './ArtifactPanel';
 import { ArtifactPanelProvider, useArtifactPanel, type Artifact, type OpenArtifactInput } from './ArtifactContext';
 import { AppFrameLayer } from './AppFrameLayer';
+import { EmbeddedApp } from './EmbeddedApp';
 
 const authFetchMock = vi.fn();
 vi.mock('../lib/api', async (importOriginal) => {
@@ -288,6 +289,192 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
   });
 });
 
+describe('H2 (Codex review): a cap-suspended pinned app never falls back to hosting in a still-mounted transcript placeholder (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockNarrow(false);
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    cleanup();
+    rectSpy.mockRestore();
+  });
+
+  function appInput(id: string, pinned = true): OpenArtifactInput {
+    return { id, kind: 'app', title: id, content: '', appUrl: `apps/${id}.html`, appHeight: 320, pinned };
+  }
+
+  function Api({ onReady }: { onReady: (api: ReturnType<typeof useArtifactPanel>) => void }) {
+    const api = useArtifactPanel();
+    onReady(api);
+    return null;
+  }
+
+  function mount() {
+    let api!: ReturnType<typeof useArtifactPanel>;
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(Api, { onReady: (a) => (api = a) }),
+        // A live transcript placeholder for app1's url — simulating the
+        // transcript still showing the original <embedded-app> tag near
+        // where the app was pinned from. This is the placeholder host
+        // arbitration wrongly fell back to hosting in, pre-fix, once app1
+        // got cap-suspended in the panel.
+        createElement(EmbeddedApp, { url: 'apps/app1.html', height: 320, context: 'transcript' }),
+        createElement(ArtifactPanel),
+        createElement(AppFrameLayer),
+      ),
+    );
+    return () => api;
+  }
+
+  it('bars hosting everywhere once suspended; the transcript shows a "suspended in panel" chip, not a live iframe; wake resumes normal hosting', async () => {
+    const getApi = mount();
+
+    // Transcript-only host, the ordinary single-placeholder case, settles first.
+    await screen.findByTitle('apps/app1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Pin 7 apps in one batch — app1 (opened first, least-recently-used in
+    // MRU order) never goes live on the panel side and is cap-suspended the
+    // instant its marker mounts, exactly like the pre-existing "beyond the
+    // 6-live cap" test, except this time a live transcript placeholder for
+    // the SAME url is already hosting when the marker appears.
+    await act(async () => {
+      for (let i = 1; i <= 7; i++) getApi().open(appInput(`app${i}`));
+    });
+    await screen.findByTitle('apps/app7.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1 + 6); // app1 never re-fetched via the panel
+
+    // Past AppFrameLayer's GRACE_MS (250ms) + margin, the previously-hosting
+    // transcript slot must have been evicted — the bug this fixes let it
+    // silently keep hosting the live iframe there forever.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByTitle('apps/app1.html')).toBeNull();
+    expect(authFetchMock).toHaveBeenCalledTimes(1 + 6);
+
+    // The transcript placeholder now shows the relabeled chip instead.
+    expect(screen.getByRole('button', { name: 'suspended in panel' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'open in panel ↗' })).toBeNull();
+
+    // Waking removes the suspension marker (ArtifactAppStack swaps back to a
+    // live EmbeddedApp) — normal host arbitration resumes with a fresh fetch.
+    const wakeBtn = screen.getByRole('button', { name: 'tap to open' });
+    await act(async () => {
+      fireEvent.click(wakeBtn);
+    });
+    await screen.findByTitle('apps/app1.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1 + 6 + 1);
+  });
+});
+
+describe('M2 (Codex review): wokenIds/everLiveIds are pruned on close, so a re-pin of the same id always requires a fresh wake gesture (mounted)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockNarrow(false);
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    cleanup();
+    rectSpy.mockRestore();
+  });
+
+  function appInput(id: string, pinned = true): OpenArtifactInput {
+    return { id, kind: 'app', title: id, content: '', appUrl: `apps/${id}.html`, appHeight: 320, pinned };
+  }
+
+  function Api({ onReady }: { onReady: (api: ReturnType<typeof useArtifactPanel>) => void }) {
+    const api = useArtifactPanel();
+    onReady(api);
+    return null;
+  }
+
+  function mount() {
+    let api!: ReturnType<typeof useArtifactPanel>;
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(Api, { onReady: (a) => (api = a) }),
+        createElement(ArtifactPanel),
+        createElement(AppFrameLayer),
+      ),
+    );
+    return () => api;
+  }
+
+  it('closing a woken, cap-suspended app then re-pinning the same id (pushed beyond cap again) shows a fresh "tap to open", not a stale live iframe or "tap to reload"', async () => {
+    const getApi = mount();
+
+    // app1..app7 in one batch -> app1 (opened first) is cap-suspended, same
+    // setup as the pre-existing "beyond the 6-live cap" test.
+    await act(async () => {
+      for (let i = 1; i <= 7; i++) getApi().open(appInput(`app${i}`));
+    });
+    await screen.findByTitle('apps/app7.html');
+    expect(screen.queryByTitle('apps/app1.html')).toBeNull();
+
+    // Wake app1 -> live, and (via the everLiveIds effect) marked ever-live.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'tap to open' }));
+    });
+    await screen.findByTitle('apps/app1.html');
+
+    // Close EVERY open app (app1 plus the other 6 that were live) -> the
+    // artifacts array is empty again, so the next batch's MRU math below
+    // isn't muddied by app2-7's own (legitimate, unrelated) demotion.
+    await act(async () => {
+      for (let i = 1; i <= 7; i++) getApi().close(`app${i}`);
+    });
+    // AppFrameLayer's own hoisted iframe is grace-gated (GRACE_MS=250ms), not
+    // torn down the instant the placeholder unmounts — same as the
+    // pre-existing "demoted-from-live" test above.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByTitle('apps/app1.html')).toBeNull();
+
+    // Re-pin app1, then open 6 BRAND-NEW apps in the SAME batch right after
+    // it, reproducing the exact "beyond the 6-live cap" shape (first-opened
+    // in a batch = least-recently-used in that batch = suspended) with app1
+    // as the one that lands beyond the cap boundary — purely by MRU
+    // freshness, not by anything left over from before. Whether app1 shows
+    // live/suspended, and which suspended label it uses, therefore depends
+    // ONLY on stale vs. pruned wokenIds/everLiveIds membership from before
+    // the close above.
+    await act(async () => {
+      getApi().open(appInput('app1'));
+      for (let i = 8; i <= 13; i++) getApi().open(appInput(`app${i}`));
+    });
+    await screen.findByTitle('apps/app13.html');
+
+    // Without pruning: stale wokenIds would force app1 live here regardless
+    // of cap position (an unrequested auto-fetch); stale everLiveIds would
+    // show "suspended — tap to reload" instead of the honest "tap to open"
+    // for what is, from the user's perspective, a brand-new pin. app8-13
+    // never went live before either, so they'd also show "tap to open" if
+    // suspended — but they're all within the 6-live cap here, so app1's
+    // button is the only suspended one in the DOM.
+    expect(screen.queryByTitle('apps/app1.html')).toBeNull();
+    expect(screen.getByRole('button', { name: 'tap to open' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'suspended — tap to reload' })).toBeNull();
+  });
+});
+
 describe('ArtifactPanel — C2 always-mounted app stack (mounted, mobile sheet)', () => {
   let rectSpy: ReturnType<typeof vi.spyOn>;
 
@@ -500,5 +687,65 @@ describe('D4: version picker + pin/track-latest (mounted, desktop)', () => {
     await screen.findByTitle('apps/widget/v1.html');
     expect(authFetchMock).toHaveBeenCalledTimes(3); // new url -> new fetch
     expect(loadAppTabVersion('tabA')).toEqual({ kind: 'pinned', filename: 'v1.html' });
+  });
+
+  it('M1 (Codex review): a stale version-listing response for a since-abandoned tab must not overwrite the current tab\'s listing', async () => {
+    const getApi = mount();
+
+    // Two DIFFERENT app names, so each gets its own /api/media-apps/<name>/versions
+    // url — the race is real, not just two requests for the same url.
+    await act(async () => {
+      getApi().open({ id: 'tabA', kind: 'app', title: 'a', content: '', appUrl: 'apps/app-a.html', appHeight: 320, pinned: true });
+      getApi().open({ id: 'tabB', kind: 'app', title: 'b', content: '', appUrl: 'apps/app-b.html', appHeight: 320, pinned: true });
+    });
+    await screen.findByTitle('apps/app-b.html'); // tabB opened last -> active
+
+    let resolveA: (v: unknown) => void = () => {};
+    let resolveB: (v: unknown) => void = () => {};
+    const pendingA = new Promise((resolve) => {
+      resolveA = resolve;
+    });
+    const pendingB = new Promise((resolve) => {
+      resolveB = resolve;
+    });
+    authFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/media-apps/app-a/versions') return pendingA;
+      if (url === '/api/media-apps/app-b/versions') return pendingB;
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) });
+    });
+
+    // Focus the picker while tabB (app-b) is active -> launches fetch B.
+    const select = () => screen.getByLabelText('App version') as HTMLSelectElement;
+    fireEvent.focus(select());
+
+    // Switch to tabA BEFORE B resolves. The [name] reset effect clears
+    // fetchedForRef + listing; focusing again launches fetch A for app-a.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'a' }));
+    });
+    fireEvent.focus(select());
+
+    // Resolve B (the older, now-abandoned request) with app-b's data.
+    await act(async () => {
+      resolveB({
+        ok: true,
+        json: () =>
+          Promise.resolve({ name: 'app-b', versions: [{ filename: 'bv1.html', version: 'bv1', label: null, url: 'apps/app-b/bv1.html', latest: false }], latest: null }),
+      });
+    });
+    // Must NOT land: the picker is showing tabA now, and must never briefly
+    // (or permanently) offer app-b's version as an option for app-a's tab.
+    expect(screen.queryByRole('option', { name: 'bv1' })).toBeNull();
+
+    // Resolve A (the current request) with app-a's data — this one must land.
+    await act(async () => {
+      resolveA({
+        ok: true,
+        json: () =>
+          Promise.resolve({ name: 'app-a', versions: [{ filename: 'av1.html', version: 'av1', label: null, url: 'apps/app-a/av1.html', latest: false }], latest: null }),
+      });
+    });
+    await screen.findByRole('option', { name: 'av1' });
+    expect(screen.queryByRole('option', { name: 'bv1' })).toBeNull();
   });
 });

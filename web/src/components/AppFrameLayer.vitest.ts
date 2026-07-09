@@ -178,12 +178,12 @@ describe('shouldReloadOnFrame (D2: track-latest hot reload gate, pure)', () => {
     expect(shouldReloadOnFrame({ ...panelSlot, trackLatest: false }, 'apps/widget.html', frame)).toBe(false);
   });
 
-  it('ignores a frame for a different url (slotFramePath mismatch)', () => {
+  it('ignores a frame for a different app name (unrelated app)', () => {
     expect(shouldReloadOnFrame(panelSlot, 'apps/other.html', frame)).toBe(false);
   });
 
   it('ignores a frame when this slot url does not resolve to a media-root fetch path', () => {
-    expect(shouldReloadOnFrame(panelSlot, null, frame)).toBe(false);
+    expect(shouldReloadOnFrame(panelSlot, 'https://example.com/apps/widget.html', frame)).toBe(false);
   });
 
   it('ignores a duplicate/stale frame whose mtime is not newer than the slot\'s last applied mtime', () => {
@@ -197,6 +197,43 @@ describe('shouldReloadOnFrame (D2: track-latest hot reload gate, pure)', () => {
 
   it('accepts the first-ever frame (lastMtime still null)', () => {
     expect(shouldReloadOnFrame({ ...panelSlot, lastMtime: null }, 'apps/widget.html', frame)).toBe(true);
+  });
+
+  // H3 (Codex review): name-aware matching. A track-latest PANEL slot must
+  // reload on ANY frame shape for the same app name — version-file write,
+  // `latest` pointer refresh, or the flat-alias refresh itself — because a
+  // producer that only writes versioned files + `latest` (no flat-alias
+  // touch) previously never hot-reloaded a flat-url track-latest tab at all
+  // (exact-path equality never matched). D5's producer contract (every
+  // version write ALSO refreshes the flat compat alias — see
+  // docs/plans/cockpit-pinned-artifacts/phase-d-tasks.md:66) is what makes a
+  // flat-fetch on ANY of these frames correct: the flat file on disk is
+  // guaranteed current by the time this fires, so re-fetching the slot's own
+  // (flat) url is exactly as valid as reacting to a flat-frame directly.
+  it('H3: a flat/track-latest slot reloads on a version-file frame with the same app name', () => {
+    const versionFrame = { path: 'apps/widget/2026-07-08T23-32-05Z.html', mtime: 200 };
+    expect(shouldReloadOnFrame(panelSlot, 'apps/widget.html', versionFrame)).toBe(true);
+  });
+
+  it('H3: a flat/track-latest slot reloads on a `latest`-pointer frame with the same app name', () => {
+    const latestFrame = { path: 'apps/widget/latest', mtime: 200 };
+    expect(shouldReloadOnFrame(panelSlot, 'apps/widget.html', latestFrame)).toBe(true);
+  });
+
+  it('H3: a versioned slot url still matches a flat-alias frame with the same app name', () => {
+    const slotUrl = 'apps/widget/2026-07-01T00-00-00Z.html';
+    expect(shouldReloadOnFrame(panelSlot, slotUrl, frame)).toBe(true);
+  });
+
+  it('H3: name mismatch still gates out even across version-file/latest-pointer frame shapes', () => {
+    const otherVersionFrame = { path: 'apps/other/2026-07-08T23-32-05Z.html', mtime: 200 };
+    const otherLatestFrame = { path: 'apps/other/latest', mtime: 200 };
+    expect(shouldReloadOnFrame(panelSlot, 'apps/widget.html', otherVersionFrame)).toBe(false);
+    expect(shouldReloadOnFrame(panelSlot, 'apps/widget.html', otherLatestFrame)).toBe(false);
+  });
+
+  it('H3/M3: matches app names across /api/media/-prefixed and bare slot url shapes', () => {
+    expect(shouldReloadOnFrame(panelSlot, '/api/media/apps/widget.html', frame)).toBe(true);
   });
 });
 
@@ -296,5 +333,142 @@ describe('D2: track-latest hot reload — cockpit:media-app-changed (mounted)', 
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('L1 (Codex review): multiple non-host transcript duplicates of the same url each keep their own chip (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  it('a panel-hosted app with two transcript-context duplicates of its url renders two distinct "open in panel" chips, not one', async () => {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/dup.html', height: 320, context: 'panel' }),
+        createElement(EmbeddedApp, { url: 'apps/dup.html', height: 320, context: 'transcript' }),
+        createElement(EmbeddedApp, { url: 'apps/dup.html', height: 320, context: 'transcript' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    // The panel-context placeholder wins host arbitration (pickHost) — one
+    // iframe, one fetch, regardless of how many transcript duplicates exist.
+    await screen.findByTitle('apps/dup.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Before the L1 fix, shadowsRef was a single DOMRect per url — the
+    // second transcript duplicate's Map.set silently overwrote the first's,
+    // leaving only one chip in the DOM no matter how many duplicates existed.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'open in panel ↗' })).toHaveLength(2);
+    });
+  });
+});
+
+describe('H1 (Codex review): fetch generations — a reload mid-flight is never lost (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function mountApp(url: string) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320, context: 'panel' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  function dispatchFrame(path: string, mtime: number) {
+    return act(async () => {
+      window.dispatchEvent(new CustomEvent('cockpit:media-app-changed', { detail: { path, mtime } }));
+    });
+  }
+
+  // The bug: a frame-triggered reload() that lands while an OLDER fetch for
+  // the same url is still in flight used to be silently dropped — fetchHtml
+  // no-ops when fetchingRef already has the url, and the in-flight fetch had
+  // no way to know a reload had superseded it — yet reload() unconditionally
+  // cleared slot.html and (pre-fix) would have let the older fetch's THEN
+  // commit its now-stale response over it, with lastMtime already advanced
+  // to the reload's mtime. Net effect: newer content never loads, and a
+  // future identical frame is suppressed by shouldReloadOnFrame's own mtime
+  // gate since lastMtime already (wrongly) reflects it.
+  it('an older in-flight fetch never commits over a reload that lands mid-flight; the reload wins via a self re-fetch', async () => {
+    let resolveA: (v: { ok: boolean; text: () => Promise<string> }) => void = () => {};
+    let resolveB: (v: { ok: boolean; text: () => Promise<string> }) => void = () => {};
+    const pendingA = new Promise<{ ok: boolean; text: () => Promise<string> }>((resolve) => {
+      resolveA = resolve;
+    });
+    const pendingB = new Promise<{ ok: boolean; text: () => Promise<string> }>((resolve) => {
+      resolveB = resolve;
+    });
+    authFetchMock.mockImplementationOnce(() => pendingA).mockImplementationOnce(() => pendingB);
+
+    mountApp('apps/h1.html');
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(1)); // fetch A launched on mount
+
+    // A reload lands while A is still in flight (bumps fetchGen + records
+    // pendingMtime=555). fetchHtml() no-ops here — fetchingRef still holds
+    // the url — so no second authFetch call yet; the mismatch is only
+    // noticed once A's own .finally() runs below.
+    await dispatchFrame('apps/h1.html', 555);
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Resolve A (the now-superseded, pre-reload fetch) with OLD content.
+    await act(async () => {
+      resolveA({ ok: true, text: () => Promise.resolve('<html>OLD</html>') });
+    });
+
+    // OLD must never be committed, and A's generation mismatch must have
+    // triggered a self re-fetch (fetch B) for the current generation.
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTitle('apps/h1.html')).toBeNull();
+
+    // Resolve B (the reload's own re-fetch) with NEW content.
+    await act(async () => {
+      resolveB({ ok: true, text: () => Promise.resolve('<html>NEW</html>') });
+    });
+
+    const iframe = await screen.findByTitle('apps/h1.html');
+    expect(iframe.getAttribute('srcdoc')).toBe('<html>NEW</html>');
+
+    // lastMtime now reflects the reload's mtime (555), committed only when
+    // generation B landed — a duplicate/stale frame at the same mtime must
+    // not trigger a third fetch.
+    await dispatchFrame('apps/h1.html', 555);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
   });
 });
