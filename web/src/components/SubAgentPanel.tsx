@@ -156,7 +156,20 @@ export function SubAgentPanel({ subagents, open, onClose, focusAgentId }: SubAge
     gsap.fromTo(
       panelRef.current,
       { x: 28, opacity: 0 },
-      { x: 0, opacity: 1, duration: 0.28, ease: 'power3.out' },
+      {
+        x: 0,
+        opacity: 1,
+        duration: 0.28,
+        ease: 'power3.out',
+        // GSAP leaves the inline `transform` in place after the tween settles
+        // (it never auto-clears to `none`). A `.sa-panel` (position:fixed) with
+        // a lingering non-`none` transform becomes the containing block for any
+        // `position:fixed` descendant — including the image Lightbox rendered
+        // from a sub-agent's nested transcript (SubAgentThread -> EmbeddedMedia
+        // -> Lightbox). That squishes the Lightbox into the drawer's box
+        // instead of the full viewport. Clear it once the tween completes.
+        onComplete: () => gsap.set(panelRef.current, { clearProps: 'transform' }),
+      },
     );
   }, [open, !!selected]);
 
