@@ -1,0 +1,98 @@
+{
+  "slug": "cockpit-counter-beacon",
+  "viewport": {
+    "width": 900,
+    "height": 700
+  },
+  "states": [
+    {
+      "name": "01-loaded",
+      "selector": ".stage",
+      "pre": [
+        {
+          "action": "waitFor",
+          "selector": "iframe[title=\"proof/app.html\"]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "02-crashed",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "click",
+          "frame": "iframe[title=\"proof/app.html\"]",
+          "selector": "button.danger"
+        },
+        {
+          "action": "waitFor",
+          "selector": ".embed-app-crashed"
+        },
+        {
+          "action": "wait",
+          "ms": 300
+        }
+      ]
+    },
+    {
+      "name": "03-recovered",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "click",
+          "selector": ".embed-app-reload-btn"
+        },
+        {
+          "action": "waitFor",
+          "selector": "iframe[title=\"proof/app.html\"]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    }
+  ],
+  "video": {
+    "name": "crash-reload-run",
+    "steps": [
+      {
+        "action": "waitFor",
+        "selector": "iframe[title=\"proof/app.html\"]"
+      },
+      {
+        "action": "wait",
+        "ms": 500
+      },
+      {
+        "action": "click",
+        "frame": "iframe[title=\"proof/app.html\"]",
+        "selector": "button.danger"
+      },
+      {
+        "action": "waitFor",
+        "selector": ".embed-app-crashed"
+      },
+      {
+        "action": "wait",
+        "ms": 600
+      },
+      {
+        "action": "click",
+        "selector": ".embed-app-reload-btn"
+      },
+      {
+        "action": "waitFor",
+        "selector": "iframe[title=\"proof/app.html\"]"
+      },
+      {
+        "action": "wait",
+        "ms": 600
+      }
+    ]
+  }
+}

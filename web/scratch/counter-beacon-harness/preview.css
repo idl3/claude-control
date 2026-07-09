@@ -1,0 +1,21 @@
+@import '../../src/styles.css';
+
+body {
+  margin: 0;
+}
+#root {
+  min-height: 100vh;
+}
+.stage {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.proto-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 0 0 12px;
+}

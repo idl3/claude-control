@@ -1,0 +1,83 @@
+{
+  "slug": "cockpit-churn-spike",
+  "viewport": {
+    "width": 1400,
+    "height": 900
+  },
+  "states": [
+    {
+      "name": "end-state-counters",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "wait",
+          "ms": 13000
+        }
+      ]
+    },
+    {
+      "name": "end-state-full",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "fix1-pane-clip",
+      "pre": [
+        {
+          "action": "scrollIntoView",
+          "selector": "[data-panel=stable] [data-embed-app-url]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "fix2-evicted",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "click",
+          "selector": "[data-testid=toggle-hide-stable]"
+        },
+        {
+          "action": "wait",
+          "ms": 500
+        }
+      ]
+    },
+    {
+      "name": "fix2-reappeared",
+      "fullPage": true,
+      "pre": [
+        {
+          "action": "click",
+          "selector": "[data-testid=toggle-hide-stable]"
+        },
+        {
+          "action": "wait",
+          "ms": 800
+        }
+      ]
+    }
+  ],
+  "video": {
+    "name": "churn-run",
+    "steps": [
+      {
+        "action": "waitFor",
+        "selector": "[data-testid=churn-counters]"
+      },
+      {
+        "action": "wait",
+        "ms": 13500
+      }
+    ]
+  }
+}

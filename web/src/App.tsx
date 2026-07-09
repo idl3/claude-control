@@ -45,6 +45,7 @@ import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
+import { AppFrameLayer } from './components/AppFrameLayer';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -683,6 +684,19 @@ function AppInner() {
     return null;
   }, [cockpit.prompt, cockpit.messages]);
 
+  // Whether the SELECTED session is actively working. cockpit.sessions gets a
+  // fresh array identity on every liveness/pending frame; feeding that array
+  // straight into convertedMessages' deps rebuilt the whole thread (and
+  // remounted embedded iframes) on updates with no new messages. This boolean
+  // rarely flips, so the thread memo keys on it instead of the array.
+  const selectedWorking = useMemo(() => {
+    const sess = cockpit.sessions.find((s) => s.id === cockpit.selectedId);
+    return (
+      (!!sess && claudeWorking(sess)) ||
+      (answering !== null && answering.sessionId === cockpit.selectedId)
+    );
+  }, [cockpit.sessions, cockpit.selectedId, answering]);
+
   const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
     const base =
       hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
@@ -703,13 +717,9 @@ function AppInner() {
       } as ThreadMessageLike);
     }
     // The "Working…" loader mirrors the session activity icon: same claudeWorking
-    // signal (thinking / recent activity), so the two never disagree. A freshly
-    // answered AskUserQuestion bridges the brief gap before the pane shows work.
-    const sess = cockpit.sessions.find((s) => s.id === cockpit.selectedId);
-    const working =
-      (!!sess && claudeWorking(sess)) ||
-      (answering !== null && answering.sessionId === cockpit.selectedId);
-    if (working) {
+    // signal via selectedWorking above — derived OUTSIDE this memo so the
+    // thread only rebuilds when the flag FLIPS, not on every sessions frame.
+    if (selectedWorking) {
       base.push({
         role: 'assistant',
         id: 'optimistic-working',
@@ -718,7 +728,7 @@ function AppInner() {
       } as ThreadMessageLike);
     }
     return base;
-  }, [fullConverted, hiddenCount, cockpit.selectedId, cockpit.sessions, selectedPending, answering]);
+  }, [fullConverted, hiddenCount, selectedPending, selectedWorking]);
 
   const loadEarlier = useCallback(() => {
     setVisibleCount((c) => c + LOAD_EARLIER_STEP);
@@ -2442,6 +2452,7 @@ function AppInner() {
         ) : null}
 
         <HotkeyHints />
+        <AppFrameLayer />
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>

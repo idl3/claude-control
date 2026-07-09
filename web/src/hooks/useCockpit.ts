@@ -266,6 +266,14 @@ export function useCockpit(): CockpitStore {
             new CustomEvent('cockpit:ack', { detail: msg }),
           );
           break;
+        case 'media-app-changed':
+          // D2: same decoupling idiom as 'ack' above — AppFrameLayer owns the
+          // actual hot-reload decision (panel-hosted, track-latest slots
+          // only; see shouldReloadOnFrame), so the store stays free of it.
+          window.dispatchEvent(
+            new CustomEvent('cockpit:media-app-changed', { detail: msg }),
+          );
+          break;
         default:
           break;
       }

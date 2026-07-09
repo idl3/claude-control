@@ -1,0 +1,86 @@
+{
+  "slug": "cockpit-pin-to-panel-desktop",
+  "viewport": { "width": 1360, "height": 900 },
+  "states": [
+    {
+      "name": "01-initial-transcript",
+      "fullPage": true,
+      "pre": [{ "action": "waitFor", "selector": "iframe[title=\"apps/counter.html\"]" }, { "action": "wait", "ms": 500 }]
+    },
+    {
+      "name": "02-pinned-first",
+      "fullPage": true,
+      "pre": [
+        { "action": "click", "selector": "[aria-label=\"Pin to panel\"]" },
+        { "action": "waitFor", "selector": ".artifact-panel" },
+        { "action": "wait", "ms": 400 }
+      ]
+    },
+    {
+      "name": "03-pinned-second-both-chips",
+      "fullPage": true,
+      "pre": [
+        { "action": "click", "selector": "[aria-label=\"Pin to panel\"]" },
+        { "action": "waitFor", "selector": ".embed-app-panel-chip" },
+        { "action": "wait", "ms": 400 }
+      ]
+    },
+    {
+      "name": "04-incremented-in-panel",
+      "selector": ".artifact-panel",
+      "pre": [
+        { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+        { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+        { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+        { "action": "wait", "ms": 400 }
+      ]
+    },
+    {
+      "name": "05-tab-switched-away",
+      "fullPage": true,
+      "pre": [
+        { "action": "click", "selector": ".artifact-tab:has-text(\"counter.html\")" },
+        { "action": "wait", "ms": 400 }
+      ]
+    },
+    {
+      "name": "06-tab-switched-back-count-intact",
+      "selector": ".artifact-panel",
+      "pre": [
+        { "action": "click", "selector": ".artifact-tab:has-text(\"counter2.html\")" },
+        { "action": "wait", "ms": 400 }
+      ]
+    },
+    {
+      "name": "07-unpinned-transcript-resumes",
+      "fullPage": true,
+      "pre": [
+        { "action": "click", "selector": "[aria-label=\"Close counter2.html\"]" },
+        { "action": "wait", "ms": 600 }
+      ]
+    }
+  ],
+  "video": {
+    "name": "pin-to-panel-flow",
+    "steps": [
+      { "action": "waitFor", "selector": "iframe[title=\"apps/counter.html\"]" },
+      { "action": "wait", "ms": 500 },
+      { "action": "click", "selector": "[aria-label=\"Pin to panel\"]" },
+      { "action": "waitFor", "selector": ".artifact-panel" },
+      { "action": "wait", "ms": 400 },
+      { "action": "click", "selector": "[aria-label=\"Pin to panel\"]" },
+      { "action": "waitFor", "selector": ".embed-app-panel-chip" },
+      { "action": "wait", "ms": 400 },
+      { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+      { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+      { "action": "click", "frame": "iframe[title=\"apps/counter2.html\"]", "selector": "text=+1" },
+      { "action": "wait", "ms": 400 },
+      { "action": "click", "selector": ".artifact-tab:has-text(\"counter.html\")" },
+      { "action": "wait", "ms": 500 },
+      { "action": "click", "selector": ".artifact-tab:has-text(\"counter2.html\")" },
+      { "action": "wait", "ms": 500 },
+      { "action": "click", "selector": "[aria-label=\"Close counter2.html\"]" },
+      { "action": "wait", "ms": 800 }
+    ]
+  }
+}

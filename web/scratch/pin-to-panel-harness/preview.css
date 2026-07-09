@@ -1,0 +1,31 @@
+@import '../../src/styles.css';
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+}
+#root {
+  height: 100vh;
+}
+/* Real production wrapper (App.tsx) so the panel's actual 50:50 desktop
+   split + mobile bottom-sheet rules apply unmodified — see styles.css's
+   .detail-split block. */
+.detail-split {
+  height: 100vh;
+}
+.stage {
+  padding: 20px;
+  overflow: auto;
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.proto-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 0 0 12px;
+}
