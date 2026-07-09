@@ -4,6 +4,8 @@
 // `latest` pointer layout and the GET /api/media-apps/<name>/versions
 // response shape this file's types describe.
 
+import { mediaAppFramePath } from './mediaUrl';
+
 export interface AppVersionEntry {
   filename: string;
   /** ISO-stamp segment of the filename (the version's identity). */
@@ -30,9 +32,23 @@ const APP_URL_RE = /^apps\/([a-z0-9-]+)(?:\.html|\/)/;
  * the flat legacy form ("apps/counter.html") and a versioned file
  * ("apps/counter/2026-07-08T23-32-05Z.html"). Returns null for anything else
  * (not a media-apps url at all, e.g. an http(s) url or an unrelated media path).
+ *
+ * M3 (Codex review): normalizes through mediaAppFramePath first, so an
+ * already `/api/media/`-prefixed url (e.g. one round-tripped out of a
+ * previous transcript render, or an EmbeddedApp `url` prop given the
+ * prefixed form directly) resolves to the same name as its bare-relative
+ * equivalent. Before this fix, only the bare form ("apps/counter.html")
+ * matched APP_URL_RE — a prefixed url ("/api/media/apps/counter.html")
+ * always returned null, which silently broke H3's name-aware frame matching
+ * (AppFrameLayer.tsx's shouldReloadOnFrame) for any slot whose url happened
+ * to carry the prefix. mediaAppFramePath returns null for anything that
+ * isn't a local media-root fetch (http(s), rejected) — fall back to the raw
+ * url in that case so the null ultimately still flows through APP_URL_RE
+ * and fails the same way it always did for non-media urls.
  */
 export function appNameFromUrl(url: string): string | null {
-  const m = APP_URL_RE.exec(url);
+  const normalized = mediaAppFramePath(url) ?? url;
+  const m = APP_URL_RE.exec(normalized);
   return m ? m[1] : null;
 }
 

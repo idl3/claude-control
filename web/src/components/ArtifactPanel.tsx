@@ -318,10 +318,23 @@ function AppVersionPicker({
   const ensureFetched = useCallback(() => {
     if (fetchedForRef.current === name) return;
     fetchedForRef.current = name;
+    // M1 (Codex review): stale-response guard. `fetchedForRef.current` is
+    // reassigned synchronously by the NEXT ensureFetched call (a tab switch,
+    // or the rebuild-refresh effect's reset+re-fetch below) before this
+    // promise can resolve — so if it no longer equals what we requested by
+    // the time we land, a newer request has since superseded this one and
+    // the response must not overwrite `listing` with stale/wrong-app data.
+    const requestedName = name;
     authFetch(`/api/media-apps/${encodeURIComponent(name)}/versions`)
       .then((res) => (res.ok ? (res.json() as Promise<AppVersionListing>) : null))
-      .then((data) => setListing(data))
-      .catch(() => setListing(null));
+      .then((data) => {
+        if (fetchedForRef.current !== requestedName) return;
+        setListing(data);
+      })
+      .catch(() => {
+        if (fetchedForRef.current !== requestedName) return;
+        setListing(null);
+      });
   }, [name]);
 
   useEffect(() => {
@@ -413,12 +426,27 @@ function ArtifactAppStack({
                 trackLatest={trackLatest}
               />
             ) : (
-              <button type="button" className="artifact-app-suspended" onClick={() => onWake(a.id)}>
-                {/* CP3-C FIX 2: distinguish "was live, state discarded on cap
-                    demotion" from "never loaded" — honest about whether
-                    waking re-fetches fresh vs. re-fetches lost state. */}
-                {everLiveIds.has(a.id) ? 'suspended — tap to reload' : 'tap to open'}
-              </button>
+              <>
+                <button type="button" className="artifact-app-suspended" onClick={() => onWake(a.id)}>
+                  {/* CP3-C FIX 2: distinguish "was live, state discarded on cap
+                      demotion" from "never loaded" — honest about whether
+                      waking re-fetches fresh vs. re-fetches lost state. */}
+                  {everLiveIds.has(a.id) ? 'suspended — tap to reload' : 'tap to open'}
+                </button>
+                {/* H2 (Codex review): a marker-only EmbeddedApp — never
+                    fetches or hosts anything (see EmbeddedApp.tsx's doc
+                    comment) — tells AppFrameLayer's host arbitration this
+                    url is suspended in the panel right now, so it can bar
+                    hosting everywhere (including a still-mounted transcript
+                    placeholder) instead of silently falling back to hosting
+                    the live iframe there and defeating LIVE_APP_CAP. */}
+                <EmbeddedApp
+                  url={url}
+                  height={a.appHeight ?? APP_HEIGHT_DEFAULT}
+                  context="panel"
+                  suspended
+                />
+              </>
             )}
           </div>
         );
@@ -480,6 +508,39 @@ export function ArtifactPanel() {
       return changed ? next : prev;
     });
   }, [liveAppIds]);
+
+  // M2 (Codex review): prune both accumulate-only sets to the ids still
+  // present in appArtifacts. Bug: wokenIds/everLiveIds only ever grew, so
+  // once an app tab closed (its id dropped out of appArtifacts) the ids
+  // stayed in both sets forever. Since appArtifactId derives deterministically
+  // from the app's url (see ArtifactContext), re-pinning the SAME app later
+  // reused the same id and silently rehydrated its stale membership — the
+  // freshly re-pinned tab would auto-count as "already woken" (skipping the
+  // cap's wake gesture) and misreport "suspended — tap to reload" instead of
+  // the honest "tap to open" for what is, from the user's perspective, a
+  // brand new session. Pruning on every appArtifacts change means a close
+  // followed by a re-pin always requires a fresh wake gesture again.
+  useEffect(() => {
+    const openIds = new Set(appArtifacts.map((a) => a.id));
+    setWokenIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (openIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+    setEverLiveIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (openIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [appArtifacts]);
 
   // D4: per-tab version pin/track-latest. `versionOverrides` shadows
   // localStorage for the current mount only (avoids a read-on-every-render);

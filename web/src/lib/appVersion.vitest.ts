@@ -19,12 +19,28 @@ describe('appNameFromUrl', () => {
   it('returns null for a non-media-apps url', () => {
     expect(appNameFromUrl('https://example.com/apps/counter.html')).toBeNull();
     expect(appNameFromUrl('runs/demo.mp4')).toBeNull();
-    expect(appNameFromUrl('/api/media/apps/counter.html')).toBeNull();
   });
 
   it('returns null for an app name with disallowed characters (never matches the [a-z0-9-]+ rule)', () => {
     expect(appNameFromUrl('apps/Counter.html')).toBeNull();
     expect(appNameFromUrl('apps/my_app.html')).toBeNull();
+  });
+
+  // M3 (Codex review): appNameFromUrl must resolve the SAME name whether the
+  // url is bare-relative or already `/api/media/`-prefixed — both are legal
+  // EmbeddedApp `url` shapes (see mediaUrl.ts's resolveMediaUrl), and
+  // AppFrameLayer's H3 name-aware frame matching (shouldReloadOnFrame)
+  // depends on this parity to compare a slot's url against a WS frame's path.
+  it('extracts the name from an /api/media/-prefixed flat url (matches the bare form)', () => {
+    expect(appNameFromUrl('/api/media/apps/counter.html')).toBe('counter');
+    expect(appNameFromUrl('/api/media/apps/counter.html')).toBe(appNameFromUrl('apps/counter.html'));
+  });
+
+  it('extracts the name from an /api/media/-prefixed versioned url (matches the bare form)', () => {
+    expect(appNameFromUrl('/api/media/apps/counter/2026-07-08T23-32-05Z.html')).toBe('counter');
+    expect(appNameFromUrl('/api/media/apps/counter/2026-07-08T23-32-05Z.html')).toBe(
+      appNameFromUrl('apps/counter/2026-07-08T23-32-05Z.html'),
+    );
   });
 });
 
