@@ -256,3 +256,62 @@ export function AppPinButton({
     </button>
   );
 }
+
+function FullscreenIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M8 3H4v4M16 3h4v4M8 21H4v-4M16 21h4v-4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A4: dispatches `cockpit:studio-open` — same window-CustomEvent idiom as
+ * `cockpit:app-reload` above (AppReloadButton's doc comment) — carrying the
+ * app's url in `detail`. StudioModal.tsx owns the actual studio (derives
+ * name/version from the url, renders the fullscreen overlay); this button
+ * only ever signals intent.
+ *
+ * BOUNDARY NOTE: like AppReloadButton/AppPinButton, this file owns only the
+ * button's presentation — composing it into the actually-visible hoisted
+ * chrome (next to the Open/Reload buttons, in all three chrome states) is
+ * AppFrameLayer.tsx's job (it is the sole caller of AppReloadButton/
+ * AppPinButton today). AppFrameLayer.tsx is locked by another in-flight
+ * agent for this Phase A dispatch, so that composition step is NOT done
+ * here — this button is not yet reachable from the live UI. It is fully
+ * wired (event dispatch + StudioModal listens for it) and covered by tests
+ * that exercise the button and StudioModal directly. Follow-up: add
+ * `<AppFullscreenButton url={...} .../>` alongside the existing
+ * `<AppReloadButton>`/`<AppPinButton>` call sites in AppFrameLayer.tsx.
+ */
+export function AppFullscreenButton({
+  url,
+  quiet = true,
+  style,
+}: {
+  url: string;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const onClick = () => {
+    window.dispatchEvent(new CustomEvent('cockpit:studio-open', { detail: { url } }));
+  };
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-fullscreen-btn${quiet ? '' : ' embed-app-fullscreen-btn-labeled'}`}
+      aria-label="Open in studio"
+      onClick={onClick}
+      style={style}
+    >
+      <FullscreenIcon />
+      {quiet ? null : 'Fullscreen'}
+    </button>
+  );
+}

@@ -47,6 +47,7 @@ import { CommandPalette, type PaletteCommand } from './components/CommandPalette
 import { HotkeyHints } from './components/HotkeyHints';
 import { AppFrameLayer } from './components/AppFrameLayer';
 import { useHotkeySuppressionInterceptor } from './lib/hotkeySuppression';
+import { StudioModal } from './components/StudioModal';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -2461,15 +2462,17 @@ function AppInner() {
   );
 }
 
-// A3: registers the single capture-phase hotkey-suppression interceptor
+// A3/A4: registers the single capture-phase hotkey-suppression interceptor
 // (see lib/hotkeySuppression.ts) as a sibling of TokenGate/AppInner, in
 // App's OWN commit — so its useLayoutEffect runs before AppInner (and all
 // 20 of its descendants' keydown listeners) even mounts. Also the sole
 // provider/mount-point for chrome that must exist independently of
-// TokenGate's auth gate (A4's StudioModal joins here).
+// TokenGate's auth gate: A4's StudioModal is self-mounting (listens for
+// `cockpit:studio-open` itself) and lives here so it's always present,
+// regardless of auth state or which session is active.
 function AppChrome() {
   useHotkeySuppressionInterceptor();
-  return null;
+  return <StudioModal />;
 }
 
 // Root: gate the whole app behind the token login. TokenGate probes
