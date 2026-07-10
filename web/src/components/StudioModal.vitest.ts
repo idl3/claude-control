@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement } from 'react';
 import { StudioModal } from './StudioModal';
 import { AppFrameLayer } from './AppFrameLayer';
@@ -259,12 +259,19 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     expect(frame.style.height).toBe('1024px');
   });
 
-  it('zero iframe reloads across a full mode-switch cycle — one fetch, one iframe node, for the entire journey', async () => {
+  it('zero iframe reloads across a full mode-switch cycle — one html fetch, one iframe node, for the entire journey', async () => {
     renderStudio();
     openStudio('apps/no-reload-resize.html');
 
     const iframeAtOpen = await screen.findByTitle('apps/no-reload-resize.html');
-    expect(authFetchMock).toHaveBeenCalledTimes(1);
+    // C3: StudioPanel also fires one manifest fetch on mount (a sibling
+    // authFetch call — this describe block's beforeEach mocks a `.text()`-
+    // only response, so the manifest fetch's `res.json()` throws, caught by
+    // fetchAppManifest, degrading to null — expected here since this url
+    // carries no fixture manifest). The claim under test — no REFETCH across
+    // mode switches — only cares that the call count stays flat afterward.
+    await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2));
+    const callsAtOpen = authFetchMock.mock.calls.length;
 
     for (const label of [/Mobile 390/, /iPad 768/, /Desktop 1280/, /Mobile 390/]) {
       await act(async () => {
@@ -275,7 +282,7 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     await waitFor(() => {
       expect(screen.getByTitle('apps/no-reload-resize.html')).toBe(iframeAtOpen);
     });
-    expect(authFetchMock).toHaveBeenCalledTimes(1); // still just the initial fetch
+    expect(authFetchMock).toHaveBeenCalledTimes(callsAtOpen); // no new fetches from mode switches
   });
 
   it('gated modes stay unreachable at small screens even with AppFrameLayer mounted (Phase A gating unchanged)', () => {
@@ -347,5 +354,278 @@ describe('CP3-A HIGH regression: suppression release is not animation-gated', ()
     } finally {
       gsapNeverComplete = false;
     }
+  });
+});
+
+// --- Phase C, C3: Props panel ------------------------------------------
+// A permanently-visible sibling of `.studio-frame` (see StudioModal.tsx's
+// StudioPropsPanel doc comment) — never a hide/show tab, so these tests
+// never need to worry about the panel unmounting the iframe. Each describe
+// block below scopes its own `authFetchMock` implementation (same locally-
+// scoped pattern as the "B2: device-mode resize" block above) so the
+// manifest fetch's response is explicit and doesn't leak between tests.
+const FIXTURE_MANIFEST = {
+  'schema-version': 1,
+  component: 'Counter',
+  props: [
+    { name: 'label', tsType: 'string', required: true, example: 'Clicks' },
+    { name: 'count', tsType: 'number', required: false, default: 0 },
+    {
+      name: 'theme',
+      tsType: '"light" | "dark" | "auto"',
+      required: false,
+      enumOptions: ['light', 'dark', 'auto'],
+      default: 'light',
+    },
+    { name: 'onChange', tsType: '(labels: string[]) => void', required: false },
+  ],
+};
+
+function mockManifestFetch(manifest: unknown | null): void {
+  authFetchMock.mockReset();
+  authFetchMock.mockImplementation((url: string) => {
+    if (url.endsWith('.manifest.json')) {
+      if (manifest === null) return Promise.resolve({ ok: false });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(manifest) });
+    }
+    return Promise.resolve({ ok: true, text: () => Promise.resolve('<html>app</html>') });
+  });
+}
+
+describe('StudioModal — C3: props panel manifest states', () => {
+  it('degrade path: a manifest-less (404) artifact shows the rebuild-command message, not a form', async () => {
+    mockManifestFetch(null);
+    render(createElement(StudioModal));
+    openStudio('apps/old-counter.html');
+
+    await screen.findByText(/rebuild with a component entry/);
+    expect(document.querySelector('.studio-props-degrade-cmd')?.textContent).toContain('old-counter');
+    expect(screen.queryByLabelText('label')).toBeNull();
+  });
+
+  it('renders a typed form generated from the manifest — enum select, number/string inputs, required marker, example chip', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    await screen.findByLabelText('label'); // string input
+    expect(screen.getByLabelText('count')).toBeTruthy(); // number input
+    expect(screen.getByLabelText('theme').tagName).toBe('SELECT'); // enum select
+    expect(document.querySelector('.studio-prop-name')?.textContent).toBe('label *'); // required marker
+    expect(screen.getByText('example: Clicks')).toBeTruthy();
+
+    // `onChange` (a function tsType) has no typed control — raw-JSON-only.
+    expect(screen.queryByLabelText('onChange')).toBeNull();
+    expect(screen.getByLabelText('onChange raw JSON')).toBeTruthy();
+  });
+});
+
+describe('StudioModal — C3: props panel live injection (mounted with AppFrameLayer)', () => {
+  // Same rect stub as "B2: device-mode resize" above — AppFrameLayer only
+  // hoists a real <iframe> once its placeholder reports non-zero bounds.
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  function renderStudio() {
+    render(
+      createElement(ArtifactPanelProvider, null, createElement(StudioModal), createElement(AppFrameLayer)),
+    );
+  }
+
+  // Studio Phase C CP3 audit, FIX 1: simulates the artifact's real
+  // `cc-bridge-ready` announcement (ccBridgeRuntime.tsx's withCcBridge posts
+  // this on its own mount) — same `window.dispatchEvent(new MessageEvent(...))`
+  // idiom as embeds.vitest.ts's cc-app-error beacon tests, `source` set to
+  // the tracked iframe's own contentWindow so `isValidCcBridgeReady`'s
+  // source-identity check passes.
+  function sendBridgeReady(win: Window): void {
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'cc-bridge-ready', manifestVersion: 1 }, source: win }),
+      );
+    });
+  }
+
+  it('editing a typed prop debounces the cc-props-set postMessage to ≤150ms once the bridge is ready, without an iframe reload', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
+    const fetchCallsAtSettle = authFetchMock.mock.calls.length;
+
+    // FIX 1: sends only proceed once a validated cc-bridge-ready has been
+    // seen from this app's own iframe — see the queued/flushed test below
+    // for the no-ready-yet case this closes.
+    sendBridgeReady(iframe.contentWindow as Window);
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+      expect(postSpy).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(149);
+      expect(postSpy).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1); // 150ms total — the acceptance ceiling
+      expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-set', props: { label: 'Widgets' } }, '*');
+      expect(postSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Never reloads the iframe — same node, no new fetch.
+    expect(screen.getByTitle('apps/counter.html')).toBe(iframe);
+    expect(authFetchMock.mock.calls.length).toBe(fetchCallsAtSettle);
+  });
+
+  it('the raw-JSON override forwards an invalid (non-JSON) value as-is — the artifact must exercise its own error path, not have it validated away', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('count');
+    const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
+    sendBridgeReady(iframe.contentWindow as Window);
+
+    // `count` is a number prop; force raw-JSON editing via its toggle, then
+    // type a deliberately invalid (unparseable) value.
+    const countRow = screen.getByLabelText('count').closest('.studio-prop-field') as HTMLElement;
+    fireEvent.click(within(countRow).getByRole('button', { name: 'raw' }));
+    fireEvent.change(within(countRow).getByLabelText('count raw JSON'), { target: { value: 'not-json' } });
+
+    await vi.waitFor(() => {
+      expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-set', props: { count: 'not-json' } }, '*');
+    });
+  });
+
+  it('Reset to defaults sends cc-props-reset immediately (no debounce), regardless of bridge readiness', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
+
+    // Deliberately no sendBridgeReady() call here — reset is ungated (see
+    // StudioModal.tsx's reset() doc comment) and must fire even before the
+    // bridge has announced itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-reset' }, '*');
+  });
+
+  it('a props-set committed before cc-bridge-ready arrives is queued (not sent), then flushed exactly once when a valid ready lands', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+      vi.advanceTimersByTime(150); // debounce fires, but the bridge isn't ready — queued, not sent
+      expect(postSpy).not.toHaveBeenCalled();
+
+      // A second edit before ready lands must coalesce to the newest value,
+      // not queue a backlog — only 'Final' should ever reach the artifact.
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Final' } });
+      vi.advanceTimersByTime(150);
+      expect(postSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Ready arrives (valid shape + matching iframe window) — flushes
+    // immediately, no further debounce wait, exactly once.
+    sendBridgeReady(win);
+    expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-set', props: { label: 'Final' } }, '*');
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cc-bridge-ready message from a window other than this app's own iframe is ignored — the gate stays closed and the props-set stays queued", async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    // Same-shape ready message, but sourced from the top frame itself
+    // (never the tracked iframe's contentWindow) — same spoofed-source idiom
+    // as embeds.vitest.ts's "ignores a spoofed-source beacon" test. Must not
+    // flip the gate: the source-identity check now runs live against a real
+    // listener, not just in isolation (appBridge.vitest.ts already covers
+    // isValidCcBridgeReady in isolation).
+    sendBridgeReady(window);
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+      vi.advanceTimersByTime(150);
+      expect(postSpy).not.toHaveBeenCalled(); // spoofed ready never opened the gate
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('StudioModal — Studio Phase C CP3 audit, FIX 2: reset clears stale raw-JSON textareas', () => {
+  it('after Reset to defaults, a raw-JSON-only field (no typed control) with stale/invalid text is cleared, not left stale', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    // `onChange` is a function tsType — always raw-JSON-only, no typed-
+    // control toggle exists to force a remount another way (the exact
+    // "unrecoverable for raw-only props" case FIX 2 targets).
+    await screen.findByLabelText('onChange raw JSON');
+    const textarea = screen.getByLabelText('onChange raw JSON') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'not valid json {{{' } });
+    expect(textarea.value).toBe('not valid json {{{');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+
+    const textareaAfterReset = screen.getByLabelText('onChange raw JSON') as HTMLTextAreaElement;
+    expect(textareaAfterReset.value).toBe('');
+  });
+
+  it('reset also clears a raw-JSON override on a field that HAS a typed control (toggled into raw mode)', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    await screen.findByLabelText('count');
+    const countRow = screen.getByLabelText('count').closest('.studio-prop-field') as HTMLElement;
+    fireEvent.click(within(countRow).getByRole('button', { name: 'raw' }));
+    const raw = within(countRow).getByLabelText('count raw JSON') as HTMLTextAreaElement;
+    fireEvent.change(raw, { target: { value: 'not-json' } });
+    expect(raw.value).toBe('not-json');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+
+    // Still in raw mode after reset (FIX 2 only remounts the textarea, not
+    // the whole field — the rawMode toggle choice survives, matching the
+    // "typed"/"raw" button's own persisted-choice UX elsewhere in this
+    // panel) — its value is cleared.
+    const rawAfterReset = within(countRow).getByLabelText('count raw JSON') as HTMLTextAreaElement;
+    expect(rawAfterReset.value).toBe('');
   });
 });
