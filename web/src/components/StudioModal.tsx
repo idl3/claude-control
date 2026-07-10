@@ -14,6 +14,7 @@ import {
 import { saveCapture } from '../lib/api';
 import { EmbeddedApp } from './EmbeddedApp';
 import { StudioAnnotate, type StudioAnnotateHandle } from './StudioAnnotate';
+import { StudioInspector } from './StudioInspector';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
 // per the ≤150ms acceptance budget.
@@ -35,7 +36,7 @@ const BRIDGE_READY_FALLBACK_MS = 250;
  * established lookup key: cheaper and more surgical than threading a new
  * accessor prop/context through AppFrameLayer just for this one panel.
  */
-function findAppIframeWindow(url: string): Window | null {
+export function findAppIframeWindow(url: string): Window | null {
   for (const el of document.querySelectorAll('iframe')) {
     if ((el as HTMLIFrameElement).title === url) return (el as HTMLIFrameElement).contentWindow;
   }
@@ -334,6 +335,66 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
           resetGeneration={resetGeneration}
         />
       ))}
+    </div>
+  );
+}
+
+type SidePanelTab = 'props' | 'inspector';
+
+/**
+ * E1/E2: tab strip added atop StudioPropsPanel's existing permanently-
+ * mounted, never-unmounted container (see that component's own doc comment
+ * — hiding `.studio-frame` is the risk it guards against, not hiding its OWN
+ * content). StudioPropsPanel and StudioInspector both stay mounted here
+ * regardless of which tab is active, toggled via the native `hidden`
+ * attribute rather than a conditional render, so switching tabs never resets
+ * either panel's in-progress state (a pending prop edit, an already-fetched
+ * outline) — same never-unmount discipline as `.studio-frame` itself, just
+ * applied one level down. Console (E2) ships `disabled` — a "coming soon"
+ * placeholder tab with no body to hide/show, since it can never become
+ * active (see phase-e-tasks.md's E2 CP0 log for why live forwarding wasn't
+ * shipped this phase).
+ */
+function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
+  const [tab, setTab] = useState<SidePanelTab>('props');
+  return (
+    <div className="studio-side-panel">
+      <div className="studio-side-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'props'}
+          className="studio-side-tab"
+          onClick={() => setTab('props')}
+        >
+          Props
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'inspector'}
+          className="studio-side-tab"
+          onClick={() => setTab('inspector')}
+        >
+          Inspector
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={false}
+          className="studio-side-tab studio-side-tab-disabled"
+          disabled
+          title="Console — coming soon"
+        >
+          Console
+        </button>
+      </div>
+      <div className="studio-side-tab-body" hidden={tab !== 'props'}>
+        <StudioPropsPanel url={url} manifest={manifest} />
+      </div>
+      <div className="studio-side-tab-body" hidden={tab !== 'inspector'}>
+        <StudioInspector url={url} active={tab === 'inspector'} />
+      </div>
     </div>
   );
 }
@@ -738,7 +799,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
           <div className="studio-frame" style={{ width: device.width, height: device.height }}>
             <EmbeddedApp url={url} height={device.height} context="studio" />
           </div>
-          <StudioPropsPanel url={url} manifest={manifest} />
+          <StudioSidePanel url={url} manifest={manifest} />
         </div>
       </div>
     </div>

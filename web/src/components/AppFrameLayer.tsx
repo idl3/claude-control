@@ -188,6 +188,21 @@ function basename(url: string): string {
  * is already hosting).
  * FIX 3 (StudioModal.tsx) and FIX 4 (StudioModal.tsx) are documented at
  * their own call sites — this file is untouched by either.
+ *
+ * Studio Phase E CP3 audit follow-up layers on top of Phase B CP3's FIX 2,
+ * narrowing rather than reverting it:
+ * FIX 1 [P2] — a studio-hosted app that crashes while the studio is its only
+ * host was previously unrecoverable short of closing and reopening the whole
+ * modal (Phase B CP3 FIX 2 suppressed the reload/pin/fullscreen trio for
+ * EVERY studio-context render branch, including crashed). The CRASHED branch
+ * ONLY now renders `AppReloadButton` unconditionally — same
+ * `cockpit:app-reload` CustomEvent the transcript/panel reload button already
+ * dispatches, the same url-keyed remount path (`reload()` above), no new
+ * mechanism. Pin and fullscreen stay suppressed for studio in every branch
+ * (still redundant/self-referential in-studio — fullscreen re-opening the
+ * studio for a url the studio already hosts is a no-op regardless of crash
+ * state); only the healthy and failed branches are unchanged from Phase B
+ * CP3. See `isStudioHost` in the render below for the branch-scoped gate.
  * Transcript-only scroll fade (operator follow-up to fade-during-scroll)
  * layers on top of that fix, unchanged design elsewhere: the fade/skeleton
  * exists to mask a transcript-hosted iframe's fast-flick lag as it's towed
@@ -1492,10 +1507,15 @@ export function AppFrameLayer() {
         // studio's own chrome, close + device bar, doesn't have room to
         // account for) and making the fullscreen button a self-referential
         // no-op (it would re-open the studio for a url already hosted by the
-        // studio). Studio-context hosts render none of the three; reload
-        // stays reachable once hosting falls back to panel/transcript (see
-        // pickHost) — a crashed/failed studio-hosted slot is not stranded,
-        // just without an in-studio reload affordance this phase.
+        // studio). Studio-context hosts render none of the three in the
+        // healthy/failed branches.
+        // Studio Phase E CP3 audit, FIX 1: the CRASHED branch is the one
+        // exception — see this component's module doc comment. A crashed
+        // studio-hosted slot with no other host gets a reload affordance
+        // (dispatches the same cockpit:app-reload the transcript/panel
+        // button uses); pin + fullscreen stay suppressed there too, since
+        // both are still redundant/self-referential in-studio regardless of
+        // crash state.
         const isStudioHost = slot.context === 'studio';
         return (
           <span
@@ -1542,9 +1562,14 @@ export function AppFrameLayer() {
                 {slot.lastCrashMessage ? (
                   <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
                 ) : null}
+                {/* Studio Phase E CP3 audit, FIX 1: reload renders for EVERY
+                    context, including studio — a crashed studio host is the
+                    one branch where reload is the sole recovery affordance
+                    short of closing the whole modal. Pin + fullscreen stay
+                    studio-suppressed (see isStudioHost above). */}
+                <AppReloadButton url={url} quiet={false} />
                 {!isStudioHost && (
                   <>
-                    <AppReloadButton url={url} quiet={false} />
                     <AppPinButton
                       pinned={pinned}
                       quiet={false}

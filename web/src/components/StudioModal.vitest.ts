@@ -6,7 +6,7 @@ import { StudioModal } from './StudioModal';
 import { AppFrameLayer } from './AppFrameLayer';
 import { ArtifactPanelProvider } from './ArtifactContext';
 import { getHotkeySuppressed, setHotkeySuppressed } from '../lib/hotkeySuppression';
-import { MAX_CC_CAPTURE_DATA_URL_LENGTH } from '../lib/appBridge';
+import { MAX_CC_CAPTURE_DATA_URL_LENGTH, CC_DOM_OUTLINE_RESULT_TYPE } from '../lib/appBridge';
 
 // B2: device-mode resize tests mount AppFrameLayer alongside StudioModal so
 // they can observe the actual hosted iframe (AppFrameLayer.vitest.ts's
@@ -584,6 +584,92 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
       expect(postSpy).not.toHaveBeenCalled(); // spoofed ready never opened the gate
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('StudioModal — E1/E2: side-panel tab strip (Props / Inspector / Console)', () => {
+  it('defaults to the Props tab; Inspector is not selected and Console is disabled with a "coming soon" tooltip', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+    await screen.findByLabelText('label');
+
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent)).toEqual(['Props', 'Inspector', 'Console']);
+    expect(screen.getByRole('tab', { name: 'Props' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Inspector' }).getAttribute('aria-selected')).toBe('false');
+
+    const consoleTab = screen.getByRole('tab', { name: 'Console' }) as HTMLButtonElement;
+    expect(consoleTab.disabled).toBe(true);
+    expect(consoleTab.getAttribute('title')).toBe('Console — coming soon');
+  });
+
+  it('switching to the Inspector tab and back never resets an in-progress prop edit — Props stays mounted, only `hidden` toggles', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+    await screen.findByLabelText('label');
+
+    fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+    expect((screen.getByLabelText('label') as HTMLInputElement).value).toBe('Widgets');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Inspector' }));
+    expect(screen.getByRole('tab', { name: 'Inspector' }).getAttribute('aria-selected')).toBe('true');
+    // Props' own input is still in the DOM (never unmounted) — just hidden.
+    expect((screen.getByLabelText('label') as HTMLInputElement).value).toBe('Widgets');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Props' }));
+    expect((screen.getByLabelText('label') as HTMLInputElement).value).toBe('Widgets');
+  });
+
+  it('Inspector tab requests and renders a live outline from the hosted iframe (mounted with AppFrameLayer)', async () => {
+    function mockRect(over: Partial<DOMRect>): DOMRect {
+      const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+      return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    }
+    const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+    try {
+      mockManifestFetch(FIXTURE_MANIFEST);
+      render(
+        createElement(ArtifactPanelProvider, null, createElement(StudioModal), createElement(AppFrameLayer)),
+      );
+      openStudio('apps/counter.html');
+
+      const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+      await screen.findByLabelText('label');
+      const win = iframe.contentWindow as Window;
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Inspector' }));
+
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', { data: { type: 'cc-bridge-ready', manifestVersion: 1 }, source: win }),
+        );
+      });
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: {
+              type: CC_DOM_OUTLINE_RESULT_TYPE,
+              truncated: false,
+              tree: {
+                tag: 'div',
+                id: 'app-root',
+                className: null,
+                textPreview: null,
+                childCount: 0,
+                children: [],
+              },
+            },
+            source: win,
+          }),
+        );
+      });
+
+      expect(screen.getByText('div#app-root')).toBeTruthy();
+    } finally {
+      rectSpy.mockRestore();
     }
   });
 });

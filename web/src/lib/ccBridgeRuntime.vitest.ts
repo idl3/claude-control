@@ -16,12 +16,17 @@ import {
   CC_PROPS_RESET_TYPE,
   CC_CAPTURE_REQUEST_TYPE,
   CC_CAPTURE_RESULT_TYPE,
+  CC_DOM_OUTLINE_REQUEST_TYPE,
+  CC_DOM_OUTLINE_RESULT_TYPE,
   isCcPropsSetShape,
   isCcPropsResetShape,
   isCcCaptureRequestShape,
+  isCcDomOutlineRequestShape,
   isTrustedCcBridgeParent,
   parseCcInboundMessage,
   captureCcBridgeSnapshot,
+  serializeCcDomOutline,
+  postCcDomOutlineResult,
   withCcBridge,
 } from './ccBridgeRuntime';
 
@@ -85,6 +90,18 @@ describe('isCcCaptureRequestShape', () => {
   });
 });
 
+describe('isCcDomOutlineRequestShape', () => {
+  it('accepts the exact bare shape', () => {
+    expect(isCcDomOutlineRequestShape({ type: CC_DOM_OUTLINE_REQUEST_TYPE })).toBe(true);
+  });
+
+  it('rejects extra keys or a wrong type', () => {
+    expect(isCcDomOutlineRequestShape({ type: CC_DOM_OUTLINE_REQUEST_TYPE, extra: 1 })).toBe(false);
+    expect(isCcDomOutlineRequestShape({ type: 'nope' })).toBe(false);
+    expect(isCcDomOutlineRequestShape(null)).toBe(false);
+  });
+});
+
 describe('isTrustedCcBridgeParent', () => {
   it('accepts a source that reference-equals window.parent', () => {
     const parent = {};
@@ -134,6 +151,124 @@ describe('parseCcInboundMessage', () => {
     expect(
       parseCcInboundMessage({}, parent, { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'r1' }),
     ).toBeNull();
+  });
+
+  it('parses a trusted dom-outline-request message', () => {
+    expect(parseCcInboundMessage(parent, parent, { type: CC_DOM_OUTLINE_REQUEST_TYPE })).toEqual({
+      kind: 'outline',
+    });
+  });
+
+  it('rejects a dom-outline-request from a spoofed source', () => {
+    expect(parseCcInboundMessage({}, parent, { type: CC_DOM_OUTLINE_REQUEST_TYPE })).toBeNull();
+  });
+});
+
+describe('serializeCcDomOutline', () => {
+  it('serializes tag/id/className/childCount and a direct-text preview', () => {
+    document.body.innerHTML = '<div id="root" class="a b"><span>hello world</span></div>';
+    const root = document.getElementById('root') as Element;
+    const { tree, truncated } = serializeCcDomOutline(root);
+    expect(truncated).toBe(false);
+    expect(tree).toEqual({
+      tag: 'div',
+      id: 'root',
+      className: 'a b',
+      textPreview: null, // no DIRECT text node on #root — only an element child
+      childCount: 1,
+      children: [
+        {
+          tag: 'span',
+          id: null,
+          className: null,
+          textPreview: 'hello world',
+          childCount: 0,
+          children: [],
+        },
+      ],
+    });
+  });
+
+  it('hard-caps textPreview at 40 chars with no ellipsis marker, ignoring descendant text', () => {
+    document.body.innerHTML =
+      '<div id="root">' + 'x'.repeat(50) + '<span>this text is a descendant, not counted</span></div>';
+    const root = document.getElementById('root') as Element;
+    const { tree } = serializeCcDomOutline(root);
+    expect(tree.textPreview).toBe('x'.repeat(40));
+    expect(tree.textPreview?.length).toBe(40);
+  });
+
+  it('caps depth: a node exactly at maxDepth is included but childless, and flips truncated', () => {
+    document.body.innerHTML = '<div id="d0"><div id="d1"><div id="d2">deep</div></div></div>';
+    const root = document.getElementById('d0') as Element;
+    const { tree, truncated } = serializeCcDomOutline(root, /* maxDepth */ 1, 2000);
+    expect(truncated).toBe(true);
+    expect(tree.tag).toBe('div');
+    expect(tree.children).toHaveLength(1);
+    const d1 = tree.children[0];
+    expect(d1.id).toBe('d1');
+    // d1 is AT maxDepth (depth 1) — real DOM childCount still reported...
+    expect(d1.childCount).toBe(1);
+    // ...but children is truncated to empty, since walking past maxDepth stops.
+    expect(d1.children).toHaveLength(0);
+  });
+
+  it('caps total nodes at maxNodes across the WHOLE tree (not per-branch), and flips truncated', () => {
+    // 1 root + 5 children = 6 nodes total; cap at 3 total.
+    document.body.innerHTML =
+      '<div id="root"><span></span><span></span><span></span><span></span><span></span></div>';
+    const root = document.getElementById('root') as Element;
+    const { tree, truncated } = serializeCcDomOutline(root, 12, /* maxNodes */ 3);
+    expect(truncated).toBe(true);
+    // root (1) + 2 children walked (2) = 3 visited before the cap stops the walk.
+    expect(tree.children).toHaveLength(2);
+  });
+
+  it('does not truncate a tree that fits comfortably within both budgets', () => {
+    document.body.innerHTML = '<div id="root"><span>a</span><span>b</span></div>';
+    const root = document.getElementById('root') as Element;
+    const { truncated } = serializeCcDomOutline(root);
+    expect(truncated).toBe(false);
+  });
+});
+
+describe('postCcDomOutlineResult', () => {
+  it('posts a cc-dom-outline-result carrying the serialized tree to window.parent', () => {
+    document.body.innerHTML = '<div id="root"><span>hi</span></div>';
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      postCcDomOutlineResult(document.getElementById('root') as Element);
+      expect(posted).toHaveLength(1);
+      const msg = posted[0] as { type: string; truncated: boolean; tree: { tag: string } | null };
+      expect(msg.type).toBe(CC_DOM_OUTLINE_RESULT_TYPE);
+      expect(msg.truncated).toBe(false);
+      expect(msg.tree?.tag).toBe('div');
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
+  });
+
+  it('degrades to tree:null (not a thrown error) when serialization itself throws', () => {
+    // A throwing `id` getter simulates a hostile/buggy custom element —
+    // serializeCcDomOutline's own try/catch (postCcDomOutlineResult) must
+    // still post SOMETHING, not leave the request unanswered.
+    const throwing = {
+      tagName: 'DIV',
+      get id(): string {
+        throw new Error('boom');
+      },
+    } as unknown as Element;
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      postCcDomOutlineResult(throwing);
+      expect(posted).toContainEqual({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false });
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
   });
 });
 
@@ -302,6 +437,47 @@ describe('withCcBridge', () => {
       await Promise.resolve();
     });
     expect(mockToPng).not.toHaveBeenCalled();
+  });
+
+  it('a trusted cc-dom-outline-request posts a cc-dom-outline-result back to window.parent', () => {
+    const Bridged = withCcBridge(Fixture, { label: 'hi' }, 1);
+    render(createElement(Bridged));
+
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', { data: { type: CC_DOM_OUTLINE_REQUEST_TYPE }, source: window }),
+        );
+      });
+      expect(posted).toHaveLength(1);
+      const msg = posted[0] as { type: string; truncated: boolean };
+      expect(msg.type).toBe(CC_DOM_OUTLINE_RESULT_TYPE);
+      expect(msg.truncated).toBe(false);
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
+  });
+
+  it('ignores a cc-dom-outline-request from a spoofed source — no result is posted', () => {
+    const Bridged = withCcBridge(Fixture, { label: 'hi' }, 1);
+    render(createElement(Bridged));
+
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', { data: { type: CC_DOM_OUTLINE_REQUEST_TYPE } }), // no source
+        );
+      });
+      expect(posted).toHaveLength(0);
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
   });
 
   it('ignores a message with no matching source (spoofed / same-shape-different-window)', () => {

@@ -19,8 +19,40 @@ export const CC_PROPS_SET_TYPE = 'cc-props-set';
 export const CC_PROPS_RESET_TYPE = 'cc-props-reset';
 export const CC_CAPTURE_REQUEST_TYPE = 'cc-capture-request';
 export const CC_CAPTURE_RESULT_TYPE = 'cc-capture-result';
+export const CC_DOM_OUTLINE_REQUEST_TYPE = 'cc-dom-outline-request';
+export const CC_DOM_OUTLINE_RESULT_TYPE = 'cc-dom-outline-result';
+
+/**
+ * E1: re-enforced defensively on the cockpit side, at the SAME ceilings
+ * ccBridgeRuntime.tsx's own serializeCcDomOutline uses to produce a result.
+ * Source-identity proves the message genuinely came from the tracked
+ * iframe, but not that ITS OWN serialization code stayed within its
+ * advertised caps — a buggy or compromised producer build could still emit
+ * a tree deeper/wider than it claims. Re-walking with the same numbers
+ * bounds isCcDomOutlineResultShape's own validation cost to a fixed worst
+ * case regardless of what a hostile payload contains, while never rejecting
+ * a legitimately-capped result (same numbers, so nothing correctly
+ * truncated on the producer side can ever exceed them here).
+ */
+const CC_DOM_OUTLINE_MAX_DEPTH = 12;
+const CC_DOM_OUTLINE_MAX_NODES = 2000;
 
 export type CcBridgeReady = { type: typeof CC_BRIDGE_READY_TYPE; manifestVersion: number };
+
+export type CcDomOutlineNode = {
+  tag: string;
+  id: string | null;
+  className: string | null;
+  textPreview: string | null;
+  childCount: number;
+  children: CcDomOutlineNode[];
+};
+
+export type CcDomOutlineResult = {
+  type: typeof CC_DOM_OUTLINE_RESULT_TYPE;
+  tree: CcDomOutlineNode | null;
+  truncated: boolean;
+};
 
 export type CcCaptureResult =
   | { type: typeof CC_CAPTURE_RESULT_TYPE; requestId: string; ok: true; dataUrl: string }
@@ -116,6 +148,65 @@ export function isValidCcCaptureResult(eventSource: unknown, slotWindow: unknown
 }
 
 /**
+ * Recursive shape+budget check for one outline node, called only after the
+ * top-level envelope already matched. `budget` is a shared mutable counter
+ * (closed over across the whole recursive walk, same "whole-tree, not
+ * per-branch" discipline as the producer's own serializeCcDomOutline) so an
+ * oversize tree is rejected outright — not silently truncated here, since
+ * silently accepting a shorter tree than what was actually sent could mask
+ * a producer-side bug the E1 acceptance criteria explicitly want caught.
+ */
+function isPlainOutlineNodeShape(
+  data: unknown,
+  depth: number,
+  budget: { count: number },
+): data is CcDomOutlineNode {
+  if (depth > CC_DOM_OUTLINE_MAX_DEPTH) return false;
+  budget.count += 1;
+  if (budget.count > CC_DOM_OUTLINE_MAX_NODES) return false;
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  if (keys.some((k) => !OUTLINE_NODE_KEYS.has(k)) || keys.length !== OUTLINE_NODE_KEYS.size) return false;
+  if (typeof rec.tag !== 'string') return false;
+  if (rec.id !== null && typeof rec.id !== 'string') return false;
+  if (rec.className !== null && typeof rec.className !== 'string') return false;
+  if (rec.textPreview !== null && typeof rec.textPreview !== 'string') return false;
+  if (typeof rec.childCount !== 'number') return false;
+  if (!Array.isArray(rec.children)) return false;
+  return rec.children.every((c) => isPlainOutlineNodeShape(c, depth + 1, budget));
+}
+
+const OUTLINE_NODE_KEYS = new Set(['tag', 'id', 'className', 'textPreview', 'childCount', 'children']);
+
+/**
+ * Exact-shape check for an inbound `cc-dom-outline-result`. `tree: null` is
+ * a valid degrade case (the producer's own walk threw — see
+ * postCcDomOutlineResult's try/catch); a non-null tree is walked recursively
+ * against the same depth/node budget the producer itself enforces.
+ */
+export function isCcDomOutlineResultShape(data: unknown): data is CcDomOutlineResult {
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  if (keys.some((k) => k !== 'type' && k !== 'tree' && k !== 'truncated')) return false;
+  if (rec.type !== CC_DOM_OUTLINE_RESULT_TYPE) return false;
+  if (typeof rec.truncated !== 'boolean') return false;
+  if (rec.tree === null) return true;
+  return isPlainOutlineNodeShape(rec.tree, 0, { count: 0 });
+}
+
+/**
+ * Combined check for an inbound `cc-dom-outline-result`: same source-identity
+ * + exact-shape discipline as `isValidCcCaptureResult`. No requestId to
+ * additionally check (outline results aren't correlated — see
+ * ccBridgeRuntime.tsx's E1 doc comment).
+ */
+export function isValidCcDomOutlineResult(eventSource: unknown, slotWindow: unknown, data: unknown): boolean {
+  return isTrustedCcBridgeSource(eventSource, slotWindow) && isCcDomOutlineResultShape(data);
+}
+
+/**
  * Post a `cc-capture-request` down to a tracked iframe's contentWindow.
  * `requestId` is a caller-generated correlation id (StudioModal mints one
  * per Screenshot click) — REQUIRED, unlike props-set/props-reset's fire-and-
@@ -129,6 +220,17 @@ export function isValidCcCaptureResult(eventSource: unknown, slotWindow: unknown
  */
 export function sendCcCaptureRequest(iframeWindow: Window, requestId: string): void {
   iframeWindow.postMessage({ type: CC_CAPTURE_REQUEST_TYPE, requestId }, '*');
+}
+
+/**
+ * Post a `cc-dom-outline-request` down to a tracked iframe's contentWindow.
+ * Outbound send from the cockpit (the trusted party in this direction) — no
+ * shape/source validation applies here, mirroring sendCcCaptureRequest. No
+ * requestId (unlike capture): see ccBridgeRuntime.tsx's E1 doc comment for
+ * why outline results don't need correlation.
+ */
+export function sendCcDomOutlineRequest(iframeWindow: Window): void {
+  iframeWindow.postMessage({ type: CC_DOM_OUTLINE_REQUEST_TYPE }, '*');
 }
 
 /**
