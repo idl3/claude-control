@@ -290,6 +290,22 @@ describe('isCcDomOutlineResultShape', () => {
       true,
     );
   });
+
+  it('rejects a self-referencing (cyclic) node — the depth cap terminates the recursive walk before infinite recursion, a hostile/buggy producer can never hang or crash validation', () => {
+    // A hostile or buggy producer build could post a tree whose own
+    // `children` array cycles back to an ancestor (or itself) instead of
+    // terminating in leaves. isPlainOutlineNodeShape's depth check
+    // (`if (depth > CC_DOM_OUTLINE_MAX_DEPTH) return false;`) is the FIRST
+    // line of the recursive walk, evaluated before it ever re-enters
+    // `.every(...)` on the current node's children — so a cycle can recurse
+    // at most CC_DOM_OUTLINE_MAX_DEPTH+1 (13) stack frames deep before this
+    // returns false, never actually looping forever or blowing the stack.
+    const n = { tag: 'div', id: null, className: null, textPreview: '', childCount: 1, children: [] as any[] };
+    n.children.push(n);
+    expect(
+      isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: n, truncated: true }),
+    ).toBe(false);
+  });
 });
 
 describe('isValidCcDomOutlineResult (combined check)', () => {
