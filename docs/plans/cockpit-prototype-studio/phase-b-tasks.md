@@ -17,10 +17,32 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 ## Status
 | state | tasks |
 |---|---|
-| todo | B1, B2, B3 |
-| done | — |
+| todo | — |
+| done | B1, B2, B3 |
 
 <!-- CP0 log: emitted by /100x:commit-plan 2026-07-10; B6 elided: Dependencies (linear) -->
+
+<!-- CP0 log: /100x:execute 2026-07-10, worktree claude-cockpit-wt/studio-phase-b, branch feat/cockpit-prototype-studio-phase-b -->
+
+### B1 — done — sha `2ba82de`
+'studio' context tier: pickHost prefers studio > panel > transcript while open; STUDIO_HOIST_Z_INDEX=310 unconditional elevation, clearing `.studio-overlay`'s z-index 300. Verified via real-Chromium `elementFromPoint` hit-test (jsdom can't prove this) at `.studio-frame` center — resolves to the live IFRAME, not the backdrop. `npx vitest run` + `npx tsc -b --pretty false` green at commit time.
+
+### B2 — done — sha `d4d6e93`
+Device-mode placeholder resizing: StudioModal body hosts the placeholder at 390×844 / 768×1024 / 1280×800, letterboxed/centered; mode switches resize the placeholder only, zero iframe reloads (load-count assertions). `npx vitest run` + `npm run build` green at commit time.
+
+### B3 — done — sha `9b55cc5`
+Harness evidence (`web/scratch/studio-phase-b-harness/`, gitignored): stateful counter embedded in transcript → open studio (count intact) → mobile 390 / iPad 768 / desktop 1280 switches (count intact each) → increment in studio → close (count intact, hosting resumes in transcript). Zero iframe reloads across the full journey — constant `HOTRELOAD1783531324` id string in every captured frame/still. 8 PNGs read and confirmed; video `studio-phase-b-flow.webm` captured. `hit-test.mjs` re-run post-fix: elevation still PASSes.
+
+**Deviation (loud, in-scope but beyond the literal "capture evidence" brief):** frame-by-frame video inspection (ffmpeg `fps=15` extraction, not visible in the discrete PNG stills alone) surfaced a real visual defect — `.embed-app-hoist` is portaled to `document.body`, a separate DOM subtree from `.studio-panel`, so `StudioModal`'s GSAP enter/exit tween (~280ms opacity/scale, `useModalTransition`) never reached the hoisted iframe. The iframe's rect is driven declaratively by JSX (`transform`/`width`/`height`, no `opacity` in that style object), so it snapped to its new bounds fully opaque while the surrounding backdrop/toolbar were still mid-fade — confirmed via real pre-fix video frames at both the open (~t=1.6s) and close (~t=4.4s) transitions. This directly regresses the B3 acceptance bar ("polished open/close ... correct clip/z at every step"), so it was fixed in-phase rather than filed for later: `shouldCrossFadeHoist(prevContext, nextContext)` (pure edge-detector, fires only on a studio enter/exit) imperatively zeroes the hoist span's opacity for one frame then releases it next rAF, letting the pre-existing unconditional `.embed-app-hoist { transition: opacity 100ms }` CSS rule (already shared with the scroll-fade mechanism) cross-fade it back in. No new CSS, no new deps — reuses existing infrastructure entirely. Re-captured evidence after the fix confirms the pop is gone at both transitions (fresh fps=15 frames f-023→f-026 open, f-064→f-067 close). 6 new regression tests added for `shouldCrossFadeHoist`.
+
+**Other deviations flagged:**
+- The coordinator's original re-brief referenced a `prototype-cockpit-uiproof` skill path that does not exist in this environment; the harness was built directly against the `prototype-component` skill's `run.mjs` pattern instead (same output contract: `~/.claude-control/media/prototypes/<slug>-<ISO>/`), with a standalone `hit-test.mjs` for the `elementFromPoint` proof since `run.mjs`'s step vocabulary has no generic "evaluate JS" action.
+- Hit a stray orphaned `node` process squatting on port 5199 (the `churn-spike` harness's dev-server port) during final re-verification, likely a leftover from an earlier session's harness run that never exited. Diagnosed via `lsof -i :5199`, killed (`kill -9`), re-ran clean.
+- **Budget**: complexity-budget was `{ files: 6, loc-delta: 500 }`. Actual cumulative phase diff (`202367a..HEAD`, i.e. all of B1+B2+B3 against the umbrella base): **6 files** (on budget), **563 insertions / 55 deletions** — net +508, ~8 lines over the 500 loc-delta budget. Minor, mechanical overage (test-file growth: `AppFrameLayer.vitest.ts` alone carries 246 of the 563 insertions across all three tasks) — flagged per policy, not gating.
+
+**Verification (final, full phase)**: `cd web && npx vitest run` → 725 passed (46 files), up from a 707 baseline (+18 net: 6 new B3 tests plus prior B1/B2 additions). `npx tsc -b --pretty false` → clean. `npm run build` → green (one pre-existing, unrelated chunk-size warning on `dist/assets/index-*.js`). `churn-spike` harness re-run → "stable iframe loads: 1, unstable iframe loads: 1" (Phase A never-reload seam intact, unaffected by Phase B).
+
+**Evidence paths**: `~/.claude-control/media/prototypes/studio-phase-b/` (stable-named copy, 8 PNGs + video + `frames-scan2/`) and `~/.claude-control/media/prototypes/cockpit-studio-phase-b-2026-07-10T05-15-35/` (fresh post-fix timestamped run, identical contents).
 
 ## Audit item coverage
 | Task | Rubric |
