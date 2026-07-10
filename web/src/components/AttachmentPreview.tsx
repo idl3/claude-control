@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authFetch, uploadServeUrl } from '../lib/api';
+import { XIcon } from './icons';
 
 /**
  * Fetch an upload by basename through authFetch (sends the bearer header) and
@@ -170,6 +171,22 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       onClick={onClose}
       onKeyDown={onKeyDown}
     >
+      {/* Explicit close affordance on top of #172's "tap anywhere closes" —
+          not a replacement for it. stopPropagation only so this button's own
+          click doesn't ALSO bubble into the backdrop's onClose (harmless
+          either way, since onClose is idempotent, but keeps the two dismiss
+          paths — X vs backdrop-tap — independently testable/observable). */}
+      <button
+        type="button"
+        className="lightbox-close-btn"
+        aria-label="Close"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+      >
+        <XIcon size={20} />
+      </button>
       <img className="lightbox-img" src={src} alt={alt} />
     </div>
   );
