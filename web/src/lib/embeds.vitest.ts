@@ -876,7 +876,7 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     // No artifact pinned yet — no panel, no tab.
     expect(screen.queryByRole('tab')).toBeNull();
 
-    fireEvent.click(screen.getByLabelText('Pin to panel'));
+    fireEvent.click(screen.getByLabelText('Open in panel'));
 
     // A panel tab appears, titled from the url's basename, and is focused.
     const tab = await screen.findByRole('tab', { name: 'pin1.html' });
@@ -887,10 +887,10 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     expect(await screen.findByText('open in panel ↗')).toBeTruthy();
     expect(screen.getAllByTitle('apps/pin1.html')).toHaveLength(1);
     expect(authFetchMock).toHaveBeenCalledTimes(1); // pinning never re-fetches
-    expect(screen.getByLabelText('Pinned to panel')).toBeTruthy(); // button reflects pinned state
+    expect(screen.getByLabelText('Opened in panel')).toBeTruthy(); // button reflects pinned state
 
     // Pin again — idempotent focus, no duplicate tab, no extra fetch.
-    fireEvent.click(screen.getByLabelText('Pinned to panel'));
+    fireEvent.click(screen.getByLabelText('Opened in panel'));
     expect(screen.getAllByRole('tab', { name: 'pin1.html' })).toHaveLength(1);
     expect(authFetchMock).toHaveBeenCalledTimes(1);
 
@@ -903,7 +903,7 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     });
     expect(await screen.findByTitle('apps/pin1.html')).toBeTruthy();
     expect(authFetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Pin to panel')).toBeTruthy(); // back to unpinned state
+    expect(screen.getByLabelText('Open in panel')).toBeTruthy(); // back to unpinned state
   });
 });
 

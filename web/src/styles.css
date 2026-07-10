@@ -4954,6 +4954,28 @@ select.config-input {
 /* Phase C, C3: "pin to panel" affordance — mirrors .embed-app-reload-btn's
    quiet-corner idiom exactly, opposite corner (top:6/left:6 vs reload's
    top:6/right:6) so the two never overlap in any chrome state. */
+
+.embed-app-fullscreen-btn {
+  position: absolute;
+  top: 6px;
+  right: 34px; /* corner slot next to the reload button (right: 6px) */
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-1) 82%, transparent);
+  color: var(--text-faint);
+  opacity: 0.55;
+  transition:
+    opacity var(--ease) 0.15s,
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.embed-app-fullscreen-btn:hover,
+.embed-app-fullscreen-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-1);
+}
+
 .embed-app-pin-btn {
   position: absolute;
   top: 6px;
@@ -7665,73 +7687,126 @@ select.config-input {
 }
 .olam-terminal-newtab:hover { color: var(--text-dim, #aaa); text-decoration: underline; }
 
-/* ── Live /goal + ultrathink highlighting (composer overlay only) ──────────
-   Same reserved-token gradients as the transcript (.goal-pill / .ultrathink-
-   text below, in the /goal + ultrathink section), but stripped of every
-   property that would change glyph advance width — the transcript versions
-   add padding/margin/border/font-weight for a static one-shot render; the
-   composer overlay sits pixel-for-pixel over live (invisible) textarea text,
-   so it must obey the same METRIC CONSTRAINT as .composer-pill above. */
-.composer-goal-pill {
-  background-image: linear-gradient(
-    100deg,
-    oklch(55% 0.03 240) 0%,
-    oklch(68% 0.05 235) 25%,
-    oklch(72% 0.04 230) 50%,
-    oklch(68% 0.05 235) 75%,
-    oklch(55% 0.03 240) 100%
-  );
-  background-size: 200% auto;
-  animation: shimmer-sweep 1.8s linear infinite;
-  color: oklch(97% 0.01 240);
-  text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
-  border-radius: 4px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-  /* Metric-neutral breathing room: padding grows the box on every side, and
-     the exactly-equal-and-opposite negative margin pulls it back in, netting
-     zero net advance in both axes — the background/glow/radius render
-     outward into the margin's negative space while every glyph position
-     before/inside/after this span stays pixel-identical to the zero-padding
-     version. This is NOT relaxing the METRIC CONSTRAINT above to "some
-     padding is fine" — it's padding cancelled by matching negative margin,
-     still zero net advance. Do not change one value without the other. */
-  padding: 1px 2px;
-  margin: -1px -2px;
+/* --- A4: StudioModal (fullscreen device-preview shell) ---
+   z-index 300: above the mobile panel sheet (.artifact-panel[data-mode='sheet'],
+   200) and elevated hoists (PANEL_SHEET_HOIST_Z_INDEX, 210 — see
+   AppFrameLayer.tsx), below the sub-agent drawer (.sa-backdrop/.sa-panel,
+   899/900) and the real attachment lightbox (.lightbox, 1000). */
+.studio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.88);
 }
-@media (prefers-reduced-motion: reduce) {
-  .composer-goal-pill {
-    animation: none;
-  }
+.studio-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
-.composer-ultrathink {
-  background-image: linear-gradient(
-    90deg,
-    oklch(70% 0.25 20),
-    oklch(75% 0.2 80),
-    oklch(78% 0.2 140),
-    oklch(72% 0.2 200),
-    oklch(68% 0.24 260),
-    oklch(70% 0.25 320),
-    oklch(70% 0.25 20)
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: thinking-flash 2.2s linear infinite;
-  /* NO font-weight change (the transcript's .ultrathink-text is bold) —
-     metric constraint: bolding widens glyphs vs. the textarea's regular
-     weight and would drift everything after it out of alignment.
-     Deliberately skips the .composer-goal-pill padding/negative-margin
-     breathing-room trick above: this rule paints gradient-filled text
-     (background-clip: text) with no visible background box, border, or
-     shadow, so padding would add space around glyphs with nothing drawn
-     in it — a no-op visually, not worth the added metric-neutrality risk. */
+.studio-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
-@media (prefers-reduced-motion: reduce) {
-  .composer-ultrathink {
-    animation: none;
-  }
+.studio-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
+.studio-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-version {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.studio-close {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.studio-close:hover {
+  color: var(--text);
+}
+.studio-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.studio-suppress-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-device-bar {
+  display: flex;
+  gap: 6px;
+}
+.studio-device-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-device-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.studio-device-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+}
+.studio-frame {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+
