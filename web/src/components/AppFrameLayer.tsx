@@ -5,7 +5,7 @@ import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 import { appNameFromUrl } from '../lib/appVersion';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
-import { AppReloadButton, AppPinButton } from './EmbeddedApp';
+import { AppReloadButton, AppPinButton, AppFullscreenButton } from './EmbeddedApp';
 import { useIsNarrow } from '../hooks/useIsNarrow';
 
 /** Phase C, C3: title for a freshly-pinned app artifact — last path segment
@@ -148,6 +148,61 @@ function basename(url: string): string {
  * check here. EmbeddedApp.tsx doesn't emit the attribute yet; this is
  * forward-compatible plumbing only.
  *
+ * Phase B, B1 (studio hosting tier) is the first caller of that forward-
+ * compatible plumbing's SIBLING, not the attribute itself: `context` grows a
+ * third value, 'studio' (StudioModal.tsx renders one EmbeddedApp placeholder
+ * with it for whichever url is currently open). pickHost now prefers
+ * studio > panel > transcript — a studio host is even more "the durable
+ * home right now" than a panel pin, since the user explicitly asked to look
+ * at nothing else. A studio host must paint ABOVE the studio overlay itself
+ * (styles.css `.studio-overlay`, z-index: 300) — otherwise the live iframe
+ * would sit geometrically inside the studio's device-frame box but visually
+ * behind the overlay's own backdrop. That needs a NEW z-index tier (310),
+ * kept deliberately separate from PANEL_SHEET_HOIST_Z_INDEX (210): see
+ * STUDIO_HOIST_Z_INDEX/hoistZIndex below for why the two must never be
+ * folded into one check even though both feed the same style property.
+ * Everything else (fetch/reload/crash/GC/scroll-sync/pane-clip) is
+ * unchanged — studio is just a third arbitration tier and a second,
+ * independent elevation rule layered on top of the existing machinery.
+ *
+ * Studio Phase B CP3 audit follow-ups layer on top of B1-B3, also unchanged
+ * design elsewhere:
+ * FIX 1 widens both pane-clip ancestor lookups (`.closest(...)`, in tick()
+ * and syncPositions()) from `'.thread-viewport'` alone to
+ * `'.thread-viewport, .studio-body'`. A device preset taller than the
+ * modal's usable height (iPad 1024 / Desktop 800 routinely exceed a typical
+ * laptop viewport once .studio-head/.studio-toolbar/padding are subtracted —
+ * the COMMON path, not a corner case) makes `.studio-body` itself the
+ * scrollable pane (styles.css: `overflow: auto`), but a studio host's
+ * `.closest('.thread-viewport')` never matched anything, so computePaneClip
+ * fell back to viewportRect() and the z-310 hoisted iframe rendered fully
+ * UNCLIPPED over the studio's own head/toolbar chrome (close button, device
+ * bar) once `.studio-body` was scrolled. See computePaneClip's doc comment
+ * for the ancestor-selection wording.
+ * FIX 2 stops the reload/pin/fullscreen corner trio from rendering at all
+ * for a studio-context host (see `isStudioHost` in the render below) — it
+ * used to float over the previewed app inside the device box for every
+ * context, which is redundant clutter for studio (its own chrome already has
+ * a close button and a device bar) and makes the fullscreen button a
+ * self-referential no-op there (re-opening the studio for a url the studio
+ * is already hosting).
+ * FIX 3 (StudioModal.tsx) and FIX 4 (StudioModal.tsx) are documented at
+ * their own call sites — this file is untouched by either.
+ *
+ * Studio Phase E CP3 audit follow-up layers on top of Phase B CP3's FIX 2,
+ * narrowing rather than reverting it:
+ * FIX 1 [P2] — a studio-hosted app that crashes while the studio is its only
+ * host was previously unrecoverable short of closing and reopening the whole
+ * modal (Phase B CP3 FIX 2 suppressed the reload/pin/fullscreen trio for
+ * EVERY studio-context render branch, including crashed). The CRASHED branch
+ * ONLY now renders `AppReloadButton` unconditionally — same
+ * `cockpit:app-reload` CustomEvent the transcript/panel reload button already
+ * dispatches, the same url-keyed remount path (`reload()` above), no new
+ * mechanism. Pin and fullscreen stay suppressed for studio in every branch
+ * (still redundant/self-referential in-studio — fullscreen re-opening the
+ * studio for a url the studio already hosts is a no-op regardless of crash
+ * state); only the healthy and failed branches are unchanged from Phase B
+ * CP3. See `isStudioHost` in the render below for the branch-scoped gate.
  * Transcript-only scroll fade (operator follow-up to fade-during-scroll)
  * layers on top of that fix, unchanged design elsewhere: the fade/skeleton
  * exists to mask a transcript-hosted iframe's fast-flick lag as it's towed
@@ -231,14 +286,50 @@ const PANEL_SHEET_HOIST_Z_INDEX = 210;
  * Transcript-context hosts never elevate, full stop — the `context ===
  * 'panel'` guard is unconditional, not folded into the `||`, so a stray
  * elevate attribute on a transcript placeholder can never bump it above the
- * header/composer chrome FIX 1 exists to keep it under.
+ * header/composer chrome FIX 1 exists to keep it under. Studio-context hosts
+ * ALSO never elevate via this function — they get their own unconditional
+ * check (STUDIO_HOIST_Z_INDEX/hoistZIndex below); `context`'s type is
+ * widened to accept 'studio' purely so callers can pass a Slot/SlotEl's
+ * context through unchanged, not because this function treats it specially.
  */
 export function shouldElevateHoist(
-  context: 'panel' | 'transcript',
+  context: 'panel' | 'transcript' | 'studio',
   narrow: boolean,
   elevate: boolean,
 ): boolean {
   return context === 'panel' && (narrow || elevate);
+}
+
+// Phase B, B1: a studio-context host's iframe must paint ABOVE the studio
+// overlay itself (.studio-overlay, z-index: 300) — otherwise the live app
+// would render fully hidden behind the overlay's own backdrop despite
+// geometrically sitting inside the studio's device-frame box. Unlike
+// PANEL_SHEET_HOIST_Z_INDEX (210, gated behind narrow/elevate), this is
+// UNCONDITIONAL whenever context === 'studio': the studio only ever opens as
+// a full-viewport modal, there's no "small screen" carve-out the way the
+// mobile sheet has one. Kept as its own constant/branch — deliberately NOT
+// folded into PANEL_SHEET_HOIST_Z_INDEX or shouldElevateHoist — since 210
+// and 310 answer different questions (panel-chrome-piercing vs
+// studio-overlay-piercing) that must never be conflated even though both
+// ultimately feed the same zIndex style property. 310 clears the overlay's
+// 300 with headroom while staying well below `.sa-backdrop`/`.sa-panel`
+// (899/900) and `.lightbox` (1000).
+const STUDIO_HOIST_Z_INDEX = 310;
+
+/**
+ * Combines shouldElevateHoist's panel-sheet gate (210) with the studio case
+ * (310, unconditional) into the single zIndex value the render below needs.
+ * Studio is checked first and short-circuits: a studio host must never fail
+ * to clear its own overlay, so it can't be subject to shouldElevateHoist's
+ * panel-only guard.
+ */
+export function hoistZIndex(
+  context: 'panel' | 'transcript' | 'studio',
+  narrow: boolean,
+  elevate: boolean,
+): number | undefined {
+  if (context === 'studio') return STUDIO_HOIST_Z_INDEX;
+  return shouldElevateHoist(context, narrow, elevate) ? PANEL_SHEET_HOIST_Z_INDEX : undefined;
 }
 
 // ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
@@ -252,11 +343,13 @@ type ClipInsets = { top: number; right: number; bottom: number; left: number };
 
 /**
  * FIX 1 (pane clipping): intersects an app placeholder's live bounding rect
- * against its clipping scroll pane's rect (`.thread-viewport`, or the layout
- * viewport as a fallback when no such ancestor exists) and reports how the
- * hoisted iframe standing in for it should be visually clipped so it can
- * never bleed over chrome that sits outside the scroll pane (header,
- * composer, modals).
+ * against its clipping scroll pane's rect (`.thread-viewport` or
+ * `.studio-body` — see the two call sites' `.closest()` selector, matched in
+ * document order so whichever ancestor is actually nearest wins; the layout
+ * viewport is the fallback when neither exists) and reports how the hoisted
+ * iframe standing in for it should be visually clipped so it can never bleed
+ * over chrome that sits outside the scroll pane (header, composer, modals,
+ * or — Studio Phase B CP3 audit, FIX 1 — the studio's own head/toolbar).
  *  - paneHidden: true when the two rects don't overlap at all — the
  *    placeholder has scrolled fully out of its pane. The caller must hide
  *    the iframe (visibility + pointer-events) WITHOUT evicting its slot:
@@ -299,6 +392,12 @@ export function computePaneClip(
 // top/right (styles.css) — the base corner offset before any clip is
 // accounted for.
 const RELOAD_CORNER_OFFSET = 6;
+// Phase B, B1: matches .embed-app-fullscreen-btn's CSS `right: 34px /*
+// corner slot next to the reload button (right: 6px) */` — i.e. the
+// fullscreen button always sits this many px further right than the reload
+// button's own (already-clip-clamped) corner inset, so the two never
+// overlap at any clip state.
+const FULLSCREEN_CORNER_EXTRA_RIGHT = 34 - RELOAD_CORNER_OFFSET;
 
 type ChromeClamp = {
   cornerTop: number;
@@ -392,6 +491,21 @@ export function shouldEngageScrollFade(streakCount: number, minStreak: number): 
   return streakCount >= minStreak;
 }
 
+// B3: pure edge-detector for tick()'s cross-fade call site below — studio
+// open/close is the only host-context transition wrapped in its own
+// animated (GSAP) chrome (StudioModal.tsx's useModalTransition), so it's the
+// only transition where the hoisted iframe popping straight to its new
+// rect/opacity (a separate portaled subtree from the animating panel) can
+// visibly desync from the surrounding chrome's ~280ms fade. Kept as its own
+// testable predicate rather than inlined at the call site, matching this
+// file's existing shouldEngageScrollFade/shouldElevateHoist pattern.
+export function shouldCrossFadeHoist(
+  prevContext: 'panel' | 'transcript' | 'studio',
+  nextContext: 'panel' | 'transcript' | 'studio',
+): boolean {
+  return (prevContext === 'studio') !== (nextContext === 'studio');
+}
+
 // Transcript-only fade gate (operator follow-up to fade-during-scroll): the
 // fade exists to mask fast-flick lag when a transcript-hosted iframe is
 // towed along the scrolling transcript feed. A panel/studio-hosted iframe
@@ -408,7 +522,10 @@ export function shouldEngageScrollFade(streakCount: number, minStreak: number): 
 // helpers) so applyFadeState's per-slot decision — including the "resolve
 // back to unfaded" half when a context flips away from 'transcript' mid-
 // fade — is directly unit-testable without mounting a placeholder.
-export function shouldFadeSlot(faded: boolean, context: 'panel' | 'transcript'): boolean {
+export function shouldFadeSlot(
+  faded: boolean,
+  context: 'panel' | 'transcript' | 'studio',
+): boolean {
   return faded && context === 'transcript';
 }
 
@@ -475,9 +592,21 @@ export function shouldKeepPolling(slotCount: number, presentPlaceholderCount: nu
  * (GET /api/media-apps/<name>/versions) into this synchronous WS-frame path
  * instead would add a network round-trip and a real race window for no
  * benefit over the alias the producer already guarantees.
+ *
+ * Phase B, B1: `context`'s type grows 'studio' (Slot.context can now be a
+ * studio host), but the gate itself is untouched — `!== 'panel'` already
+ * excludes it, same bucket as transcript. That's intentional, not just
+ * incidental: a studio host is a live *preview* surface (the whole point of
+ * opening it is to look at a specific build without it moving out from under
+ * you), same "reading surface, not the durable auto-reload home" rationale
+ * as transcript above, not the panel's "give me the live app" semantics.
  */
 export function shouldReloadOnFrame(
-  slot: { context: 'panel' | 'transcript'; trackLatest: boolean; lastMtime: number | null },
+  slot: {
+    context: 'panel' | 'transcript' | 'studio';
+    trackLatest: boolean;
+    lastMtime: number | null;
+  },
   slotUrl: string,
   frame: { path: string; mtime: number },
 ): boolean {
@@ -522,8 +651,10 @@ type Slot = {
   // D2: the winning host's context this tick (see pickHost) — the input to
   // shouldReloadOnFrame's panel-only gate. Kept on the slot (not derived at
   // frame-handling time) because by the time a frame arrives, tick() may not
-  // have run again since the last host change.
-  context: 'panel' | 'transcript';
+  // have run again since the last host change. Phase B, B1: 'studio' is a
+  // valid value too (see pickHost's studio > panel > transcript order) — it
+  // falls into shouldReloadOnFrame's existing not-panel bucket unchanged.
+  context: 'panel' | 'transcript' | 'studio';
   // D2/D4: whether this slot should hot-reload on a matching frame. Mirrors
   // the winning host's data-embed-app-track-latest (default true).
   trackLatest: boolean;
@@ -571,7 +702,9 @@ type SlotEl = {
   url: string;
   height: number;
   el: HTMLElement;
-  context: 'panel' | 'transcript';
+  // Phase B, B1: 'studio' added — see pickHost's doc comment for the
+  // resulting studio > panel > transcript priority.
+  context: 'panel' | 'transcript' | 'studio';
   explicitlyHidden: boolean;
   trackLatest: boolean;
   // H2 (Codex review): true for the marker placeholder EmbeddedApp renders
@@ -592,7 +725,12 @@ function readSlotEls(): SlotEl[] {
     const url = el.dataset.embedAppUrl;
     if (!url) return;
     const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
-    const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
+    const context =
+      el.dataset.embedAppContext === 'studio'
+        ? 'studio'
+        : el.dataset.embedAppContext === 'panel'
+          ? 'panel'
+          : 'transcript';
     const explicitlyHidden = el.dataset.embedAppHidden === 'true';
     const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
     const suspended = el.dataset.embedAppSuspended === 'true';
@@ -614,16 +752,31 @@ function readSlotEls(): SlotEl[] {
 /**
  * Multi-placeholder host arbitration (C2): given every placeholder currently
  * in the DOM for one url (in document order), pick the single one whose rect
- * the live iframe follows this frame. Panel-context always wins over
- * transcript — once an app is pinned, the panel is the durable home for it
- * regardless of which panel tab happens to be active right now (an inactive-
- * but-pinned tab still hosts; its transcript placeholder shows the "open in
- * panel" chip instead of a live, invisible-anyway iframe). Falls back to
- * first-in-document-order, which is the only candidate in the pre-Phase-C
- * (single placeholder) case, so this is a strict generalization.
+ * the live iframe follows this frame.
+ *
+ * Phase B, B1: studio > panel > transcript. While the studio is open for a
+ * url, it outranks even a panel pin — the user explicitly asked to look at
+ * nothing else, so a still-live-but-now-invisible panel tab must not keep
+ * hosting (that would mean the studio shows a stale/blank frame). Once the
+ * studio closes (its placeholder unmounts), hosting falls through to panel,
+ * then transcript, exactly as before B1 — same url, same Slot (keyed by url,
+ * not by placeholder), so this handoff is a pure re-arbitration with zero
+ * iframe reloads.
+ *
+ * Panel-context wins over transcript for the same reason it always has: once
+ * an app is pinned, the panel is the durable home for it regardless of which
+ * panel tab happens to be active right now (an inactive-but-pinned tab still
+ * hosts; its transcript placeholder shows the "open in panel" chip instead of
+ * a live, invisible-anyway iframe). Falls back to first-in-document-order,
+ * which is the only candidate in the pre-Phase-C (single placeholder) case,
+ * so this is a strict generalization.
  */
 function pickHost(entries: SlotEl[]): SlotEl {
-  return entries.find((e) => e.context === 'panel') ?? entries[0];
+  return (
+    entries.find((e) => e.context === 'studio') ??
+    entries.find((e) => e.context === 'panel') ??
+    entries[0]
+  );
 }
 
 // C2/L1 (Codex review): a shadow (non-host) placeholder's overlay chip. L1
@@ -880,14 +1033,22 @@ export function AppFrameLayer() {
 
         // C2: track every non-host placeholder's rect for the "open in
         // panel" chip overlay (render function below) — but only when the
-        // host is genuinely IN the panel. Two transcript-context duplicates
-        // of the same url (host = first-in-doc-order, per pickHost's
-        // fallback tier) is a pre-existing, unremarkable edge case with no
-        // panel to point at; showing "open in panel" there would be a lie.
-        // A shadow with its own zero rect (e.g. scrolled/hidden-ancestor)
-        // just doesn't get a chip this frame — no grace window needed, it's
-        // purely decorative.
-        if (host.context === 'panel') {
+        // host is genuinely IN the panel (or, Phase B B1, the studio). Two
+        // transcript-context duplicates of the same url (host = first-in-
+        // doc-order, per pickHost's fallback tier) is a pre-existing,
+        // unremarkable edge case with no panel/studio to point at; showing a
+        // chip there would be a lie. A shadow with its own zero rect (e.g.
+        // scrolled/hidden-ancestor) just doesn't get a chip this frame — no
+        // grace window needed, it's purely decorative.
+        //
+        // B1: studio hosting also gets a shadow chip on its non-host
+        // placeholders (e.g. the transcript embed you opened it from) — the
+        // tracker's B1 acceptance calls for "transcript shows its chip" while
+        // studio is open, and explicitly scopes the LABEL out of this phase
+        // ("keep existing chip text — non-host chip text stays as-is"), so
+        // this reuses the exact same "open in panel ↗" chip/click affordance
+        // rather than inventing a studio-specific label or action.
+        if (host.context === 'panel' || host.context === 'studio') {
           const arr: ShadowEntry[] = [];
           for (const e of entries) {
             if (e === host) continue;
@@ -898,8 +1059,19 @@ export function AppFrameLayer() {
           if (arr.length > 0) nextShadows.set(url, arr);
         }
 
-        // FIX 1 (pane clipping): see computePaneClip's doc comment.
-        const ancestorEl = host.el.closest('.thread-viewport');
+        // FIX 1 (pane clipping): see computePaneClip's doc comment. Studio
+        // Phase B CP3 audit, FIX 1: '.studio-body' added as a second matched
+        // ancestor selector. A device preset taller than the modal's usable
+        // height (iPad 1024 / Desktop 800 routinely exceed a typical laptop
+        // viewport once .studio-head/.studio-toolbar/padding are subtracted
+        // — the COMMON case, not an edge case) makes '.studio-body' itself
+        // the scrollable pane (styles.css: overflow: auto). Without this,
+        // `.closest('.thread-viewport')` never matched a studio host at all,
+        // so scrolling `.studio-body` fell through to computePaneClip's
+        // viewportRect() fallback — the hoisted z-310 iframe then rendered
+        // fully UNCLIPPED over .studio-head/.studio-toolbar (the close
+        // button + device bar), stealing their hit-test area.
+        const ancestorEl = host.el.closest('.thread-viewport, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         // C2: an explicitly-hidden host (inactive panel tab) hides exactly
@@ -950,6 +1122,34 @@ export function AppFrameLayer() {
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
+          // B3: studio open/close is the only host-context transition
+          // wrapped in its own animated (GSAP) chrome — see StudioModal.tsx's
+          // useModalTransition. The hoisted iframe's own position/size jumps
+          // to the new host's rect this same tick (via the JSX render below,
+          // driven by slot.rect), fully decoupled from that ~280ms panel
+          // tween since it's a separate portaled subtree (createPortal to
+          // document.body) — so without this, the iframe pops in/out fully
+          // opaque while the surrounding backdrop/chrome is still visibly
+          // fading (confirmed via the B3 harness video: studio-phase-b-flow
+          // .webm, ~t=1.6s open / ~t=4.4s close both show a fully-settled,
+          // opaque device frame while the backdrop/toolbar are still
+          // mid-fade). Cross-fade it instead: opacity 0 immediately
+          // (invisible for the one frame it jumps to the new rect), then
+          // release next frame so the existing `.embed-app-hoist {
+          // transition: opacity 100ms }` (styles.css, shared with the
+          // scroll-fade mechanism above) animates it back in. Scoped to
+          // studio transitions only — panel/transcript handoffs have no
+          // animated chrome to desync from, so fading those would just add
+          // visible latency with nothing to hide it from.
+          if (shouldCrossFadeHoist(slot.context, host.context)) {
+            const hoistEl = hoistElsRef.current.get(url);
+            if (hoistEl) {
+              hoistEl.style.opacity = '0';
+              requestAnimationFrame(() => {
+                hoistEl.style.opacity = '';
+              });
+            }
+          }
           // D2: the winning host can change context/trackLatest tick-to-tick
           // (e.g. a panel pin/unpin, or D4 flipping a tab's mode) — no re-
           // render needed for this alone, it only feeds shouldReloadOnFrame.
@@ -1038,7 +1238,11 @@ export function AppFrameLayer() {
         const hostEl = slot.hostEl;
         if (!hostEl || !hostEl.isConnected) continue;
         const rect = hostEl.getBoundingClientRect();
-        const ancestorEl = hostEl.closest('.thread-viewport');
+        // Studio Phase B CP3 audit, FIX 1: same '.studio-body' ancestor as
+        // tick() above — must stay in lockstep with that call site (see its
+        // comment for the full rationale) or the sync path and the rAF path
+        // would clip differently frame-to-frame.
+        const ancestorEl = hostEl.closest('.thread-viewport, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         const paneHidden = geometryHidden || slot.explicitlyHidden;
@@ -1297,6 +1501,22 @@ export function AppFrameLayer() {
         // button's filled-icon/aria-pressed visual only (see AppPinButton's
         // doc comment for why the click handler itself never toggles).
         const pinned = artifacts.some((a) => a.id === appArtifactId(url) && a.pinned);
+        // Studio Phase B CP3 audit, FIX 2: the reload/pin/fullscreen corner
+        // trio used to render for every context, including studio — floating
+        // over the previewed app inside the device box (visual clutter the
+        // studio's own chrome, close + device bar, doesn't have room to
+        // account for) and making the fullscreen button a self-referential
+        // no-op (it would re-open the studio for a url already hosted by the
+        // studio). Studio-context hosts render none of the three in the
+        // healthy/failed branches.
+        // Studio Phase E CP3 audit, FIX 1: the CRASHED branch is the one
+        // exception — see this component's module doc comment. A crashed
+        // studio-hosted slot with no other host gets a reload affordance
+        // (dispatches the same cockpit:app-reload the transcript/panel
+        // button uses); pin + fullscreen stay suppressed there too, since
+        // both are still redundant/self-referential in-studio regardless of
+        // crash state.
+        const isStudioHost = slot.context === 'studio';
         return (
           <span
             key={url}
@@ -1321,9 +1541,7 @@ export function AppFrameLayer() {
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,
-              zIndex: shouldElevateHoist(slot.context, narrow, slot.elevate)
-                ? PANEL_SHEET_HOIST_Z_INDEX
-                : undefined,
+              zIndex: hoistZIndex(slot.context, narrow, slot.elevate),
             }}
           >
             {slot.crashed ? (
@@ -1344,23 +1562,46 @@ export function AppFrameLayer() {
                 {slot.lastCrashMessage ? (
                   <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
                 ) : null}
+                {/* Studio Phase E CP3 audit, FIX 1: reload renders for EVERY
+                    context, including studio — a crashed studio host is the
+                    one branch where reload is the sole recovery affordance
+                    short of closing the whole modal. Pin + fullscreen stay
+                    studio-suppressed (see isStudioHost above). */}
                 <AppReloadButton url={url} quiet={false} />
-                <AppPinButton pinned={pinned} quiet={false} onClick={() => onPinClick(url, slot.height)} />
+                {!isStudioHost && (
+                  <>
+                    <AppPinButton
+                      pinned={pinned}
+                      quiet={false}
+                      onClick={() => onPinClick(url, slot.height)}
+                    />
+                    <AppFullscreenButton url={url} quiet={false} />
+                  </>
+                )}
               </div>
             ) : slot.failed ? (
               <>
                 <code className="embed-media-rejected">app unavailable: {url}</code>
-                <AppReloadButton
-                  url={url}
-                  quiet={false}
-                  style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
-                />
-                <AppPinButton
-                  pinned={pinned}
-                  quiet={false}
-                  onClick={() => onPinClick(url, slot.height)}
-                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
-                />
+                {!isStudioHost && (
+                  <>
+                    <AppReloadButton
+                      url={url}
+                      quiet={false}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
+                    />
+                    <AppPinButton
+                      pinned={pinned}
+                      quiet={false}
+                      onClick={() => onPinClick(url, slot.height)}
+                      style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                    />
+                    <AppFullscreenButton
+                      url={url}
+                      quiet={false}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
+                    />
+                  </>
+                )}
               </>
             ) : slot.html != null ? (
               <>
@@ -1374,12 +1615,20 @@ export function AppFrameLayer() {
                   srcDoc={slot.html}
                   title={url}
                 />
-                <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
-                <AppPinButton
-                  pinned={pinned}
-                  onClick={() => onPinClick(url, slot.height)}
-                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
-                />
+                {!isStudioHost && (
+                  <>
+                    <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
+                    <AppPinButton
+                      pinned={pinned}
+                      onClick={() => onPinClick(url, slot.height)}
+                      style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                    />
+                    <AppFullscreenButton
+                      url={url}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
+                    />
+                  </>
+                )}
               </>
             ) : (
               <span className="embed-media-skeleton" aria-label="loading app" />

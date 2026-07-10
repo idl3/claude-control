@@ -50,6 +50,12 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(appDir, '2026-07-01T10-00-00Z.html'), '<html>v1</html>');
   fs.writeFileSync(path.join(appDir, '2026-07-08T23-32-05Z-experiment.html'), '<html>v2</html>');
+  // C4: only the newer version has a manifest sibling — proves the presence
+  // flag is per-version, not app-wide.
+  fs.writeFileSync(
+    path.join(appDir, '2026-07-08T23-32-05Z-experiment.manifest.json'),
+    '{"schema-version":1,"component":"Widget","props":[]}',
+  );
   fs.writeFileSync(path.join(appDir, 'latest'), '2026-07-08T23-32-05Z-experiment.html\n');
   // A stray non-matching file must be ignored, not crash the scan.
   fs.writeFileSync(path.join(appDir, 'notes.txt'), 'irrelevant');
@@ -97,6 +103,22 @@ test('lists versions newest-first, marking the one the latest pointer names', ()
   assert.equal(listing.versions[1].filename, '2026-07-01T10-00-00Z.html');
   assert.equal(listing.versions[1].label, null);
   assert.equal(listing.versions[1].latest, false);
+});
+
+// ── manifest presence (C4) ───────────────────────────────────────────────
+
+test('a version with a sibling .manifest.json reports manifest:true + its url', () => {
+  const listing = listVersions(root, 'widget');
+  const withManifest = listing.versions.find((v) => v.filename === '2026-07-08T23-32-05Z-experiment.html');
+  assert.equal(withManifest.manifest, true);
+  assert.equal(withManifest.manifestUrl, 'apps/widget/2026-07-08T23-32-05Z-experiment.manifest.json');
+});
+
+test('a version with no sibling manifest reports manifest:false + a null url', () => {
+  const listing = listVersions(root, 'widget');
+  const noManifest = listing.versions.find((v) => v.filename === '2026-07-01T10-00-00Z.html');
+  assert.equal(noManifest.manifest, false);
+  assert.equal(noManifest.manifestUrl, null);
 });
 
 test('ignores non-matching files and subdirectories in the app dir', () => {

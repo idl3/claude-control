@@ -35,6 +35,7 @@ import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
+import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic, sweepCaptures } from './lib/media-captures.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -595,6 +596,17 @@ const _handler = (req, res) => {
     return handleMediaAppVersions(res, mediaAppVersionsMatch[1]);
   }
 
+  // POST /api/media-apps/<name>/captures — D3: save a Studio screenshot
+  // (+ annotations, already composited client-side) into the media root at
+  // captures/<name>/<stamp>.png, servable straight back through the
+  // /api/media/ block above. Body is JSON {dataUrl}: a `data:image/png;
+  // base64,...` string, capped at 8MB decoded (413 on overflow).
+  const mediaAppCapturesMatch = MEDIA_APP_CAPTURES_RE.exec(u.pathname);
+  if (mediaAppCapturesMatch && req.method === 'POST') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleSaveCapture(req, res, mediaAppCapturesMatch[1]);
+  }
+
   // PWA home-screen icon. GET is token-FREE: the OS fetches manifest icons and
   // the apple-touch-icon with no Authorization header, so this surface must be
   // open (it only ever returns an image). POST/DELETE (replace/reset the custom
@@ -814,6 +826,47 @@ function handleMediaAppVersions(res, rawName) {
   if (!isValidAppName(name)) return endJson(res, 400, { error: 'invalid name' });
   const listing = listVersions(CONFIG.mediaDir, name);
   return endJson(res, 200, listing || { name, versions: [], latest: null });
+}
+
+// D3: matches POST /api/media-apps/<name>/captures.
+const MEDIA_APP_CAPTURES_RE = /^\/api\/media-apps\/([^/]+)\/captures$/;
+
+// POST /api/media-apps/<name>/captures — save a Studio screenshot into
+// captures/<name>/<stamp>.png (see lib/media-captures.js). readJsonBody's
+// own 64KB default is far too small for a base64 PNG, so this passes an
+// explicit ~10.7MB cap (8MB decoded ceiling * 4/3 base64 expansion, plus the
+// small JSON envelope) — readJsonBody's own callers elsewhere all collapse
+// every rejection to 400; this one instead distinguishes "too large" into a
+// proper 413, per the captures contract.
+async function handleSaveCapture(req, res, rawName) {
+  let name;
+  try {
+    name = decodeURIComponent(rawName);
+  } catch {
+    return endJson(res, 400, { error: 'invalid name' });
+  }
+  if (!isValidAppName(name)) return endJson(res, 400, { error: 'invalid name' });
+
+  let body;
+  try {
+    body = await readJsonBody(req, 11 * 1024 * 1024);
+  } catch (err) {
+    const message = String(err?.message || err);
+    return endJson(res, message.includes('too large') ? 413 : 400, { error: message });
+  }
+
+  const buf = decodeCaptureDataUrl(body?.dataUrl);
+  if (!buf) return endJson(res, 400, { error: 'dataUrl must be a data:image/png;base64,... string' });
+  if (isOversizeCapture(buf.length)) {
+    return endJson(res, 413, { error: 'capture exceeds 8MB limit' });
+  }
+
+  try {
+    const relPath = writeCaptureAtomic(CONFIG.mediaDir, name, buf);
+    return endJson(res, 200, { ok: true, path: relPath });
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
 }
 
 // Read a small JSON request body with a hard size cap (control payloads are
@@ -3012,6 +3065,7 @@ resources.on('overlimit', (snapshot) => {
 });
 
 let uploadSweepTimer = null;
+let captureSweepTimer = null;
 
 async function runUploadSweep() {
   try {
@@ -3020,6 +3074,21 @@ async function runUploadSweep() {
     if (removed > 0) console.log(`uploads sweep: removed ${removed} file(s) older than ${CONFIG.uploadTtlHours}h`);
   } catch (err) {
     console.error('uploads sweep failed:', err?.message || err);
+  }
+}
+
+// Studio Phase D CP3 audit, FIX 2: captures/ (Studio screenshot saves, D3)
+// had no retention sweep at all, unlike uploads/ above — an unbounded growth
+// path. Mirrors runUploadSweep exactly (same CONFIG.uploadTtlHours TTL,
+// same startup-sweep-then-24h-interval cadence, same best-effort/never-
+// throws-to-caller error handling) rather than a new config knob or cadence.
+async function runCaptureSweep() {
+  try {
+    const ttlMs = CONFIG.uploadTtlHours * 3600 * 1000;
+    const { removed } = await sweepCaptures(CONFIG.mediaDir, ttlMs);
+    if (removed > 0) console.log(`captures sweep: removed ${removed} file(s) older than ${CONFIG.uploadTtlHours}h`);
+  } catch (err) {
+    console.error('captures sweep failed:', err?.message || err);
   }
 }
 
@@ -3066,6 +3135,13 @@ async function main() {
   uploadSweepTimer = setInterval(runUploadSweep, 24 * 3600 * 1000);
   uploadSweepTimer.unref();
 
+  // Daily captures/ cleanup (Studio Phase D CP3 audit, FIX 2): same cadence
+  // as the upload sweep above — captures/<name>/*.png otherwise grows
+  // unbounded, unlike uploads/ which already had this.
+  runCaptureSweep();
+  captureSweepTimer = setInterval(runCaptureSweep, 24 * 3600 * 1000);
+  captureSweepTimer.unref();
+
   // Without this, a stale instance still holding the port makes listen() emit an
   // unhandled 'error' and the process dies with an opaque EADDRINUSE stack. Fail
   // loud and clean instead.
@@ -3109,6 +3185,7 @@ function shutdown() {
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
+  if (captureSweepTimer) clearInterval(captureSweepTimer);
   server.close();
   // Long-lived WebSocket connections keep the listening socket bound; force them
   // closed so the port frees immediately and an in-place restart can re-bind.

@@ -17,13 +17,23 @@ export default defineConfig({
     // Personal tool on localhost/tailnet — exposing source is a non-issue.
     sourcemap: true,
   },
-  // Unit tests run in a plain Node env (no jsdom): convert.ts is pure, and the
-  // ws.ts tests stub a minimal WebSocket on globalThis. Deterministic + fast.
-  // Files use the `.vitest.ts` suffix (not `.test.ts`) so the repo-root
-  // `node --test` runner — which globs **/*.test.ts — never tries to execute
-  // these TS-with-vitest files. The two runners stay fully isolated.
+  // Unit tests run in a plain Node env (no jsdom) by default: convert.ts is
+  // pure, and the ws.ts tests stub a minimal WebSocket on globalThis.
+  // Individual files opt into jsdom via a `// @vitest-environment jsdom`
+  // pragma (e.g. ccBridgeRuntime.vitest.ts). Files use the `.vitest.ts`
+  // suffix (not `.test.ts`) so the repo-root `node --test` runner — which
+  // globs **/*.test.ts — never tries to execute these TS-with-vitest files.
+  // The two runners stay fully isolated.
+  //
+  // C4: `scratch/**/*.vitest.ts` is included alongside `src/**/*.vitest.ts`
+  // so a dogfood's OWN test file (e.g. scratch/counter-app/counter.vitest.ts)
+  // can import and exercise its real component + withCcBridge wiring
+  // in-place — this repo's own established "no Playwright, jsdom+RTL proves
+  // live prop-driven re-render" verification tier (see
+  // ccBridgeRuntime.vitest.ts), extended to the actual dogfood components
+  // rather than a generic fixture.
   test: {
     environment: 'node',
-    include: ['src/**/*.vitest.ts'],
+    include: ['src/**/*.vitest.ts', 'scratch/**/*.vitest.ts'],
   },
 });

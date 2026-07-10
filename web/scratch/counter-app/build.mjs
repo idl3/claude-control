@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-// Builds the single-file counter micro-app deployed to
-// ~/.claude-control/media/apps/counter.html — the demo target for the
-// <embedded-app url="apps/counter.html" height="…" /> transcript tag.
+// Builds the single-file counter micro-app, versioned + manifested via the
+// prototype-component skill's run.mjs CLI (apps/counter/<stamp>.html + a
+// apps/counter.html flat compat alias + a sibling <stamp>.manifest.json —
+// see lib/media-apps.js's doc comment for the layout, and run.mjs's own
+// `--infer-manifest`/`--write-app` doc comments, which name THIS file as
+// their intended caller) — the demo target for the
+// <embedded-app url="apps/counter.html" height="…" /> transcript tag AND for
+// cockpit-prototype-studio's Props tab (C3), which drives Counter's props
+// live via the withCcBridge wrapper counter.tsx applies (C4).
 //
 // Bundles React + ReactDOM + counter.tsx into one minified IIFE (esbuild,
 // resolved from web/node_modules — this dir has no node_modules of its own)
@@ -13,12 +19,14 @@
 // Usage: node build.mjs   (run from anywhere; paths are resolved from this
 // file's own location, not cwd)
 import { build } from 'esbuild';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
+const RUN_MJS = path.join(os.homedir(), '.claude', 'skills', 'prototype-component', 'scripts', 'run.mjs');
 
 const result = await build({
   entryPoints: [path.join(dir, 'counter.tsx')],
@@ -109,8 +117,28 @@ const html = `<!doctype html>
 </html>
 `;
 
-const outDir = path.join(os.homedir(), '.claude-control', 'media', 'apps');
-mkdirSync(outDir, { recursive: true });
-const outFile = path.join(outDir, 'counter.html');
-writeFileSync(outFile, html, 'utf8');
-console.log(`wrote ${outFile} (${html.length} bytes total, ${js.length} bytes js)`);
+// Docgen + versioning both go through run.mjs's own CLI surfaces (not
+// duplicated here) — infer a manifest for the `Counter` component (the sole
+// docgen-visible export in counter.tsx, see that file's doc comment), then
+// version the built HTML with that manifest as a sibling. Both degrade
+// loudly-but-non-fatally on failure (run.mjs's own contract: docgen/manifest
+// problems never block the HTML build) — this script only fails outright if
+// the HTML itself can't be written/versioned.
+const tmp = mkdtempSync(path.join(os.tmpdir(), 'counter-build-'));
+try {
+  const htmlPath = path.join(tmp, 'counter.html');
+  writeFileSync(htmlPath, html, 'utf8');
+
+  const manifestPath = path.join(tmp, 'counter.manifest.json');
+  execFileSync(
+    process.execPath,
+    [RUN_MJS, '--infer-manifest', path.join(dir, 'counter.tsx'), '--out', manifestPath],
+    { stdio: 'inherit' },
+  );
+
+  execFileSync(process.execPath, [RUN_MJS, '--write-app', 'counter', '--html', htmlPath, '--manifest', manifestPath], {
+    stdio: 'inherit',
+  });
+} finally {
+  rmSync(tmp, { recursive: true, force: true });
+}
