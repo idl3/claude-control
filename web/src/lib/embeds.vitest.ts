@@ -40,6 +40,29 @@ vi.mock('../lib/api', async (importOriginal) => {
   return { ...actual, authFetch: (...args: Parameters<typeof actual.authFetch>) => authFetchMock(...args) };
 });
 
+// Mobile-sheet fix: AppFrameLayer now calls useIsNarrow() (matchMedia)
+// internally too (not just ArtifactPanel, see the C3 suite's own local mock
+// below), so every mounted suite in this file that mounts AppFrameLayer
+// needs one or it throws on mount — jsdom implements no matchMedia at all.
+// Default non-narrow (desktop) preserves every pre-existing suite's prior
+// (implicitly-desktop) behavior; C3's own identical local mock below is now
+// redundant but harmless.
+beforeEach(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
+
 // Render markdown through the same plugin + img override MarkdownText uses.
 // Static markup: effects never run, so relative-path embeds mount their
 // reserved-box frame + skeleton (no src fetched yet) — enough to assert

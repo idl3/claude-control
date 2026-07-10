@@ -6,6 +6,7 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
 import { appNameFromUrl } from '../lib/appVersion';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
 import { AppReloadButton, AppPinButton } from './EmbeddedApp';
+import { useIsNarrow } from '../hooks/useIsNarrow';
 
 /** Phase C, C3: title for a freshly-pinned app artifact — last path segment
  * of its url, falling back to the full url for a bare filename or a
@@ -114,6 +115,29 @@ const SLOT_SELECTOR = '[data-embed-app-url]';
 // B audit follow-up (CP3-B, FIX 2): cap the beacon's app-controlled crash
 // message so a misbehaving app can't blow up the crashed strip's layout.
 const CRASH_MESSAGE_MAX_LEN = 200;
+// Mobile-sheet fix: a panel-hosted app's hoisted iframe must paint ABOVE the
+// mobile bottom sheet (styles.css `.artifact-panel[data-mode='sheet']`,
+// z-index: 200). The sheet is `position: fixed` with its own z-index, so its
+// own stacking context — opaque background, tab strip, and the in-flow
+// placeholder span the iframe stands in for — paints as one atomic layer
+// above this file's document.body-portaled hoist (default z-index: 1 from
+// styles.css, chosen to stay below `.detail-head`/`.composer` at z-index: 2
+// for the transcript case) regardless of either side's own transparency.
+// Bug: pinning an app on mobile showed the sheet's tab bar + version picker
+// but never the live iframe, even though the hoist's geometry (rect,
+// visibility, clip-path) was entirely correct — confirmed via
+// document.elementFromPoint() hit-testing, which returned the sheet's own
+// placeholder span instead of the iframe. Desktop never hit this because
+// `.artifact-panel` there is `position: static` with no z-index of its own.
+// 210 clears the sheet's 200 with headroom while staying well below
+// `.sa-backdrop`/`.sa-panel` (899/900) and `.lightbox` (1000), so the
+// sub-agent drawer and image lightbox still cover a pinned app. Scoped to
+// context === 'panel' AND narrow (same `useIsNarrow()` breakpoint
+// ArtifactPanel.tsx uses to switch into sheet mode) so a transcript-hosted
+// iframe keeps the default z-index: 1, and a desktop panel-hosted iframe
+// doesn't jump above desktop modals (.config-overlay etc., z-index 50-100)
+// that currently correctly cover it.
+const PANEL_SHEET_HOIST_Z_INDEX = 210;
 
 // ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
 // DOM-free so they're unit-testable without a real layout engine — jsdom
@@ -436,6 +460,8 @@ export function AppFrameLayer() {
   // transcript duplicates of one url each keep their own chip.
   const shadowsRef = useRef<Map<string, ShadowEntry[]>>(new Map());
   const { setActive, open, artifacts } = useArtifactPanel();
+  // Mobile-sheet fix: see PANEL_SHEET_HOIST_Z_INDEX's doc comment.
+  const narrow = useIsNarrow();
 
   // Phase C, C3: pin-to-panel — always an idempotent open({..., pinned:
   // true}), never a toggle-to-unpin (see AppPinButton's doc comment). `open`
@@ -894,6 +920,7 @@ export function AppFrameLayer() {
           <span
             key={url}
             className="embed-app-hoist"
+            data-embed-app-context={slot.context}
             style={{
               position: 'fixed',
               top: r ? r.top : -99999,
@@ -903,6 +930,7 @@ export function AppFrameLayer() {
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,
+              zIndex: slot.context === 'panel' && narrow ? PANEL_SHEET_HOIST_Z_INDEX : undefined,
             }}
           >
             {slot.crashed ? (
