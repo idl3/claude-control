@@ -17,6 +17,7 @@ import {
   shouldElevateHoist,
   nextScrollStreak,
   shouldEngageScrollFade,
+  shouldFadeSlot,
   type RectLike,
 } from './AppFrameLayer';
 // C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
@@ -242,6 +243,24 @@ describe('shouldEngageScrollFade (fade-during-scroll: streak-length gate, pure)'
 
   it('stays engaged well past the minimum streak', () => {
     expect(shouldEngageScrollFade(10, 3)).toBe(true);
+  });
+});
+
+describe('shouldFadeSlot (transcript-only fade gate, pure)', () => {
+  it('engages for a transcript-context slot when faded is requested', () => {
+    expect(shouldFadeSlot(true, 'transcript')).toBe(true);
+  });
+
+  it('never engages for a panel-context slot, even when faded is requested — panel/studio hosts stay pinned via syncPositions with no lag to mask', () => {
+    expect(shouldFadeSlot(true, 'panel')).toBe(false);
+  });
+
+  it('resolves to unfaded for a transcript-context slot when faded is not requested', () => {
+    expect(shouldFadeSlot(false, 'transcript')).toBe(false);
+  });
+
+  it('resolves to unfaded for a panel-context slot when faded is not requested (idempotent)', () => {
+    expect(shouldFadeSlot(false, 'panel')).toBe(false);
   });
 });
 
@@ -756,12 +775,12 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
     rectSpy.mockRestore();
   });
 
-  function mountApp(url: string) {
-    render(
+  function mountApp(url: string, context: 'panel' | 'transcript' = 'transcript') {
+    return render(
       createElement(
         ArtifactPanelProvider,
         null,
-        createElement(EmbeddedApp, { url, height: 320 }),
+        createElement(EmbeddedApp, { url, height: 320, context }),
         createElement(AppFrameLayer),
       ),
     );
@@ -846,6 +865,98 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
 
     const iframeAfter = screen.getByTitle('apps/fade-no-remount.html');
     expect(iframeAfter).toBe(iframeBefore);
+  });
+
+  // Operator follow-up: the fade masks a transcript-hosted iframe's
+  // fast-flick lag as it's towed along the scrolling transcript feed — a
+  // panel-hosted iframe lives in ArtifactPanel's own container and is
+  // already kept pinned by syncPositions' synchronous reposition (always
+  // unconditional, unaffected by this gate), so it must never fade/skeleton
+  // on scroll. AppFrameLayer only distinguishes 'panel' | 'transcript'
+  // contexts today (see SlotEl/Slot's `context` field and readSlotEls'
+  // `=== 'panel'` bucketing) — a studio-hosted iframe, once built, reaches
+  // this same non-fading path by rendering its placeholder with
+  // `data-embed-app-context="panel"`, exactly like any other "lives in its
+  // own container, already pinned" host (the same convention the mobile-
+  // sheet z-index and D2 hot-reload gates already rely on). There is no
+  // separate 'studio' literal to construct here; this test IS the
+  // studio-context coverage the operator asked for.
+  it('does NOT engage the fade for a panel-context host on the same qualifying scroll streak (opacity stays 1, no skeleton) — covers panel/pinned AND studio hosts, which share this same non-transcript path', async () => {
+    mountApp('apps/fade-panel-no-engage.html', 'panel');
+    const iframe = await screen.findByTitle('apps/fade-panel-no-engage.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    const placeholder = document.querySelector(
+      '[data-embed-app-url="apps/fade-panel-no-engage.html"]',
+    ) as HTMLElement;
+
+    fireScrolls(3);
+
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).toBeNull();
+    // Never-reload seam still holds: gating the fade never touches the iframe itself.
+    expect(screen.getByTitle('apps/fade-panel-no-engage.html')).toBe(iframe);
+  });
+
+  it('does NOT engage the fade for a panel-context host even on a long, sustained scroll streak (well past the transcript threshold)', async () => {
+    mountApp('apps/fade-panel-sustained.html', 'panel');
+    const iframe = await screen.findByTitle('apps/fade-panel-sustained.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+
+    fireScrolls(20);
+
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
+  });
+
+  it('a host transitioning transcript→panel while faded resolves back to opacity 1 (does not stay stuck faded until settle)', async () => {
+    const { rerender } = mountApp('apps/fade-context-flip.html', 'transcript');
+    const iframe = await screen.findByTitle('apps/fade-context-flip.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+
+    fireScrolls(3);
+    expect(hoist.style.opacity).toBe('0');
+    expect(hoist.style.pointerEvents).toBe('none');
+
+    // Flip the same placeholder to panel context mid-fade (stands in for
+    // "pinned into the panel mid-scroll" — pickHost arbitrating a
+    // panel-context host in is the real-world trigger; this directly drives
+    // the same observable outcome: the winning host's context changes).
+    rerender(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/fade-context-flip.html', height: 320, context: 'panel' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    // tick()'s rAF loop (already running continuously while this slot is
+    // live — FIX 3's gate) needs a real frame to observe the placeholder's
+    // new data-embed-app-context and update slot.context — internally, NOT
+    // necessarily via a re-render: a context-only change deliberately never
+    // sets tick()'s `changed` flag (see tick()'s own comment: "no re-render
+    // needed for this alone, it only feeds shouldReloadOnFrame"), so the
+    // hoist span's rendered data-embed-app-context attribute can stay stale
+    // even after slot.context has already updated in memory — not a
+    // reliable signal to poll here. Wait a fixed, comfortably-short real
+    // window instead (well under SCROLL_SETTLE_MS's 150ms, so the pending
+    // settle timer from the fireScrolls(3) above never fires and masks the
+    // assertion by un-fading everything via the OTHER, context-independent
+    // path) — long enough for several rAF frames to land.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    // The next scroll event (still within the same gesture — 80ms is under
+    // SCROLL_SETTLE_MS, so the streak continues rather than resetting) must
+    // resolve this now-panel slot back to unfaded immediately, driven by
+    // applyFadeState's per-slot shouldFadeSlot resolve — not by waiting for
+    // the gesture to fully settle.
+    fireScrolls(1);
+
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
   });
 });
 
