@@ -1,9 +1,31 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
-import { Lightbox } from './AttachmentPreview';
+import { AttachPreviewItem, Lightbox } from './AttachmentPreview';
 import { MarkdownImg } from './EmbeddedMedia';
+
+// AttachPreviewItem's tap-open path (unlike the plain/embedded-image paths
+// below) always goes through useAuthedBlobUrl -> authFetch, since upload
+// thumbnails can't authenticate a plain <img src>. Mocked once, module-wide
+// (vi.mock is hoisted above these imports by the vite/vitest transform),
+// matching the same pattern ArtifactPanel.vitest.ts uses for the same reason.
+const authFetchMock = vi.fn();
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>();
+  return { ...actual, authFetch: (...args: Parameters<typeof actual.authFetch>) => authFetchMock(...args) };
+});
+
+// Default authFetch to a Promise that never settles: tests elsewhere in this
+// file exercise EmbeddedMedia's relative-url (kind: 'fetch') branch without
+// caring about the network response (they only assert the pre-resolve
+// state), and the module-wide mock above would otherwise make every one of
+// those calls return `undefined` (crashing on `.then`) unless a specific test
+// opts in with its own mockResolvedValue/mockReset.
+beforeEach(() => {
+  authFetchMock.mockReset();
+  authFetchMock.mockImplementation(() => new Promise(() => {}));
+});
 
 afterEach(cleanup);
 // Belt and braces: a test that throws before its effect cleanup runs would
@@ -61,6 +83,19 @@ describe('Lightbox', () => {
     expect(ancestorHandler).not.toHaveBeenCalled();
 
     document.body.removeEventListener('touchmove', ancestorHandler);
+  });
+
+  it('renders an explicit X close button with aria-label "Close" (on top of, not instead of, tap-anywhere-closes)', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'a screenshot', onClose: () => {} }));
+    const closeBtn = screen.getByRole('button', { name: 'Close' });
+    expect(closeBtn.tagName).toBe('BUTTON');
+  });
+
+  it('clicking the X close button closes (and only fires onClose once, not double-counted via the backdrop)', () => {
+    const onClose = vi.fn();
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'a screenshot', onClose }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -171,5 +206,72 @@ describe('MarkdownImg — regular (non-embed) markdown images', () => {
     // PlainMarkdownImage which always opens on click.
     fireEvent.click(btn);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('MarkdownImg — embedded image (data-embed="image") with a direct https url', () => {
+  it('tap/click opens the Lightbox once resolveMediaUrl resolves synchronously (kind: direct, no fetch needed)', () => {
+    render(
+      createElement(MarkdownImg, {
+        'data-embed': 'image',
+        'data-url': 'https://example.com/embedded-shot.png',
+        'data-size': 'md',
+      }),
+    );
+    const btn = screen.getByRole('button', { name: 'Preview https://example.com/embedded-shot.png' });
+    expect(screen.queryByRole('dialog')).toBeNull(); // not open yet
+
+    fireEvent.click(btn);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.getAttribute('aria-label')).toBe('Preview: https://example.com/embedded-shot.png');
+  });
+});
+
+describe('AttachPreviewItem — upload thumbnail tap-to-open (authed blob-URL path)', () => {
+  // jsdom has no native URL.createObjectURL/revokeObjectURL; useAuthedBlobUrl
+  // (unlike the direct-https paths above) always calls them, so this describe
+  // block is the one place in this file that needs to stub them — scoped
+  // here and restored after, so it can't leak into other tests/files.
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:mock-thumb-url');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    // Unmount now, while the stubs above are still active — the top-level
+    // `afterEach(cleanup)` (registered before this describe block, so it
+    // runs AFTER this hook) would otherwise unmount AFTER the restore below,
+    // and useAuthedBlobUrl's cleanup calls URL.revokeObjectURL on unmount,
+    // which jsdom doesn't natively provide (see file-level comment above).
+    cleanup();
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  });
+
+  it('fetches the thumbnail via authFetch (bearer header, since <img src> cannot send one), then tap opens the Lightbox', async () => {
+    const fakeBlob = new Blob(['x'], { type: 'image/png' });
+    authFetchMock.mockResolvedValue({ ok: true, blob: () => Promise.resolve(fakeBlob) });
+
+    render(
+      createElement(AttachPreviewItem, {
+        ref_: {
+          fullPath: '/Users/x/.claude-control/uploads/1717000000000-photo.jpg',
+          basename: '1717000000000-photo.jpg',
+          isImage: true,
+        },
+      }),
+    );
+
+    expect(authFetchMock).toHaveBeenCalledWith('/api/uploads/1717000000000-photo.jpg');
+    await screen.findByAltText('1717000000000-photo.jpg'); // waits for the blob URL to resolve and replace the loading placeholder
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview 1717000000000-photo.jpg' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.getAttribute('aria-label')).toBe('Preview: 1717000000000-photo.jpg');
   });
 });

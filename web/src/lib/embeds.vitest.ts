@@ -705,9 +705,12 @@ describe('C2: multi-placeholder host arbitration + panel chip (mounted)', () => 
     expect(screen.getAllByTitle('apps/dual.html')).toHaveLength(1);
     const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
     // Follows the PANEL placeholder's rect (500/500), not the transcript
-    // one's (0/0) — proving panel-context won host arbitration.
-    expect(hoist.style.top).toBe('500px');
-    expect(hoist.style.left).toBe('500px');
+    // one's (0/0) — proving panel-context won host arbitration. Position is
+    // via `transform` (scroll-lag fix, AppFrameLayer.tsx) — top/left are
+    // fixed at 0 from mount, translate3d carries the actual offset.
+    expect(hoist.style.top).toBe('0px');
+    expect(hoist.style.left).toBe('0px');
+    expect(hoist.style.transform).toBe('translate3d(500px, 500px, 0)');
 
     // The non-host (transcript) placeholder gets a click-to-focus chip
     // instead of a second, invisible-anyway iframe.

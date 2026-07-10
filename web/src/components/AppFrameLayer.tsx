@@ -108,10 +108,71 @@ function basename(url: string): string {
  * evict) treatment FIX 1 already uses for a scrolled-out-of-pane
  * placeholder, so switching panel tabs (or scrolling the transcript
  * placeholder out of view) never reloads the iframe either way.
+ *
+ * Scroll-lag fix layers on top of everything above, also unchanged design
+ * elsewhere: two problems with the pre-existing positioning, both about
+ * WHEN and HOW the hoist span moves, not WHETHER it should (computePaneClip/
+ * pickHost/tick()'s discovery-eviction-GC loop are all untouched).
+ *  - Timing: tick() is an rAF loop — it only re-measures+repositions once
+ *    per animation frame, but the browser can paint a native (trackpad/
+ *    wheel/momentum) scroll before that next frame runs, so the hoisted
+ *    iframe visibly trailed the transcript content underneath it by up to a
+ *    frame on every scroll frame. Fixed by adding a SYNCHRONOUS fast path
+ *    (syncPositions, this file's useEffect) driven by passive, capture-phase
+ *    `scroll`/`resize` listeners on `window` — capture phase because scroll
+ *    events don't bubble but DO propagate during capture, so one listener
+ *    catches every nested scroll container (`.thread-viewport`, a panel
+ *    body, any future nested pane) without enumerating them. tick() keeps
+ *    doing discovery/arbitration/eviction/GC exactly as before, refreshing
+ *    each slot's `hostEl` every frame so syncPositions always has a current
+ *    element to re-measure without its own DOM query.
+ *  - Paint cost: repositioning used to write `style.top`/`style.left`
+ *    directly — both layout-triggering. Both the rAF loop's render and the
+ *    new sync path now write only `transform: translate3d(x, y, 0)`
+ *    (compositor-only) against a hoist span whose own top/left are fixed at
+ *    0 from mount. See hoistTransform's doc comment for why this is pixel-
+ *    identical to the old top/left positioning, and therefore why
+ *    computePaneClip's clip-inset math needs no coordinate changes of its
+ *    own.
+ * Neither change touches the never-reload seam this file exists for: the
+ * <iframe> element itself is still never reparented/remounted by either
+ * path — only the wrapping hoist span's own inline style changes.
+ *
+ * Generic elevation hook (fullscreen-panel follow-up) also layers on top,
+ * unchanged design elsewhere: PANEL_SHEET_HOIST_Z_INDEX's mobile-sheet
+ * special case (`context === 'panel' && narrow`) is now
+ * `context === 'panel' && (narrow || elevate)` — see
+ * PANEL_SHEET_HOIST_Z_INDEX/shouldElevateHoist's doc comments — so any
+ * future panel placeholder can ask for the same chrome-piercing z-index via
+ * `data-embed-app-elevate="true"` without adding another bespoke breakpoint
+ * check here. EmbeddedApp.tsx doesn't emit the attribute yet; this is
+ * forward-compatible plumbing only.
  */
 
 const GRACE_MS = 250;
 const SLOT_SELECTOR = '[data-embed-app-url]';
+// Fade-during-scroll (operator follow-up to the scroll-lag fix below): a
+// scroll "settles" once this many ms pass with no further scroll event —
+// mirrors this file's existing GRACE_MS pattern (a debounce window, not a
+// throttle). Kept in sync with styles.css's `.embed-app-hoist` opacity
+// transition comment if this value ever changes.
+const SCROLL_SETTLE_MS = 150;
+// Require this many scroll events in a row, each within SCROLL_SETTLE_MS of
+// the last, before engaging the fade. A single wheel notch or a 1-2-event
+// nudge produces 1-2 events total (then goes quiet) — not worth a visible
+// opacity flash for a scroll that's basically already over. Sustained scroll
+// motion (trackpad flick, held-down wheel) fires many events in rapid
+// succession well before it ends, so real scroll gestures cross this
+// threshold almost immediately. Chosen empirically: low enough to engage
+// well before a fast flick's midpoint, high enough that idle-scroll noise
+// (a stray 1-2px wheel tick) never triggers it.
+const SCROLL_FADE_MIN_STREAK = 3;
+// Matches styles.css's `.embed-app-hoist { transition: opacity ... }` —
+// duplicated as a named constant here (not read by CSS) purely so this
+// file's own doc comments/tests have one canonical number to point at.
+// Exported so the vitest suite can assert it stays in lockstep with the
+// CSS transition duration instead of the two silently drifting apart.
+export const SCROLL_FADE_DURATION_MS = 100;
 // B audit follow-up (CP3-B, FIX 2): cap the beacon's app-controlled crash
 // message so a misbehaving app can't blow up the crashed strip's layout.
 const CRASH_MESSAGE_MAX_LEN = 200;
@@ -137,7 +198,34 @@ const CRASH_MESSAGE_MAX_LEN = 200;
 // iframe keeps the default z-index: 1, and a desktop panel-hosted iframe
 // doesn't jump above desktop modals (.config-overlay etc., z-index 50-100)
 // that currently correctly cover it.
+//
+// Generalized (fullscreen-panel follow-up): the mobile-sheet case above was
+// the only caller, hard-coded as `context === 'panel' && narrow`. A
+// placeholder may now instead opt in directly via
+// `data-embed-app-elevate="true"` (any future "put this app's iframe above
+// chrome" case — e.g. a desktop fullscreen panel — without adding another
+// bespoke breakpoint check here). Scoped to panel-context hosts only, same
+// as before: a transcript embed must NEVER pierce chrome (it's meant to stay
+// clipped inside the scroll pane, see FIX 1 above) even if some future
+// placeholder mistakenly carries the attribute — see shouldElevateHoist.
 const PANEL_SHEET_HOIST_Z_INDEX = 210;
+
+/**
+ * Generic elevation gate: a panel-context host either matches the existing
+ * mobile-sheet breakpoint (`narrow`) or explicitly opts in via
+ * `data-embed-app-elevate="true"` (`elevate`, read by readSlotEls below).
+ * Transcript-context hosts never elevate, full stop — the `context ===
+ * 'panel'` guard is unconditional, not folded into the `||`, so a stray
+ * elevate attribute on a transcript placeholder can never bump it above the
+ * header/composer chrome FIX 1 exists to keep it under.
+ */
+export function shouldElevateHoist(
+  context: 'panel' | 'transcript',
+  narrow: boolean,
+  elevate: boolean,
+): boolean {
+  return context === 'panel' && (narrow || elevate);
+}
 
 // ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
 // DOM-free so they're unit-testable without a real layout engine — jsdom
@@ -235,6 +323,59 @@ export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
     cornerLeft: RELOAD_CORNER_OFFSET + c.left,
     crashedInset: c,
   };
+}
+
+// ── Scroll-lag fix pure helpers ─────────────────────────────────────────
+// Same DOM-free rationale as computePaneClip/clampChromeInsets above. The
+// hoist span used to be repositioned by writing `style.top`/`style.left`
+// directly — both layout-triggering properties — from inside tick()'s rAF
+// loop. Two problems: (1) the loop only re-measures+repositions once per
+// animation frame, so a native browser-driven scroll (which the compositor
+// can paint before the next rAF fires) visibly ran the transcript content
+// ahead of the iframe hoisted over it, one frame of lag on every scroll
+// frame; (2) top/left forces layout even when nothing but the element's own
+// screen position moved. Fix: the hoist span's own `top`/`left` are now
+// fixed at 0 (set once, in the render below) and every reposition — both the
+// rAF loop's and the new synchronous scroll/resize path below — writes only
+// `transform: translate3d(x, y, 0)`, a compositor-only property. Positioning
+// an unmoved (top:0/left:0) fixed-position box via translate3d(rect.left,
+// rect.top, 0) lands it at the exact same viewport pixel a
+// top:rect.top/left:rect.left box would have, so computePaneClip's clip
+// insets (already relative to the placeholder's own border-box-local
+// top-left — see its doc comment) need no coordinate adjustment: the box
+// they describe is identical either way.
+export function hoistTransform(r: RectLike | null): string {
+  return r ? `translate3d(${r.left}px, ${r.top}px, 0)` : 'translate3d(-99999px, -99999px, 0)';
+}
+
+// Pulled out of the render below so the imperative scroll/resize sync path
+// (tick()'s useEffect) can apply the identical clip-path string without
+// duplicating the null/hidden tri-state logic inline — the two paths must
+// never be able to drift from each other.
+export function hoistClipPath(
+  r: RectLike | null,
+  paneHidden: boolean,
+  clip: ClipInsets | null,
+): string | undefined {
+  return r && !paneHidden && clip
+    ? `inset(${clip.top}px ${clip.right}px ${clip.bottom}px ${clip.left}px)`
+    : undefined;
+}
+
+// Fade-during-scroll pure helpers — same DOM-free rationale as the rest of
+// this section. `count` is consecutive scroll events seen so far this
+// gesture; a gap of more than `settleMs` since the last event resets the
+// streak to 1 (the gap itself means the previous gesture already settled,
+// so this event starts a new one) instead of continuing to accumulate.
+export type ScrollStreak = { count: number; lastT: number };
+
+export function nextScrollStreak(prev: ScrollStreak, now: number, settleMs: number): ScrollStreak {
+  const withinGesture = now - prev.lastT <= settleMs;
+  return { count: withinGesture ? prev.count + 1 : 1, lastT: now };
+}
+
+export function shouldEngageScrollFade(streakCount: number, minStreak: number): boolean {
+  return streakCount >= minStreak;
 }
 
 function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
@@ -374,6 +515,22 @@ type Slot = {
   // re-fetches itself — no reload is ever lost, and `lastMtime` only moves
   // when the generation that owns it actually lands.
   fetchGen: number;
+  // Scroll-lag fix: the current winning host element (see pickHost),
+  // refreshed every tick() alongside rect/context/trackLatest above. The
+  // synchronous scroll/resize sync path (this component's useEffect) reads
+  // this directly to re-measure+reposition WITHOUT waiting for the next rAF
+  // frame — it never re-queries the DOM itself (that stays tick()'s job:
+  // discovery, multi-placeholder arbitration, eviction). null only in the
+  // instant before a slot's first tick() (never actually observable outside
+  // that render, since a slot is always created with its host already known).
+  hostEl: HTMLElement | null;
+  // Mirrors the winning host's data-embed-app-hidden — the sync path folds
+  // this into paneHidden exactly like tick() does, so an inactive panel tab
+  // scrolling (rare, but the DOM stays live) can't accidentally un-hide.
+  explicitlyHidden: boolean;
+  // Generic elevation hook — see shouldElevateHoist above. Render-only,
+  // not part of the scroll/resize sync path (structural, not scroll-driven).
+  elevate: boolean;
 };
 
 type SlotEl = {
@@ -387,6 +544,12 @@ type SlotEl = {
   // for a cap-suspended app (`suspended` prop -> data-embed-app-suspended).
   // See tick()'s per-url loop below for what this bars.
   suspended: boolean;
+  // Generic elevation hook (see PANEL_SHEET_HOIST_Z_INDEX/shouldElevateHoist
+  // above): a placeholder may carry `data-embed-app-elevate="true"` to ask
+  // for the chrome-piercing z-index outside the mobile-sheet breakpoint.
+  // EmbeddedApp.tsx doesn't emit this yet — forward-compatible plumbing for
+  // whichever placeholder wires it up next (e.g. a fullscreen panel mode).
+  elevate: boolean;
 };
 
 function readSlotEls(): SlotEl[] {
@@ -399,6 +562,7 @@ function readSlotEls(): SlotEl[] {
     const explicitlyHidden = el.dataset.embedAppHidden === 'true';
     const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
     const suspended = el.dataset.embedAppSuspended === 'true';
+    const elevate = el.dataset.embedAppElevate === 'true';
     out.push({
       url,
       height: Number.isFinite(height) ? height : 360,
@@ -407,6 +571,7 @@ function readSlotEls(): SlotEl[] {
       explicitlyHidden,
       trackLatest,
       suspended,
+      elevate,
     });
   });
   return out;
@@ -459,6 +624,25 @@ export function AppFrameLayer() {
   // fresh every tick. L1: array per url (see ShadowEntry) so multiple
   // transcript duplicates of one url each keep their own chip.
   const shadowsRef = useRef<Map<string, ShadowEntry[]>>(new Map());
+  // Scroll-lag fix: the hoist <span> DOM elements themselves, keyed by url —
+  // populated/cleared by the render's own ref callback below. The scroll/
+  // resize sync path (this component's useEffect) writes `style.transform`/
+  // `style.clipPath`/`style.visibility`/`style.pointerEvents` on these
+  // DIRECTLY, bypassing React's render/commit cycle entirely, which is what
+  // lets a reposition land in the SAME frame a native scroll paints instead
+  // of waiting for the next React-driven render. slotsRef stays the single
+  // source of truth either way — the sync path updates it too, so a
+  // subsequent React re-render (from tick(), a reload, etc.) never
+  // reads/renders a stale rect.
+  const hoistElsRef = useRef<Map<string, HTMLSpanElement>>(new Map());
+  // Fade-during-scroll: consecutive-scroll-event streak (see
+  // nextScrollStreak's doc comment), whether the fade is currently engaged,
+  // and the pending settle timer id — all mutable, non-reactive, exactly
+  // like the refs above (this is imperative DOM-sync state, not render
+  // state).
+  const scrollStreakRef = useRef<ScrollStreak>({ count: 0, lastT: 0 });
+  const scrollFadedRef = useRef(false);
+  const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setActive, open, artifacts } = useArtifactPanel();
   // Mobile-sheet fix: see PANEL_SHEET_HOIST_Z_INDEX's doc comment.
   const narrow = useIsNarrow();
@@ -708,6 +892,9 @@ export function AppFrameLayer() {
             lastMtime: null,
             pendingMtime: null,
             fetchGen: 0,
+            hostEl: host.el,
+            explicitlyHidden: host.explicitlyHidden,
+            elevate: host.elevate,
           };
           slotsRef.current.set(url, slot);
           fetchHtml(url);
@@ -734,6 +921,13 @@ export function AppFrameLayer() {
           // render needed for this alone, it only feeds shouldReloadOnFrame.
           slot.context = host.context;
           slot.trackLatest = host.trackLatest;
+          // Scroll-lag fix: keep the sync path's cached host element/hidden
+          // flag current every tick (~60fps while any slot exists — see FIX
+          // 3's gate), same "cheap, no dedicated change-detection" treatment
+          // as context/trackLatest just above.
+          slot.hostEl = host.el;
+          slot.explicitlyHidden = host.explicitlyHidden;
+          slot.elevate = host.elevate;
         }
       }
 
@@ -781,6 +975,138 @@ export function AppFrameLayer() {
       // next time the DOM changes (a new placeholder mounts, or a hidden
       // pane's ancestor flips back to visible).
     }
+
+    // Scroll-lag fix: synchronous fast path, invoked directly by the
+    // scroll/resize listeners below (NOT scheduled via rAF — a capture-phase
+    // scroll/resize listener already runs before the browser paints the
+    // frame that triggered it, so calling this straight from the listener is
+    // what actually closes the 1-frame gap; wrapping it in another rAF would
+    // reintroduce the exact lag this exists to remove). Bounded by however
+    // many slots currently exist (LIVE_APP_CAP caps panel-context hosts at
+    // 6; transcript-context concurrent embeds are realistically just as few
+    // — see this file's module doc comment), so a getBoundingClientRect() +
+    // a few style writes per slot on every scroll event is cheap.
+    //
+    // Deliberately narrower than tick(): only repositions slots whose cached
+    // host element (slot.hostEl, kept current by tick() every frame) is
+    // still attached to the document. tick() owns discovery (does a url's
+    // placeholder exist at all right now?), multi-placeholder arbitration
+    // (which placeholder wins?), and eviction (GRACE_MS bookkeeping,
+    // slot.lastSeen) exclusively — this function never adds/removes a slot
+    // and never touches slot.lastSeen, so it can't race tick()'s own grace-
+    // window/eviction timing. A detached hostEl (churn remount replaced the
+    // element, or the placeholder was genuinely torn down) is left entirely
+    // alone here — tick()'s own querySelectorAll-driven pass on the very
+    // next frame is the sole source of truth for "is this url still
+    // present," exactly as before this fix.
+    function syncPositions() {
+      for (const [url, slot] of slotsRef.current) {
+        const hostEl = slot.hostEl;
+        if (!hostEl || !hostEl.isConnected) continue;
+        const rect = hostEl.getBoundingClientRect();
+        const ancestorEl = hostEl.closest('.thread-viewport');
+        const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
+        const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
+        const paneHidden = geometryHidden || slot.explicitlyHidden;
+        slot.rect = rect;
+        slot.paneHidden = paneHidden;
+        slot.clip = clip;
+
+        const el = hoistElsRef.current.get(url);
+        if (!el) continue;
+        const hidden = paneHidden;
+        el.style.transform = hoistTransform(rect);
+        el.style.width = `${rect.width}px`;
+        el.style.height = `${rect.height}px`;
+        el.style.visibility = hidden ? 'hidden' : 'visible';
+        el.style.pointerEvents = hidden ? 'none' : 'auto';
+        const clipPath = hoistClipPath(rect, paneHidden, clip);
+        if (clipPath) el.style.clipPath = clipPath;
+        else el.style.removeProperty('clip-path');
+      }
+    }
+
+    // Fade-during-scroll: toggles opacity/pointerEvents on every currently-
+    // visible hoist span and injects/removes a `.embed-media-skeleton`
+    // shimmer DIRECTLY into each slot's placeholder element (slot.hostEl) —
+    // never into EmbeddedApp.tsx's own JSX (this file doesn't own that
+    // component's markup; out of scope for this fix). The skeleton lands in
+    // NORMAL DOCUMENT FLOW inside the placeholder (`.embed-media-frame` is
+    // already `position: relative` + `overflow: hidden` in styles.css, and
+    // currently renders no children), so it scrolls with the transcript with
+    // zero JS involvement and cannot lag by construction — the whole point
+    // of fading the (JS-repositioned) iframe out during motion instead of
+    // just relying on syncPositions to keep chasing it. Skipped entirely for
+    // a pane-hidden slot: nothing visible to fade, nothing to gain, and no
+    // point reserving a skeleton box no one can see.
+    function applyFadeState(faded: boolean) {
+      for (const [url, slot] of slotsRef.current) {
+        if (!slot.rect || slot.paneHidden) continue;
+        const el = hoistElsRef.current.get(url);
+        if (el) {
+          el.style.opacity = faded ? '0' : '';
+          el.style.pointerEvents = faded ? 'none' : 'auto';
+        }
+        const hostEl = slot.hostEl;
+        if (!hostEl || !hostEl.isConnected) continue;
+        const existing = hostEl.querySelector<HTMLElement>('[data-scroll-fade-skeleton]');
+        if (faded && !existing) {
+          const skeleton = document.createElement('span');
+          skeleton.className = 'embed-media-skeleton';
+          skeleton.setAttribute('aria-hidden', 'true');
+          skeleton.setAttribute('data-scroll-fade-skeleton', 'true');
+          hostEl.appendChild(skeleton);
+        } else if (!faded && existing) {
+          existing.remove();
+        }
+      }
+    }
+
+    // Wraps syncPositions with the fade-engagement streak/settle bookkeeping.
+    // syncPositions itself ALWAYS runs first, on every scroll event,
+    // regardless of fade state — the sync-follow fix above still matters for
+    // slow scrolls (never crosses SCROLL_FADE_MIN_STREAK) and for the
+    // final settle snap (see below), so position tracking never stops just
+    // because the fade is engaged.
+    function handleScroll() {
+      syncPositions();
+      const now = performance.now();
+      scrollStreakRef.current = nextScrollStreak(scrollStreakRef.current, now, SCROLL_SETTLE_MS);
+      // Re-applied on EVERY qualifying scroll event, not just the rising
+      // edge into "faded" — applyFadeState is idempotent (skips a slot
+      // that's already faded/already un-hidden), and a slot that's still
+      // paneHidden when the streak first crosses the threshold (scrolled
+      // out of view at the start of a long flick) only becomes eligible
+      // partway through the SAME gesture once it scrolls into view; gating
+      // on the rising edge alone would silently skip fading it for the rest
+      // of that gesture. scrollFadedRef still exists purely to know whether
+      // a reveal is owed on settle.
+      if (shouldEngageScrollFade(scrollStreakRef.current.count, SCROLL_FADE_MIN_STREAK)) {
+        scrollFadedRef.current = true;
+        applyFadeState(true);
+      }
+      if (scrollSettleTimerRef.current !== null) clearTimeout(scrollSettleTimerRef.current);
+      scrollSettleTimerRef.current = setTimeout(() => {
+        scrollSettleTimerRef.current = null;
+        scrollStreakRef.current = { count: 0, lastT: 0 };
+        if (scrollFadedRef.current) {
+          scrollFadedRef.current = false;
+          // Snap to the truly-settled position before revealing — the scroll
+          // that just ended may have landed after this timer's own last
+          // syncPositions() call (compositor-driven smooth-scroll deceleration
+          // can still be settling in the final ms).
+          syncPositions();
+          applyFadeState(false);
+        }
+      }, SCROLL_SETTLE_MS);
+    }
+    // passive (never calls preventDefault) + capture phase: scroll events
+    // don't bubble, but DO propagate during the capture phase, so one
+    // listener on window catches every nested scroll container (the
+    // transcript's `.thread-viewport`, a panel body, any future nested pane)
+    // instead of needing one listener per container.
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
+    window.addEventListener('resize', syncPositions, { passive: true });
 
     // FIX 3 (gated loop): arm/disarm via a MutationObserver on document.body
     // rather than polling unconditionally at ~60fps forever. The callback is
@@ -866,7 +1192,17 @@ export function AppFrameLayer() {
       window.removeEventListener('cockpit:app-reload', onAppReload);
       window.removeEventListener('cockpit:media-app-changed', onMediaAppChanged);
       window.removeEventListener('message', onMessage);
+      window.removeEventListener('scroll', handleScroll, { capture: true });
+      window.removeEventListener('resize', syncPositions);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      // Fade-during-scroll: a settle timer can still be pending at unmount
+      // (session switch mid-scroll, etc.) — clear it so a stale callback
+      // never fires after teardown. The placeholder itself is React/
+      // EmbeddedApp-owned and outlives this portal layer, so any injected
+      // skeleton left in it (mid-fade unmount) would otherwise leak into the
+      // transcript permanently; strip every marker this layer ever added.
+      if (scrollSettleTimerRef.current !== null) clearTimeout(scrollSettleTimerRef.current);
+      for (const el of document.querySelectorAll('[data-scroll-fade-skeleton]')) el.remove();
     };
   }, []);
 
@@ -904,10 +1240,7 @@ export function AppFrameLayer() {
         // (pre-existing grace-hide behavior) OR it's found but scrolled
         // fully outside its pane (paneHidden) — either way, no eviction.
         const hidden = !r || slot.paneHidden;
-        const clipPath =
-          r && !slot.paneHidden && slot.clip
-            ? `inset(${slot.clip.top}px ${slot.clip.right}px ${slot.clip.bottom}px ${slot.clip.left}px)`
-            : undefined;
+        const clipPath = hoistClipPath(r, slot.paneHidden, slot.clip);
         // B audit follow-up (CP3-B, FIX 1): see clampChromeInsets' doc
         // comment — clamps the corner reload button and the crashed strip
         // into the visible slice of a partially-clipped placeholder.
@@ -919,18 +1252,30 @@ export function AppFrameLayer() {
         return (
           <span
             key={url}
+            ref={(el) => {
+              if (el) hoistElsRef.current.set(url, el);
+              else hoistElsRef.current.delete(url);
+            }}
             className="embed-app-hoist"
             data-embed-app-context={slot.context}
             style={{
               position: 'fixed',
-              top: r ? r.top : -99999,
-              left: r ? r.left : -99999,
+              // Scroll-lag fix: fixed at 0/0, set once — every reposition
+              // (this render AND the scroll/resize sync path above) moves
+              // the box purely via `transform`, a compositor-only property.
+              // See hoistTransform's doc comment for why this is pixel-
+              // identical to the old top:r.top/left:r.left.
+              top: 0,
+              left: 0,
+              transform: hoistTransform(r),
               width: r ? r.width : 1,
               height: r ? r.height : 1,
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,
-              zIndex: slot.context === 'panel' && narrow ? PANEL_SHEET_HOIST_Z_INDEX : undefined,
+              zIndex: shouldElevateHoist(slot.context, narrow, slot.elevate)
+                ? PANEL_SHEET_HOIST_Z_INDEX
+                : undefined,
             }}
           >
             {slot.crashed ? (
