@@ -1,19 +1,36 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement, useState } from 'react';
+
+// D1: html-to-image is mocked so these tests never touch a real canvas/DOM
+// rasterizer — jsdom has no rendering pipeline for toPng to walk. Each test
+// controls the mock's resolution/rejection directly via the imported `toPng`
+// reference below (same "import the mocked fn back" idiom vitest's own docs
+// use for factory mocks).
+vi.mock('html-to-image', () => ({ toPng: vi.fn() }));
+import { toPng } from 'html-to-image';
 import {
   CC_BRIDGE_READY_TYPE,
   CC_PROPS_SET_TYPE,
   CC_PROPS_RESET_TYPE,
+  CC_CAPTURE_REQUEST_TYPE,
+  CC_CAPTURE_RESULT_TYPE,
   isCcPropsSetShape,
   isCcPropsResetShape,
+  isCcCaptureRequestShape,
   isTrustedCcBridgeParent,
   parseCcInboundMessage,
+  captureCcBridgeSnapshot,
   withCcBridge,
 } from './ccBridgeRuntime';
 
-afterEach(cleanup);
+const mockToPng = vi.mocked(toPng);
+
+afterEach(() => {
+  cleanup();
+  mockToPng.mockReset();
+});
 
 describe('isCcPropsSetShape', () => {
   it('accepts the exact shape', () => {
@@ -45,6 +62,26 @@ describe('isCcPropsResetShape', () => {
   it('rejects extra keys or a wrong type', () => {
     expect(isCcPropsResetShape({ type: CC_PROPS_RESET_TYPE, extra: 1 })).toBe(false);
     expect(isCcPropsResetShape({ type: 'nope' })).toBe(false);
+  });
+});
+
+describe('isCcCaptureRequestShape', () => {
+  it('accepts the exact shape', () => {
+    expect(isCcCaptureRequestShape({ type: CC_CAPTURE_REQUEST_TYPE, requestId: 'r1' })).toBe(true);
+  });
+
+  it('rejects an empty or non-string requestId', () => {
+    expect(isCcCaptureRequestShape({ type: CC_CAPTURE_REQUEST_TYPE, requestId: '' })).toBe(false);
+    expect(isCcCaptureRequestShape({ type: CC_CAPTURE_REQUEST_TYPE, requestId: 1 })).toBe(false);
+    expect(isCcCaptureRequestShape({ type: CC_CAPTURE_REQUEST_TYPE })).toBe(false);
+  });
+
+  it('rejects extra keys or a wrong type', () => {
+    expect(isCcCaptureRequestShape({ type: CC_CAPTURE_REQUEST_TYPE, requestId: 'r1', extra: 1 })).toBe(
+      false,
+    );
+    expect(isCcCaptureRequestShape({ type: 'nope', requestId: 'r1' })).toBe(false);
+    expect(isCcCaptureRequestShape(null)).toBe(false);
   });
 });
 
@@ -85,6 +122,57 @@ describe('parseCcInboundMessage', () => {
 
   it('rejects a malformed / unrecognized shape from a trusted source', () => {
     expect(parseCcInboundMessage(parent, parent, { type: 'unknown-message' })).toBeNull();
+  });
+
+  it('parses a trusted capture-request message', () => {
+    expect(
+      parseCcInboundMessage(parent, parent, { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'r1' }),
+    ).toEqual({ kind: 'capture', requestId: 'r1' });
+  });
+
+  it('rejects a capture-request from a spoofed source', () => {
+    expect(
+      parseCcInboundMessage({}, parent, { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'r1' }),
+    ).toBeNull();
+  });
+});
+
+describe('captureCcBridgeSnapshot', () => {
+  it('resolves toPng and posts a cc-capture-result with the dataUrl, tagged with requestId', async () => {
+    mockToPng.mockResolvedValue('data:image/png;base64,AAAA');
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      await captureCcBridgeSnapshot('req-1');
+      expect(mockToPng).toHaveBeenCalledWith(document.body, { skipFonts: true });
+      expect(posted).toContainEqual({
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'req-1',
+        ok: true,
+        dataUrl: 'data:image/png;base64,AAAA',
+      });
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
+  });
+
+  it('posts ok:false with an error message when toPng rejects', async () => {
+    mockToPng.mockRejectedValue(new Error('tainted canvas'));
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      await captureCcBridgeSnapshot('req-2');
+      expect(posted).toContainEqual({
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'req-2',
+        ok: false,
+        error: 'tainted canvas',
+      });
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
   });
 });
 
@@ -170,6 +258,50 @@ describe('withCcBridge', () => {
     // Remounted: label reverts to the original exampleProps, clicks reset to 0.
     expect(screen.getByTestId('label').textContent).toBe('hi');
     expect(screen.getByTestId('clicks').textContent).toBe('0');
+  });
+
+  it('a trusted cc-capture-request triggers toPng and posts cc-capture-result back to window.parent', async () => {
+    mockToPng.mockResolvedValue('data:image/png;base64,BBBB');
+    const Bridged = withCcBridge(Fixture, { label: 'hi' }, 1);
+    render(createElement(Bridged));
+
+    const posted: unknown[] = [];
+    const originalPostMessage = window.postMessage;
+    window.postMessage = ((data: unknown) => posted.push(data)) as typeof window.postMessage;
+    try {
+      await act(async () => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'req-9' },
+            source: window,
+          }),
+        );
+        // captureCcBridgeSnapshot is async (awaits toPng) — flush microtasks.
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(posted).toContainEqual({
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'req-9',
+        ok: true,
+        dataUrl: 'data:image/png;base64,BBBB',
+      });
+    } finally {
+      window.postMessage = originalPostMessage;
+    }
+  });
+
+  it('ignores a cc-capture-request from a spoofed source — toPng is never invoked', async () => {
+    const Bridged = withCcBridge(Fixture, { label: 'hi' }, 1);
+    render(createElement(Bridged));
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'req-x' } }),
+      );
+      await Promise.resolve();
+    });
+    expect(mockToPng).not.toHaveBeenCalled();
   });
 
   it('ignores a message with no matching source (spoofed / same-shape-different-window)', () => {

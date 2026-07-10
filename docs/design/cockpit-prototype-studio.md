@@ -14,7 +14,7 @@
 | # | Concern | Target | Measured |
 |---|---|---|---|
 | P1 | Oversized device preset on small screens | dynamic gating (mode hidden when screen < preset) | by construction |
-| P2 | In-sandbox capture on large components | async + progress + 10s timeout → error chip | TBD Phase D |
+| P2 | In-sandbox capture on large components | async + progress + 10s timeout → error chip | Phase D: implemented as designed; +13.5KB raw / +5.0KB gzip bundle growth (well under the 80KB budget); live-probe round-trip (capture → annotate → save → fetch) confirmed in a real browser |
 
 ## Simplicity findings
 | # | Temptation | What we do instead |

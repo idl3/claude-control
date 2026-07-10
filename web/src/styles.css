@@ -7752,6 +7752,7 @@ select.config-input {
   background: rgba(0, 0, 0, 0.88);
 }
 .studio-panel {
+  position: relative; /* D1/D2/D3: anchors .studio-capture-overlay's inset:0 */
   width: 100%;
   height: 100%;
   display: flex;
@@ -7989,5 +7990,185 @@ select.config-input {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+}
+
+/* --- D1/D2/D3: Screenshot button + capture/annotate/save flow. The overlay
+   stays WITHIN .studio-panel (itself already inside .studio-overlay's
+   z-index:300 stack) — no new z-index tier needed, `position: absolute;
+   inset: 0` on .studio-capture-overlay anchors against .studio-panel's now
+   `position: relative` regardless of how deep in the toolbar this renders. */
+.studio-capture-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.studio-capture-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.studio-capture-btn:hover {
+  border-color: var(--accent);
+}
+.studio-capture-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.studio-capture-error-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid #d33;
+  color: #d33;
+}
+.studio-capture-error-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.studio-capture-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  padding: 24px;
+}
+/* The studio-context hoisted live-app iframe is a position:fixed portal
+   rendered straight to document.body (AppFrameLayer.tsx), not a descendant
+   of .studio-panel — so its inline z-index: 310 (STUDIO_HOIST_Z_INDEX,
+   deliberately above .studio-overlay's 300 for normal Studio use) is
+   compared at the SAME stacking context as .studio-capture-overlay above
+   and wins, silently intercepting every click meant for the annotation
+   canvas / Save / Cancel. body.studio-capture-reviewing is toggled by
+   StudioCapture (StudioModal.tsx) only while stage.kind is
+   review/saving/saved, so this only neutralizes the hoisted iframe during
+   that sub-state — normal Studio use is untouched.
+
+   Studio Phase D CP3 audit, FIX 3: scoped to [data-embed-app-context='studio']
+   (set by AppFrameLayer.tsx on every hoist span, per its own `slot.context`)
+   — NOT every .embed-app-hoist. Only a studio-context hoist ever reaches
+   STUDIO_HOIST_Z_INDEX (310), so panel/transcript-hosted hoists were never
+   the actual collision this rule exists for; the unscoped selector was a
+   latent landmine (a future z-index bump on a non-studio hoist would have
+   been silently neutralized body-wide during Studio capture review) rather
+   than a live bug — no behavior change today. */
+body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] {
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+.studio-capture-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 100%;
+  max-height: 100%;
+}
+.studio-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.studio-capture-actions button {
+  padding: 6px 16px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.studio-capture-actions button:hover {
+  border-color: var(--accent);
+}
+.studio-capture-saving,
+.studio-capture-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+}
+.studio-capture-tag {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* --- D2: canvas annotation overlay (StudioAnnotate.tsx) */
+.studio-annotate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+.studio-annotate-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.studio-annotate-tool-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  text-transform: capitalize;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-annotate-tool-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.studio-annotate-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+.studio-annotate-undo {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-annotate-undo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-annotate-canvas {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  touch-action: none; /* pointer events drive drawing; no browser scroll/zoom gesture should intercept them */
 }
 

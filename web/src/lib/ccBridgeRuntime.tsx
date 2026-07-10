@@ -24,17 +24,34 @@
 // reference equality, the same discriminator appBeacon.ts/appBridge.ts use
 // in the other direction.
 //
-// Reserved, not yet handled (future phases): cc-capture-request,
-// cc-dom-outline-request, cc-console-entry.
+// Reserved, not yet handled (future phases): cc-dom-outline-request,
+// cc-console-entry.
+//
+// D1: cc-capture-request/cc-capture-result — same source-identity model as
+// props-set/props-reset above (event.source must reference-equal
+// window.parent), but a one-shot request/response, not a state sync: on a
+// trusted, well-shaped request, this module runs html-to-image's toPng over
+// document.body and posts the resulting dataUrl (or an error string on
+// failure — toPng CAN reject, e.g. a tainted/cross-origin image inside the
+// artifact) back to window.parent, tagged with the SAME requestId so a late
+// response can never be mistaken for a different, subsequent request's
+// answer (see appBridge.ts's sendCcCaptureRequest doc comment). html-to-image
+// is imported statically (not dynamically) — Phase D's Halt-N constraint
+// requires the producer bundle stay a single static-import chunk, so the
+// import cost lands on every artifact build, not just capture-invoking ones.
 
 import { useEffect, useState, type ComponentType } from 'react';
+import { toPng } from 'html-to-image';
 
 export const CC_BRIDGE_READY_TYPE = 'cc-bridge-ready';
 export const CC_PROPS_SET_TYPE = 'cc-props-set';
 export const CC_PROPS_RESET_TYPE = 'cc-props-reset';
+export const CC_CAPTURE_REQUEST_TYPE = 'cc-capture-request';
+export const CC_CAPTURE_RESULT_TYPE = 'cc-capture-result';
 
 export type CcPropsSetMessage = { type: typeof CC_PROPS_SET_TYPE; props: Record<string, unknown> };
 export type CcPropsResetMessage = { type: typeof CC_PROPS_RESET_TYPE };
+export type CcCaptureRequestMessage = { type: typeof CC_CAPTURE_REQUEST_TYPE; requestId: string };
 
 /**
  * Exact-shape check for an inbound `cc-props-set` message — mirrors
@@ -59,6 +76,16 @@ export function isCcPropsResetShape(data: unknown): data is CcPropsResetMessage 
   return keys.length === 1 && keys[0] === 'type' && rec.type === CC_PROPS_RESET_TYPE;
 }
 
+/** Exact-shape check for an inbound `cc-capture-request` message — `requestId` must be a non-empty string, no other keys allowed. */
+export function isCcCaptureRequestShape(data: unknown): data is CcCaptureRequestMessage {
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  if (keys.some((k) => k !== 'type' && k !== 'requestId')) return false;
+  if (rec.type !== CC_CAPTURE_REQUEST_TYPE) return false;
+  return typeof rec.requestId === 'string' && rec.requestId.length > 0;
+}
+
 /**
  * Source-identity check — the iframe's own side of the boundary: the only
  * trusted sender of props-set/props-reset is window.parent.
@@ -67,7 +94,10 @@ export function isTrustedCcBridgeParent(eventSource: unknown, parentWindow: unkn
   return eventSource != null && eventSource === parentWindow;
 }
 
-export type CcBridgeInboundMessage = { kind: 'set'; props: Record<string, unknown> } | { kind: 'reset' };
+export type CcBridgeInboundMessage =
+  | { kind: 'set'; props: Record<string, unknown> }
+  | { kind: 'reset' }
+  | { kind: 'capture'; requestId: string };
 
 /**
  * Combined check the bridge's own `message` listener runs against every
@@ -83,7 +113,38 @@ export function parseCcInboundMessage(
   if (!isTrustedCcBridgeParent(eventSource, parentWindow)) return null;
   if (isCcPropsSetShape(data)) return { kind: 'set', props: data.props };
   if (isCcPropsResetShape(data)) return { kind: 'reset' };
+  if (isCcCaptureRequestShape(data)) return { kind: 'capture', requestId: data.requestId };
   return null;
+}
+
+/**
+ * Runs html-to-image's toPng over `document.body` (the artifact's full
+ * rendered root — simplest reliable capture target, no dependency on any
+ * app-specific root element id) and posts the result back to window.parent
+ * as `cc-capture-result`, tagged with the same requestId the request
+ * carried. `skipFonts: true` avoids toPng's most common failure mode
+ * (embedding @font-face rules from a cross-origin stylesheet throws a
+ * SecurityError) at the cost of web-font glyphs not rendering pixel-perfect
+ * in the capture — an acceptable trade for a screenshot tool, not a
+ * pixel-perfect export. This is an OUTBOUND send once triggered by a
+ * trusted, validated request, so (like sendCcPropsSet/sendCcPropsReset in
+ * appBridge.ts) it applies no further validation of its own.
+ */
+export async function captureCcBridgeSnapshot(requestId: string): Promise<void> {
+  try {
+    const dataUrl = await toPng(document.body, { skipFonts: true });
+    window.parent.postMessage({ type: CC_CAPTURE_RESULT_TYPE, requestId, ok: true, dataUrl }, '*');
+  } catch (err) {
+    window.parent.postMessage(
+      {
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId,
+        ok: false,
+        error: err instanceof Error ? err.message : 'capture failed',
+      },
+      '*',
+    );
+  }
 }
 
 /**
@@ -115,9 +176,11 @@ export function withCcBridge<P extends Record<string, unknown>>(
         if (!msg) return;
         if (msg.kind === 'set') {
           setOverrides((prev) => ({ ...prev, ...msg.props }));
-        } else {
+        } else if (msg.kind === 'reset') {
           setOverrides({});
           setResetKey((k) => k + 1);
+        } else {
+          void captureCcBridgeSnapshot(msg.requestId);
         }
       }
       window.addEventListener('message', onMessage);

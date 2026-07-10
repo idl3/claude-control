@@ -3,11 +3,16 @@ import {
   CC_BRIDGE_READY_TYPE,
   CC_PROPS_SET_TYPE,
   CC_PROPS_RESET_TYPE,
+  CC_CAPTURE_REQUEST_TYPE,
+  CC_CAPTURE_RESULT_TYPE,
   isCcBridgeReadyShape,
+  isCcCaptureResultShape,
   isTrustedCcBridgeSource,
   isValidCcBridgeReady,
+  isValidCcCaptureResult,
   sendCcPropsSet,
   sendCcPropsReset,
+  sendCcCaptureRequest,
 } from './appBridge';
 
 describe('isCcBridgeReadyShape', () => {
@@ -88,5 +93,99 @@ describe('sendCcPropsSet / sendCcPropsReset', () => {
     const postMessage = vi.fn();
     sendCcPropsReset({ postMessage } as unknown as Window);
     expect(postMessage).toHaveBeenCalledWith({ type: CC_PROPS_RESET_TYPE }, '*');
+  });
+});
+
+describe('isCcCaptureResultShape', () => {
+  it('accepts a well-formed success result', () => {
+    expect(
+      isCcCaptureResultShape({
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'r1',
+        ok: true,
+        dataUrl: 'data:image/png;base64,AAAA',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts a well-formed failure result', () => {
+    expect(
+      isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: 'r1', ok: false, error: 'boom' }),
+    ).toBe(true);
+  });
+
+  it('rejects a success result with an empty dataUrl, or a missing dataUrl entirely', () => {
+    expect(
+      isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: 'r1', ok: true, dataUrl: '' }),
+    ).toBe(false);
+    expect(isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: 'r1', ok: true })).toBe(
+      false,
+    );
+  });
+
+  it('rejects ok:true carrying an `error` key instead of `dataUrl` (discriminant mismatch, not coerced)', () => {
+    expect(
+      isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: 'r1', ok: true, error: 'x' }),
+    ).toBe(false);
+  });
+
+  it('rejects a missing/empty requestId, a non-boolean ok, or extra keys', () => {
+    expect(
+      isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: '', ok: true, dataUrl: 'x' }),
+    ).toBe(false);
+    expect(
+      isCcCaptureResultShape({ type: CC_CAPTURE_RESULT_TYPE, requestId: 'r1', ok: 'yes', dataUrl: 'x' }),
+    ).toBe(false);
+    expect(
+      isCcCaptureResultShape({
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'r1',
+        ok: true,
+        dataUrl: 'x',
+        extra: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a wrong type or non-object data', () => {
+    expect(isCcCaptureResultShape({ type: 'nope', requestId: 'r1', ok: true, dataUrl: 'x' })).toBe(false);
+    expect(isCcCaptureResultShape(null)).toBe(false);
+  });
+});
+
+describe('isValidCcCaptureResult (combined check)', () => {
+  const win = {};
+
+  it('accepts a matching source + exact shape', () => {
+    expect(
+      isValidCcCaptureResult(win, win, {
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'r1',
+        ok: true,
+        dataUrl: 'x',
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a spoofed source even with a perfectly valid shape', () => {
+    expect(
+      isValidCcCaptureResult({}, win, {
+        type: CC_CAPTURE_RESULT_TYPE,
+        requestId: 'r1',
+        ok: true,
+        dataUrl: 'x',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('sendCcCaptureRequest', () => {
+  it('posts a cc-capture-request message with the given requestId to the target window', () => {
+    const postMessage = vi.fn();
+    sendCcCaptureRequest({ postMessage } as unknown as Window, 'req-1');
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'req-1' },
+      '*',
+    );
   });
 });
