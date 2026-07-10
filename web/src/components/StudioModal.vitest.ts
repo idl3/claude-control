@@ -73,7 +73,11 @@ function openStudio(url = 'apps/counter.html'): void {
 }
 
 beforeEach(() => {
-  mockViewportWidth(1400); // wide desktop by default
+  // Studio Phase E polish, F2: STUDIO_BODY_CHROME_WIDTH grew from 50 to 390
+  // (now counts the 320px side panel + 20px `.studio-body` gap, not just
+  // padding/border), so Desktop's real enable threshold is 1280 + 390 =
+  // 1670 — 1800 clears all three device thresholds comfortably.
+  mockViewportWidth(1800); // wide desktop by default
   window.sessionStorage.clear();
 });
 
@@ -149,15 +153,16 @@ describe('StudioModal — Studio Phase B CP3 audit, FIX 4: rapid app swap is ign
 });
 
 describe('StudioModal — device-mode gating', () => {
-  // Studio Phase B CP3 audit, FIX 3: gating now requires the raw device
-  // width PLUS `.studio-body`'s own chrome width (STUDIO_BODY_CHROME_WIDTH
-  // = 50 in StudioModal.tsx), so Mobile's real threshold is 390 + 50 = 440,
-  // not the raw 390. 500px sits above that threshold (Mobile enabled) but
-  // below iPad's 768 + 50 = 818 (iPad/Desktop stay disabled) — the same
-  // "only Mobile fits" shape the old 390px case asserted, just at the
-  // width that's actually enabled post-fix.
-  it('at 500px, only Mobile is enabled', () => {
-    mockViewportWidth(500);
+  // Studio Phase B CP3 audit, FIX 3 (widened by Studio Phase E polish, F2):
+  // gating now requires the raw device width PLUS `.studio-body`'s own
+  // chrome width (STUDIO_BODY_CHROME_WIDTH = 390 in StudioModal.tsx — F2
+  // folded in the 320px side panel + 20px gap, not just padding/border), so
+  // Mobile's real threshold is 390 + 390 = 780. 800px sits above that
+  // threshold (Mobile enabled) but below iPad's 768 + 390 = 1158
+  // (iPad/Desktop stay disabled) — the same "only Mobile fits" shape the
+  // old case asserted, just at the width that's actually enabled post-fix.
+  it('at 800px, only Mobile is enabled', () => {
+    mockViewportWidth(800);
     render(createElement(StudioModal));
     openStudio();
 
@@ -184,8 +189,8 @@ describe('StudioModal — device-mode gating', () => {
     expect(mobile.disabled).toBe(true);
   });
 
-  it('at exactly the chrome-aware threshold (440px = 390 + 50), Mobile is enabled', () => {
-    mockViewportWidth(440);
+  it('at exactly the chrome-aware threshold (780px = 390 + 390), Mobile is enabled', () => {
+    mockViewportWidth(780);
     render(createElement(StudioModal));
     openStudio();
 
@@ -193,8 +198,8 @@ describe('StudioModal — device-mode gating', () => {
     expect(mobile.disabled).toBe(false);
   });
 
-  it('at 1400px, all three modes are enabled', () => {
-    render(createElement(StudioModal)); // beforeEach already mocks 1400px
+  it('at 1800px, all three modes are enabled', () => {
+    render(createElement(StudioModal)); // beforeEach already mocks 1800px
     openStudio();
 
     const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
@@ -206,7 +211,7 @@ describe('StudioModal — device-mode gating', () => {
   });
 
   it('disabled modes carry a "screen too small" tooltip', () => {
-    mockViewportWidth(500); // FIX 3: see "at 500px, only Mobile is enabled" above
+    mockViewportWidth(800); // FIX 3: see "at 800px, only Mobile is enabled" above
     render(createElement(StudioModal));
     openStudio();
     expect(screen.getByRole('button', { name: /iPad 768/ }).getAttribute('title')).toBe(
@@ -246,7 +251,7 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     openStudio('apps/device-size.html');
 
     const frame = document.querySelector('.studio-frame') as HTMLElement;
-    // Desktop viewport (beforeEach mocks 1400px) defaults to the largest
+    // Desktop viewport (beforeEach mocks 1800px) defaults to the largest
     // enabled mode, Desktop, per StudioPanel's initial-mode logic.
     expect(frame.style.width).toBe('1280px');
     expect(frame.style.height).toBe('800px');
@@ -595,8 +600,17 @@ describe('StudioModal — E1/E2: side-panel tab strip (Props / Inspector / Conso
     openStudio('apps/counter.html');
     await screen.findByLabelText('label');
 
+    // Studio Phase E polish, F11: Console now carries a "soon" pill
+    // (`studio-side-tab-soon`, aria-hidden) after its visible label, so a raw
+    // textContent equality check against 'Console' alone would break on that
+    // markup addition — the accessible-name check via `getByRole(..., {
+    // name })` below is the real claim under test (it excludes aria-hidden
+    // descendants per the accessible-name algorithm, so the pill can't
+    // change Console's a11y identity), same as Props/Inspector already use.
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Props', 'Inspector', 'Console']);
+    expect(tabs).toHaveLength(3);
+    expect(tabs[0].textContent).toBe('Props');
+    expect(tabs[1].textContent).toBe('Inspector');
     expect(screen.getByRole('tab', { name: 'Props' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab', { name: 'Inspector' }).getAttribute('aria-selected')).toBe('false');
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useModalTransition } from '../lib/anim';
+import { useModalTransition, prefersReducedMotion } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
@@ -189,6 +189,10 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
   // Studio Phase C CP3 audit, FIX 2: remount counter for the raw-JSON
   // textareas — see StudioPropField's `resetGeneration` doc comment.
   const [resetGeneration, setResetGeneration] = useState(0);
+  // Studio Phase E polish, F15: "Copied" affordance for the degrade-path
+  // rebuild command. Declared up here with the other hooks (not inside the
+  // `manifest === null` conditional branch below) to obey rules-of-hooks.
+  const [cmdCopied, setCmdCopied] = useState(false);
 
   // Studio Phase C CP3 audit, FIX 1: `cc-bridge-ready` (posted once by the
   // artifact's ccBridgeRuntime.tsx on ITS mount) previously had no cockpit-
@@ -301,19 +305,45 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
   };
 
   if (manifest === undefined) {
-    return <div className="studio-props-panel" aria-label="Props" />;
+    return (
+      <div className="studio-props-panel studio-props-loading" aria-label="Props">
+        <div className="thread-skeleton" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="thread-skeleton-row">
+              <span className="thread-skeleton-bar" style={{ width: '40%' }} />
+              <span className="thread-skeleton-bar" style={{ width: '85%' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (manifest === null) {
     const name = appNameFromUrl(url) ?? url;
+    const cmd = `node ~/.claude/skills/prototype-component/scripts/run.mjs \\\n  --write-app ${name} --html <built.html> --manifest <out.manifest.json>`;
     return (
       <div className="studio-props-panel studio-props-degrade" aria-label="Props">
         <p className="studio-props-degrade-msg">
           No prop manifest for this build — rebuild with a component entry to enable live prop editing.
         </p>
-        <pre className="studio-props-degrade-cmd">
-          {`node ~/.claude/skills/prototype-component/scripts/run.mjs \\\n  --write-app ${name} --html <built.html> --manifest <out.manifest.json>`}
-        </pre>
+        <pre className="studio-props-degrade-cmd">{cmd}</pre>
+        <button
+          type="button"
+          className="studio-props-degrade-copy"
+          data-copied={cmdCopied ? '' : undefined}
+          onClick={() => {
+            navigator.clipboard
+              ?.writeText(cmd)
+              .then(() => {
+                setCmdCopied(true);
+                setTimeout(() => setCmdCopied(false), 1500);
+              })
+              .catch(() => {});
+          }}
+        >
+          {cmdCopied ? 'Copied' : 'Copy command'}
+        </button>
       </div>
     );
   }
@@ -357,42 +387,79 @@ type SidePanelTab = 'props' | 'inspector';
  */
 function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
   const [tab, setTab] = useState<SidePanelTab>('props');
+
+  // Studio Phase E polish, F13: roving tabindex across the two REAL tabs
+  // (Console never receives focus via arrows — it's `disabled` and has no
+  // panel). Shared by both real tab buttons below.
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const next = tab === 'props' ? 'inspector' : 'props';
+    setTab(next);
+    requestAnimationFrame(() => document.getElementById(`studio-tab-${next}`)?.focus());
+  };
+
   return (
     <div className="studio-side-panel">
       <div className="studio-side-tabs" role="tablist">
         <button
           type="button"
           role="tab"
+          id="studio-tab-props"
           aria-selected={tab === 'props'}
+          aria-controls="studio-tabpanel-props"
+          tabIndex={tab === 'props' ? 0 : -1}
           className="studio-side-tab"
           onClick={() => setTab('props')}
+          onKeyDown={onTabKeyDown}
         >
           Props
         </button>
         <button
           type="button"
           role="tab"
+          id="studio-tab-inspector"
           aria-selected={tab === 'inspector'}
+          aria-controls="studio-tabpanel-inspector"
+          tabIndex={tab === 'inspector' ? 0 : -1}
           className="studio-side-tab"
           onClick={() => setTab('inspector')}
+          onKeyDown={onTabKeyDown}
         >
           Inspector
         </button>
         <button
           type="button"
           role="tab"
+          id="studio-tab-console"
           aria-selected={false}
+          tabIndex={-1}
           className="studio-side-tab studio-side-tab-disabled"
           disabled
           title="Console — coming soon"
         >
           Console
+          <span className="studio-side-tab-soon" aria-hidden="true">
+            soon
+          </span>
         </button>
       </div>
-      <div className="studio-side-tab-body" hidden={tab !== 'props'}>
+      <div
+        className="studio-side-tab-body"
+        role="tabpanel"
+        id="studio-tabpanel-props"
+        aria-labelledby="studio-tab-props"
+        hidden={tab !== 'props'}
+      >
         <StudioPropsPanel url={url} manifest={manifest} />
       </div>
-      <div className="studio-side-tab-body" hidden={tab !== 'inspector'}>
+      <div
+        className="studio-side-tab-body"
+        role="tabpanel"
+        id="studio-tabpanel-inspector"
+        aria-labelledby="studio-tab-inspector"
+        hidden={tab !== 'inspector'}
+      >
         <StudioInspector url={url} active={tab === 'inspector'} />
       </div>
     </div>
@@ -419,7 +486,16 @@ type DeviceModeId = (typeof DEVICE_MODES)[number]['id'];
 // device box without `.studio-body`'s own `overflow: auto` kicking in — a
 // boundary-band horizontal scrollbar. Gating on `width + chrome` instead
 // means "enabled" now genuinely implies "fits with no scrollbar."
-const STUDIO_BODY_CHROME_WIDTH = 50;
+//
+// Studio Phase E polish, F2: the original 50px only accounted for
+// `.studio-body`'s padding+border — it never counted the 320px
+// `.studio-side-panel` flex-basis or the 20px `.studio-body` gap that sits
+// between the frame and that panel, both of which also eat into the
+// available width whenever the side panel is visible (i.e. always — it's
+// permanently mounted, see StudioSidePanel's doc comment). 50 + 320 + 20 =
+// 390: "enabled" now genuinely implies the frame AND the props panel both
+// fit with no scrollbar, not just the frame alone.
+const STUDIO_BODY_CHROME_WIDTH = 390;
 
 /**
  * Same SSR-safe matchMedia idiom as `useIsNarrow` (hooks/useIsNarrow.ts),
@@ -632,15 +708,22 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
                 <button type="button" onClick={() => setStage({ kind: 'idle' })}>
                   Cancel
                 </button>
-                <button type="button" onClick={save} disabled={!annotateReady}>
+                <button type="button" className="studio-capture-save" onClick={save} disabled={!annotateReady}>
                   Save
                 </button>
               </div>
             </div>
           )}
-          {stage.kind === 'saving' && <div className="studio-capture-saving">Saving…</div>}
+          {stage.kind === 'saving' && (
+            <div className="studio-capture-saving">
+              <span className="thread-loading-spinner" aria-hidden="true" /> Saving…
+            </div>
+          )}
           {stage.kind === 'saved' && (
             <div className="studio-capture-saved">
+              <div className="studio-capture-saved-head">
+                <span aria-hidden="true">✓</span> Saved
+              </div>
               <code className="studio-capture-tag">{`<embedded-image url="${stage.path}" />`}</code>
               <div className="studio-capture-actions">
                 <button type="button" onClick={() => copyTag(stage.path)}>
@@ -705,6 +788,31 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   );
   const device = DEVICE_MODES.find((d) => d.id === mode) ?? DEVICE_MODES[0];
 
+  // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device-mode
+  // switch via the Web Animations API (transform/opacity only — never a raw
+  // width tween, which would fight the layout-driven resize) instead of a
+  // hard cut. `frameRef` never gets a `key` — this must never remount the
+  // frame, which would tear down EmbeddedApp's placeholder and force an
+  // iframe reload. `frameFirstRef` skips the animation on first mount (only
+  // a mode CHANGE should animate, not the initial render).
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const frameFirstRef = useRef(true);
+  useEffect(() => {
+    if (frameFirstRef.current) {
+      frameFirstRef.current = false;
+      return;
+    }
+    const el = frameRef.current;
+    if (!el || prefersReducedMotion() || typeof el.animate !== 'function') return;
+    el.animate(
+      [
+        { opacity: 0.4, transform: 'scale(0.985)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 220, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
+    );
+  }, [mode]);
+
   // Suppression toggle: defaults ON the first time the studio is ever opened
   // in this tab session; after that it remembers the user's last choice
   // (sessionStorage) across opens. Independent of that persisted preference,
@@ -747,6 +855,22 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     }
   };
 
+  // Studio Phase E polish, F13: roving tabindex + arrow traversal across the
+  // device bar, restricted to the currently-ENABLED set (wrapping) so arrow
+  // keys never land on a disabled ("screen too small") button.
+  const onDeviceKeyDown = (e: React.KeyboardEvent, currentId: DeviceModeId) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const enabledIds = DEVICE_MODES.map((d) => d.id).filter((id) => enabledById[id]);
+    if (enabledIds.length === 0) return;
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const at = enabledIds.indexOf(currentId);
+    const from = at === -1 ? 0 : at;
+    const nextId = enabledIds[(from + dir + enabledIds.length) % enabledIds.length];
+    setMode(nextId);
+    requestAnimationFrame(() => document.getElementById(`studio-device-${nextId}`)?.focus());
+  };
+
   return (
     <div className="studio-overlay" ref={rootRef} role="presentation">
       <div className="studio-panel" role="dialog" aria-modal="true" aria-label={`${name} studio`}>
@@ -766,17 +890,20 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
             <input type="checkbox" checked={suppressOn} onChange={toggleSuppress} />
             Disable cockpit hotkeys
           </label>
-          <div className="studio-device-bar">
+          <div className="studio-device-bar" role="group" aria-label="Device size">
             {DEVICE_MODES.map((d) => {
               const enabled = enabledById[d.id];
               return (
                 <button
                   key={d.id}
+                  id={`studio-device-${d.id}`}
                   type="button"
                   className="studio-device-btn"
                   aria-pressed={mode === d.id}
                   disabled={!enabled}
                   title={enabled ? undefined : 'screen too small'}
+                  tabIndex={mode === d.id ? 0 : -1}
+                  onKeyDown={(e) => onDeviceKeyDown(e, d.id)}
                   onClick={() => enabled && setMode(d.id)}
                 >
                   {d.label} {d.width}
@@ -796,7 +923,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               `.studio-frame` box below stays the device-sized reservation
               from Phase A (B2 sizes it per device mode) — EmbeddedApp fills
               it at 100%/100% (studio context, same treatment as panel). */}
-          <div className="studio-frame" style={{ width: device.width, height: device.height }}>
+          <div className="studio-frame" ref={frameRef} style={{ width: device.width, height: device.height }}>
             <EmbeddedApp url={url} height={device.height} context="studio" />
           </div>
           <StudioSidePanel url={url} manifest={manifest} />
