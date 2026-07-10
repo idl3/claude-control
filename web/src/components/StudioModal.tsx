@@ -1,9 +1,230 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useModalTransition } from '../lib/anim';
-import { appNameFromUrl } from '../lib/appVersion';
+import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
+import { sendCcPropsSet, sendCcPropsReset } from '../lib/appBridge';
 import { EmbeddedApp } from './EmbeddedApp';
+
+// Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
+// per the ≤150ms acceptance budget.
+const PROPS_DEBOUNCE_MS = 150;
+
+/**
+ * The live iframe hosting `url` is owned by AppFrameLayer (a hoisted portal,
+ * keyed by url — see EmbeddedApp.tsx's doc comment), not by this panel, so
+ * there is no ref to reach it directly. Every AppFrameLayer-hosted iframe
+ * carries `title={url}` (StudioModal.vitest.ts's existing tests already rely
+ * on this — `screen.findByTitle(url)`), which doubles as a stable, already-
+ * established lookup key: cheaper and more surgical than threading a new
+ * accessor prop/context through AppFrameLayer just for this one panel.
+ */
+function findAppIframeWindow(url: string): Window | null {
+  for (const el of document.querySelectorAll('iframe')) {
+    if ((el as HTMLIFrameElement).title === url) return (el as HTMLIFrameElement).contentWindow;
+  }
+  return null;
+}
+
+/** Best-effort control-kind pick for one manifest prop — falls through to
+ * raw-JSON-only for anything not in this small, high-confidence set (enums,
+ * booleans, numbers, strings). Complex tsTypes (generics, function types —
+ * see manifest.mjs's "un-inferable" degrade case) are never mis-rendered as
+ * a text input; they get the raw-JSON editor only. */
+function studioPropControlKind(prop: AppManifestProp): 'enum' | 'boolean' | 'number' | 'string' | 'raw' {
+  if (prop.enumOptions && prop.enumOptions.length > 0) return 'enum';
+  if (prop.tsType === 'boolean') return 'boolean';
+  if (prop.tsType === 'number') return 'number';
+  if (prop.tsType === 'string') return 'string';
+  return 'raw';
+}
+
+function StudioPropField({
+  prop,
+  value,
+  onChange,
+}: {
+  prop: AppManifestProp;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const kind = studioPropControlKind(prop);
+  const [rawMode, setRawMode] = useState(kind === 'raw');
+
+  // Per-prop raw-JSON override (C3 acceptance: "invalid-value testing"):
+  // deliberately does NOT require valid JSON. A parse failure forwards the
+  // exact typed text as a raw string — an intentionally-wrong-typed value
+  // (e.g. text typed into a `count: number` prop) is exactly the invalid
+  // input this escape hatch exists to inject, so the artifact's OWN error
+  // path (cc-app-error beacon -> AppFrameLayer's existing crash strip, see
+  // lib/appBeacon.ts) can be exercised — never sanitized away here.
+  const onRawChange = (text: string) => {
+    try {
+      onChange(JSON.parse(text));
+    } catch {
+      onChange(text);
+    }
+  };
+
+  let control: React.ReactNode = null;
+  if (!rawMode) {
+    if (kind === 'enum') {
+      const opts = prop.enumOptions ?? [];
+      control = (
+        <select
+          aria-label={prop.name}
+          value={typeof value === 'string' ? value : String(prop.example ?? prop.default ?? opts[0] ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {opts.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    } else if (kind === 'boolean') {
+      control = (
+        <input
+          type="checkbox"
+          aria-label={prop.name}
+          checked={Boolean(value)}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+      );
+    } else if (kind === 'number') {
+      control = (
+        <input
+          type="number"
+          aria-label={prop.name}
+          value={typeof value === 'number' ? value : ''}
+          onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+        />
+      );
+    } else if (kind === 'string') {
+      control = (
+        <input
+          type="text"
+          aria-label={prop.name}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    }
+  }
+
+  return (
+    <div className="studio-prop-field">
+      <div className="studio-prop-label">
+        <span className="studio-prop-name">
+          {prop.name}
+          {prop.required ? ' *' : ''}
+        </span>
+        <span className="studio-prop-type">{prop.tsType}</span>
+        {prop.example !== undefined && (
+          <button type="button" className="studio-prop-example-chip" onClick={() => onChange(prop.example)}>
+            example: {String(prop.example)}
+          </button>
+        )}
+      </div>
+      {control ?? (
+        <textarea
+          className="studio-prop-raw"
+          aria-label={`${prop.name} raw JSON`}
+          defaultValue={value === undefined ? '' : JSON.stringify(value)}
+          onChange={(e) => onRawChange(e.target.value)}
+        />
+      )}
+      {kind !== 'raw' && (
+        <button type="button" className="studio-prop-raw-toggle" onClick={() => setRawMode((r) => !r)}>
+          {rawMode ? 'typed' : 'raw'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Phase C, C3: the Props panel. Always mounted alongside `.studio-frame`
+ * (never a tab that unmounts the frame — that would tear down the
+ * context="studio" EmbeddedApp placeholder and force an iframe reload,
+ * defeating the whole point of live prop editing) so editing a prop can
+ * never itself trigger the reload the acceptance criterion explicitly rules
+ * out. Renders one of three states: loading (manifest fetch in flight),
+ * degrade (no manifest — old, pre-rebuild artifact), or the generated form.
+ */
+function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A newly (re)fetched manifest means a different app/version is open —
+  // drop any in-progress edits from the previous one.
+  useEffect(() => {
+    setValues({});
+  }, [manifest]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const commit = useCallback(
+    (next: Record<string, unknown>) => {
+      setValues(next);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const win = findAppIframeWindow(url);
+        if (win) sendCcPropsSet(win, next);
+      }, PROPS_DEBOUNCE_MS);
+    },
+    [url],
+  );
+
+  const reset = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setValues({});
+    const win = findAppIframeWindow(url);
+    if (win) sendCcPropsReset(win);
+  };
+
+  if (manifest === undefined) {
+    return <div className="studio-props-panel" aria-label="Props" />;
+  }
+
+  if (manifest === null) {
+    const name = appNameFromUrl(url) ?? url;
+    return (
+      <div className="studio-props-panel studio-props-degrade" aria-label="Props">
+        <p className="studio-props-degrade-msg">
+          No prop manifest for this build — rebuild with a component entry to enable live prop editing.
+        </p>
+        <pre className="studio-props-degrade-cmd">
+          {`node ~/.claude/skills/prototype-component/scripts/run.mjs \\\n  --write-app ${name} --html <built.html> --manifest <out.manifest.json>`}
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="studio-props-panel" aria-label="Props">
+      <div className="studio-props-head">
+        <span className="studio-props-title">Props</span>
+        <button type="button" className="studio-props-reset" onClick={reset}>
+          Reset to defaults
+        </button>
+      </div>
+      {manifest.props.map((prop) => (
+        <StudioPropField
+          key={prop.name}
+          prop={prop}
+          value={values[prop.name]}
+          onChange={(v) => commit({ ...values, [prop.name]: v })}
+        />
+      ))}
+    </div>
+  );
+}
 
 const SUPPRESS_STORAGE_KEY = 'cockpit:studio-suppress-hotkeys';
 
@@ -77,6 +298,19 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   };
   const name = appNameFromUrl(url) ?? url;
   const versionTag = versionTagFromUrl(url);
+
+  // C3: undefined = loading, null = no manifest (degrade path), object = form.
+  const [manifest, setManifest] = useState<AppManifest | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    setManifest(undefined);
+    fetchAppManifest(url).then((m) => {
+      if (!cancelled) setManifest(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
 
   // Studio Phase B CP3 audit, FIX 3: gate on the device width PLUS
   // `.studio-body`'s own chrome width (see STUDIO_BODY_CHROME_WIDTH), not
@@ -191,6 +425,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
           <div className="studio-frame" style={{ width: device.width, height: device.height }}>
             <EmbeddedApp url={url} height={device.height} context="studio" />
           </div>
+          <StudioPropsPanel url={url} manifest={manifest} />
         </div>
       </div>
     </div>
