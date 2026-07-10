@@ -3096,9 +3096,12 @@ async function main() {
   // Self-healing orphan guard: a past restart or a manual `npm start` can leave
   // duplicate server.js instances running for days (each polling tmux) if they
   // aren't holding the port when a new instance starts (#137 only frees the
-  // port itself). Reap any other process running this exact server.js before
-  // we do anything else. Best-effort — never blocks boot.
-  for (const pid of reapSiblingServers({ scriptPath: fileURLToPath(import.meta.url) })) {
+  // port itself). Reap any other process running this exact server.js AND
+  // bound to this instance's own port before we do anything else. Port-scoped
+  // (see lib/reap-siblings.js) — a hermetic/test instance on a different
+  // CLAUDE_CONTROL_PORT is never touched. Escape hatch: CLAUDE_CONTROL_NO_REAP=1
+  // skips this entirely. Best-effort — never blocks boot.
+  for (const pid of reapSiblingServers({ scriptPath: fileURLToPath(import.meta.url), port: CONFIG.port })) {
     console.log(`claude-control: reaped duplicate server.js instance (pid ${pid})`);
   }
 
