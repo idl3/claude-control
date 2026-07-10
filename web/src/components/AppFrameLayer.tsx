@@ -164,6 +164,30 @@ function basename(url: string): string {
  * Everything else (fetch/reload/crash/GC/scroll-sync/pane-clip) is
  * unchanged — studio is just a third arbitration tier and a second,
  * independent elevation rule layered on top of the existing machinery.
+ *
+ * Studio Phase B CP3 audit follow-ups layer on top of B1-B3, also unchanged
+ * design elsewhere:
+ * FIX 1 widens both pane-clip ancestor lookups (`.closest(...)`, in tick()
+ * and syncPositions()) from `'.thread-viewport'` alone to
+ * `'.thread-viewport, .studio-body'`. A device preset taller than the
+ * modal's usable height (iPad 1024 / Desktop 800 routinely exceed a typical
+ * laptop viewport once .studio-head/.studio-toolbar/padding are subtracted —
+ * the COMMON path, not a corner case) makes `.studio-body` itself the
+ * scrollable pane (styles.css: `overflow: auto`), but a studio host's
+ * `.closest('.thread-viewport')` never matched anything, so computePaneClip
+ * fell back to viewportRect() and the z-310 hoisted iframe rendered fully
+ * UNCLIPPED over the studio's own head/toolbar chrome (close button, device
+ * bar) once `.studio-body` was scrolled. See computePaneClip's doc comment
+ * for the ancestor-selection wording.
+ * FIX 2 stops the reload/pin/fullscreen corner trio from rendering at all
+ * for a studio-context host (see `isStudioHost` in the render below) — it
+ * used to float over the previewed app inside the device box for every
+ * context, which is redundant clutter for studio (its own chrome already has
+ * a close button and a device bar) and makes the fullscreen button a
+ * self-referential no-op there (re-opening the studio for a url the studio
+ * is already hosting).
+ * FIX 3 (StudioModal.tsx) and FIX 4 (StudioModal.tsx) are documented at
+ * their own call sites — this file is untouched by either.
  */
 
 const GRACE_MS = 250;
@@ -291,11 +315,13 @@ type ClipInsets = { top: number; right: number; bottom: number; left: number };
 
 /**
  * FIX 1 (pane clipping): intersects an app placeholder's live bounding rect
- * against its clipping scroll pane's rect (`.thread-viewport`, or the layout
- * viewport as a fallback when no such ancestor exists) and reports how the
- * hoisted iframe standing in for it should be visually clipped so it can
- * never bleed over chrome that sits outside the scroll pane (header,
- * composer, modals).
+ * against its clipping scroll pane's rect (`.thread-viewport` or
+ * `.studio-body` — see the two call sites' `.closest()` selector, matched in
+ * document order so whichever ancestor is actually nearest wins; the layout
+ * viewport is the fallback when neither exists) and reports how the hoisted
+ * iframe standing in for it should be visually clipped so it can never bleed
+ * over chrome that sits outside the scroll pane (header, composer, modals,
+ * or — Studio Phase B CP3 audit, FIX 1 — the studio's own head/toolbar).
  *  - paneHidden: true when the two rects don't overlap at all — the
  *    placeholder has scrolled fully out of its pane. The caller must hide
  *    the iframe (visibility + pointer-events) WITHOUT evicting its slot:
@@ -982,8 +1008,19 @@ export function AppFrameLayer() {
           if (arr.length > 0) nextShadows.set(url, arr);
         }
 
-        // FIX 1 (pane clipping): see computePaneClip's doc comment.
-        const ancestorEl = host.el.closest('.thread-viewport');
+        // FIX 1 (pane clipping): see computePaneClip's doc comment. Studio
+        // Phase B CP3 audit, FIX 1: '.studio-body' added as a second matched
+        // ancestor selector. A device preset taller than the modal's usable
+        // height (iPad 1024 / Desktop 800 routinely exceed a typical laptop
+        // viewport once .studio-head/.studio-toolbar/padding are subtracted
+        // — the COMMON case, not an edge case) makes '.studio-body' itself
+        // the scrollable pane (styles.css: overflow: auto). Without this,
+        // `.closest('.thread-viewport')` never matched a studio host at all,
+        // so scrolling `.studio-body` fell through to computePaneClip's
+        // viewportRect() fallback — the hoisted z-310 iframe then rendered
+        // fully UNCLIPPED over .studio-head/.studio-toolbar (the close
+        // button + device bar), stealing their hit-test area.
+        const ancestorEl = host.el.closest('.thread-viewport, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         // C2: an explicitly-hidden host (inactive panel tab) hides exactly
@@ -1150,7 +1187,11 @@ export function AppFrameLayer() {
         const hostEl = slot.hostEl;
         if (!hostEl || !hostEl.isConnected) continue;
         const rect = hostEl.getBoundingClientRect();
-        const ancestorEl = hostEl.closest('.thread-viewport');
+        // Studio Phase B CP3 audit, FIX 1: same '.studio-body' ancestor as
+        // tick() above — must stay in lockstep with that call site (see its
+        // comment for the full rationale) or the sync path and the rAF path
+        // would clip differently frame-to-frame.
+        const ancestorEl = hostEl.closest('.thread-viewport, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         const paneHidden = geometryHidden || slot.explicitlyHidden;
@@ -1395,6 +1436,17 @@ export function AppFrameLayer() {
         // button's filled-icon/aria-pressed visual only (see AppPinButton's
         // doc comment for why the click handler itself never toggles).
         const pinned = artifacts.some((a) => a.id === appArtifactId(url) && a.pinned);
+        // Studio Phase B CP3 audit, FIX 2: the reload/pin/fullscreen corner
+        // trio used to render for every context, including studio — floating
+        // over the previewed app inside the device box (visual clutter the
+        // studio's own chrome, close + device bar, doesn't have room to
+        // account for) and making the fullscreen button a self-referential
+        // no-op (it would re-open the studio for a url already hosted by the
+        // studio). Studio-context hosts render none of the three; reload
+        // stays reachable once hosting falls back to panel/transcript (see
+        // pickHost) — a crashed/failed studio-hosted slot is not stranded,
+        // just without an in-studio reload affordance this phase.
+        const isStudioHost = slot.context === 'studio';
         return (
           <span
             key={url}
@@ -1440,29 +1492,41 @@ export function AppFrameLayer() {
                 {slot.lastCrashMessage ? (
                   <code className="embed-app-crashed-detail">{slot.lastCrashMessage}</code>
                 ) : null}
-                <AppReloadButton url={url} quiet={false} />
-                <AppPinButton pinned={pinned} quiet={false} onClick={() => onPinClick(url, slot.height)} />
-                <AppFullscreenButton url={url} quiet={false} />
+                {!isStudioHost && (
+                  <>
+                    <AppReloadButton url={url} quiet={false} />
+                    <AppPinButton
+                      pinned={pinned}
+                      quiet={false}
+                      onClick={() => onPinClick(url, slot.height)}
+                    />
+                    <AppFullscreenButton url={url} quiet={false} />
+                  </>
+                )}
               </div>
             ) : slot.failed ? (
               <>
                 <code className="embed-media-rejected">app unavailable: {url}</code>
-                <AppReloadButton
-                  url={url}
-                  quiet={false}
-                  style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
-                />
-                <AppPinButton
-                  pinned={pinned}
-                  quiet={false}
-                  onClick={() => onPinClick(url, slot.height)}
-                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
-                />
-                <AppFullscreenButton
-                  url={url}
-                  quiet={false}
-                  style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
-                />
+                {!isStudioHost && (
+                  <>
+                    <AppReloadButton
+                      url={url}
+                      quiet={false}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight }}
+                    />
+                    <AppPinButton
+                      pinned={pinned}
+                      quiet={false}
+                      onClick={() => onPinClick(url, slot.height)}
+                      style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                    />
+                    <AppFullscreenButton
+                      url={url}
+                      quiet={false}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
+                    />
+                  </>
+                )}
               </>
             ) : slot.html != null ? (
               <>
@@ -1476,16 +1540,20 @@ export function AppFrameLayer() {
                   srcDoc={slot.html}
                   title={url}
                 />
-                <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
-                <AppPinButton
-                  pinned={pinned}
-                  onClick={() => onPinClick(url, slot.height)}
-                  style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
-                />
-                <AppFullscreenButton
-                  url={url}
-                  style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
-                />
+                {!isStudioHost && (
+                  <>
+                    <AppReloadButton url={url} style={{ top: chrome.cornerTop, right: chrome.cornerRight }} />
+                    <AppPinButton
+                      pinned={pinned}
+                      onClick={() => onPinClick(url, slot.height)}
+                      style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                    />
+                    <AppFullscreenButton
+                      url={url}
+                      style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
+                    />
+                  </>
+                )}
               </>
             ) : (
               <span className="embed-media-skeleton" aria-label="loading app" />

@@ -15,6 +15,18 @@ const DEVICE_MODES = [
 
 type DeviceModeId = (typeof DEVICE_MODES)[number]['id'];
 
+// Studio Phase B CP3 audit, FIX 3: `.studio-body` (styles.css) reserves
+// 24px padding on every side (48px horizontal total) around `.studio-frame`,
+// which itself carries a 1px border on every side (2px horizontal total) —
+// 50px of chrome the device box's raw preset width doesn't account for. A
+// mode used to enable the instant the window matched the RAW device width
+// (useMinWidth(DEVICE_MODES[i].width)), so a window exactly at (or a few px
+// above) a preset's width enabled that mode yet couldn't actually fit its
+// device box without `.studio-body`'s own `overflow: auto` kicking in — a
+// boundary-band horizontal scrollbar. Gating on `width + chrome` instead
+// means "enabled" now genuinely implies "fits with no scrollbar."
+const STUDIO_BODY_CHROME_WIDTH = 50;
+
 /**
  * Same SSR-safe matchMedia idiom as `useIsNarrow` (hooks/useIsNarrow.ts),
  * generalized from a fixed max-width breakpoint to an arbitrary min-width —
@@ -66,9 +78,12 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   const name = appNameFromUrl(url) ?? url;
   const versionTag = versionTagFromUrl(url);
 
-  const mobileEnabled = useMinWidth(DEVICE_MODES[0].width);
-  const ipadEnabled = useMinWidth(DEVICE_MODES[1].width);
-  const desktopEnabled = useMinWidth(DEVICE_MODES[2].width);
+  // Studio Phase B CP3 audit, FIX 3: gate on the device width PLUS
+  // `.studio-body`'s own chrome width (see STUDIO_BODY_CHROME_WIDTH), not
+  // the raw device width alone — see that constant's doc comment.
+  const mobileEnabled = useMinWidth(DEVICE_MODES[0].width + STUDIO_BODY_CHROME_WIDTH);
+  const ipadEnabled = useMinWidth(DEVICE_MODES[1].width + STUDIO_BODY_CHROME_WIDTH);
+  const desktopEnabled = useMinWidth(DEVICE_MODES[2].width + STUDIO_BODY_CHROME_WIDTH);
   const enabledById: Record<DeviceModeId, boolean> = {
     mobile: mobileEnabled,
     ipad: ipadEnabled,
@@ -196,7 +211,29 @@ export function StudioModal() {
   useEffect(() => {
     const onOpen = (e: Event) => {
       const url = (e as CustomEvent<{ url?: string }>).detail?.url;
-      if (url) setOpenUrl(url);
+      if (!url) return;
+      // Studio Phase B CP3 audit, FIX 4: `<StudioPanel key={openUrl} ...>`
+      // below keys the panel by its url, so an unconditional `setOpenUrl(url)`
+      // for a SECOND app opened while a first app's studio is already open
+      // force-unmounts the first StudioPanel outright (React tears down and
+      // remounts on a key change) — bypassing useModalTransition's exit tween
+      // entirely, a visible jump-cut instead of the studio's normal close
+      // animation. Ignoring the second open (ignore-until-closed) is the
+      // smallest guard that avoids the jump-cut: the user sees the current
+      // app's studio uninterrupted, closes it via the regular path (full exit
+      // tween), and can reopen for the new app afterward — this keeps the
+      // existing one-studio-at-a-time model (`openUrl` is a single value, not
+      // a stack) intact rather than adding a pending-url queue plus wiring a
+      // second, deferred open into StudioPanel's own onClose/exit-complete
+      // callback to auto-chain the swap, which would add real state machinery
+      // for what's a rare double-open edge case. The functional-update form
+      // (`prev`) is required, not incidental: this effect's dependency array
+      // is `[]` (the listener is attached exactly once), so a plain
+      // `openUrl` reference in this closure would always read the STALE
+      // value from the initial render (always null) — `prev` always reflects
+      // the actual current state at update time regardless of when onOpen
+      // fires relative to this effect's single mount.
+      setOpenUrl((prev) => (prev && prev !== url ? prev : url));
     };
     window.addEventListener('cockpit:studio-open', onOpen);
     return () => window.removeEventListener('cockpit:studio-open', onOpen);

@@ -121,9 +121,42 @@ describe('StudioModal — open/close', () => {
   });
 });
 
+describe('StudioModal — Studio Phase B CP3 audit, FIX 4: rapid app swap is ignored until the studio closes', () => {
+  it("opening a second app while a first app's studio is open is ignored (no jump-cut); the second open succeeds once the first is closed", () => {
+    render(createElement(StudioModal));
+    openStudio('apps/appa.html');
+    expect(screen.getByRole('dialog', { name: 'appa studio' })).toBeTruthy();
+
+    // Pre-fix: `setOpenUrl(url)` applied unconditionally on every open
+    // event. `<StudioPanel key={openUrl} ...>` is keyed by url, so this
+    // second open force-unmounted appa's StudioPanel outright (a React key
+    // change tears down and remounts) — bypassing useModalTransition's exit
+    // tween entirely, a visible jump-cut instead of the studio's normal
+    // close animation.
+    openStudio('apps/appb.html');
+    expect(screen.getByRole('dialog', { name: 'appa studio' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'appb studio' })).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Close studio'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Reopening for appb now succeeds — the guard is "ignore until closed,"
+    // not "ignore forever."
+    openStudio('apps/appb.html');
+    expect(screen.getByRole('dialog', { name: 'appb studio' })).toBeTruthy();
+  });
+});
+
 describe('StudioModal — device-mode gating', () => {
-  it('at 390px, only Mobile is enabled', () => {
-    mockViewportWidth(390);
+  // Studio Phase B CP3 audit, FIX 3: gating now requires the raw device
+  // width PLUS `.studio-body`'s own chrome width (STUDIO_BODY_CHROME_WIDTH
+  // = 50 in StudioModal.tsx), so Mobile's real threshold is 390 + 50 = 440,
+  // not the raw 390. 500px sits above that threshold (Mobile enabled) but
+  // below iPad's 768 + 50 = 818 (iPad/Desktop stay disabled) — the same
+  // "only Mobile fits" shape the old 390px case asserted, just at the
+  // width that's actually enabled post-fix.
+  it('at 500px, only Mobile is enabled', () => {
+    mockViewportWidth(500);
     render(createElement(StudioModal));
     openStudio();
 
@@ -133,6 +166,30 @@ describe('StudioModal — device-mode gating', () => {
     expect(mobile.disabled).toBe(false);
     expect(ipad.disabled).toBe(true);
     expect(desktop.disabled).toBe(true);
+  });
+
+  // Regression test proving the boundary-band bug FIX 3 closes: pre-fix,
+  // Mobile enabled the instant the window matched its RAW 390px width, even
+  // though `.studio-body`'s 24px padding (both sides) + `.studio-frame`'s
+  // 1px border (both sides) — 50px total — meant a 390px window could not
+  // actually fit a 390px device box without `.studio-body`'s own
+  // `overflow: auto` kicking in (a boundary-band horizontal scrollbar).
+  it('at exactly the raw device width (390px), Mobile is now disabled — the pre-fix boundary-band bug', () => {
+    mockViewportWidth(390);
+    render(createElement(StudioModal));
+    openStudio();
+
+    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
+    expect(mobile.disabled).toBe(true);
+  });
+
+  it('at exactly the chrome-aware threshold (440px = 390 + 50), Mobile is enabled', () => {
+    mockViewportWidth(440);
+    render(createElement(StudioModal));
+    openStudio();
+
+    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
+    expect(mobile.disabled).toBe(false);
   });
 
   it('at 1400px, all three modes are enabled', () => {
@@ -148,7 +205,7 @@ describe('StudioModal — device-mode gating', () => {
   });
 
   it('disabled modes carry a "screen too small" tooltip', () => {
-    mockViewportWidth(390);
+    mockViewportWidth(500); // FIX 3: see "at 500px, only Mobile is enabled" above
     render(createElement(StudioModal));
     openStudio();
     expect(screen.getByRole('button', { name: /iPad 768/ }).getAttribute('title')).toBe(

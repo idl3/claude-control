@@ -1186,3 +1186,151 @@ describe('Phase B, B1: studio hosting tier — pickHost priority, elevation, han
     });
   });
 });
+
+describe('Studio Phase B CP3 audit, FIX 1: .studio-body pane clip (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let studioBodyEl: HTMLElement | null = null;
+  let placeholderEl: HTMLElement | null = null;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    placeholderEl?.remove();
+    studioBodyEl?.remove();
+    placeholderEl = null;
+    studioBodyEl = null;
+  });
+
+  it('a studio host inside a scrolled real .studio-body pane gets clipped to that pane instead of falling back to the full viewport', async () => {
+    // .studio-body pane: fixed at top=40 (below the modal's own head +
+    // toolbar), 400x300 — the ancestor `.closest('.thread-viewport,
+    // .studio-body')` must actually find. Pre-fix the selector only matched
+    // '.thread-viewport', so a studio host never found ANY clipping
+    // ancestor and computePaneClip ran against viewportRect() instead.
+    const ancestorRect = { top: 40, left: 0, width: 400, height: 300 };
+    // Placeholder scrolled so its top sits 20px ABOVE the pane's top and its
+    // bottom runs 440px below the pane's bottom — exactly what a device box
+    // taller than the modal (iPad 1024 / Desktop 800) produces once
+    // `.studio-body`'s own `overflow: auto` has scrolled on a typical
+    // laptop screen.
+    const placeholderRect = { top: -20, left: 0, width: 400, height: 800 };
+
+    studioBodyEl = document.createElement('div');
+    studioBodyEl.className = 'studio-body';
+    document.body.appendChild(studioBodyEl);
+
+    placeholderEl = document.createElement('span');
+    placeholderEl.setAttribute('data-embed-app-url', 'apps/studio-clip.html');
+    placeholderEl.setAttribute('data-embed-app-height', '800');
+    placeholderEl.setAttribute('data-embed-app-context', 'studio');
+    studioBodyEl.appendChild(placeholderEl);
+
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      if (this === studioBodyEl) return mockRect(ancestorRect);
+      if (this === placeholderEl) return mockRect(placeholderRect);
+      return mockRect({});
+    });
+
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    await screen.findByTitle('apps/studio-clip.html');
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement;
+    await waitFor(() => {
+      // top: ancestor.top(40) - rect.top(-20) = 60; bottom: rect.bottom(780)
+      // - ancestor.bottom(340) = 440 — a real, non-trivial clip on BOTH
+      // edges. Pre-fix this was `undefined` (unclipped): a placeholder that
+      // easily fits inside jsdom's default (effectively infinite) viewport
+      // produces no clip at all once `.closest()` falls through to
+      // viewportRect(), which is exactly the "unclipped iframe floats over
+      // the studio's own head/toolbar" bug FIX 1 closes.
+      expect(hoist.style.clipPath).toBe('inset(60px 0px 440px 0px)');
+    });
+  });
+
+  it("elementFromPoint hit-testing at the studio's close button cannot be expressed in jsdom at all — no layout engine, no implementation of the API — same limitation B1's own verification note (phase-b-tasks.md) already recorded ('jsdom can't prove this', proven instead via a real-Chromium harness). The clip-math assertion above is FIX 1's real, DOM-observable proof for this suite.", () => {
+    // jsdom (this project's vitest environment) doesn't even implement
+    // elementFromPoint — there's no layout engine to hit-test against, so
+    // there is nothing here to assert beyond "the API is absent." A real
+    // close-button-vs-iframe hit-test needs a real browser, exactly as B1
+    // documented.
+    expect(typeof (document as unknown as { elementFromPoint?: unknown }).elementFromPoint).toBe(
+      'undefined',
+    );
+  });
+});
+
+describe('Studio Phase B CP3 audit, FIX 2: studio hosts render no corner-button chrome (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let extraEls: HTMLElement[] = [];
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    for (const el of extraEls) el.remove();
+    extraEls = [];
+  });
+
+  function appendRawPlaceholder(attrs: Record<string, string>): HTMLElement {
+    const el = document.createElement('span');
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    document.body.appendChild(el);
+    extraEls.push(el);
+    return el;
+  }
+
+  it('a studio-context host renders none of the reload/pin/fullscreen corner trio; a transcript host for a different url still renders all three', async () => {
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/studio-chrome.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/transcript-chrome.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    const studioIframe = await screen.findByTitle('apps/studio-chrome.html');
+    const transcriptIframe = await screen.findByTitle('apps/transcript-chrome.html');
+    const studioHoist = studioIframe.closest('.embed-app-hoist') as HTMLElement;
+    const transcriptHoist = transcriptIframe.closest('.embed-app-hoist') as HTMLElement;
+
+    // Pre-fix: this trio rendered unconditionally for every context,
+    // including studio — floating over the previewed app inside the device
+    // box (visual clutter the studio's own head/toolbar chrome has no room
+    // for), and turning the fullscreen button into a self-referential no-op
+    // (re-opening the studio for a url the studio already hosts).
+    expect(studioHoist.querySelector('[aria-label="Reload app"]')).toBeNull();
+    expect(studioHoist.querySelector('[aria-label="Open in panel"]')).toBeNull();
+    expect(studioHoist.querySelector('[aria-label="Open in studio"]')).toBeNull();
+
+    // A non-studio host is completely unaffected by the new gate.
+    expect(transcriptHoist.querySelector('[aria-label="Reload app"]')).not.toBeNull();
+    expect(transcriptHoist.querySelector('[aria-label="Open in panel"]')).not.toBeNull();
+    expect(transcriptHoist.querySelector('[aria-label="Open in studio"]')).not.toBeNull();
+  });
+});
