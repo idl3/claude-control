@@ -30,6 +30,30 @@ vi.mock('../lib/api', async (importOriginal) => {
 
 afterEach(cleanup);
 
+// Mobile-sheet fix: AppFrameLayer now calls useIsNarrow() (matchMedia)
+// internally to gate PANEL_SHEET_HOIST_Z_INDEX — jsdom implements no
+// matchMedia at all (not even a stub), so every mounted test in this file
+// needs one or it throws on mount. Default to non-narrow (desktop) so all
+// pre-existing tests keep their prior (implicitly-desktop) behavior; call
+// mockNarrow(true) inside a specific test, before render(), to simulate the
+// mobile sheet. Mirrors ArtifactPanel.vitest.ts's identical helper.
+function mockNarrow(narrow: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: narrow && query === '(max-width:760px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+beforeEach(() => mockNarrow(false));
+
 describe('computePaneClip (A3 audit follow-up, FIX 1: pane-intersection geometry)', () => {
   const ancestor: RectLike = { top: 100, left: 0, width: 800, height: 600 }; // e.g. .thread-viewport rect
 
@@ -378,6 +402,69 @@ describe('L1 (Codex review): multiple non-host transcript duplicates of the same
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'open in panel ↗' })).toHaveLength(2);
     });
+  });
+});
+
+describe('Mobile-sheet fix: panel-hosted hoist z-index rides above the mobile sheet (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function mountApp(context: 'panel' | 'transcript', url: string) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320, context }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  it("bumps a panel-context hoist to z-index 210 on the mobile sheet (narrow), clearing the sheet's own z-index: 200", async () => {
+    mockNarrow(true);
+    mountApp('panel', 'apps/sheet-zindex.html');
+    await screen.findByTitle('apps/sheet-zindex.html');
+
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    expect(hoist!.style.zIndex).toBe('210');
+  });
+
+  it('leaves a panel-context hoist at the CSS default (no inline z-index) on desktop (not narrow)', async () => {
+    mockNarrow(false);
+    mountApp('panel', 'apps/desktop-zindex.html');
+    await screen.findByTitle('apps/desktop-zindex.html');
+
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    // DESIGN RULE: a desktop panel-hosted iframe must stay below desktop
+    // modals (.config-overlay etc., z-index 50-100) — no inline override.
+    expect(hoist!.style.zIndex).toBe('');
+  });
+
+  it('DESIGN RULE: never bumps a transcript-context hoist, even on the mobile sheet — it must stay below .detail-head/.composer (z-index: 2)', async () => {
+    mockNarrow(true);
+    mountApp('transcript', 'apps/transcript-zindex.html');
+    await screen.findByTitle('apps/transcript-zindex.html');
+
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    expect(hoist!.style.zIndex).toBe('');
   });
 });
 
