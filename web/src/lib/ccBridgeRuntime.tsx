@@ -61,6 +61,15 @@ export const CC_CAPTURE_RESULT_TYPE = 'cc-capture-result';
 export const CC_DOM_OUTLINE_REQUEST_TYPE = 'cc-dom-outline-request';
 export const CC_DOM_OUTLINE_RESULT_TYPE = 'cc-dom-outline-result';
 
+// E2: reserved protocol slot — no handler exists yet (see the "Reserved" doc
+// comment above this block). Kept as a concrete exported symbol so a future
+// implementer, and the E3 contract docs, have one canonical name to point at
+// instead of re-deriving the string. A disabled "coming soon" Console tab
+// (see StudioModal.tsx's StudioSidePanel) already reserves the UI slot;
+// live forwarding wasn't shipped this phase — see phase-e-tasks.md's E2 CP0
+// log entry for the triviality-bar reasoning.
+export const CC_CONSOLE_ENTRY_TYPE = 'cc-console-entry';
+
 // E1: outline serialization budget — matches the acceptance ceiling exactly
 // (depth <=12, total nodes <=2000). appBridge.ts re-enforces the SAME two
 // numbers when validating an inbound result, defensively bounding its own
