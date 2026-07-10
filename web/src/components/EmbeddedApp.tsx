@@ -46,7 +46,10 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  *  - `context` ('transcript' default): rides as `data-embed-app-context` so
  *    AppFrameLayer can pick a single deterministic host per url when the same
  *    app is embedded in both the transcript AND pinned into the panel
- *    (panel-context always wins — see AppFrameLayer's tick()).
+ *    (panel-context always wins — see AppFrameLayer's tick()). Phase B, B1
+ *    adds a third value, 'studio' — StudioModal renders one of these for the
+ *    currently-open url, and it outranks panel too (studio > panel >
+ *    transcript, see AppFrameLayer's pickHost) while the studio stays open.
  *  - `hidden` (false default): the panel renders EVERY open app artifact's
  *    placeholder simultaneously so tab switches never tear one down (that
  *    would reload the iframe), but only the ACTIVE tab's should actually be
@@ -89,7 +92,7 @@ export function EmbeddedApp({
 }: {
   url: string;
   height: number;
-  context?: 'panel' | 'transcript';
+  context?: 'panel' | 'transcript' | 'studio';
   hidden?: boolean;
   trackLatest?: boolean;
   suspended?: boolean;
@@ -103,11 +106,12 @@ export function EmbeddedApp({
     return <code className="embed-media-rejected">app url rejected: {url}</code>;
   }
 
-  // Panel context fills its slot exactly (ArtifactPanel/.artifact-app-slot
-  // sizes the box); transcript context keeps the reserved-box width cap +
-  // fixed height from the tag's `height` attr.
+  // Panel and studio contexts both fill their slot exactly (ArtifactPanel/
+  // .artifact-app-slot sizes the panel box; StudioModal's .studio-frame sizes
+  // the device-preset box — see B2) instead of the transcript's reserved-box
+  // width cap + fixed height from the tag's `height` attr.
   const frameStyle =
-    context === 'panel'
+    context === 'panel' || context === 'studio'
       ? { width: '100%', height: '100%' }
       : { width: '100%', maxWidth: APP_FRAME_MAX_WIDTH, height: `${height}px` };
 
@@ -280,15 +284,10 @@ function FullscreenIcon() {
  *
  * BOUNDARY NOTE: like AppReloadButton/AppPinButton, this file owns only the
  * button's presentation — composing it into the actually-visible hoisted
- * chrome (next to the Open/Reload buttons, in all three chrome states) is
+ * chrome (next to the Reload/Pin buttons, in all three chrome states) is
  * AppFrameLayer.tsx's job (it is the sole caller of AppReloadButton/
- * AppPinButton today). AppFrameLayer.tsx is locked by another in-flight
- * agent for this Phase A dispatch, so that composition step is NOT done
- * here — this button is not yet reachable from the live UI. It is fully
- * wired (event dispatch + StudioModal listens for it) and covered by tests
- * that exercise the button and StudioModal directly. Follow-up: add
- * `<AppFullscreenButton url={...} .../>` alongside the existing
- * `<AppReloadButton>`/`<AppPinButton>` call sites in AppFrameLayer.tsx.
+ * AppPinButton). Phase B, B1 wires this in: AppFrameLayer now imports and
+ * renders it alongside AppReloadButton/AppPinButton in every chrome state.
  */
 export function AppFullscreenButton({
   url,

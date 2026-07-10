@@ -5,7 +5,7 @@ import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 import { appNameFromUrl } from '../lib/appVersion';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
-import { AppReloadButton, AppPinButton } from './EmbeddedApp';
+import { AppReloadButton, AppPinButton, AppFullscreenButton } from './EmbeddedApp';
 import { useIsNarrow } from '../hooks/useIsNarrow';
 
 /** Phase C, C3: title for a freshly-pinned app artifact — last path segment
@@ -147,6 +147,23 @@ function basename(url: string): string {
  * `data-embed-app-elevate="true"` without adding another bespoke breakpoint
  * check here. EmbeddedApp.tsx doesn't emit the attribute yet; this is
  * forward-compatible plumbing only.
+ *
+ * Phase B, B1 (studio hosting tier) is the first caller of that forward-
+ * compatible plumbing's SIBLING, not the attribute itself: `context` grows a
+ * third value, 'studio' (StudioModal.tsx renders one EmbeddedApp placeholder
+ * with it for whichever url is currently open). pickHost now prefers
+ * studio > panel > transcript — a studio host is even more "the durable
+ * home right now" than a panel pin, since the user explicitly asked to look
+ * at nothing else. A studio host must paint ABOVE the studio overlay itself
+ * (styles.css `.studio-overlay`, z-index: 300) — otherwise the live iframe
+ * would sit geometrically inside the studio's device-frame box but visually
+ * behind the overlay's own backdrop. That needs a NEW z-index tier (310),
+ * kept deliberately separate from PANEL_SHEET_HOIST_Z_INDEX (210): see
+ * STUDIO_HOIST_Z_INDEX/hoistZIndex below for why the two must never be
+ * folded into one check even though both feed the same style property.
+ * Everything else (fetch/reload/crash/GC/scroll-sync/pane-clip) is
+ * unchanged — studio is just a third arbitration tier and a second,
+ * independent elevation rule layered on top of the existing machinery.
  */
 
 const GRACE_MS = 250;
@@ -217,14 +234,50 @@ const PANEL_SHEET_HOIST_Z_INDEX = 210;
  * Transcript-context hosts never elevate, full stop — the `context ===
  * 'panel'` guard is unconditional, not folded into the `||`, so a stray
  * elevate attribute on a transcript placeholder can never bump it above the
- * header/composer chrome FIX 1 exists to keep it under.
+ * header/composer chrome FIX 1 exists to keep it under. Studio-context hosts
+ * ALSO never elevate via this function — they get their own unconditional
+ * check (STUDIO_HOIST_Z_INDEX/hoistZIndex below); `context`'s type is
+ * widened to accept 'studio' purely so callers can pass a Slot/SlotEl's
+ * context through unchanged, not because this function treats it specially.
  */
 export function shouldElevateHoist(
-  context: 'panel' | 'transcript',
+  context: 'panel' | 'transcript' | 'studio',
   narrow: boolean,
   elevate: boolean,
 ): boolean {
   return context === 'panel' && (narrow || elevate);
+}
+
+// Phase B, B1: a studio-context host's iframe must paint ABOVE the studio
+// overlay itself (.studio-overlay, z-index: 300) — otherwise the live app
+// would render fully hidden behind the overlay's own backdrop despite
+// geometrically sitting inside the studio's device-frame box. Unlike
+// PANEL_SHEET_HOIST_Z_INDEX (210, gated behind narrow/elevate), this is
+// UNCONDITIONAL whenever context === 'studio': the studio only ever opens as
+// a full-viewport modal, there's no "small screen" carve-out the way the
+// mobile sheet has one. Kept as its own constant/branch — deliberately NOT
+// folded into PANEL_SHEET_HOIST_Z_INDEX or shouldElevateHoist — since 210
+// and 310 answer different questions (panel-chrome-piercing vs
+// studio-overlay-piercing) that must never be conflated even though both
+// ultimately feed the same zIndex style property. 310 clears the overlay's
+// 300 with headroom while staying well below `.sa-backdrop`/`.sa-panel`
+// (899/900) and `.lightbox` (1000).
+const STUDIO_HOIST_Z_INDEX = 310;
+
+/**
+ * Combines shouldElevateHoist's panel-sheet gate (210) with the studio case
+ * (310, unconditional) into the single zIndex value the render below needs.
+ * Studio is checked first and short-circuits: a studio host must never fail
+ * to clear its own overlay, so it can't be subject to shouldElevateHoist's
+ * panel-only guard.
+ */
+export function hoistZIndex(
+  context: 'panel' | 'transcript' | 'studio',
+  narrow: boolean,
+  elevate: boolean,
+): number | undefined {
+  if (context === 'studio') return STUDIO_HOIST_Z_INDEX;
+  return shouldElevateHoist(context, narrow, elevate) ? PANEL_SHEET_HOIST_Z_INDEX : undefined;
 }
 
 // ── FIX 1 + FIX 3 pure helpers ──────────────────────────────────────────
@@ -285,6 +338,12 @@ export function computePaneClip(
 // top/right (styles.css) — the base corner offset before any clip is
 // accounted for.
 const RELOAD_CORNER_OFFSET = 6;
+// Phase B, B1: matches .embed-app-fullscreen-btn's CSS `right: 34px /*
+// corner slot next to the reload button (right: 6px) */` — i.e. the
+// fullscreen button always sits this many px further right than the reload
+// button's own (already-clip-clamped) corner inset, so the two never
+// overlap at any clip state.
+const FULLSCREEN_CORNER_EXTRA_RIGHT = 34 - RELOAD_CORNER_OFFSET;
 
 type ChromeClamp = {
   cornerTop: number;
@@ -441,9 +500,21 @@ export function shouldKeepPolling(slotCount: number, presentPlaceholderCount: nu
  * (GET /api/media-apps/<name>/versions) into this synchronous WS-frame path
  * instead would add a network round-trip and a real race window for no
  * benefit over the alias the producer already guarantees.
+ *
+ * Phase B, B1: `context`'s type grows 'studio' (Slot.context can now be a
+ * studio host), but the gate itself is untouched — `!== 'panel'` already
+ * excludes it, same bucket as transcript. That's intentional, not just
+ * incidental: a studio host is a live *preview* surface (the whole point of
+ * opening it is to look at a specific build without it moving out from under
+ * you), same "reading surface, not the durable auto-reload home" rationale
+ * as transcript above, not the panel's "give me the live app" semantics.
  */
 export function shouldReloadOnFrame(
-  slot: { context: 'panel' | 'transcript'; trackLatest: boolean; lastMtime: number | null },
+  slot: {
+    context: 'panel' | 'transcript' | 'studio';
+    trackLatest: boolean;
+    lastMtime: number | null;
+  },
   slotUrl: string,
   frame: { path: string; mtime: number },
 ): boolean {
@@ -488,8 +559,10 @@ type Slot = {
   // D2: the winning host's context this tick (see pickHost) — the input to
   // shouldReloadOnFrame's panel-only gate. Kept on the slot (not derived at
   // frame-handling time) because by the time a frame arrives, tick() may not
-  // have run again since the last host change.
-  context: 'panel' | 'transcript';
+  // have run again since the last host change. Phase B, B1: 'studio' is a
+  // valid value too (see pickHost's studio > panel > transcript order) — it
+  // falls into shouldReloadOnFrame's existing not-panel bucket unchanged.
+  context: 'panel' | 'transcript' | 'studio';
   // D2/D4: whether this slot should hot-reload on a matching frame. Mirrors
   // the winning host's data-embed-app-track-latest (default true).
   trackLatest: boolean;
@@ -537,7 +610,9 @@ type SlotEl = {
   url: string;
   height: number;
   el: HTMLElement;
-  context: 'panel' | 'transcript';
+  // Phase B, B1: 'studio' added — see pickHost's doc comment for the
+  // resulting studio > panel > transcript priority.
+  context: 'panel' | 'transcript' | 'studio';
   explicitlyHidden: boolean;
   trackLatest: boolean;
   // H2 (Codex review): true for the marker placeholder EmbeddedApp renders
@@ -558,7 +633,12 @@ function readSlotEls(): SlotEl[] {
     const url = el.dataset.embedAppUrl;
     if (!url) return;
     const height = Number.parseInt(el.dataset.embedAppHeight ?? '', 10);
-    const context = el.dataset.embedAppContext === 'panel' ? 'panel' : 'transcript';
+    const context =
+      el.dataset.embedAppContext === 'studio'
+        ? 'studio'
+        : el.dataset.embedAppContext === 'panel'
+          ? 'panel'
+          : 'transcript';
     const explicitlyHidden = el.dataset.embedAppHidden === 'true';
     const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
     const suspended = el.dataset.embedAppSuspended === 'true';
@@ -580,16 +660,31 @@ function readSlotEls(): SlotEl[] {
 /**
  * Multi-placeholder host arbitration (C2): given every placeholder currently
  * in the DOM for one url (in document order), pick the single one whose rect
- * the live iframe follows this frame. Panel-context always wins over
- * transcript — once an app is pinned, the panel is the durable home for it
- * regardless of which panel tab happens to be active right now (an inactive-
- * but-pinned tab still hosts; its transcript placeholder shows the "open in
- * panel" chip instead of a live, invisible-anyway iframe). Falls back to
- * first-in-document-order, which is the only candidate in the pre-Phase-C
- * (single placeholder) case, so this is a strict generalization.
+ * the live iframe follows this frame.
+ *
+ * Phase B, B1: studio > panel > transcript. While the studio is open for a
+ * url, it outranks even a panel pin — the user explicitly asked to look at
+ * nothing else, so a still-live-but-now-invisible panel tab must not keep
+ * hosting (that would mean the studio shows a stale/blank frame). Once the
+ * studio closes (its placeholder unmounts), hosting falls through to panel,
+ * then transcript, exactly as before B1 — same url, same Slot (keyed by url,
+ * not by placeholder), so this handoff is a pure re-arbitration with zero
+ * iframe reloads.
+ *
+ * Panel-context wins over transcript for the same reason it always has: once
+ * an app is pinned, the panel is the durable home for it regardless of which
+ * panel tab happens to be active right now (an inactive-but-pinned tab still
+ * hosts; its transcript placeholder shows the "open in panel" chip instead of
+ * a live, invisible-anyway iframe). Falls back to first-in-document-order,
+ * which is the only candidate in the pre-Phase-C (single placeholder) case,
+ * so this is a strict generalization.
  */
 function pickHost(entries: SlotEl[]): SlotEl {
-  return entries.find((e) => e.context === 'panel') ?? entries[0];
+  return (
+    entries.find((e) => e.context === 'studio') ??
+    entries.find((e) => e.context === 'panel') ??
+    entries[0]
+  );
 }
 
 // C2/L1 (Codex review): a shadow (non-host) placeholder's overlay chip. L1
@@ -846,14 +941,22 @@ export function AppFrameLayer() {
 
         // C2: track every non-host placeholder's rect for the "open in
         // panel" chip overlay (render function below) — but only when the
-        // host is genuinely IN the panel. Two transcript-context duplicates
-        // of the same url (host = first-in-doc-order, per pickHost's
-        // fallback tier) is a pre-existing, unremarkable edge case with no
-        // panel to point at; showing "open in panel" there would be a lie.
-        // A shadow with its own zero rect (e.g. scrolled/hidden-ancestor)
-        // just doesn't get a chip this frame — no grace window needed, it's
-        // purely decorative.
-        if (host.context === 'panel') {
+        // host is genuinely IN the panel (or, Phase B B1, the studio). Two
+        // transcript-context duplicates of the same url (host = first-in-
+        // doc-order, per pickHost's fallback tier) is a pre-existing,
+        // unremarkable edge case with no panel/studio to point at; showing a
+        // chip there would be a lie. A shadow with its own zero rect (e.g.
+        // scrolled/hidden-ancestor) just doesn't get a chip this frame — no
+        // grace window needed, it's purely decorative.
+        //
+        // B1: studio hosting also gets a shadow chip on its non-host
+        // placeholders (e.g. the transcript embed you opened it from) — the
+        // tracker's B1 acceptance calls for "transcript shows its chip" while
+        // studio is open, and explicitly scopes the LABEL out of this phase
+        // ("keep existing chip text — non-host chip text stays as-is"), so
+        // this reuses the exact same "open in panel ↗" chip/click affordance
+        // rather than inventing a studio-specific label or action.
+        if (host.context === 'panel' || host.context === 'studio') {
           const arr: ShadowEntry[] = [];
           for (const e of entries) {
             if (e === host) continue;
@@ -1273,9 +1376,7 @@ export function AppFrameLayer() {
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,
-              zIndex: shouldElevateHoist(slot.context, narrow, slot.elevate)
-                ? PANEL_SHEET_HOIST_Z_INDEX
-                : undefined,
+              zIndex: hoistZIndex(slot.context, narrow, slot.elevate),
             }}
           >
             {slot.crashed ? (
@@ -1298,6 +1399,7 @@ export function AppFrameLayer() {
                 ) : null}
                 <AppReloadButton url={url} quiet={false} />
                 <AppPinButton pinned={pinned} quiet={false} onClick={() => onPinClick(url, slot.height)} />
+                <AppFullscreenButton url={url} quiet={false} />
               </div>
             ) : slot.failed ? (
               <>
@@ -1312,6 +1414,11 @@ export function AppFrameLayer() {
                   quiet={false}
                   onClick={() => onPinClick(url, slot.height)}
                   style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                />
+                <AppFullscreenButton
+                  url={url}
+                  quiet={false}
+                  style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
                 />
               </>
             ) : slot.html != null ? (
@@ -1331,6 +1438,10 @@ export function AppFrameLayer() {
                   pinned={pinned}
                   onClick={() => onPinClick(url, slot.height)}
                   style={{ top: chrome.cornerTop, left: chrome.cornerLeft }}
+                />
+                <AppFullscreenButton
+                  url={url}
+                  style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
                 />
               </>
             ) : (

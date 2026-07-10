@@ -3,6 +3,7 @@ import { useModalTransition } from '../lib/anim';
 import { appNameFromUrl } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
+import { EmbeddedApp } from './EmbeddedApp';
 
 const SUPPRESS_STORAGE_KEY = 'cockpit:studio-suppress-hotkeys';
 
@@ -163,13 +164,17 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
         </div>
 
         <div className="studio-body">
-          {/* Phase B moves real component hosting in here; Phase A only
-              reserves the exact device-sized box so the layout is stable
-              ahead of time. No iframe is created or moved by opening or
-              closing the studio — whatever's hosting `url` today (see
-              AppFrameLayer.tsx) is untouched. */}
+          {/* B1: a context='studio' EmbeddedApp placeholder — same
+              cheap-to-remount span AppFrameLayer already tracks for
+              transcript/panel placeholders of this url. It never creates or
+              moves an iframe itself; it just tells AppFrameLayer's host
+              arbitration (pickHost: studio > panel > transcript) that the
+              studio wants to host `url` while this panel is open. The
+              `.studio-frame` box below stays the device-sized reservation
+              from Phase A (B2 sizes it per device mode) — EmbeddedApp fills
+              it at 100%/100% (studio context, same treatment as panel). */}
           <div className="studio-frame" style={{ width: device.width, height: device.height }}>
-            component hosting arrives in Phase B
+            <EmbeddedApp url={url} height={device.height} context="studio" />
           </div>
         </div>
       </div>

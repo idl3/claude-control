@@ -15,6 +15,7 @@ import {
   hoistTransform,
   hoistClipPath,
   shouldElevateHoist,
+  hoistZIndex,
   nextScrollStreak,
   shouldEngageScrollFade,
   type RectLike,
@@ -210,6 +211,26 @@ describe('shouldElevateHoist (generic elevation gate, pure)', () => {
     expect(shouldElevateHoist('transcript', true, false)).toBe(false);
     expect(shouldElevateHoist('transcript', false, true)).toBe(false);
     expect(shouldElevateHoist('transcript', true, true)).toBe(false);
+  });
+});
+
+describe('hoistZIndex (Phase B, B1: studio 310 vs panel 210, pure)', () => {
+  it('a studio host always resolves to 310, regardless of narrow/elevate', () => {
+    expect(hoistZIndex('studio', false, false)).toBe(310);
+    expect(hoistZIndex('studio', true, false)).toBe(310);
+    expect(hoistZIndex('studio', false, true)).toBe(310);
+    expect(hoistZIndex('studio', true, true)).toBe(310);
+  });
+
+  it('DESIGN RULE: studio 310 is a distinct tier from panel elevate 210 — never conflated', () => {
+    expect(hoistZIndex('studio', true, true)).not.toBe(hoistZIndex('panel', true, true));
+    expect(hoistZIndex('panel', true, true)).toBe(210);
+  });
+
+  it('falls through to shouldElevateHoist for panel/transcript (unchanged behavior)', () => {
+    expect(hoistZIndex('panel', true, false)).toBe(210);
+    expect(hoistZIndex('panel', false, false)).toBeUndefined();
+    expect(hoistZIndex('transcript', true, true)).toBeUndefined();
   });
 });
 
@@ -938,5 +959,200 @@ describe('H1 (Codex review): fetch generations — a reload mid-flight is never 
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(authFetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Phase B, B1: studio hosting tier — pickHost priority, elevation, handoff, chips (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  // Distinguish each context's placeholder by a fixed top offset, so the
+  // hoisted iframe's translate (hoistTransform) tells us which placeholder
+  // currently won host arbitration (pickHost) — a DOM-observable proxy for
+  // "who's hosting" independent of z-index/narrow, and independent of
+  // pickHost itself (not exported — same reason the pre-existing L1 test
+  // exercises it indirectly rather than unit-testing it directly).
+  const TOP_BY_CONTEXT: Record<string, number> = { transcript: 0, panel: 100, studio: 200 };
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let extraEls: HTMLElement[] = [];
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      const ctx = this.getAttribute('data-embed-app-context') ?? 'transcript';
+      return mockRect({ top: TOP_BY_CONTEXT[ctx] ?? 0, left: 0 });
+    });
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    for (const el of extraEls) el.remove();
+    extraEls = [];
+  });
+
+  // Same raw-placeholder idiom as the "Generic elevation hook" suite above —
+  // builds exactly the shape EmbeddedApp renders (context prop -> data-embed-
+  // app-context) without needing a live StudioModal/ArtifactPanel around it.
+  function appendRawPlaceholder(attrs: Record<string, string>): HTMLElement {
+    const el = document.createElement('span');
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    document.body.appendChild(el);
+    extraEls.push(el);
+    return el;
+  }
+
+  it('studio outranks panel and transcript: with all three placeholders present for one url, the studio placeholder hosts (one slot, one fetch)', async () => {
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/tiers.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/tiers.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'panel',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/tiers.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    const iframe = await screen.findByTitle('apps/tiers.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoist.style.transform).toBe('translate3d(0px, 200px, 0)'); // studio's top offset
+    expect(hoist.style.zIndex).toBe('310');
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // one Slot per url regardless of placeholder count
+  });
+
+  it('closing the studio hands hosting back to panel, then transcript — zero iframe reloads across the whole journey (never-reload seam)', async () => {
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/handoff.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+    });
+    const panelEl = appendRawPlaceholder({
+      'data-embed-app-url': 'apps/handoff.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'panel',
+    });
+    const studioEl = appendRawPlaceholder({
+      'data-embed-app-url': 'apps/handoff.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    const iframeAtStudio = await screen.findByTitle('apps/handoff.html');
+    expect((iframeAtStudio.closest('.embed-app-hoist') as HTMLElement).style.transform).toBe(
+      'translate3d(0px, 200px, 0)',
+    );
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Close the studio — same DOM effect as StudioPanel unmounting (its
+    // EmbeddedApp context="studio" placeholder goes away with it).
+    await act(async () => {
+      studioEl.remove();
+    });
+    await waitFor(() => {
+      const h = screen.getByTitle('apps/handoff.html').closest('.embed-app-hoist') as HTMLElement;
+      expect(h.style.transform).toBe('translate3d(0px, 100px, 0)'); // falls to panel
+    });
+    expect(screen.getByTitle('apps/handoff.html')).toBe(iframeAtStudio); // never remounted
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Unpin from the panel too — falls all the way back to transcript.
+    await act(async () => {
+      panelEl.remove();
+    });
+    await waitFor(() => {
+      const h = screen.getByTitle('apps/handoff.html').closest('.embed-app-hoist') as HTMLElement;
+      expect(h.style.transform).toBe('translate3d(0px, 0px, 0)'); // falls to transcript
+    });
+    expect(screen.getByTitle('apps/handoff.html')).toBe(iframeAtStudio); // still the same node
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // one fetch for the entire journey
+  });
+
+  it('DESIGN RULE: a studio host always elevates to 310 (distinct from panel elevate\'s 210), on both narrow and desktop', async () => {
+    mockNarrow(true);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/studio-zindex-narrow.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    const { unmount } = render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+    const iframeNarrow = await screen.findByTitle('apps/studio-zindex-narrow.html');
+    expect((iframeNarrow.closest('.embed-app-hoist') as HTMLElement).style.zIndex).toBe('310');
+    unmount();
+
+    mockNarrow(false);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/studio-zindex-desktop.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+    const iframeDesktop = await screen.findByTitle('apps/studio-zindex-desktop.html');
+    expect((iframeDesktop.closest('.embed-app-hoist') as HTMLElement).style.zIndex).toBe('310');
+  });
+
+  it('DESIGN RULE: 310 clears .studio-overlay\'s own z-index (300, styles.css) with headroom, and stays below the sub-agent drawer (899/900) and lightbox (1000)', () => {
+    expect(hoistZIndex('studio', false, false)).toBeGreaterThan(300);
+    expect(hoistZIndex('studio', false, false)).toBeLessThan(899);
+  });
+
+  it('DESIGN RULE: a transcript-context hoist still never elevates, even while a studio host wins arbitration for a different url', async () => {
+    mockNarrow(false);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/t1.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/t2.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    const iframe1 = await screen.findByTitle('apps/t1.html');
+    const iframe2 = await screen.findByTitle('apps/t2.html');
+    expect((iframe1.closest('.embed-app-hoist') as HTMLElement).style.zIndex).toBe('');
+    expect((iframe2.closest('.embed-app-hoist') as HTMLElement).style.zIndex).toBe('310');
+  });
+
+  it('non-host placeholders (transcript AND panel) get the "open in panel ↗" chip while studio hosts — chip text stays unchanged this phase', async () => {
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/chips.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/chips.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'panel',
+    });
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/chips.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'studio',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    await screen.findByTitle('apps/chips.html');
+    await waitFor(() => {
+      // Both the transcript AND the (now-shadowed) panel placeholder get the
+      // existing chip — same text/click affordance as the pre-B1 panel-hosts
+      // case, per the tracker's "keep existing chip text" instruction.
+      expect(screen.getAllByRole('button', { name: 'open in panel ↗' })).toHaveLength(2);
+    });
   });
 });

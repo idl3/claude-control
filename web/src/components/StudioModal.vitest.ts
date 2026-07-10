@@ -97,11 +97,13 @@ describe('StudioModal — open/close', () => {
     expect(document.querySelector('.studio-overlay')).toBeTruthy();
   });
 
-  it('does not reload or touch any iframe — the body is a placeholder only, no <iframe> exists', () => {
+  it('renders a context="studio" EmbeddedApp placeholder for the open url — no <iframe> of its own (AppFrameLayer owns hosting, see AppFrameLayer.vitest.ts)', () => {
     render(createElement(StudioModal));
-    openStudio();
+    openStudio('apps/counter.html');
     expect(document.querySelector('iframe')).toBeNull();
-    expect(screen.getByText('component hosting arrives in Phase B')).toBeTruthy();
+    const placeholder = document.querySelector('[data-embed-app-context="studio"]');
+    expect(placeholder).toBeTruthy();
+    expect(placeholder?.getAttribute('data-embed-app-url')).toBe('apps/counter.html');
   });
 });
 
