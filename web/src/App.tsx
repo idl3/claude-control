@@ -46,6 +46,7 @@ import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { HotkeyHints } from './components/HotkeyHints';
 import { AppFrameLayer } from './components/AppFrameLayer';
+import { useHotkeySuppressionInterceptor } from './lib/hotkeySuppression';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -2460,13 +2461,27 @@ function AppInner() {
   );
 }
 
+// A3: registers the single capture-phase hotkey-suppression interceptor
+// (see lib/hotkeySuppression.ts) as a sibling of TokenGate/AppInner, in
+// App's OWN commit — so its useLayoutEffect runs before AppInner (and all
+// 20 of its descendants' keydown listeners) even mounts. Also the sole
+// provider/mount-point for chrome that must exist independently of
+// TokenGate's auth gate (A4's StudioModal joins here).
+function AppChrome() {
+  useHotkeySuppressionInterceptor();
+  return null;
+}
+
 // Root: gate the whole app behind the token login. TokenGate probes
 // /api/health and only renders AppInner (which opens the WS) once authorized.
 // Tokenless servers probe 200 → AppInner renders immediately, no prompt.
 export default function App() {
   return (
-    <TokenGate>
-      <AppInner />
-    </TokenGate>
+    <>
+      <AppChrome />
+      <TokenGate>
+        <AppInner />
+      </TokenGate>
+    </>
   );
 }
