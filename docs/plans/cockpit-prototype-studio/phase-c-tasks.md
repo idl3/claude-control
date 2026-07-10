@@ -199,6 +199,46 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
      test files in place — not in the tracker's own Files line, but a
      minimal, necessary enabler for the live-probe tests above, not a
      scope expansion in itself. -->
+<!-- CP0 log: CP3-C audit fixes done 2026-07-10, sha 97e4248. FIX 1
+     [HIGH]: cc-bridge-ready had no cockpit-side listener at all —
+     isValidCcBridgeReady (appBridge.ts) sat unused, and cc-props-set fired
+     on the blind 150ms debounce regardless of whether the artifact's own
+     message listener had mounted yet, silently dropping a props-set that
+     landed too early. StudioPropsPanel (StudioModal.tsx) now runs a
+     `message` listener that validates ready via isValidCcBridgeReady against
+     the SAME iframe window findAppIframeWindow(url) already tracks; while
+     not-ready, a committed props-set is queued (coalesced to the newest
+     value only, never a backlog) in a ref and flushed exactly once when the
+     gate opens. Handshake ordering guarantee, two races closed: (a)
+     fresh-open — the artifact's own listener effect (ccBridgeRuntime.tsx)
+     mounts synchronously before postMessage delivery is ever observable
+     (delivery is always a queued task), so the real ready message reliably
+     flips the gate; (b) already-hosted-elsewhere — AppFrameLayer's pickHost
+     arbitration can hand the studio an iframe that already announced ready
+     before this panel existed, so a belt-and-suspenders
+     BRIDGE_READY_FALLBACK_MS=250ms timer (comfortably above the 150ms
+     debounce) opens the gate unconditionally if no ready is ever seen.
+     cc-props-reset stays ungated (documented in reset()'s own comment):
+     idempotent to the artifact's own default state, so an early send is a
+     safe no-op, never a lost mutation. FIX 2 [MEDIUM]: reset-to-defaults
+     cleared live props but left stale/invalid text sitting in the raw-JSON
+     textareas (uncontrolled `defaultValue`, only evaluated at mount) —
+     unrecoverable for raw-only props (e.g. function-typed) with no typed
+     control to force a remount another way. reset() now bumps a
+     `resetGeneration` counter folded into just the raw textarea's key
+     (StudioPropField), remounting it alone so `defaultValue` re-evaluates to
+     '' — the field's `rawMode` toggle choice (keyed by prop.name) survives
+     the reset. Tests: 4 new (queued-then-flushed-on-ready, spoofed-source
+     ready ignored + stays queued, raw-only field cleared on reset, raw
+     override on a typed-control field cleared on reset) + 2 existing tests
+     (debounce happy-path, invalid-raw-JSON forwarding) updated to simulate
+     the real cc-bridge-ready handshake instead of relying on the pre-fix
+     always-send behavior. Full web suite 775/775 green (771 baseline + 4
+     new). Server suite unchanged, 930/930 green (no server files touched).
+     tsc -b clean, vite build clean. Files: web/src/components/StudioModal.tsx,
+     web/src/components/StudioModal.vitest.ts. No AppFrameLayer.tsx changes —
+     the existing findAppIframeWindow(url)/title-lookup seam from C3 already
+     covered everything FIX 1 needed. -->
 
 ## Audit item coverage
 | Task | Rubric |

@@ -442,7 +442,21 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     );
   }
 
-  it('editing a typed prop debounces the cc-props-set postMessage to ≤150ms, without an iframe reload', async () => {
+  // Studio Phase C CP3 audit, FIX 1: simulates the artifact's real
+  // `cc-bridge-ready` announcement (ccBridgeRuntime.tsx's withCcBridge posts
+  // this on its own mount) — same `window.dispatchEvent(new MessageEvent(...))`
+  // idiom as embeds.vitest.ts's cc-app-error beacon tests, `source` set to
+  // the tracked iframe's own contentWindow so `isValidCcBridgeReady`'s
+  // source-identity check passes.
+  function sendBridgeReady(win: Window): void {
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'cc-bridge-ready', manifestVersion: 1 }, source: win }),
+      );
+    });
+  }
+
+  it('editing a typed prop debounces the cc-props-set postMessage to ≤150ms once the bridge is ready, without an iframe reload', async () => {
     mockManifestFetch(FIXTURE_MANIFEST);
     renderStudio();
     openStudio('apps/counter.html');
@@ -452,6 +466,11 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
     const fetchCallsAtSettle = authFetchMock.mock.calls.length;
 
+    // FIX 1: sends only proceed once a validated cc-bridge-ready has been
+    // seen from this app's own iframe — see the queued/flushed test below
+    // for the no-ready-yet case this closes.
+    sendBridgeReady(iframe.contentWindow as Window);
+
     vi.useFakeTimers();
     try {
       fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
@@ -460,6 +479,7 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
       expect(postSpy).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1); // 150ms total — the acceptance ceiling
       expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-set', props: { label: 'Widgets' } }, '*');
+      expect(postSpy).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -477,6 +497,7 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
     await screen.findByLabelText('count');
     const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
+    sendBridgeReady(iframe.contentWindow as Window);
 
     // `count` is a number prop; force raw-JSON editing via its toggle, then
     // type a deliberately invalid (unparseable) value.
@@ -489,7 +510,7 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     });
   });
 
-  it('Reset to defaults sends cc-props-reset immediately (no debounce)', async () => {
+  it('Reset to defaults sends cc-props-reset immediately (no debounce), regardless of bridge readiness', async () => {
     mockManifestFetch(FIXTURE_MANIFEST);
     renderStudio();
     openStudio('apps/counter.html');
@@ -498,7 +519,113 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     await screen.findByLabelText('label');
     const postSpy = vi.spyOn(iframe.contentWindow as Window, 'postMessage');
 
+    // Deliberately no sendBridgeReady() call here — reset is ungated (see
+    // StudioModal.tsx's reset() doc comment) and must fire even before the
+    // bridge has announced itself.
     fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
     expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-reset' }, '*');
+  });
+
+  it('a props-set committed before cc-bridge-ready arrives is queued (not sent), then flushed exactly once when a valid ready lands', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+      vi.advanceTimersByTime(150); // debounce fires, but the bridge isn't ready — queued, not sent
+      expect(postSpy).not.toHaveBeenCalled();
+
+      // A second edit before ready lands must coalesce to the newest value,
+      // not queue a backlog — only 'Final' should ever reach the artifact.
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Final' } });
+      vi.advanceTimersByTime(150);
+      expect(postSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Ready arrives (valid shape + matching iframe window) — flushes
+    // immediately, no further debounce wait, exactly once.
+    sendBridgeReady(win);
+    expect(postSpy).toHaveBeenCalledWith({ type: 'cc-props-set', props: { label: 'Final' } }, '*');
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cc-bridge-ready message from a window other than this app's own iframe is ignored — the gate stays closed and the props-set stays queued", async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    renderStudio();
+    openStudio('apps/counter.html');
+
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    await screen.findByLabelText('label');
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    // Same-shape ready message, but sourced from the top frame itself
+    // (never the tracked iframe's contentWindow) — same spoofed-source idiom
+    // as embeds.vitest.ts's "ignores a spoofed-source beacon" test. Must not
+    // flip the gate: the source-identity check now runs live against a real
+    // listener, not just in isolation (appBridge.vitest.ts already covers
+    // isValidCcBridgeReady in isolation).
+    sendBridgeReady(window);
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByLabelText('label'), { target: { value: 'Widgets' } });
+      vi.advanceTimersByTime(150);
+      expect(postSpy).not.toHaveBeenCalled(); // spoofed ready never opened the gate
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('StudioModal — Studio Phase C CP3 audit, FIX 2: reset clears stale raw-JSON textareas', () => {
+  it('after Reset to defaults, a raw-JSON-only field (no typed control) with stale/invalid text is cleared, not left stale', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    // `onChange` is a function tsType — always raw-JSON-only, no typed-
+    // control toggle exists to force a remount another way (the exact
+    // "unrecoverable for raw-only props" case FIX 2 targets).
+    await screen.findByLabelText('onChange raw JSON');
+    const textarea = screen.getByLabelText('onChange raw JSON') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'not valid json {{{' } });
+    expect(textarea.value).toBe('not valid json {{{');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+
+    const textareaAfterReset = screen.getByLabelText('onChange raw JSON') as HTMLTextAreaElement;
+    expect(textareaAfterReset.value).toBe('');
+  });
+
+  it('reset also clears a raw-JSON override on a field that HAS a typed control (toggled into raw mode)', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    await screen.findByLabelText('count');
+    const countRow = screen.getByLabelText('count').closest('.studio-prop-field') as HTMLElement;
+    fireEvent.click(within(countRow).getByRole('button', { name: 'raw' }));
+    const raw = within(countRow).getByLabelText('count raw JSON') as HTMLTextAreaElement;
+    fireEvent.change(raw, { target: { value: 'not-json' } });
+    expect(raw.value).toBe('not-json');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+
+    // Still in raw mode after reset (FIX 2 only remounts the textarea, not
+    // the whole field — the rawMode toggle choice survives, matching the
+    // "typed"/"raw" button's own persisted-choice UX elsewhere in this
+    // panel) — its value is cleared.
+    const rawAfterReset = within(countRow).getByLabelText('count raw JSON') as HTMLTextAreaElement;
+    expect(rawAfterReset.value).toBe('');
   });
 });

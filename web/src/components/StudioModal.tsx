@@ -3,12 +3,19 @@ import { useModalTransition } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
-import { sendCcPropsSet, sendCcPropsReset } from '../lib/appBridge';
+import { sendCcPropsSet, sendCcPropsReset, isValidCcBridgeReady } from '../lib/appBridge';
 import { EmbeddedApp } from './EmbeddedApp';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
 // per the ≤150ms acceptance budget.
 const PROPS_DEBOUNCE_MS = 150;
+
+// Studio Phase C CP3 audit, FIX 1: belt-and-suspenders fallback for the
+// "already-hosted elsewhere" race — see the `bridgeReady` doc comment on
+// StudioPropsPanel below for the two races this constant closes. Chosen
+// comfortably above PROPS_DEBOUNCE_MS so the normal (fresh-open) path is
+// always resolved by the real `cc-bridge-ready` message, not the fallback.
+const BRIDGE_READY_FALLBACK_MS = 250;
 
 /**
  * The live iframe hosting `url` is owned by AppFrameLayer (a hoisted portal,
@@ -43,10 +50,22 @@ function StudioPropField({
   prop,
   value,
   onChange,
+  resetGeneration,
 }: {
   prop: AppManifestProp;
   value: unknown;
   onChange: (v: unknown) => void;
+  // Studio Phase C CP3 audit, FIX 2: bumped by StudioPropsPanel's reset() on
+  // every "Reset to defaults" click. The raw-JSON textarea below is
+  // uncontrolled (`defaultValue`, not `value`) so it can hold deliberately
+  // invalid/unparseable text (see onRawChange's doc comment) — React only
+  // re-evaluates `defaultValue` at mount, so a `values` reset to `{}` alone
+  // reverts the live artifact but leaves stale text sitting in the
+  // textarea. Folding this counter into the textarea's `key` forces exactly
+  // that one element to remount on reset, without disturbing the field's
+  // `rawMode` toggle state (which stays keyed by `prop.name` alone, via the
+  // parent's `key={prop.name}` on the whole field).
+  resetGeneration: number;
 }) {
   const kind = studioPropControlKind(prop);
   const [rawMode, setRawMode] = useState(kind === 'raw');
@@ -129,6 +148,7 @@ function StudioPropField({
       </div>
       {control ?? (
         <textarea
+          key={resetGeneration}
           className="studio-prop-raw"
           aria-label={`${prop.name} raw JSON`}
           defaultValue={value === undefined ? '' : JSON.stringify(value)}
@@ -156,6 +176,31 @@ function StudioPropField({
 function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Studio Phase C CP3 audit, FIX 2: remount counter for the raw-JSON
+  // textareas — see StudioPropField's `resetGeneration` doc comment.
+  const [resetGeneration, setResetGeneration] = useState(0);
+
+  // Studio Phase C CP3 audit, FIX 1: `cc-bridge-ready` (posted once by the
+  // artifact's ccBridgeRuntime.tsx on ITS mount) previously had no cockpit-
+  // side listener — isValidCcBridgeReady sat unused, and cc-props-set fired
+  // on the blind PROPS_DEBOUNCE_MS debounce with no readiness gating, so a
+  // props-set that landed before the artifact's OWN message listener effect
+  // ran was silently dropped (postMessage has no delivery ack). `bridgeReady`
+  // (state, drives the flush effect below) plus `bridgeReadyRef` (always-
+  // current, read from inside the debounce timeout's closure so a stale
+  // `bridgeReady` captured at commit()-creation time can never cause a
+  // send that should've been queued, or vice versa) gate outbound sends.
+  // `pendingPropsRef` coalesces to just the newest not-yet-sent commit —
+  // props are idempotent full-sets, not deltas, so only the latest value
+  // needs to survive being queued, never a history — and is flushed exactly
+  // once when the gate opens.
+  const [bridgeReady, setBridgeReadyState] = useState(false);
+  const bridgeReadyRef = useRef(false);
+  const pendingPropsRef = useRef<Record<string, unknown> | null>(null);
+  const setBridgeReady = useCallback((v: boolean) => {
+    bridgeReadyRef.current = v;
+    setBridgeReadyState(v);
+  }, []);
 
   // A newly (re)fetched manifest means a different app/version is open —
   // drop any in-progress edits from the previous one.
@@ -169,13 +214,62 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
     };
   }, []);
 
+  // Handshake ordering guarantee. Two races, both closed here:
+  //  1. Fresh-open race (the one FIX 1 exists for): the artifact's own
+  //     message listener effect (ccBridgeRuntime.tsx) mounts after its
+  //     ready-announce effect in the SAME synchronous effects pass, so by
+  //     the time `cc-bridge-ready` is actually delivered (postMessage
+  //     delivery is always a queued task, never synchronous) the artifact's
+  //     listener is already live — this listener flips `bridgeReady` the
+  //     moment a validated ready message from the CORRECT iframe window
+  //     arrives, and the flush effect below sends whatever was queued.
+  //  2. Already-hosted race: AppFrameLayer's pickHost arbitration (studio >
+  //     panel > transcript) can hand this panel an iframe that was already
+  //     open elsewhere and already announced ready before this listener (or
+  //     even this panel) existed — no second announcement is coming.
+  //     `BRIDGE_READY_FALLBACK_MS` (250ms, comfortably above
+  //     PROPS_DEBOUNCE_MS's 150ms) is the belt-and-suspenders half: by the
+  //     time it fires, the artifact's own listener is unconditionally live
+  //     either way, so it's safe to stop gating and flush.
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      const win = findAppIframeWindow(url);
+      if (!win) return;
+      if (isValidCcBridgeReady(event.source, win, event.data)) {
+        setBridgeReady(true);
+      }
+    }
+    window.addEventListener('message', onMessage);
+    const fallback = setTimeout(() => setBridgeReady(true), BRIDGE_READY_FALLBACK_MS);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(fallback);
+    };
+  }, [url, setBridgeReady]);
+
+  // Flushes the queued props exactly once when the gate opens. `bridgeReady`
+  // only ever transitions false -> true once per panel instance (a new app
+  // open remounts this whole component via StudioModal's `key={openUrl}`),
+  // so this effect body runs at most once with a non-null pending value.
+  useEffect(() => {
+    if (!bridgeReady || pendingPropsRef.current === null) return;
+    const win = findAppIframeWindow(url);
+    if (win) sendCcPropsSet(win, pendingPropsRef.current);
+    pendingPropsRef.current = null;
+  }, [bridgeReady, url]);
+
   const commit = useCallback(
     (next: Record<string, unknown>) => {
       setValues(next);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         const win = findAppIframeWindow(url);
-        if (win) sendCcPropsSet(win, next);
+        if (!win) return;
+        if (bridgeReadyRef.current) {
+          sendCcPropsSet(win, next);
+        } else {
+          pendingPropsRef.current = next; // coalesce to newest
+        }
       }, PROPS_DEBOUNCE_MS);
     },
     [url],
@@ -183,8 +277,16 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
 
   const reset = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    pendingPropsRef.current = null; // a queued-but-unsent set must not outlive a reset
     setValues({});
+    setResetGeneration((g) => g + 1);
     const win = findAppIframeWindow(url);
+    // Ungated, unlike cc-props-set above: cc-props-reset returns the
+    // artifact to ITS OWN default props, which is also the state it's
+    // already in if the bridge listener isn't up yet — sending it early is
+    // a safe no-op (nothing to actually reset), never a lost mutation the
+    // way an arbitrary props-set would be, so it doesn't need to wait on
+    // the same readiness gate.
     if (win) sendCcPropsReset(win);
   };
 
@@ -220,6 +322,7 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
           prop={prop}
           value={values[prop.name]}
           onChange={(v) => commit({ ...values, [prop.name]: v })}
+          resetGeneration={resetGeneration}
         />
       ))}
     </div>
