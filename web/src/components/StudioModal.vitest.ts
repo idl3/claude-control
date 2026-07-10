@@ -1,9 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import { StudioModal } from './StudioModal';
+import { AppFrameLayer } from './AppFrameLayer';
+import { ArtifactPanelProvider } from './ArtifactContext';
 import { getHotkeySuppressed, setHotkeySuppressed } from '../lib/hotkeySuppression';
+
+// B2: device-mode resize tests mount AppFrameLayer alongside StudioModal so
+// they can observe the actual hosted iframe (AppFrameLayer.vitest.ts's
+// "Phase B, B1" suite already covers pickHost/elevation/chip mechanics in
+// isolation — this file only needs the StudioModal-specific claim: switching
+// device modes resizes the placeholder box, not the live iframe identity).
+// Same authFetch-mock idiom as AppFrameLayer.vitest.ts/ArtifactPanel.vitest.ts.
+const authFetchMock = vi.fn();
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>();
+  return { ...actual, authFetch: (...args: Parameters<typeof actual.authFetch>) => authFetchMock(...args) };
+});
 
 // Stub GSAP so useModalTransition's enter/exit timelines resolve
 // synchronously — same stub as lib/anim.vitest.ts. We care about the
@@ -141,6 +155,85 @@ describe('StudioModal — device-mode gating', () => {
       'screen too small',
     );
     expect(screen.getByRole('button', { name: /Mobile 390/ }).getAttribute('title')).toBeNull();
+  });
+});
+
+describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function renderStudio() {
+    render(
+      createElement(ArtifactPanelProvider, null, createElement(StudioModal), createElement(AppFrameLayer)),
+    );
+  }
+
+  it('the device box (.studio-frame) is sized exactly to each preset — Mobile 390x844, iPad 768x1024, Desktop 1280x800', () => {
+    renderStudio();
+    openStudio('apps/device-size.html');
+
+    const frame = document.querySelector('.studio-frame') as HTMLElement;
+    // Desktop viewport (beforeEach mocks 1400px) defaults to the largest
+    // enabled mode, Desktop, per StudioPanel's initial-mode logic.
+    expect(frame.style.width).toBe('1280px');
+    expect(frame.style.height).toBe('800px');
+
+    fireEvent.click(screen.getByRole('button', { name: /Mobile 390/ }));
+    expect(frame.style.width).toBe('390px');
+    expect(frame.style.height).toBe('844px');
+
+    fireEvent.click(screen.getByRole('button', { name: /iPad 768/ }));
+    expect(frame.style.width).toBe('768px');
+    expect(frame.style.height).toBe('1024px');
+  });
+
+  it('zero iframe reloads across a full mode-switch cycle — one fetch, one iframe node, for the entire journey', async () => {
+    renderStudio();
+    openStudio('apps/no-reload-resize.html');
+
+    const iframeAtOpen = await screen.findByTitle('apps/no-reload-resize.html');
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    for (const label of [/Mobile 390/, /iPad 768/, /Desktop 1280/, /Mobile 390/]) {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: label }));
+      });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByTitle('apps/no-reload-resize.html')).toBe(iframeAtOpen);
+    });
+    expect(authFetchMock).toHaveBeenCalledTimes(1); // still just the initial fetch
+  });
+
+  it('gated modes stay unreachable at small screens even with AppFrameLayer mounted (Phase A gating unchanged)', () => {
+    mockViewportWidth(390);
+    renderStudio();
+    openStudio('apps/gated-small.html');
+
+    const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
+    const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
+    expect(ipad.disabled).toBe(true);
+    expect(desktop.disabled).toBe(true);
+
+    fireEvent.click(ipad); // disabled — StudioPanel's onClick guards `enabled &&`
+    const frame = document.querySelector('.studio-frame') as HTMLElement;
+    expect(frame.style.width).toBe('390px'); // stays on the only enabled mode, Mobile
   });
 });
 

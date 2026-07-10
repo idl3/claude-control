@@ -7850,6 +7850,19 @@ select.config-input {
   padding: 24px;
 }
 .studio-frame {
+  /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder
+     filling it at 100%/100% (see EmbeddedApp.tsx's frameStyle) — the inline
+     width/height set by StudioModal.tsx must land exactly at the device
+     preset's own pixel size so the embedded app's own media queries respond
+     to the real breakpoint, not a shrunken one. `* { box-sizing: border-box
+     }` (styles.css line ~70) means padding here would eat directly into that
+     size, so this box carries none (the border-only bezel below is a
+     negligible, deliberate 1px/side device-frame affordance). The
+     font-size/text-align/padding this box carried in Phase A were for the
+     "hosting arrives in Phase B" placeholder text only — dead since B1
+     replaced that text with the live app; removed here as part of the same
+     box this task (B2) resizes.
+  */
   flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -7857,9 +7870,5 @@ select.config-input {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-dim);
-  font-size: 13px;
-  text-align: center;
-  padding: 16px;
 }
 
