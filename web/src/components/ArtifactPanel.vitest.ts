@@ -289,6 +289,104 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, desktop)', () 
   });
 });
 
+describe('ArtifactPanel — session-specific panels (mounted, desktop)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockNarrow(false);
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    cleanup();
+    rectSpy.mockRestore();
+  });
+
+  function appInput(id: string, pinned = true): OpenArtifactInput {
+    return { id, kind: 'app', title: id, content: '', appUrl: `apps/${id}.html`, appHeight: 320, pinned };
+  }
+
+  function Api({ onReady }: { onReady: (api: ReturnType<typeof useArtifactPanel>) => void }) {
+    const api = useArtifactPanel();
+    onReady(api);
+    return null;
+  }
+
+  // Mirrors this file's own `mount()` but with a controllable `sessionId`
+  // prop, so a "session switch" is driven the same way App.tsx experiences
+  // one — the SAME long-lived `<ArtifactPanelProvider>` instance rerendered
+  // with a new `sessionId`, never remounted (see ArtifactContext.vitest.ts's
+  // `setupSession` for the identical pattern one layer down, without the
+  // rendered ArtifactPanel/AppFrameLayer chrome).
+  function mountSession(sessionId: string | null) {
+    let api!: ReturnType<typeof useArtifactPanel>;
+    const tree = (sid: string | null) =>
+      createElement(
+        ArtifactPanelProvider,
+        { sessionId: sid },
+        createElement(Api, { onReady: (a) => (api = a) }),
+        createElement(ArtifactPanel),
+        createElement(AppFrameLayer),
+      );
+    const view = render(tree(sessionId));
+    return { getApi: () => api, switchTo: (sid: string | null) => view.rerender(tree(sid)) };
+  }
+
+  it('a pinned app opened in session A shows the panel; switching to an empty session B hides it entirely (no dock/sheet chrome), and A\'s app is gone; switching back to A restores it, still pinned', async () => {
+    const { getApi, switchTo } = mountSession('session-a');
+
+    await act(async () => {
+      getApi().open(appInput('proto1'));
+    });
+    await screen.findByTitle('apps/proto1.html');
+    expect(screen.getByRole('region', { name: 'Artifact panel' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'proto1' })).toBeTruthy();
+
+    // Switch to a session with nothing open — the panel's dock/sheet chrome
+    // disappears entirely (ArtifactPanel's own `if (!isOpen) return null`,
+    // unchanged, now correctly sees session B's empty slice). Session A's app
+    // iframe is no longer a "genuinely present" placeholder for AppFrameLayer
+    // to find, so it ages out through the layer's normal GRACE_MS (250ms
+    // real-time rAF loop, see AppFrameLayer.tsx) eviction path — the same
+    // path a truly-removed placeholder takes; not synchronous, hence waitFor.
+    switchTo('session-b');
+    expect(screen.queryByRole('region', { name: 'Artifact panel' })).toBeNull();
+    await waitFor(() => expect(screen.queryByTitle('apps/proto1.html')).toBeNull());
+
+    // Switch back: session A's panel reappears with the same pinned app on
+    // the same tab. (Its iframe reloads — the documented, accepted
+    // cross-session exception — but the tab/pin state is exactly restored.)
+    switchTo('session-a');
+    expect(screen.getByRole('region', { name: 'Artifact panel' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'proto1' })).toBeTruthy();
+    await screen.findByTitle('apps/proto1.html');
+    expect(getApi().artifacts.find((a) => a.id === 'proto1')?.pinned).toBe(true);
+  });
+
+  it('two sessions keep fully independent open-artifact sets — switching never bleeds one session\'s tabs into the other', async () => {
+    const { getApi, switchTo } = mountSession('session-a');
+    await act(async () => {
+      getApi().open(appInput('app-a'));
+    });
+    expect(screen.getByRole('tab', { name: 'app-a' })).toBeTruthy();
+
+    switchTo('session-b');
+    expect(screen.queryByRole('tab', { name: 'app-a' })).toBeNull();
+    await act(async () => {
+      getApi().open(appInput('app-b'));
+    });
+    expect(screen.getByRole('tab', { name: 'app-b' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'app-a' })).toBeNull();
+
+    switchTo('session-a');
+    expect(screen.getByRole('tab', { name: 'app-a' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'app-b' })).toBeNull();
+  });
+});
+
 describe('H2 (Codex review): a cap-suspended pinned app never falls back to hosting in a still-mounted transcript placeholder (mounted)', () => {
   let rectSpy: ReturnType<typeof vi.spyOn>;
 
