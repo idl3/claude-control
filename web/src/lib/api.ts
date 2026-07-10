@@ -274,6 +274,23 @@ export async function uploadIcon(file: File): Promise<void> {
   if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 }
 
+/**
+ * D3: save a Studio screenshot (+ annotations, already composited
+ * client-side into a single PNG dataUrl) into the media root at
+ * captures/<name>/<stamp>.png. Returns the embeddable relative path — same
+ * one `<embedded-image url="..." />` uses, fetchable via GET /api/media/.
+ */
+export async function saveCapture(name: string, dataUrl: string): Promise<string> {
+  const res = await authFetch(`/api/media-apps/${encodeURIComponent(name)}/captures`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; path?: string; error?: string };
+  if (!res.ok || !json.ok || !json.path) throw new Error(json.error || `HTTP ${res.status}`);
+  return json.path;
+}
+
 /** Remove the custom home-screen icon, reverting to the bundled default. */
 export async function resetIcon(): Promise<void> {
   const res = await authFetch('/api/icon', { method: 'DELETE' });

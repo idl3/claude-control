@@ -35,6 +35,7 @@ import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
+import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic } from './lib/media-captures.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -595,6 +596,17 @@ const _handler = (req, res) => {
     return handleMediaAppVersions(res, mediaAppVersionsMatch[1]);
   }
 
+  // POST /api/media-apps/<name>/captures — D3: save a Studio screenshot
+  // (+ annotations, already composited client-side) into the media root at
+  // captures/<name>/<stamp>.png, servable straight back through the
+  // /api/media/ block above. Body is JSON {dataUrl}: a `data:image/png;
+  // base64,...` string, capped at 8MB decoded (413 on overflow).
+  const mediaAppCapturesMatch = MEDIA_APP_CAPTURES_RE.exec(u.pathname);
+  if (mediaAppCapturesMatch && req.method === 'POST') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleSaveCapture(req, res, mediaAppCapturesMatch[1]);
+  }
+
   // PWA home-screen icon. GET is token-FREE: the OS fetches manifest icons and
   // the apple-touch-icon with no Authorization header, so this surface must be
   // open (it only ever returns an image). POST/DELETE (replace/reset the custom
@@ -814,6 +826,47 @@ function handleMediaAppVersions(res, rawName) {
   if (!isValidAppName(name)) return endJson(res, 400, { error: 'invalid name' });
   const listing = listVersions(CONFIG.mediaDir, name);
   return endJson(res, 200, listing || { name, versions: [], latest: null });
+}
+
+// D3: matches POST /api/media-apps/<name>/captures.
+const MEDIA_APP_CAPTURES_RE = /^\/api\/media-apps\/([^/]+)\/captures$/;
+
+// POST /api/media-apps/<name>/captures — save a Studio screenshot into
+// captures/<name>/<stamp>.png (see lib/media-captures.js). readJsonBody's
+// own 64KB default is far too small for a base64 PNG, so this passes an
+// explicit ~10.7MB cap (8MB decoded ceiling * 4/3 base64 expansion, plus the
+// small JSON envelope) — readJsonBody's own callers elsewhere all collapse
+// every rejection to 400; this one instead distinguishes "too large" into a
+// proper 413, per the captures contract.
+async function handleSaveCapture(req, res, rawName) {
+  let name;
+  try {
+    name = decodeURIComponent(rawName);
+  } catch {
+    return endJson(res, 400, { error: 'invalid name' });
+  }
+  if (!isValidAppName(name)) return endJson(res, 400, { error: 'invalid name' });
+
+  let body;
+  try {
+    body = await readJsonBody(req, 11 * 1024 * 1024);
+  } catch (err) {
+    const message = String(err?.message || err);
+    return endJson(res, message.includes('too large') ? 413 : 400, { error: message });
+  }
+
+  const buf = decodeCaptureDataUrl(body?.dataUrl);
+  if (!buf) return endJson(res, 400, { error: 'dataUrl must be a data:image/png;base64,... string' });
+  if (isOversizeCapture(buf.length)) {
+    return endJson(res, 413, { error: 'capture exceeds 8MB limit' });
+  }
+
+  try {
+    const relPath = writeCaptureAtomic(CONFIG.mediaDir, name, buf);
+    return endJson(res, 200, { ok: true, path: relPath });
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
 }
 
 // Read a small JSON request body with a hard size cap (control payloads are

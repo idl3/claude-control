@@ -629,3 +629,210 @@ describe('StudioModal — Studio Phase C CP3 audit, FIX 2: reset clears stale ra
     expect(rawAfterReset.value).toBe('');
   });
 });
+
+// --- Phase D: D1 (capture) + D3 (save-to-media-root) ----------------------
+// D1's cc-capture-request/result round-trips through the same real,
+// AppFrameLayer-hoisted iframe as the C3 props-panel bridge tests above
+// (findAppIframeWindow matches by `title === url`, same as those). D2's
+// StudioAnnotate is exercised for real here (mounted inside the review
+// overlay) but its own pure geometry/composite functions get isolated unit
+// coverage in StudioAnnotate.vitest.ts — this file only proves the capture
+// state machine + requestId correlation + save wiring.
+describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFrameLayer)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  function renderStudio() {
+    render(
+      createElement(ArtifactPanelProvider, null, createElement(StudioModal), createElement(AppFrameLayer)),
+    );
+  }
+
+  function captureRequestId(postSpy: ReturnType<typeof vi.spyOn>): string {
+    const call = postSpy.mock.calls.find((c) => (c[0] as { type?: string })?.type === 'cc-capture-request');
+    return (call?.[0] as { requestId: string }).requestId;
+  }
+
+  it('Screenshot click sends cc-capture-request; a matching cc-capture-result opens the review overlay with the annotate canvas', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'cc-capture-request' }), '*');
+    const requestId = captureRequestId(postSpy);
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: 'data:image/png;base64,AAAA' },
+          source: win,
+        }),
+      );
+    });
+
+    expect(document.querySelector('.studio-capture-review')).toBeTruthy();
+    expect(screen.getByTestId('studio-annotate-canvas')).toBeTruthy();
+  });
+
+  it('toggles body.studio-capture-reviewing while the review overlay is showing, and clears it on unmount (regression: the studio-context hoisted live-app iframe at z-index 310 otherwise sits above .studio-capture-overlay and swallows every click meant for the canvas/Save/Cancel — caught only via live-browser evidence-gathering, since jsdom performs no real stacking-context/hit-testing)', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    expect(document.body.classList.contains('studio-capture-reviewing')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: 'data:image/png;base64,AAAA' },
+          source: win,
+        }),
+      );
+    });
+
+    expect(document.querySelector('.studio-capture-review')).toBeTruthy();
+    expect(document.body.classList.contains('studio-capture-reviewing')).toBe(true);
+
+    cleanup();
+    expect(document.body.classList.contains('studio-capture-reviewing')).toBe(false);
+  });
+
+  it('capture times out after 10s with no result — an error chip renders and Screenshot re-enables', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    await screen.findByTitle('apps/counter.html');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+      expect(screen.getByRole('button', { name: 'Capturing…' })).toBeTruthy();
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(screen.getByRole('alert').textContent).toContain('capture timed out');
+      expect(screen.getByRole('button', { name: 'Screenshot' })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a cc-capture-result from a spoofed source (not the tracked iframe) is ignored — stays in the capturing state', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: 'data:image/png;base64,AAAA' },
+          source: window, // spoofed: never the tracked iframe's contentWindow
+        }),
+      );
+    });
+
+    expect(document.querySelector('.studio-capture-review')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Capturing…' })).toBeTruthy();
+  });
+
+  it('a stale cc-capture-result carrying an unrecognized requestId (e.g. from a prior, already-timed-out request) is ignored', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'cc-capture-result',
+            requestId: 'some-other-stale-request-id',
+            ok: true,
+            dataUrl: 'data:image/png;base64,AAAA',
+          },
+          source: win,
+        }),
+      );
+    });
+
+    expect(document.querySelector('.studio-capture-review')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Capturing…' })).toBeTruthy();
+  });
+
+  it('D3: Save posts the composited PNG to the captures endpoint and renders a copyable <embedded-image> tag', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: 'data:image/png;base64,AAAA' },
+          source: win,
+        }),
+      );
+    });
+
+    // saveCapture() lives in lib/api.ts and calls `authFetch` via that
+    // module's OWN internal binding, not the one StudioModal.tsx imports —
+    // so the `vi.mock('../lib/api', ...)` partial-mock swap above (which
+    // only rebinds `authFetch` for EXTERNAL importers) never intercepts it.
+    // Stubbing the underlying global `fetch` reaches it regardless of which
+    // module made the call.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/captures')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ok: true, path: 'captures/counter/2026-01-01T00-00-00Z.png' }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('<html>app</html>') } as Response);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/media-apps/counter/captures',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    expect(
+      await screen.findByText('<embedded-image url="captures/counter/2026-01-01T00-00-00Z.png" />'),
+    ).toBeTruthy();
+    fetchSpy.mockRestore();
+  });
+});

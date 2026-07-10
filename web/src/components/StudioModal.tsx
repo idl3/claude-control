@@ -3,8 +3,16 @@ import { useModalTransition } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
-import { sendCcPropsSet, sendCcPropsReset, isValidCcBridgeReady } from '../lib/appBridge';
+import {
+  sendCcPropsSet,
+  sendCcPropsReset,
+  sendCcCaptureRequest,
+  isValidCcBridgeReady,
+  isValidCcCaptureResult,
+} from '../lib/appBridge';
+import { saveCapture } from '../lib/api';
 import { EmbeddedApp } from './EmbeddedApp';
+import { StudioAnnotate, type StudioAnnotateHandle } from './StudioAnnotate';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
 // per the ≤150ms acceptance budget.
@@ -388,6 +396,171 @@ function versionTagFromUrl(url: string): string {
   return m ? m[1] : 'latest';
 }
 
+// D1: client-side ceiling on how long a `cc-capture-request` waits for its
+// matching `cc-capture-result` before the button re-enables with an error —
+// bounds a wedged/crashed artifact (tainted canvas, an infinite render loop
+// inside toPng's DOM walk, etc.) from leaving Screenshot stuck forever.
+const CAPTURE_TIMEOUT_MS = 10_000;
+
+type CaptureStage =
+  | { kind: 'idle' }
+  | { kind: 'capturing' }
+  | { kind: 'error'; message: string }
+  | { kind: 'review'; dataUrl: string }
+  | { kind: 'saving' }
+  | { kind: 'saved'; path: string };
+
+/**
+ * D1/D2/D3: Screenshot button + capture/annotate/save flow, mounted inside
+ * `.studio-toolbar`. `requestIdRef` is the sole correlation key between a
+ * Screenshot click and its eventual `cc-capture-result` (see
+ * appBridge.ts's `sendCcCaptureRequest` doc comment) — a click while a prior
+ * request is still outstanding mints a NEW requestId, so a stale result (or
+ * a post-timeout late arrival) fails the `=== requestIdRef.current` check
+ * below and is silently dropped rather than misapplied to the wrong request.
+ */
+function StudioCapture({ url, name }: { url: string; name: string }) {
+  const [stage, setStage] = useState<CaptureStage>({ kind: 'idle' });
+  const requestIdRef = useRef<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const annotateRef = useRef<StudioAnnotateHandle | null>(null);
+
+  const clearPendingTimeout = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => clearPendingTimeout, []);
+
+  // The studio-context hoisted live-app iframe (AppFrameLayer.tsx's
+  // STUDIO_HOIST_Z_INDEX = 310) unconditionally paints above .studio-overlay
+  // so the live app stays interactive during normal Studio use — but that
+  // same z-index also sits above .studio-capture-overlay (z-index: 1), which
+  // silently swallows every pointer event meant for the annotation canvas
+  // and Save/Cancel buttons during review/saving/saved. Toggling this body
+  // class (same pattern as App.tsx's is-ipad/is-external-display) lets
+  // styles.css neutralize the hoisted iframe only while the capture overlay
+  // is actually showing, without touching AppFrameLayer's unconditional
+  // normal-use behavior.
+  useEffect(() => {
+    const reviewing = stage.kind === 'review' || stage.kind === 'saving' || stage.kind === 'saved';
+    document.body.classList.toggle('studio-capture-reviewing', reviewing);
+    return () => document.body.classList.remove('studio-capture-reviewing');
+  }, [stage.kind]);
+
+  const startCapture = () => {
+    const win = findAppIframeWindow(url);
+    if (!win) {
+      setStage({ kind: 'error', message: 'app iframe not found' });
+      return;
+    }
+    const requestId = `cap-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    requestIdRef.current = requestId;
+    setStage({ kind: 'capturing' });
+    sendCcCaptureRequest(win, requestId);
+    clearPendingTimeout();
+    timeoutRef.current = setTimeout(() => {
+      // A result that already arrived clears requestIdRef in the message
+      // listener below before this fires — that's the safe no-op half of
+      // this race; this branch only fires for a genuinely still-outstanding
+      // request.
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current = null;
+        setStage({ kind: 'error', message: 'capture timed out' });
+      }
+    }, CAPTURE_TIMEOUT_MS);
+  };
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (!requestIdRef.current) return;
+      const win = findAppIframeWindow(url);
+      if (!isValidCcCaptureResult(event.source, win, event.data)) return;
+      const data = event.data as { requestId: string; ok: boolean; dataUrl?: string; error?: string };
+      if (data.requestId !== requestIdRef.current) return; // stale — answers a different (timed-out or superseded) request
+      requestIdRef.current = null;
+      clearPendingTimeout();
+      if (data.ok && data.dataUrl) {
+        setStage({ kind: 'review', dataUrl: data.dataUrl });
+      } else {
+        setStage({ kind: 'error', message: data.error || 'capture failed' });
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [url]);
+
+  const save = async () => {
+    if (stage.kind !== 'review') return;
+    const exported = annotateRef.current ? await annotateRef.current.exportPng() : stage.dataUrl;
+    setStage({ kind: 'saving' });
+    try {
+      const path = await saveCapture(name, exported);
+      setStage({ kind: 'saved', path });
+    } catch (err) {
+      setStage({ kind: 'error', message: err instanceof Error ? err.message : 'save failed' });
+    }
+  };
+
+  const copyTag = (path: string) => {
+    navigator.clipboard?.writeText(`<embedded-image url="${path}" />`).catch(() => {});
+  };
+
+  return (
+    <div className="studio-capture-controls">
+      <button
+        type="button"
+        className="studio-capture-btn"
+        onClick={startCapture}
+        disabled={stage.kind === 'capturing'}
+      >
+        {stage.kind === 'capturing' ? 'Capturing…' : 'Screenshot'}
+      </button>
+      {stage.kind === 'error' && (
+        <span className="studio-capture-error-chip" role="alert">
+          {stage.message}
+          <button type="button" onClick={() => setStage({ kind: 'idle' })} aria-label="dismiss capture error">
+            ✕
+          </button>
+        </span>
+      )}
+      {(stage.kind === 'review' || stage.kind === 'saving' || stage.kind === 'saved') && (
+        <div className="studio-capture-overlay">
+          {stage.kind === 'review' && (
+            <div className="studio-capture-review">
+              <StudioAnnotate ref={annotateRef} imageDataUrl={stage.dataUrl} />
+              <div className="studio-capture-actions">
+                <button type="button" onClick={() => setStage({ kind: 'idle' })}>
+                  Cancel
+                </button>
+                <button type="button" onClick={save}>
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
+          {stage.kind === 'saving' && <div className="studio-capture-saving">Saving…</div>}
+          {stage.kind === 'saved' && (
+            <div className="studio-capture-saved">
+              <code className="studio-capture-tag">{`<embedded-image url="${stage.path}" />`}</code>
+              <div className="studio-capture-actions">
+                <button type="button" onClick={() => copyTag(stage.path)}>
+                  Copy
+                </button>
+                <button type="button" onClick={() => setStage({ kind: 'idle' })}>
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => void }) {
   const { rootRef, requestClose } = useModalTransition(rawClose);
   // T4 fail-safe: release suppression EAGERLY at close-request time, not via
@@ -491,6 +664,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
         </div>
 
         <div className="studio-toolbar">
+          <StudioCapture url={url} name={name} />
           <label className="studio-suppress-toggle">
             <input type="checkbox" checked={suppressOn} onChange={toggleSuppress} />
             Disable cockpit hotkeys
