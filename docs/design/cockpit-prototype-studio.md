@@ -8,7 +8,7 @@
 | T1 | Grown postMessage surface (props-set/capture/outline) | source-identity + strict shape per message family (appBeacon pattern); size caps; no eval; bridge never touches parent DOM | [known] |
 | T2 | Captures endpoint = new authed write path | NAME_RE, size cap (8MB), atomic temp+rename, media-root-only, constant-time bearer | [known] |
 | T3 | docgen on complex TS types (unions/generics/ReactNode) | un-inferable props degrade to rawType + JSON input; manifest optional; build never blocks on docgen failure | [assumed] |
-| T4 | Hotkey suppression fail-safe | capture-phase interceptor; scoped to studio-open; effect cleanup always restores; Escape carve-out | [known] |
+| T4 | Hotkey suppression fail-safe | capture-phase interceptor; scoped to studio-open; suppression released EAGERLY at close-request (not animation-gated — CP3-A HIGH) with unmount cleanup as backstop; Escape carve-out; Cmd+C/V/X pass (Cmd+A currently suppressed — revisit if studio content needs select-all) | [known] |
 
 ## Performance findings
 | # | Concern | Target | Measured |

@@ -13,7 +13,6 @@
 import { useLayoutEffect } from 'react';
 
 let suppressed = false;
-const listeners = new Set<(enabled: boolean) => void>();
 
 export function getHotkeySuppressed(): boolean {
   return suppressed;
@@ -22,13 +21,8 @@ export function getHotkeySuppressed(): boolean {
 export function setHotkeySuppressed(enabled: boolean): void {
   if (suppressed === enabled) return;
   suppressed = enabled;
-  for (const fn of listeners) fn(suppressed);
 }
 
-export function subscribeHotkeySuppressed(fn: (enabled: boolean) => void): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
 
 // Keys that must always reach the browser/app even while suppression is
 // ON — clipboard combos, so the studio's device-frame content stays

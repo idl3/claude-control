@@ -8,6 +8,7 @@ import { getHotkeySuppressed, setHotkeySuppressed } from '../lib/hotkeySuppressi
 // Stub GSAP so useModalTransition's enter/exit timelines resolve
 // synchronously — same stub as lib/anim.vitest.ts. We care about the
 // studio's own behavior, not animation timing.
+let gsapNeverComplete = false;
 vi.mock('gsap', () => {
   const noop = () => {};
   const makeTimeline = (opts?: { onComplete?: () => void }) => {
@@ -16,7 +17,7 @@ vi.mock('gsap', () => {
       to: () => self,
       kill: noop,
     };
-    opts?.onComplete?.();
+    if (!gsapNeverComplete) opts?.onComplete?.();
     return self;
   };
   return {
@@ -175,5 +176,24 @@ describe('StudioModal — hotkey suppression (A3 composition)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(getHotkeySuppressed()).toBe(false);
+  });
+});
+describe('CP3-A HIGH regression: suppression release is not animation-gated', () => {
+  it('releases suppression at close-request time even if the close animation never completes', () => {
+    // Flip the module-level gsap stub into never-complete mode: onComplete is
+    // swallowed, so unmount (and its cleanup effect) never runs. The eager
+    // release in onClose must clear suppression anyway (T4 fail-safe).
+    gsapNeverComplete = true;
+    try {
+      render(createElement(StudioModal));
+      openStudio();
+      expect(getHotkeySuppressed()).toBe(true);
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Escape' });
+      });
+      expect(getHotkeySuppressed()).toBe(false);
+    } finally {
+      gsapNeverComplete = false;
+    }
   });
 });

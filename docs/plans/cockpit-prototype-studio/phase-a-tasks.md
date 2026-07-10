@@ -27,6 +27,7 @@ A2 done: commit fe7f369 — files=2 (+9/-7, net +2) — cumulative: files=3, loc
 A3 done: commit 79bc222 — files=3 new (+281/-3, net +278) — cumulative: files=6, loc=210 (budget 0.75x files, 0.35x loc)
 A4 done: commit f455e2c — files=5 touched (2 new: StudioModal.tsx, StudioModal.vitest.ts; App.tsx/EmbeddedApp.tsx/styles.css already counted) (+560/-3, net +557) — cumulative: files=8, loc=767 (budget 1.0x files — AT CAP; 1.28x loc — OVER BUDGET by 167 loc / 28%)
 Budget note: loc-delta overage is concentrated in A3+A4 test files (172 + 179 = 351 of the 767 net lines, ~46%), which is required coverage per the task specs, not scope creep. Files landed exactly at the 8-file cap. No task added a file outside its declared **Files** list. Flagging for orchestrator awareness per fail-loud discipline — not a functional blocker, all verification gates (vitest/tsc/build) are green.
+CP3-A: verdict (b); 1 HIGH (animation-gated suppression release) + 2 MEDIUM (reopen-race key, fullscreen-btn CSS) + 1 LOW (dead pub-sub) all fixed pre-PR in the audit follow-up commit; design-doc T4 corrected; StudioPanel keyed by url; fullscreen btn CSS added; 674/674.
 Sequencing note: if scroll-sync PR still unmerged when Phase A completes, chain proceeds A→C (no AppFrameLayer contact) and defers B.
 -->
 

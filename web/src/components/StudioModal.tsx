@@ -52,7 +52,16 @@ function versionTagFromUrl(url: string): string {
 }
 
 function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => void }) {
-  const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
+  const { rootRef, requestClose } = useModalTransition(rawClose);
+  // T4 fail-safe: release suppression EAGERLY at close-request time, not via
+  // unmount cleanup alone — unmount is gated behind the close animation's
+  // GSAP onComplete, and a safety invariant must never depend on a decorative
+  // animation callback firing (CP3-A HIGH). The unmount cleanup below stays
+  // as the second line of defense.
+  const onClose = () => {
+    setHotkeySuppressed(false);
+    requestClose();
+  };
   const name = appNameFromUrl(url) ?? url;
   const versionTag = versionTagFromUrl(url);
 
@@ -189,5 +198,5 @@ export function StudioModal() {
   }, []);
 
   if (openUrl === null) return null;
-  return <StudioPanel url={openUrl} onClose={() => setOpenUrl(null)} />;
+  return <StudioPanel key={openUrl} url={openUrl} onClose={() => setOpenUrl(null)} />;
 }

@@ -4954,6 +4954,28 @@ select.config-input {
 /* Phase C, C3: "pin to panel" affordance — mirrors .embed-app-reload-btn's
    quiet-corner idiom exactly, opposite corner (top:6/left:6 vs reload's
    top:6/right:6) so the two never overlap in any chrome state. */
+
+.embed-app-fullscreen-btn {
+  position: absolute;
+  top: 6px;
+  right: 34px; /* corner slot next to the reload button (right: 6px) */
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-1) 82%, transparent);
+  color: var(--text-faint);
+  opacity: 0.55;
+  transition:
+    opacity var(--ease) 0.15s,
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.embed-app-fullscreen-btn:hover,
+.embed-app-fullscreen-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-1);
+}
+
 .embed-app-pin-btn {
   position: absolute;
   top: 6px;

@@ -6,7 +6,6 @@ import {
   getHotkeySuppressed,
   isSuppressedCombo,
   setHotkeySuppressed,
-  subscribeHotkeySuppressed,
   useHotkeySuppressionInterceptor,
 } from './hotkeySuppression';
 
@@ -24,32 +23,8 @@ describe('hotkey suppression store', () => {
     expect(getHotkeySuppressed()).toBe(false);
   });
 
-  it('set() updates the flag and notifies subscribers', () => {
-    const fn = vi.fn();
-    const unsub = subscribeHotkeySuppressed(fn);
-    setHotkeySuppressed(true);
-    expect(getHotkeySuppressed()).toBe(true);
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(fn).toHaveBeenCalledWith(true);
-    unsub();
-  });
 
-  it('set() to the same value is a no-op (no notification)', () => {
-    const fn = vi.fn();
-    setHotkeySuppressed(false); // already false
-    const unsub = subscribeHotkeySuppressed(fn);
-    setHotkeySuppressed(false);
-    expect(fn).not.toHaveBeenCalled();
-    unsub();
-  });
 
-  it('unsubscribe stops further notifications', () => {
-    const fn = vi.fn();
-    const unsub = subscribeHotkeySuppressed(fn);
-    unsub();
-    setHotkeySuppressed(true);
-    expect(fn).not.toHaveBeenCalled();
-  });
 });
 
 describe('isSuppressedCombo', () => {
