@@ -6,6 +6,7 @@ import { StudioModal } from './StudioModal';
 import { AppFrameLayer } from './AppFrameLayer';
 import { ArtifactPanelProvider } from './ArtifactContext';
 import { getHotkeySuppressed, setHotkeySuppressed } from '../lib/hotkeySuppression';
+import { MAX_CC_CAPTURE_DATA_URL_LENGTH } from '../lib/appBridge';
 
 // B2: device-mode resize tests mount AppFrameLayer alongside StudioModal so
 // they can observe the actual hosted iframe (AppFrameLayer.vitest.ts's
@@ -654,6 +655,7 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
   afterEach(() => {
     rectSpy.mockRestore();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   function renderStudio() {
@@ -665,6 +667,32 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
   function captureRequestId(postSpy: ReturnType<typeof vi.spyOn>): string {
     const call = postSpy.mock.calls.find((c) => (c[0] as { type?: string })?.type === 'cc-capture-request');
     return (call?.[0] as { requestId: string }).requestId;
+  }
+
+  /**
+   * Studio Phase D CP3 audit, FIX 1: jsdom's HTMLImageElement never fires
+   * `load`/`error` for a `src` assignment at all (verified directly — see
+   * StudioAnnotate.vitest.ts's own copy of this helper) — StudioAnnotate's
+   * decode-detection (imgReady, gating Save) needs a synthetic Image that
+   * actually fires one or the other. `failSrcs` opts a specific dataUrl into
+   * the failure (onerror) path; every other src succeeds. Tests that want to
+   * exercise the "still decoding" default (Save must stay disabled/blocked)
+   * simply don't call this at all.
+   */
+  function stubImageLoad(failSrcs: Set<string> = new Set()) {
+    class FakeImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      naturalWidth = 400;
+      naturalHeight = 320;
+      set src(value: string) {
+        queueMicrotask(() => {
+          if (failSrcs.has(value)) this.onerror?.();
+          else this.onload?.();
+        });
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
   }
 
   it('Screenshot click sends cc-capture-request; a matching cc-capture-result opens the review overlay with the annotate canvas', async () => {
@@ -787,6 +815,7 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
   });
 
   it('D3: Save posts the composited PNG to the captures endpoint and renders a copyable <embedded-image> tag', async () => {
+    stubImageLoad(); // real decode success — Save only enables once StudioAnnotate's imgReady flips true
     renderStudio();
     openStudio('apps/counter.html');
     const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
@@ -822,6 +851,12 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
       return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('<html>app</html>') } as Response);
     });
 
+    // Studio Phase D CP3 audit, FIX 1: Save starts disabled until the review
+    // image has actually decoded — wait for it to enable before clicking,
+    // same as a real user would have to.
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
@@ -834,5 +869,95 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
       await screen.findByText('<embedded-image url="captures/counter/2026-01-01T00-00-00Z.png" />'),
     ).toBeTruthy();
     fetchSpy.mockRestore();
+  });
+
+  // Studio Phase D CP3 audit, FIX 1 coverage: a malformed/undecodable or
+  // oversize capture must never silently produce a blank-canvas save — Save
+  // stays disabled/blocked and no POST ever fires.
+
+  it('Save stays disabled while the review image has not (yet, or ever) finished decoding — no POST fires on click', async () => {
+    // No stubImageLoad() here: default jsdom never fires onload/onerror at
+    // all, which is exactly the "still decoding" state Save must block on.
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: 'data:image/png;base64,AAAA' },
+          source: win,
+        }),
+      );
+    });
+
+    const saveBtn = (await screen.findByRole('button', { name: 'Save' })) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+
+    fireEvent.click(saveBtn);
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      '/api/media-apps/counter/captures',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('a malformed capture image (source onerror) surfaces a real error stage, matching the capture-failed chip idiom, instead of leaving Save silently exportable', async () => {
+    const malformed = 'data:image/png;base64,not-actually-a-png';
+    stubImageLoad(new Set([malformed]));
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: malformed },
+          source: win,
+        }),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('capture image failed to decode'));
+    expect(document.querySelector('.studio-capture-review')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      '/api/media-apps/counter/captures',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('an oversize cc-capture-result dataUrl (over the 15MB base64 ceiling) is rejected at the message boundary with the capture-failed error chip, never entering review', async () => {
+    renderStudio();
+    openStudio('apps/counter.html');
+    const iframe = (await screen.findByTitle('apps/counter.html')) as HTMLIFrameElement;
+    const win = iframe.contentWindow as Window;
+    const postSpy = vi.spyOn(win, 'postMessage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Screenshot' }));
+    const requestId = captureRequestId(postSpy);
+    const oversizeDataUrl = `data:image/png;base64,${'A'.repeat(MAX_CC_CAPTURE_DATA_URL_LENGTH + 1)}`;
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'cc-capture-result', requestId, ok: true, dataUrl: oversizeDataUrl },
+          source: win,
+        }),
+      );
+    });
+
+    expect(screen.getByRole('alert').textContent).toContain('capture too large to review');
+    expect(document.querySelector('.studio-capture-review')).toBeNull();
   });
 });

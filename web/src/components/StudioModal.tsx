@@ -9,6 +9,7 @@ import {
   sendCcCaptureRequest,
   isValidCcBridgeReady,
   isValidCcCaptureResult,
+  MAX_CC_CAPTURE_DATA_URL_LENGTH,
 } from '../lib/appBridge';
 import { saveCapture } from '../lib/api';
 import { EmbeddedApp } from './EmbeddedApp';
@@ -424,6 +425,19 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
   const requestIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const annotateRef = useRef<StudioAnnotateHandle | null>(null);
+  // Studio Phase D CP3 audit, FIX 1: StudioAnnotate's own imgReady, lifted
+  // here so Save can be disabled/blocked while the received dataUrl hasn't
+  // (yet, or ever) finished decoding — belt-and-suspenders against silently
+  // exporting a blank canvas: StudioAnnotate.exportPng() ALSO throws while
+  // its own imgReady is false, so this is the UI-affordance half, not the
+  // only guard. Stable identities (useCallback, empty deps — setStage/
+  // setAnnotateReady are useState setters, already stable) so passing these
+  // as props never re-triggers StudioAnnotate's image-load effect.
+  const [annotateReady, setAnnotateReady] = useState(false);
+  const handleAnnotateReady = useCallback((ready: boolean) => setAnnotateReady(ready), []);
+  const handleAnnotateError = useCallback(() => {
+    setStage({ kind: 'error', message: 'capture image failed to decode' });
+  }, []);
 
   const clearPendingTimeout = () => {
     if (timeoutRef.current) {
@@ -459,6 +473,7 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
     const requestId = `cap-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     requestIdRef.current = requestId;
     setStage({ kind: 'capturing' });
+    setAnnotateReady(false); // fresh capture cycle — Save stays blocked until the NEW image decodes
     sendCcCaptureRequest(win, requestId);
     clearPendingTimeout();
     timeoutRef.current = setTimeout(() => {
@@ -483,7 +498,16 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
       requestIdRef.current = null;
       clearPendingTimeout();
       if (data.ok && data.dataUrl) {
-        setStage({ kind: 'review', dataUrl: data.dataUrl });
+        // Studio Phase D CP3 audit, FIX 1: an oversize dataUrl is rejected
+        // HERE, before ever reaching the review stage — not folded into
+        // isCcCaptureResultShape (see that constant's doc comment for why:
+        // this path surfaces the existing capture-failed error chip instead
+        // of a silent drop).
+        if (data.dataUrl.length > MAX_CC_CAPTURE_DATA_URL_LENGTH) {
+          setStage({ kind: 'error', message: 'capture too large to review' });
+        } else {
+          setStage({ kind: 'review', dataUrl: data.dataUrl });
+        }
       } else {
         setStage({ kind: 'error', message: data.error || 'capture failed' });
       }
@@ -493,10 +517,17 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
   }, [url]);
 
   const save = async () => {
-    if (stage.kind !== 'review') return;
-    const exported = annotateRef.current ? await annotateRef.current.exportPng() : stage.dataUrl;
+    // Studio Phase D CP3 audit, FIX 1: `!annotateReady` blocks Save the same
+    // way the disabled button attribute does — a logic-level guard, not just
+    // a UI affordance, since a synthetic/programmatic click can bypass
+    // `disabled`. exportPng() is now called INSIDE the try below (it used to
+    // sit before it, uncaught): StudioAnnotate.exportPng() itself throws
+    // while its own imgReady is false, and an uncaught throw there used to
+    // become an unhandled rejection instead of the error stage.
+    if (stage.kind !== 'review' || !annotateReady) return;
     setStage({ kind: 'saving' });
     try {
+      const exported = annotateRef.current ? await annotateRef.current.exportPng() : stage.dataUrl;
       const path = await saveCapture(name, exported);
       setStage({ kind: 'saved', path });
     } catch (err) {
@@ -530,12 +561,17 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
         <div className="studio-capture-overlay">
           {stage.kind === 'review' && (
             <div className="studio-capture-review">
-              <StudioAnnotate ref={annotateRef} imageDataUrl={stage.dataUrl} />
+              <StudioAnnotate
+                ref={annotateRef}
+                imageDataUrl={stage.dataUrl}
+                onReady={handleAnnotateReady}
+                onError={handleAnnotateError}
+              />
               <div className="studio-capture-actions">
                 <button type="button" onClick={() => setStage({ kind: 'idle' })}>
                   Cancel
                 </button>
-                <button type="button" onClick={save}>
+                <button type="button" onClick={save} disabled={!annotateReady}>
                   Save
                 </button>
               </div>

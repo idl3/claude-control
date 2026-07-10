@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createElement, createRef } from 'react';
 import {
   toCanvasPoint,
@@ -15,7 +15,35 @@ import {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
+
+/**
+ * jsdom's HTMLImageElement never fires `load`/`error` for a `src` assignment
+ * (no resource loading without jsdom's `resources: 'usable'` option, which
+ * this project's vitest config doesn't set — verified directly: an
+ * unstubbed `new Image()` with a data-URL `src` fires neither event, ever).
+ * StudioAnnotate's real decode-detection (imgReady / onReady / onError,
+ * Studio Phase D CP3 audit FIX 1) needs a synthetic Image that actually
+ * fires one or the other, so tests exercising that path stub the global
+ * constructor. `failSrcs` opts a specific `imageDataUrl` into the failure
+ * (onerror) path; every other src succeeds (onload) on the next microtask.
+ */
+function stubImageLoad(failSrcs: Set<string> = new Set()) {
+  class FakeImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    naturalWidth = 400;
+    naturalHeight = 320;
+    set src(value: string) {
+      queueMicrotask(() => {
+        if (failSrcs.has(value)) this.onerror?.();
+        else this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal('Image', FakeImage);
+}
 
 describe('toCanvasPoint', () => {
   it('maps a viewport point 1:1 when the display size equals the buffer size', () => {
@@ -213,19 +241,58 @@ describe('StudioAnnotate (mounted component)', () => {
     expect(undoBtn.disabled).toBe(true);
   });
 
-  it('exposes exportPng() via the forwarded ref and resolves without throwing (canvas.toDataURL)', async () => {
+  it('exposes exportPng() via the forwarded ref and resolves once the source image has decoded (imgReady)', async () => {
     // jsdom has no real canvas rendering backend without the optional
     // `canvas` npm package: canvas.toDataURL() resolves to `null` there
     // (verified directly against jsdom), not a data URL string — a real
     // browser always returns a string. This only asserts the ref-forwarded
-    // call resolves cleanly; the actual dataUrl content is exercised for
-    // real in StudioModal.vitest.ts's D3 save-flow test via a mocked fetch.
+    // call resolves cleanly once decode succeeds; the actual dataUrl content
+    // is exercised for real in StudioModal.vitest.ts's D3 save-flow test via
+    // a mocked fetch.
+    stubImageLoad();
     const ref = createRef<StudioAnnotateHandle>();
-    render(createElement(StudioAnnotate, { ref, imageDataUrl: 'data:image/png;base64,AAAA' }));
+    const onReady = vi.fn();
+    render(createElement(StudioAnnotate, { ref, imageDataUrl: 'data:image/png;base64,AAAA', onReady }));
+    await waitFor(() => expect(onReady).toHaveBeenCalledWith(true));
+
     let out: string | null | undefined;
     await act(async () => {
       out = await ref.current?.exportPng();
     });
     expect(out === null || typeof out === 'string').toBe(true);
+  });
+
+  // Studio Phase D CP3 audit, FIX 1 coverage: the source image's decode
+  // state now gates exportPng() itself (StudioModal additionally disables
+  // the Save button on the same signal — see StudioModal.vitest.ts) so a
+  // malformed/undecodable capture can never silently produce a blank-canvas
+  // PNG, regardless of caller.
+
+  it('exportPng() rejects while the source image has not (yet, or ever) finished decoding — never silently exports a blank canvas', async () => {
+    // No stubImageLoad() here: default jsdom never fires onload/onerror at
+    // all for an <img> src assignment, which IS the "still decoding, or a
+    // decode that will never resolve" state this guard exists for.
+    const ref = createRef<StudioAnnotateHandle>();
+    render(createElement(StudioAnnotate, { ref, imageDataUrl: 'data:image/png;base64,AAAA' }));
+    await expect(ref.current?.exportPng()).rejects.toThrow(/not ready/);
+  });
+
+  it('a malformed/undecodable dataUrl fires the source image onerror, calls onError(), and never reaches onReady(true)', async () => {
+    const malformed = 'data:image/png;base64,not-actually-a-png';
+    stubImageLoad(new Set([malformed]));
+    const onReady = vi.fn();
+    const onError = vi.fn();
+    render(createElement(StudioAnnotate, { imageDataUrl: malformed, onReady, onError }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onReady).not.toHaveBeenCalledWith(true);
+  });
+
+  it('sizes the canvas backing buffer to the image natural resolution once decode succeeds', async () => {
+    stubImageLoad();
+    render(createElement(StudioAnnotate, { imageDataUrl: 'data:image/png;base64,AAAA' }));
+    const canvas = document.querySelector('[data-testid="studio-annotate-canvas"]') as HTMLCanvasElement;
+    await waitFor(() => expect(canvas.width).toBe(400));
+    expect(canvas.height).toBe(320);
   });
 });

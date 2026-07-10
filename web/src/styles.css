@@ -8055,8 +8055,17 @@ select.config-input {
    canvas / Save / Cancel. body.studio-capture-reviewing is toggled by
    StudioCapture (StudioModal.tsx) only while stage.kind is
    review/saving/saved, so this only neutralizes the hoisted iframe during
-   that sub-state — normal Studio use is untouched. */
-body.studio-capture-reviewing .embed-app-hoist {
+   that sub-state — normal Studio use is untouched.
+
+   Studio Phase D CP3 audit, FIX 3: scoped to [data-embed-app-context='studio']
+   (set by AppFrameLayer.tsx on every hoist span, per its own `slot.context`)
+   — NOT every .embed-app-hoist. Only a studio-context hoist ever reaches
+   STUDIO_HOIST_Z_INDEX (310), so panel/transcript-hosted hoists were never
+   the actual collision this rule exists for; the unscoped selector was a
+   latent landmine (a future z-index bump on a non-studio hoist would have
+   been silently neutralized body-wide during Studio capture review) rather
+   than a live bug — no behavior change today. */
+body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] {
   z-index: 0 !important;
   pointer-events: none !important;
 }

@@ -35,7 +35,7 @@ import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
-import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic } from './lib/media-captures.js';
+import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic, sweepCaptures } from './lib/media-captures.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { readConfig, writeConfig } from './lib/config.js';
@@ -3065,6 +3065,7 @@ resources.on('overlimit', (snapshot) => {
 });
 
 let uploadSweepTimer = null;
+let captureSweepTimer = null;
 
 async function runUploadSweep() {
   try {
@@ -3073,6 +3074,21 @@ async function runUploadSweep() {
     if (removed > 0) console.log(`uploads sweep: removed ${removed} file(s) older than ${CONFIG.uploadTtlHours}h`);
   } catch (err) {
     console.error('uploads sweep failed:', err?.message || err);
+  }
+}
+
+// Studio Phase D CP3 audit, FIX 2: captures/ (Studio screenshot saves, D3)
+// had no retention sweep at all, unlike uploads/ above — an unbounded growth
+// path. Mirrors runUploadSweep exactly (same CONFIG.uploadTtlHours TTL,
+// same startup-sweep-then-24h-interval cadence, same best-effort/never-
+// throws-to-caller error handling) rather than a new config knob or cadence.
+async function runCaptureSweep() {
+  try {
+    const ttlMs = CONFIG.uploadTtlHours * 3600 * 1000;
+    const { removed } = await sweepCaptures(CONFIG.mediaDir, ttlMs);
+    if (removed > 0) console.log(`captures sweep: removed ${removed} file(s) older than ${CONFIG.uploadTtlHours}h`);
+  } catch (err) {
+    console.error('captures sweep failed:', err?.message || err);
   }
 }
 
@@ -3119,6 +3135,13 @@ async function main() {
   uploadSweepTimer = setInterval(runUploadSweep, 24 * 3600 * 1000);
   uploadSweepTimer.unref();
 
+  // Daily captures/ cleanup (Studio Phase D CP3 audit, FIX 2): same cadence
+  // as the upload sweep above — captures/<name>/*.png otherwise grows
+  // unbounded, unlike uploads/ which already had this.
+  runCaptureSweep();
+  captureSweepTimer = setInterval(runCaptureSweep, 24 * 3600 * 1000);
+  captureSweepTimer.unref();
+
   // Without this, a stale instance still holding the port makes listen() emit an
   // unhandled 'error' and the process dies with an opaque EADDRINUSE stack. Fail
   // loud and clean instead.
@@ -3162,6 +3185,7 @@ function shutdown() {
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);
+  if (captureSweepTimer) clearInterval(captureSweepTimer);
   server.close();
   // Long-lived WebSocket connections keep the listening socket bound; force them
   // closed so the port frees immediately and an in-place restart can re-bind.

@@ -131,8 +131,27 @@ export function drawStroke(ctx: DrawCtx, stroke: Stroke): void {
 
 const COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
 
-export const StudioAnnotate = forwardRef<StudioAnnotateHandle, { imageDataUrl: string }>(
-  function StudioAnnotate({ imageDataUrl }, ref) {
+export interface StudioAnnotateProps {
+  imageDataUrl: string;
+  /**
+   * Studio Phase D CP3 audit, FIX 1: fires `true` once the source image has
+   * successfully decoded (canvas sized + drawable) and `false` at the start
+   * of every load attempt AND on decode failure — the caller (StudioModal)
+   * gates the Save button on this so a malformed/undecodable dataUrl can
+   * never reach exportPng() from the UI.
+   */
+  onReady?: (ready: boolean) => void;
+  /**
+   * Fires when the source image fails to decode (the browser's native
+   * `<img>` onerror — an invalid/truncated/non-image dataUrl). The caller
+   * surfaces this as a real error stage, mirroring the existing capture-
+   * failed error chip idiom.
+   */
+  onError?: () => void;
+}
+
+export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotateProps>(
+  function StudioAnnotate({ imageDataUrl, onReady, onError }, ref) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [tool, setTool] = useState<AnnotateTool>('pen');
     const [color, setColor] = useState(COLORS[0]);
@@ -146,6 +165,13 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, { imageDataUrl: s
     // and the exported PNG stay full quality regardless of how small the
     // review overlay renders the preview.
     useEffect(() => {
+      // Reset to not-ready at the start of every load attempt (not just on
+      // failure) — defensive against a future reuse of this component that
+      // loads a second imageDataUrl into an already-mounted instance without
+      // unmounting first; today StudioModal always unmounts/remounts between
+      // captures, but this keeps the invariant true regardless.
+      setImgReady(false);
+      onReady?.(false);
       const img = new Image();
       img.onload = () => {
         imgRef.current = img;
@@ -155,12 +181,26 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, { imageDataUrl: s
           canvas.height = img.naturalHeight;
         }
         setImgReady(true);
+        onReady?.(true);
+      };
+      // Studio Phase D CP3 audit, FIX 1: a malformed/undecodable dataUrl
+      // (truncated base64, non-PNG bytes, etc.) fires the native <img>
+      // onerror — previously unhandled, leaving imgReady permanently false
+      // with no user-visible signal and Save unguarded (a stale/blank canvas
+      // could still export). Surfaces a real error to the caller AND keeps
+      // imgReady false, which now also gates Save (see exportPng() below and
+      // StudioModal's `disabled={!annotateReady}`).
+      img.onerror = () => {
+        setImgReady(false);
+        onReady?.(false);
+        onError?.();
       };
       img.src = imageDataUrl;
       return () => {
         img.onload = null;
+        img.onerror = null;
       };
-    }, [imageDataUrl]);
+    }, [imageDataUrl, onReady, onError]);
 
     // Redraw the full picture (base image + every committed stroke) any time
     // the stroke list changes or the image finishes loading.
@@ -177,6 +217,13 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, { imageDataUrl: s
 
     useImperativeHandle(ref, () => ({
       async exportPng() {
+        // Studio Phase D CP3 audit, FIX 1: belt-and-suspenders — StudioModal
+        // already disables the Save button while !annotateReady (mirrors
+        // this component's own imgReady), but exportPng() ALSO refuses here
+        // so a malformed/undecodable dataUrl can never silently produce a
+        // blank-canvas PNG even if a future caller invokes it directly,
+        // bypassing the disabled button.
+        if (!imgReady) throw new Error('image not ready — cannot export');
         const canvas = canvasRef.current;
         if (!canvas) throw new Error('canvas not ready');
         return canvas.toDataURL('image/png');

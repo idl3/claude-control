@@ -21,6 +21,7 @@ import {
   isOversizeCapture,
   decodeCaptureDataUrl,
   writeCaptureAtomic,
+  sweepCaptures,
   MAX_CAPTURE_BYTES,
 } from '../lib/media-captures.js';
 import { resolveMediaPath } from '../lib/media.js';
@@ -61,6 +62,88 @@ test('writeCaptureAtomic writes under captures/<name>/<stamp>.png, leaves no tem
   assert.equal(fs.readFileSync(full, 'utf8'), 'png-bytes');
   const entries = fs.readdirSync(path.dirname(full));
   assert.ok(entries.every((e) => !e.startsWith('.tmp-')));
+});
+
+// Studio Phase D CP3 audit, FIX 2: a mid-write failure (disk full, permission
+// error, cross-device rename, etc.) must never leave an orphaned .tmp-* file
+// behind in captures/<name>/ — writeCaptureAtomic best-effort unlinks the
+// temp file on failure, then rethrows the ORIGINAL error.
+test('writeCaptureAtomic cleans up its temp file and rethrows the original error when renameSync fails mid-write', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'captures-fail-'));
+  const originalRename = fs.renameSync;
+  const renameError = new Error('simulated cross-device rename failure');
+  fs.renameSync = () => {
+    throw renameError;
+  };
+  try {
+    assert.throws(() => writeCaptureAtomic(root, 'widget', Buffer.from('png-bytes')), renameError);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  const dir = path.join(root, 'captures', 'widget');
+  const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  assert.deepEqual(entries, [], 'no orphaned .tmp-* (or any other) file left behind');
+});
+
+// ── sweepCaptures ────────────────────────────────────────────────────────
+// Mirrors lib/uploads.js's sweepUploads test conventions (test/uploads.test.js),
+// one directory level deeper: captures/<name>/*.png rather than a flat dir.
+
+test('sweepCaptures removes captures/<name>/*.png files older than ttl, keeps fresh ones, across multiple app subdirectories', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'captures-sweep-'));
+  const widgetDir = path.join(root, 'captures', 'widget');
+  const gadgetDir = path.join(root, 'captures', 'gadget');
+  fs.mkdirSync(widgetDir, { recursive: true });
+  fs.mkdirSync(gadgetDir, { recursive: true });
+
+  const oldFile = path.join(widgetDir, 'old.png');
+  const newFile = path.join(widgetDir, 'new.png');
+  const oldFile2 = path.join(gadgetDir, 'old2.png');
+  fs.writeFileSync(oldFile, 'x');
+  fs.writeFileSync(newFile, 'y');
+  fs.writeFileSync(oldFile2, 'z');
+
+  const past = (Date.now() - 48 * 3600 * 1000) / 1000;
+  fs.utimesSync(oldFile, past, past);
+  fs.utimesSync(oldFile2, past, past);
+
+  const ttlMs = 24 * 3600 * 1000; // 24h
+  const { removed, kept } = await sweepCaptures(root, ttlMs);
+
+  assert.equal(removed, 2);
+  assert.equal(kept, 1);
+  assert.equal(fs.existsSync(oldFile), false);
+  assert.equal(fs.existsSync(oldFile2), false);
+  assert.equal(fs.existsSync(newFile), true);
+
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sweepCaptures is a no-op on a missing captures/ directory', async () => {
+  const res = await sweepCaptures('/no/such/cockpit/media-root', 1000);
+  assert.deepEqual(res, { removed: 0, kept: 0 });
+});
+
+test('sweepCaptures ignores non-.png files and non-directory entries directly under captures/', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'captures-sweep-ignore-'));
+  const widgetDir = path.join(root, 'captures', 'widget');
+  fs.mkdirSync(widgetDir, { recursive: true });
+  const strayFile = path.join(root, 'captures', 'stray.txt'); // a file directly under captures/, not a name subdir
+  fs.writeFileSync(strayFile, 'not an app dir');
+  const nonPng = path.join(widgetDir, 'notes.txt');
+  fs.writeFileSync(nonPng, 'ignore me');
+
+  const past = (Date.now() - 48 * 3600 * 1000) / 1000;
+  fs.utimesSync(strayFile, past, past);
+  fs.utimesSync(nonPng, past, past);
+
+  const { removed, kept } = await sweepCaptures(root, 24 * 3600 * 1000);
+  assert.equal(removed, 0);
+  assert.equal(kept, 0);
+  assert.equal(fs.existsSync(strayFile), true);
+  assert.equal(fs.existsSync(nonPng), true);
+
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 // ── route level (_handler) ──────────────────────────────────────────────

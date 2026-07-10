@@ -27,6 +27,24 @@ export type CcCaptureResult =
   | { type: typeof CC_CAPTURE_RESULT_TYPE; requestId: string; ok: false; error: string };
 
 /**
+ * Upper bound on an inbound `cc-capture-result`'s `dataUrl` STRING length —
+ * checked by the cockpit in StudioModal.tsx's onMessage handler, BEFORE
+ * entering the review/annotate stage, not baked into `isCcCaptureResultShape`
+ * below: folding it into the shape check would make an oversize result fail
+ * exact-shape validation entirely, and the caller's `if (!isValid...) return`
+ * early-out would then silently drop it with no error surfaced — the CP3
+ * audit explicitly requires the existing capture-failed error chip to fire
+ * instead (Studio Phase D CP3, FIX 1).
+ *
+ * ~15MB of base64 TEXT comfortably covers lib/media-captures.js's
+ * MAX_CAPTURE_BYTES (8MB DECODED): base64 inflates by 4/3, so an 8MB PNG
+ * encodes to ~10.9MB of base64 text; 15MB leaves headroom above that plus the
+ * `data:image/png;base64,` header — keep this in sync with the server ceiling
+ * if either changes.
+ */
+export const MAX_CC_CAPTURE_DATA_URL_LENGTH = 15 * 1024 * 1024;
+
+/**
  * Shape check on `event.data` for an inbound `cc-bridge-ready` announcement —
  * exact match only, mirrors isAppErrorBeaconShape: `type` must be the exact
  * literal, `manifestVersion` must be a number, and no other keys are allowed.
