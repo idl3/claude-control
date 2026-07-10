@@ -25,7 +25,9 @@ function StudioInspectorNodeLabel({ node }: { node: CcDomOutlineNode }) {
         {classPart}
       </span>
       {node.textPreview && <span className="studio-inspector-node-text">“{node.textPreview}”</span>}
-      <span className="studio-inspector-node-count">{node.childCount}</span>
+      <span className="studio-inspector-node-count" aria-label={`${node.childCount} children`}>
+        {node.childCount}
+      </span>
     </span>
   );
 }
@@ -33,17 +35,17 @@ function StudioInspectorNodeLabel({ node }: { node: CcDomOutlineNode }) {
 function StudioInspectorNode({ node }: { node: CcDomOutlineNode }) {
   if (node.children.length === 0) {
     return (
-      <div className="studio-inspector-node studio-inspector-leaf">
+      <div className="studio-inspector-node studio-inspector-leaf" role="treeitem">
         <StudioInspectorNodeLabel node={node} />
       </div>
     );
   }
   return (
-    <details className="studio-inspector-node">
+    <details className="studio-inspector-node" role="treeitem">
       <summary>
         <StudioInspectorNodeLabel node={node} />
       </summary>
-      <div className="studio-inspector-children">
+      <div className="studio-inspector-children" role="group">
         {node.children.map((child, i) => (
           <StudioInspectorNode key={i} node={child} />
         ))}
@@ -125,11 +127,20 @@ export function StudioInspector({ url, active }: { url: string; active: boolean 
           Outline truncated — depth/node limit reached, showing a partial tree.
         </p>
       )}
-      {result === undefined && <p className="studio-inspector-empty">Loading outline…</p>}
+      {result === undefined && (
+        <div className="thread-loading" role="status">
+          <span className="thread-loading-spinner" aria-hidden="true" />
+          <span>Loading outline…</span>
+        </div>
+      )}
       {result !== undefined && result.tree === null && (
         <p className="studio-inspector-empty">No outline available.</p>
       )}
-      {result?.tree && <StudioInspectorNode node={result.tree} />}
+      {result?.tree && (
+        <div role="tree" aria-label="DOM outline">
+          <StudioInspectorNode node={result.tree} />
+        </div>
+      )}
     </div>
   );
 }
