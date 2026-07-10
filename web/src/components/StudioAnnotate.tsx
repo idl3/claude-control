@@ -125,7 +125,7 @@ export function drawStroke(ctx: DrawCtx, stroke: Stroke): void {
     return;
   }
   // text
-  ctx.font = '20px sans-serif';
+  ctx.font = '20px ui-monospace, "SF Mono", Menlo, monospace';
   ctx.fillText(stroke.text, stroke.points[0].x, stroke.points[0].y);
 }
 

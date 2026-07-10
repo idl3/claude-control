@@ -157,7 +157,10 @@ describe('drawStroke', () => {
   it('text: sets a font and draws the string at the anchor point', () => {
     const ctx = mockDrawCtx();
     drawStroke(ctx, { tool: 'text', color: '#0000ff', points: [{ x: 5, y: 9 }], text: 'hi' });
-    expect(ctx.font).toBe('20px sans-serif');
+    // Studio Phase E polish, F8: annotation text font switched to a
+    // monospace stack (ui-monospace/SF Mono/Menlo) for better legibility on
+    // screenshots — was '20px sans-serif'.
+    expect(ctx.font).toBe('20px ui-monospace, "SF Mono", Menlo, monospace');
     expect(ctx.calls).toEqual(['fillText(hi,5,9)']);
   });
 });

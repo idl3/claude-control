@@ -5095,14 +5095,22 @@ select.config-input {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 10px;
+  padding: 16px;
   text-align: center;
-  background: var(--bg-2);
+  background: color-mix(in oklch, var(--red) 8%, var(--bg-2));
+}
+.embed-app-crashed::before {
+  content: '⚠';
+  font-size: 22px;
+  line-height: 1;
+  color: var(--red);
 }
 .embed-app-crashed-msg {
   overflow-wrap: anywhere;
   max-width: 90%;
+  color: var(--red);
+  font-weight: 600;
 }
 /* B audit follow-up (CP3-B, FIX 2): the beacon's own crash message (capped
    to 200 chars in AppFrameLayer.tsx), rendered as a second, de-emphasized
@@ -7749,7 +7757,9 @@ select.config-input {
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: rgba(0, 0, 0, 0.88);
+  background: oklch(10% 0.012 260 / 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 .studio-panel {
   position: relative; /* D1/D2/D3: anchors .studio-capture-overlay's inset:0 */
@@ -7757,6 +7767,7 @@ select.config-input {
   height: 100%;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
 }
 .studio-head {
   display: flex;
@@ -7766,6 +7777,7 @@ select.config-input {
   padding: 10px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
+  background: var(--bg-1);
 }
 .studio-title-group {
   display: flex;
@@ -7774,7 +7786,7 @@ select.config-input {
   min-width: 0;
 }
 .studio-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
@@ -7812,6 +7824,7 @@ select.config-input {
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
+  background: var(--bg-1);
 }
 .studio-suppress-toggle {
   display: flex;
@@ -7834,7 +7847,12 @@ select.config-input {
   color: var(--text-dim);
   cursor: pointer;
 }
+.studio-device-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
 .studio-device-btn[aria-pressed='true'] {
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
   border-color: var(--accent);
   color: var(--text);
 }
@@ -7846,10 +7864,11 @@ select.config-input {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 20px;
   overflow: auto;
   padding: 24px;
+  background: radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--bg) 86%, black) 0%, color-mix(in oklch, var(--bg) 66%, black) 100%);
 }
 .studio-frame {
   /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder
@@ -7866,9 +7885,10 @@ select.config-input {
      box this task (B2) resizes.
   */
   flex: 0 0 auto;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in oklch, var(--line) 82%, white 12%);
   border-radius: var(--radius);
   background: var(--bg-1);
+  box-shadow: 0 24px 60px -18px rgba(0,0,0,0.65), 0 6px 18px -6px rgba(0,0,0,0.45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7917,6 +7937,20 @@ select.config-input {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.studio-side-tab-soon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-faint);
+  vertical-align: middle;
+}
 .studio-side-tab-body {
   flex: 1 1 auto;
   overflow: auto;
@@ -7943,8 +7977,26 @@ select.config-input {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--bg-2);
   color: var(--text);
+}
+.studio-props-degrade-copy {
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-props-degrade-copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.studio-props-degrade-copy[data-copied] {
+  color: var(--green);
+  border-color: var(--green);
 }
 .studio-props-head {
   display: flex;
@@ -7993,7 +8045,7 @@ select.config-input {
 .studio-prop-type {
   font-size: 10px;
   color: var(--text-dim);
-  font-family: monospace;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 .studio-prop-example-chip {
   font-size: 10px;
@@ -8011,12 +8063,12 @@ select.config-input {
 .studio-prop-raw {
   width: 100%;
   min-height: 44px;
-  font-family: monospace;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 11px;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--bg-2);
   color: var(--text);
 }
 .studio-prop-raw-toggle {
@@ -8067,7 +8119,7 @@ select.config-input {
   font-size: 11px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--bg-2);
   color: var(--text-dim);
 }
 .studio-inspector-empty {
@@ -8093,7 +8145,7 @@ select.config-input {
   font-size: 11px;
 }
 .studio-inspector-node-tag {
-  font-family: monospace;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   color: var(--text);
 }
 .studio-inspector-node-text {
@@ -8141,8 +8193,8 @@ select.config-input {
   padding: 3px 8px;
   font-size: 11px;
   border-radius: var(--radius);
-  border: 1px solid #d33;
-  color: #d33;
+  border: 1px solid var(--red);
+  color: var(--red);
 }
 .studio-capture-error-chip button {
   border: 0;
@@ -8161,6 +8213,14 @@ select.config-input {
   justify-content: center;
   background: rgba(0, 0, 0, 0.88);
   padding: 24px;
+  animation: studio-capture-in 0.18s ease both;
+}
+@keyframes studio-capture-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-capture-overlay { animation: none; }
 }
 /* The studio-context hoisted live-app iframe is a position:fixed portal
    rendered straight to document.body (AppFrameLayer.tsx), not a descendant
@@ -8209,6 +8269,28 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-actions button:hover {
   border-color: var(--accent);
 }
+.studio-capture-actions button.studio-capture-save {
+  background: var(--accent);
+  color: oklch(18% 0.02 260);
+  border-color: transparent;
+  font-weight: 600;
+}
+.studio-capture-actions button.studio-capture-save:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: transparent;
+}
+.studio-capture-actions button.studio-capture-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-capture-saved-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 600;
+  font-size: 13px;
+}
 .studio-capture-saving,
 .studio-capture-saved {
   display: flex;
@@ -8222,7 +8304,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   padding: 8px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--bg-2);
   color: var(--text);
   font-size: 11px;
   word-break: break-all;
@@ -8286,5 +8368,70 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   border-radius: var(--radius);
   background: var(--bg-1);
   touch-action: none; /* pointer events drive drawing; no browser scroll/zoom gesture should intercept them */
+}
+
+.studio-close:focus-visible,
+.studio-device-btn:focus-visible,
+.studio-side-tab:focus-visible,
+.studio-suppress-toggle input:focus-visible,
+.studio-capture-btn:focus-visible,
+.studio-capture-actions button:focus-visible,
+.studio-capture-error-chip button:focus-visible,
+.studio-props-reset:focus-visible,
+.studio-prop-example-chip:focus-visible,
+.studio-prop-raw-toggle:focus-visible,
+.studio-prop-raw:focus-visible,
+.studio-props-degrade-copy:focus-visible,
+.studio-props-panel select:focus-visible,
+.studio-props-panel input:focus-visible,
+.studio-inspector-refresh:focus-visible,
+.studio-inspector-node summary:focus-visible,
+.studio-annotate-tool-btn:focus-visible,
+.studio-annotate-undo:focus-visible,
+.studio-annotate-color:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 640px) {
+  .studio-body {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 12px;
+  }
+  .studio-frame {
+    align-self: center;
+    max-width: 100%;
+  }
+  .studio-side-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 52vh;
+  }
+  .studio-title {
+    font-size: 15px;
+  }
+}
+@media (pointer: coarse) {
+  .studio-device-btn,
+  .studio-side-tab,
+  .studio-capture-btn,
+  .studio-capture-actions button,
+  .studio-props-reset,
+  .studio-prop-raw-toggle,
+  .studio-inspector-refresh,
+  .studio-annotate-tool-btn,
+  .studio-annotate-undo {
+    min-height: 44px;
+  }
+  .studio-annotate-color {
+    width: 44px;
+    height: 44px;
+  }
+  .studio-prop-example-chip {
+    min-height: 32px;
+  }
 }
 
