@@ -12,6 +12,11 @@ import {
   clampChromeInsets,
   shouldKeepPolling,
   shouldReloadOnFrame,
+  hoistTransform,
+  hoistClipPath,
+  shouldElevateHoist,
+  nextScrollStreak,
+  shouldEngageScrollFade,
   type RectLike,
 } from './AppFrameLayer';
 // C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
@@ -143,6 +148,100 @@ describe('clampChromeInsets (B audit follow-up, FIX 1: clamp chrome into the vis
   it('passes the full clip through as the crashed strip inset unchanged', () => {
     const clip = { top: 10, right: 20, bottom: 30, left: 40 };
     expect(clampChromeInsets(clip).crashedInset).toEqual(clip);
+  });
+});
+
+describe('hoistTransform (scroll-lag fix: compositor-friendly positioning, pure)', () => {
+  it('translates by the rect origin', () => {
+    expect(hoistTransform({ top: 120, left: 40, width: 300, height: 200 })).toBe(
+      'translate3d(40px, 120px, 0)',
+    );
+  });
+
+  it('translates by (0, 0) when the rect sits at the viewport origin', () => {
+    expect(hoistTransform({ top: 0, left: 0, width: 300, height: 200 })).toBe('translate3d(0px, 0px, 0)');
+  });
+
+  it('parks off-screen when there is no rect (grace-hidden / not-yet-found)', () => {
+    expect(hoistTransform(null)).toBe('translate3d(-99999px, -99999px, 0)');
+  });
+});
+
+describe('hoistClipPath (scroll-lag fix: shared clip-path string, pure)', () => {
+  const rect: RectLike = { top: 0, left: 0, width: 300, height: 200 };
+  const clip = { top: 10, right: 0, bottom: 0, left: 0 };
+
+  it('returns the inset() string when there is a rect, it is not paneHidden, and a clip exists', () => {
+    expect(hoistClipPath(rect, false, clip)).toBe('inset(10px 0px 0px 0px)');
+  });
+
+  it('returns undefined with no rect (not-yet-found / grace-hidden)', () => {
+    expect(hoistClipPath(null, false, clip)).toBeUndefined();
+  });
+
+  it('returns undefined when paneHidden, even with a rect and a clip', () => {
+    expect(hoistClipPath(rect, true, clip)).toBeUndefined();
+  });
+
+  it('returns undefined when there is no clip (fully inside the pane)', () => {
+    expect(hoistClipPath(rect, false, null)).toBeUndefined();
+  });
+});
+
+describe('shouldElevateHoist (generic elevation gate, pure)', () => {
+  it('elevates a panel host on the mobile-sheet breakpoint, no elevate attribute needed', () => {
+    expect(shouldElevateHoist('panel', true, false)).toBe(true);
+  });
+
+  it('elevates a panel host via the explicit elevate attribute, regardless of narrow', () => {
+    expect(shouldElevateHoist('panel', false, true)).toBe(true);
+  });
+
+  it('elevates a panel host when both narrow and elevate are true', () => {
+    expect(shouldElevateHoist('panel', true, true)).toBe(true);
+  });
+
+  it('does not elevate a panel host on desktop with no elevate attribute', () => {
+    expect(shouldElevateHoist('panel', false, false)).toBe(false);
+  });
+
+  it('DESIGN RULE: never elevates a transcript host, regardless of narrow or the elevate attribute — it must stay below .detail-head/.composer (z-index: 2)', () => {
+    expect(shouldElevateHoist('transcript', false, false)).toBe(false);
+    expect(shouldElevateHoist('transcript', true, false)).toBe(false);
+    expect(shouldElevateHoist('transcript', false, true)).toBe(false);
+    expect(shouldElevateHoist('transcript', true, true)).toBe(false);
+  });
+});
+
+describe('nextScrollStreak (fade-during-scroll: consecutive-event streak, pure)', () => {
+  it('starts a fresh streak (count 1) from the initial {count: 0, lastT: 0} state', () => {
+    expect(nextScrollStreak({ count: 0, lastT: 0 }, 1000, 150)).toEqual({ count: 1, lastT: 1000 });
+  });
+
+  it('continues the streak when the gap since the last event is within settleMs', () => {
+    expect(nextScrollStreak({ count: 1, lastT: 1000 }, 1100, 150)).toEqual({ count: 2, lastT: 1100 });
+  });
+
+  it('treats a gap exactly equal to settleMs as still within the gesture (inclusive boundary)', () => {
+    expect(nextScrollStreak({ count: 2, lastT: 1000 }, 1150, 150)).toEqual({ count: 3, lastT: 1150 });
+  });
+
+  it('resets to count 1 when the gap exceeds settleMs — the previous gesture already settled', () => {
+    expect(nextScrollStreak({ count: 5, lastT: 1000 }, 1300, 150)).toEqual({ count: 1, lastT: 1300 });
+  });
+});
+
+describe('shouldEngageScrollFade (fade-during-scroll: streak-length gate, pure)', () => {
+  it('does not engage below the minimum streak', () => {
+    expect(shouldEngageScrollFade(2, 3)).toBe(false);
+  });
+
+  it('engages exactly at the minimum streak', () => {
+    expect(shouldEngageScrollFade(3, 3)).toBe(true);
+  });
+
+  it('stays engaged well past the minimum streak', () => {
+    expect(shouldEngageScrollFade(10, 3)).toBe(true);
   });
 });
 
@@ -465,6 +564,288 @@ describe('Mobile-sheet fix: panel-hosted hoist z-index rides above the mobile sh
     const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
     expect(hoist).not.toBeNull();
     expect(hoist!.style.zIndex).toBe('');
+  });
+});
+
+describe('Generic elevation hook: data-embed-app-elevate (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let extraEl: HTMLElement | null = null;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+    if (extraEl) {
+      extraEl.remove();
+      extraEl = null;
+    }
+  });
+
+  // EmbeddedApp.tsx doesn't emit data-embed-app-elevate yet — it's forward-
+  // compatible plumbing for a follow-up fullscreen-panel agent (see this
+  // file's module doc comment) to wire up in ArtifactPanel.tsx/EmbeddedApp.tsx.
+  // Build the raw placeholder directly, exactly the shape EmbeddedApp will
+  // eventually render, rather than waiting on that follow-up work to land.
+  function appendRawPlaceholder(attrs: Record<string, string>): HTMLElement {
+    const el = document.createElement('span');
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    document.body.appendChild(el);
+    extraEl = el;
+    return el;
+  }
+
+  it('elevate attr bumps a panel-context hoist to z-index 210 even on desktop (not narrow)', async () => {
+    mockNarrow(false);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/elevate.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'panel',
+      'data-embed-app-elevate': 'true',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    await screen.findByTitle('apps/elevate.html');
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    expect(hoist!.style.zIndex).toBe('210');
+  });
+
+  it('panel+narrow still elevates unchanged, with no elevate attribute present', async () => {
+    mockNarrow(true);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/elevate-narrow.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'panel',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    await screen.findByTitle('apps/elevate-narrow.html');
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    expect(hoist!.style.zIndex).toBe('210');
+  });
+
+  it('DESIGN RULE: a transcript-context hoist never elevates, even with the elevate attribute present', async () => {
+    mockNarrow(false);
+    appendRawPlaceholder({
+      'data-embed-app-url': 'apps/elevate-transcript.html',
+      'data-embed-app-height': '320',
+      'data-embed-app-context': 'transcript',
+      'data-embed-app-elevate': 'true',
+    });
+    render(createElement(ArtifactPanelProvider, null, createElement(AppFrameLayer)));
+
+    await screen.findByTitle('apps/elevate-transcript.html');
+    const hoist = document.querySelector('.embed-app-hoist') as HTMLElement | null;
+    expect(hoist).not.toBeNull();
+    expect(hoist!.style.zIndex).toBe('');
+  });
+});
+
+describe('Scroll-lag fix: synchronous scroll/resize reposition (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let currentTop = 0;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    currentTop = 0;
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() =>
+      mockRect({ top: currentTop, left: 20 }),
+    );
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function mountApp(url: string) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320 }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  it('repositions the hoist span (transform) synchronously on a scroll event — no animation frame required', async () => {
+    mountApp('apps/scroll-sync.html');
+    const iframe = await screen.findByTitle('apps/scroll-sync.html');
+    const hoistBefore = iframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoistBefore.style.transform).toBe('translate3d(20px, 0px, 0)');
+
+    // Change what getBoundingClientRect will report BEFORE firing the scroll
+    // event, then read the hoist's transform in the exact same synchronous
+    // callstack as the dispatchEvent call itself — no `await`, no `act()`.
+    // window.dispatchEvent runs every matching listener synchronously, so a
+    // value change observable here can only have come from the capture-phase
+    // scroll listener (syncPositions): neither tick()'s rAF loop nor a React
+    // commit can run in between two synchronous statements in the same turn.
+    currentTop = 340;
+    window.dispatchEvent(new Event('scroll'));
+
+    const hoistAfter = iframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoistAfter.style.transform).toBe('translate3d(20px, 340px, 0)');
+  });
+
+  it('a resize event also triggers a synchronous reposition', async () => {
+    mountApp('apps/resize-sync.html');
+    const iframe = await screen.findByTitle('apps/resize-sync.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoist.style.transform).toBe('translate3d(20px, 0px, 0)');
+
+    currentTop = 88;
+    window.dispatchEvent(new Event('resize'));
+    expect(hoist.style.transform).toBe('translate3d(20px, 88px, 0)');
+  });
+
+  it('never-reload seam: the live iframe element is never remounted by a scroll-triggered reposition', async () => {
+    mountApp('apps/scroll-no-remount.html');
+    const iframeBefore = await screen.findByTitle('apps/scroll-no-remount.html');
+
+    currentTop = 500;
+    window.dispatchEvent(new Event('scroll'));
+    currentTop = 900;
+    window.dispatchEvent(new Event('scroll'));
+    currentTop = 40;
+    window.dispatchEvent(new Event('scroll'));
+
+    const iframeAfter = screen.getByTitle('apps/scroll-no-remount.html');
+    expect(iframeAfter).toBe(iframeBefore); // same DOM node, never torn down
+  });
+});
+
+describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 0, left: 0, width: 400, height: 320, x: 0, y: 0, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  let currentTop = 0;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    currentTop = 0;
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() =>
+      mockRect({ top: currentTop, left: 20 }),
+    );
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  function mountApp(url: string) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320 }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  // Dispatches N scroll events back-to-back in the same synchronous
+  // callstack — real elapsed time between them is microseconds, comfortably
+  // under SCROLL_SETTLE_MS (150ms), so every dispatch after the first
+  // extends the same streak rather than starting a new one.
+  function fireScrolls(n: number, topStep = 20) {
+    for (let i = 0; i < n; i++) {
+      currentTop += topStep;
+      window.dispatchEvent(new Event('scroll'));
+    }
+  }
+
+  it('engages the fade after SCROLL_FADE_MIN_STREAK (3) consecutive scroll events: fades the iframe and shows a skeleton in the placeholder', async () => {
+    mountApp('apps/fade-engage.html');
+    const iframe = await screen.findByTitle('apps/fade-engage.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    const placeholder = document.querySelector('[data-embed-app-url="apps/fade-engage.html"]') as HTMLElement;
+    expect(hoist.style.opacity).toBe('');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).toBeNull();
+
+    fireScrolls(3);
+
+    expect(hoist.style.opacity).toBe('0');
+    expect(hoist.style.pointerEvents).toBe('none');
+    // Never-reload seam: fading is opacity/pointer-events only.
+    expect(screen.getByTitle('apps/fade-engage.html')).toBe(iframe);
+    const skeleton = placeholder.querySelector('[data-scroll-fade-skeleton]');
+    expect(skeleton).not.toBeNull();
+    expect(skeleton!.className).toBe('embed-media-skeleton');
+  });
+
+  it('does not engage the fade on a small 1-2 event nudge (below SCROLL_FADE_MIN_STREAK)', async () => {
+    mountApp('apps/fade-nudge.html');
+    const iframe = await screen.findByTitle('apps/fade-nudge.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    const placeholder = document.querySelector('[data-embed-app-url="apps/fade-nudge.html"]') as HTMLElement;
+
+    fireScrolls(2);
+
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).toBeNull();
+  });
+
+  it('snaps back to full opacity and removes the skeleton once the scroll settles (real timer, past SCROLL_SETTLE_MS)', async () => {
+    mountApp('apps/fade-settle.html');
+    const iframe = await screen.findByTitle('apps/fade-settle.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    const placeholder = document.querySelector('[data-embed-app-url="apps/fade-settle.html"]') as HTMLElement;
+
+    fireScrolls(3);
+    expect(hoist.style.opacity).toBe('0');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).not.toBeNull();
+
+    // SCROLL_SETTLE_MS is 150ms (AppFrameLayer.tsx) — wait comfortably past
+    // it with a real timer, matching this file's GRACE_MS convention
+    // (embeds.vitest.ts) rather than faking timers (jsdom's rAF polyfill
+    // likely relies on real setTimeout internally).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).toBeNull();
+  });
+
+  it('never-reload seam: the live iframe element is never remounted across a full fade-engage-then-settle cycle', async () => {
+    mountApp('apps/fade-no-remount.html');
+    const iframeBefore = await screen.findByTitle('apps/fade-no-remount.html');
+
+    fireScrolls(3);
+    expect(screen.getByTitle('apps/fade-no-remount.html')).toBe(iframeBefore);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    const iframeAfter = screen.getByTitle('apps/fade-no-remount.html');
+    expect(iframeAfter).toBe(iframeBefore);
   });
 });
 

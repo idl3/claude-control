@@ -4958,6 +4958,18 @@ select.config-input {
    the belt-and-suspenders should a rect transiently extend past its pane. */
 .embed-app-hoist {
   z-index: 1;
+  /* Scroll-lag fix (AppFrameLayer.tsx): repositioned purely via `transform`
+     now (top/left fixed at 0, set inline) instead of layout-triggering
+     top/left writes — hints the compositor to promote this onto its own
+     layer up front so a scroll-driven translate3d() never has to wait on a
+     late layer promotion. Bounded cost: at most a handful of concurrent
+     hoist spans exist at once (LIVE_APP_CAP caps panel-context hosts at 6). */
+  will-change: transform;
+  /* Fade-during-scroll (AppFrameLayer.tsx SCROLL_FADE_DURATION_MS): only
+     `opacity` is ever transitioned here — keep this duration in sync with
+     that constant if it changes. Compositor-only property, same rationale
+     as the transform above. */
+  transition: opacity 100ms var(--ease);
 }
 
 /* B2: quiet corner reload affordance for a live/failed app iframe, and the
