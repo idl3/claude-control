@@ -211,7 +211,9 @@ function PinIcon({ filled }: { filled: boolean }) {
 }
 
 /**
- * Phase C, C3: "pin to panel" affordance — rendered by AppFrameLayer next to
+ * Phase C, C3 (A2: relabeled "Pin to panel" -> "Open in panel"; className
+ * tokens kept as-is since AppFrameLayer.tsx positions by them): "pin to
+ * panel" affordance — rendered by AppFrameLayer next to
  * AppReloadButton in every chrome state (healthy iframe corner, failed strip,
  * crashed strip), same presentation/composition split as AppReloadButton
  * above: this file owns only the button's look; AppFrameLayer owns the
@@ -244,13 +246,13 @@ export function AppPinButton({
       className={`act-btn embed-app-pin-btn${quiet ? '' : ' embed-app-pin-btn-labeled'}${
         pinned ? ' embed-app-pin-btn-active' : ''
       }`}
-      aria-label={pinned ? 'Pinned to panel' : 'Pin to panel'}
+      aria-label={pinned ? 'Opened in panel' : 'Open in panel'}
       aria-pressed={pinned}
       onClick={onClick}
       style={style}
     >
       <PinIcon filled={pinned} />
-      {quiet ? null : pinned ? 'Pinned' : 'Pin'}
+      {quiet ? null : pinned ? 'Opened' : 'Open'}
     </button>
   );
 }
