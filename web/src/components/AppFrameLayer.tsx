@@ -147,6 +147,20 @@ function basename(url: string): string {
  * `data-embed-app-elevate="true"` without adding another bespoke breakpoint
  * check here. EmbeddedApp.tsx doesn't emit the attribute yet; this is
  * forward-compatible plumbing only.
+ *
+ * Transcript-only scroll fade (operator follow-up to fade-during-scroll)
+ * layers on top of that fix, unchanged design elsewhere: the fade/skeleton
+ * exists to mask a transcript-hosted iframe's fast-flick lag as it's towed
+ * along the scrolling feed — a panel/studio-hosted iframe lives in its own
+ * container and is already kept pinned by the synchronous translate3d
+ * reposition (syncPositions, unconditional, untouched by this gate), so
+ * flashing a skeleton there is jarring with no lag to mask. applyFadeState
+ * now resolves each slot's engagement via shouldFadeSlot(faded,
+ * slot.context) instead of applying the requested `faded` state uniformly —
+ * see both doc comments below for why this is a per-slot resolve rather than
+ * a skip, which is what correctly un-fades a slot that transitions out of
+ * 'transcript' context mid-gesture (e.g. pinned into the panel mid-scroll)
+ * without waiting for the gesture to settle.
  */
 
 const GRACE_MS = 250;
@@ -376,6 +390,26 @@ export function nextScrollStreak(prev: ScrollStreak, now: number, settleMs: numb
 
 export function shouldEngageScrollFade(streakCount: number, minStreak: number): boolean {
   return streakCount >= minStreak;
+}
+
+// Transcript-only fade gate (operator follow-up to fade-during-scroll): the
+// fade exists to mask fast-flick lag when a transcript-hosted iframe is
+// towed along the scrolling transcript feed. A panel/studio-hosted iframe
+// lives in its own container — ArtifactPanel/studio, not the transcript's
+// `.thread-viewport` — and syncPositions' synchronous translate3d reposition
+// (unconditional, untouched by this gate) already keeps it pinned with no
+// lag to mask, so flashing a skeleton there would be pure jank with no
+// benefit. `context` only ever carries 'panel' | 'transcript' today (see
+// Slot['context']/SlotEl['context']); any future non-'transcript' context
+// value (e.g. a dedicated 'studio') falls out of this the same way 'panel'
+// does, with no further change needed here.
+//
+// Pure + exported (same DOM-free rationale as this file's other small
+// helpers) so applyFadeState's per-slot decision — including the "resolve
+// back to unfaded" half when a context flips away from 'transcript' mid-
+// fade — is directly unit-testable without mounting a placeholder.
+export function shouldFadeSlot(faded: boolean, context: 'panel' | 'transcript'): boolean {
+  return faded && context === 'transcript';
 }
 
 function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
@@ -1039,24 +1073,38 @@ export function AppFrameLayer() {
     // just relying on syncPositions to keep chasing it. Skipped entirely for
     // a pane-hidden slot: nothing visible to fade, nothing to gain, and no
     // point reserving a skeleton box no one can see.
+    //
+    // Transcript-only gate (operator follow-up): the requested `faded` state
+    // is resolved PER SLOT via shouldFadeSlot, not applied uniformly — a
+    // panel/studio-context slot always resolves to unfaded (effectiveFaded
+    // false) regardless of the caller's `faded` argument. This is
+    // deliberately not a skip-when-not-transcript early return: computing
+    // effectiveFaded and always running the opacity/skeleton write below
+    // means a slot whose context flips away from 'transcript' WHILE mid-fade
+    // (e.g. pinned into the panel mid-scroll) gets actively resolved back to
+    // opacity 1 / skeleton removed on the very next qualifying scroll event,
+    // rather than staying stuck faded until the whole gesture settles (the
+    // settle path's applyFadeState(false) would eventually clean it up too,
+    // but only at settle — this keeps it correct throughout the gesture).
     function applyFadeState(faded: boolean) {
       for (const [url, slot] of slotsRef.current) {
         if (!slot.rect || slot.paneHidden) continue;
+        const effectiveFaded = shouldFadeSlot(faded, slot.context);
         const el = hoistElsRef.current.get(url);
         if (el) {
-          el.style.opacity = faded ? '0' : '';
-          el.style.pointerEvents = faded ? 'none' : 'auto';
+          el.style.opacity = effectiveFaded ? '0' : '';
+          el.style.pointerEvents = effectiveFaded ? 'none' : 'auto';
         }
         const hostEl = slot.hostEl;
         if (!hostEl || !hostEl.isConnected) continue;
         const existing = hostEl.querySelector<HTMLElement>('[data-scroll-fade-skeleton]');
-        if (faded && !existing) {
+        if (effectiveFaded && !existing) {
           const skeleton = document.createElement('span');
           skeleton.className = 'embed-media-skeleton';
           skeleton.setAttribute('aria-hidden', 'true');
           skeleton.setAttribute('data-scroll-fade-skeleton', 'true');
           hostEl.appendChild(skeleton);
-        } else if (!faded && existing) {
+        } else if (!effectiveFaded && existing) {
           existing.remove();
         }
       }
