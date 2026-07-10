@@ -18,7 +18,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 | state | tasks |
 |---|---|
 | todo | — |
-| done | E1, E2, E3 |
+| done | E1, E2, E3, CP3-E |
 
 **Budget note (applies to E1+E2 combined, carried forward from before this entry existed)**: `complexity-budget: { files: 6, loc-delta: 400 }` — actual E1+E2 span (`b98b7a7..aedd15a`) touched **9 files, +1114/-12 loc**. Over on both axes (1.5x files, ~2.75x loc). Breakdown: 5 source files (`StudioInspector.tsx` new, `StudioModal.tsx`, `appBridge.ts`, `ccBridgeRuntime.tsx`, `styles.css`) + 4 test files (`StudioInspector.vitest.ts`, `StudioModal.vitest.ts`, `appBridge.vitest.ts`, `ccBridgeRuntime.vitest.ts`). The overrun is the test files: the global testing mandate (80%+ coverage, regression tests for every new surface) isn't optional against a per-phase loc budget — S1's read-only-inspector acceptance criteria (spoofed-source rejection, truncation boundary cases, full-context round-trip) need real coverage, not a token test. Not treated as scope creep; flagged here because the budget line exists and was in fact exceeded.
 
@@ -45,11 +45,21 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 - Contract docs: new "Artifact contract" section in `docs/design/cockpit-prototype-studio.md` — manifest schema v1 (fields + per-field degrade), full bidirectional message catalog (all 8 types, both directions, correlation/no-correlation reasoning), validation rules (source-identity-not-origin, exact-shape, dual-sided outline-budget enforcement, capture-size ceilings client+server), and a degrade-rules table covering manifest-absence, oversize/throwing outline walks, capture failure/timeout/oversize, crash+no-reload-button, reload-discards-overrides, and the device-mode chrome-inset gating above.
 - Verification: harness run green (`{"ok": true}`, 12/12 evidence artifacts) + full suites below.
 
+### CP3-E — done — sha `d9ea5cf`
+CP3 audit follow-up on top of E1-E3, priority-ordered:
+- **FIX 1 [P2, priority]** — the crashed strip's `isStudioHost` gate (Studio Phase B CP3, FIX 2) suppressed the reload/pin/fullscreen corner trio unconditionally for `context==='studio'`, including the crashed render branch — a studio-hosted component that crashes with the studio as its only host had no recovery path short of closing and reopening the whole modal. Fixed by rendering `AppReloadButton` unconditionally in the CRASHED branch only (`AppFrameLayer.tsx`, render function) — dispatches the same `cockpit:app-reload` CustomEvent the transcript/panel reload button already uses, remounting the shared url-keyed iframe fresh (`crashed:false`, `pickHost`'s existing studio>panel>transcript priority re-hosts it in the studio). Pin + fullscreen stay suppressed for studio in every branch (still redundant/self-referential there regardless of crash state); the healthy and failed branches are byte-for-byte unchanged from Phase B CP3. New mounted regression tests in `web/src/lib/embeds.vitest.ts` ("Studio Phase E CP3 audit, FIX 1"): a crashed studio host renders Reload (not Pin/Fullscreen) and recovers via a real click through to a freshly-fetched srcdoc; a healthy studio host still renders none of the three, confirming the fix is scoped to the crashed branch alone.
+- **FIX 2 [LOW]** — added the missing cycle/DAG regression test for `isCcDomOutlineResultShape` (`web/src/lib/appBridge.vitest.ts`): a hand-built self-referencing outline node (`n.children.push(n)`) is rejected, locking in the analytically-proven bound that `isPlainOutlineNodeShape`'s depth check (first line of the recursive walk, evaluated before `.every(...)` re-enters children) terminates within `CC_DOM_OUTLINE_MAX_DEPTH`+1 (13) stack frames regardless of a hostile/buggy producer's tree shape — no infinite recursion, no stack blow.
+- **FIX 3 [LOW]** — corrected the design doc's degrade-rules table ("Artifact throws during render (crash)" row, `docs/design/cockpit-prototype-studio.md`): it previously read as if recovering a studio crash needed a manual `cockpit:app-reload` dispatch; updated to document FIX 1's shipped in-studio Reload button as the primary recovery path, plus the close+reopen fallback's real timing nuance (`GRACE_MS`=250ms — a reopen past that window evicts-and-remounts fresh; a reopen within it reuses the still-tracked, still-crashed slot).
+- The prop-resync-on-reload finding (a full iframe reload discards all `cc-props-set` overrides, `degrade rules` table's "Full iframe reload" row) is intentionally untouched — a narrower, already-documented P2/P3 fast-follow, out of scope for this pass. `bridgeReady`/flush logic likewise untouched.
+
+**Verification**: `cd web && npx vitest run` → 878 passed (52 files), up from the 875 baseline (+3: 2 in `embeds.vitest.ts` for FIX 1, 1 in `appBridge.vitest.ts` for FIX 2). `npx tsc -b --pretty false` → clean. `npm run build` → green (same pre-existing chunk-size warning on `dist/assets/index-*.js` noted throughout this phase's log, unrelated). Server suite (`npm test` at repo root) → 945 passed (17 suites), unchanged (no server-side files touched).
+
 ## Audit item coverage
 | Task | Rubric |
 |---|---|
 | E1 | S1 |
 | E3 | full-journey evidence + contract docs |
+| CP3-E | FIX 1 P2 (priority), FIX 2/FIX 3 LOW |
 
 ## Task list
 
