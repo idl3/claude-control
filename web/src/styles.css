@@ -2863,6 +2863,63 @@ body.is-external-display .composer {
   caret-color: var(--text);
 }
 
+/* ── Live /goal + ultrathink highlighting (composer overlay only) ──────────
+   Same reserved-token gradients as the transcript (.goal-pill / .ultrathink-
+   text below, in the /goal + ultrathink section), but stripped of every
+   property that would change glyph advance width — the transcript versions
+   add padding/margin/border/font-weight for a static one-shot render; the
+   composer overlay sits pixel-for-pixel over live (invisible) textarea text,
+   so it must obey the same METRIC CONSTRAINT as .composer-pill above. */
+.composer-goal-pill {
+  background-image: linear-gradient(
+    100deg,
+    oklch(55% 0.03 240) 0%,
+    oklch(68% 0.05 235) 25%,
+    oklch(72% 0.04 230) 50%,
+    oklch(68% 0.05 235) 75%,
+    oklch(55% 0.03 240) 100%
+  );
+  background-size: 200% auto;
+  animation: shimmer-sweep 1.8s linear infinite;
+  color: oklch(97% 0.01 240);
+  text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  /* NO padding, NO margin, NO border, NO font-weight/size change — metric constraint */
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-goal-pill {
+    animation: none;
+  }
+}
+.composer-ultrathink {
+  background-image: linear-gradient(
+    90deg,
+    oklch(70% 0.25 20),
+    oklch(75% 0.2 80),
+    oklch(78% 0.2 140),
+    oklch(72% 0.2 200),
+    oklch(68% 0.24 260),
+    oklch(70% 0.25 320),
+    oklch(70% 0.25 20)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-flash 2.2s linear infinite;
+  /* NO font-weight change (the transcript's .ultrathink-text is bold) —
+     metric constraint: bolding widens glyphs vs. the textarea's regular
+     weight and would drift everything after it out of alignment. */
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-ultrathink {
+    animation: none;
+  }
+}
+
 /* Overlay placeholder: lets the hint use the <Kbd> component (a native
    placeholder is text-only). Sits exactly over the input's text box, click-
    through, and is revealed only while the input shows its (blank) placeholder. */
