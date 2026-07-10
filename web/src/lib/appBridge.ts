@@ -17,8 +17,14 @@
 export const CC_BRIDGE_READY_TYPE = 'cc-bridge-ready';
 export const CC_PROPS_SET_TYPE = 'cc-props-set';
 export const CC_PROPS_RESET_TYPE = 'cc-props-reset';
+export const CC_CAPTURE_REQUEST_TYPE = 'cc-capture-request';
+export const CC_CAPTURE_RESULT_TYPE = 'cc-capture-result';
 
 export type CcBridgeReady = { type: typeof CC_BRIDGE_READY_TYPE; manifestVersion: number };
+
+export type CcCaptureResult =
+  | { type: typeof CC_CAPTURE_RESULT_TYPE; requestId: string; ok: true; dataUrl: string }
+  | { type: typeof CC_CAPTURE_RESULT_TYPE; requestId: string; ok: false; error: string };
 
 /**
  * Shape check on `event.data` for an inbound `cc-bridge-ready` announcement —
@@ -33,6 +39,29 @@ export function isCcBridgeReadyShape(data: unknown): data is CcBridgeReady {
   if (rec.type !== CC_BRIDGE_READY_TYPE) return false;
   if (typeof rec.manifestVersion !== 'number') return false;
   return true;
+}
+
+/**
+ * Exact-shape check for an inbound `cc-capture-result` message. The success
+ * and failure variants are exact-shape checked separately (each has its own
+ * fixed key set: {type,requestId,ok,dataUrl} or {type,requestId,ok,error}) —
+ * `ok` is a discriminant, not a generic boolean; a message with `ok: true`
+ * but an `error` key instead of `dataUrl` (or vice versa) is rejected, not
+ * coerced.
+ */
+export function isCcCaptureResultShape(data: unknown): data is CcCaptureResult {
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  if (rec.type !== CC_CAPTURE_RESULT_TYPE) return false;
+  if (typeof rec.requestId !== 'string' || rec.requestId.length === 0) return false;
+  if (rec.ok === true) {
+    return keys.length === 4 && typeof rec.dataUrl === 'string' && rec.dataUrl.length > 0;
+  }
+  if (rec.ok === false) {
+    return keys.length === 4 && typeof rec.error === 'string';
+  }
+  return false;
 }
 
 /**
@@ -53,6 +82,35 @@ export function isTrustedCcBridgeSource(eventSource: unknown, slotWindow: unknow
  */
 export function isValidCcBridgeReady(eventSource: unknown, slotWindow: unknown, data: unknown): boolean {
   return isTrustedCcBridgeSource(eventSource, slotWindow) && isCcBridgeReadyShape(data);
+}
+
+/**
+ * Combined check for an inbound `cc-capture-result`: same source-identity +
+ * exact-shape discipline as `isValidCcBridgeReady`. Callers must additionally
+ * check `data.requestId` against the specific request they are awaiting —
+ * this function only proves the message is a genuine, well-formed capture
+ * result from the tracked iframe, not that it answers any particular request
+ * (a stale result from a prior, already-timed-out capture is still "valid"
+ * by this check alone).
+ */
+export function isValidCcCaptureResult(eventSource: unknown, slotWindow: unknown, data: unknown): boolean {
+  return isTrustedCcBridgeSource(eventSource, slotWindow) && isCcCaptureResultShape(data);
+}
+
+/**
+ * Post a `cc-capture-request` down to a tracked iframe's contentWindow.
+ * `requestId` is a caller-generated correlation id (StudioModal mints one
+ * per Screenshot click) — REQUIRED, unlike props-set/props-reset's fire-and-
+ * forget shape, because capture is a one-shot request/response with a 10s
+ * timeout on the caller's side: without a requestId, a `cc-capture-result`
+ * that arrives late (after the caller already gave up and re-enabled the
+ * Screenshot button) could be misread as the answer to a brand-new,
+ * unrelated capture request racing it. Outbound send from the cockpit (the
+ * trusted party in this direction) — no shape/source validation applies
+ * here, mirroring sendCcPropsSet/sendCcPropsReset.
+ */
+export function sendCcCaptureRequest(iframeWindow: Window, requestId: string): void {
+  iframeWindow.postMessage({ type: CC_CAPTURE_REQUEST_TYPE, requestId }, '*');
 }
 
 /**
