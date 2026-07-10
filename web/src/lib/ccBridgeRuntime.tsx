@@ -24,8 +24,18 @@
 // reference equality, the same discriminator appBeacon.ts/appBridge.ts use
 // in the other direction.
 //
-// Reserved, not yet handled (future phases): cc-dom-outline-request,
+// Reserved, not yet handled (future phase — E2 tracker rationale):
 // cc-console-entry.
+//
+// E1: cc-dom-outline-request/cc-dom-outline-result — same source-identity
+// model as props-set/props-reset (event.source must reference-equal
+// window.parent), a one-shot request/response like capture. On a trusted
+// request, this module walks `document.body` into a depth/node-capped plain
+// tree (serializeCcDomOutline) and posts it back as cc-dom-outline-result.
+// Unlike capture, the result carries no requestId: a stale-but-valid outline
+// is not a correctness hazard the way a stale capture would be (nothing is
+// saved from it) — Studio's Inspector tab just shows a Refresh button for
+// re-requesting, so no correlation/timeout machinery is needed here.
 //
 // D1: cc-capture-request/cc-capture-result — same source-identity model as
 // props-set/props-reset above (event.source must reference-equal
@@ -48,10 +58,39 @@ export const CC_PROPS_SET_TYPE = 'cc-props-set';
 export const CC_PROPS_RESET_TYPE = 'cc-props-reset';
 export const CC_CAPTURE_REQUEST_TYPE = 'cc-capture-request';
 export const CC_CAPTURE_RESULT_TYPE = 'cc-capture-result';
+export const CC_DOM_OUTLINE_REQUEST_TYPE = 'cc-dom-outline-request';
+export const CC_DOM_OUTLINE_RESULT_TYPE = 'cc-dom-outline-result';
+
+// E1: outline serialization budget — matches the acceptance ceiling exactly
+// (depth <=12, total nodes <=2000). appBridge.ts re-enforces the SAME two
+// numbers when validating an inbound result, defensively bounding its own
+// validation cost regardless of what a buggy/hostile producer build claims.
+export const CC_DOM_OUTLINE_MAX_DEPTH = 12;
+export const CC_DOM_OUTLINE_MAX_NODES = 2000;
+export const CC_DOM_OUTLINE_TEXT_PREVIEW_LENGTH = 40;
 
 export type CcPropsSetMessage = { type: typeof CC_PROPS_SET_TYPE; props: Record<string, unknown> };
 export type CcPropsResetMessage = { type: typeof CC_PROPS_RESET_TYPE };
 export type CcCaptureRequestMessage = { type: typeof CC_CAPTURE_REQUEST_TYPE; requestId: string };
+export type CcDomOutlineRequestMessage = { type: typeof CC_DOM_OUTLINE_REQUEST_TYPE };
+
+/** One node in a serialized read-only DOM outline — see serializeCcDomOutline. */
+export type CcDomOutlineNode = {
+  tag: string;
+  id: string | null;
+  className: string | null;
+  /** Direct text-node children only (not descendant text), trimmed, hard-capped at CC_DOM_OUTLINE_TEXT_PREVIEW_LENGTH chars. */
+  textPreview: string | null;
+  /** Actual element-child count in the live DOM, even if `children` was truncated by the depth/node budget. */
+  childCount: number;
+  children: CcDomOutlineNode[];
+};
+
+export type CcDomOutlineResultMessage = {
+  type: typeof CC_DOM_OUTLINE_RESULT_TYPE;
+  tree: CcDomOutlineNode | null;
+  truncated: boolean;
+};
 
 /**
  * Exact-shape check for an inbound `cc-props-set` message — mirrors
@@ -86,6 +125,14 @@ export function isCcCaptureRequestShape(data: unknown): data is CcCaptureRequest
   return typeof rec.requestId === 'string' && rec.requestId.length > 0;
 }
 
+/** Exact-shape check for an inbound `cc-dom-outline-request` message — no other keys allowed, same bare shape as props-reset. */
+export function isCcDomOutlineRequestShape(data: unknown): data is CcDomOutlineRequestMessage {
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  return keys.length === 1 && keys[0] === 'type' && rec.type === CC_DOM_OUTLINE_REQUEST_TYPE;
+}
+
 /**
  * Source-identity check — the iframe's own side of the boundary: the only
  * trusted sender of props-set/props-reset is window.parent.
@@ -97,7 +144,8 @@ export function isTrustedCcBridgeParent(eventSource: unknown, parentWindow: unkn
 export type CcBridgeInboundMessage =
   | { kind: 'set'; props: Record<string, unknown> }
   | { kind: 'reset' }
-  | { kind: 'capture'; requestId: string };
+  | { kind: 'capture'; requestId: string }
+  | { kind: 'outline' };
 
 /**
  * Combined check the bridge's own `message` listener runs against every
@@ -114,7 +162,93 @@ export function parseCcInboundMessage(
   if (isCcPropsSetShape(data)) return { kind: 'set', props: data.props };
   if (isCcPropsResetShape(data)) return { kind: 'reset' };
   if (isCcCaptureRequestShape(data)) return { kind: 'capture', requestId: data.requestId };
+  if (isCcDomOutlineRequestShape(data)) return { kind: 'outline' };
   return null;
+}
+
+/**
+ * Direct (non-descendant) text content of `el`, trimmed and hard-capped at
+ * CC_DOM_OUTLINE_TEXT_PREVIEW_LENGTH chars — deliberately NOT `el.textContent`
+ * (which recursively includes every descendant's text too): a tree that
+ * already shows nested elements as their own nodes doesn't need every
+ * ancestor repeating the same descendant text in its own preview.
+ */
+function directTextPreview(el: Element): string | null {
+  let text = '';
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3 /* Node.TEXT_NODE — jsdom/browser both define this constant on Node, but Node isn't guaranteed global here */) {
+      text += node.textContent ?? '';
+    }
+  }
+  text = text.trim();
+  if (!text) return null;
+  return text.length > CC_DOM_OUTLINE_TEXT_PREVIEW_LENGTH
+    ? text.slice(0, CC_DOM_OUTLINE_TEXT_PREVIEW_LENGTH)
+    : text;
+}
+
+/**
+ * Walks `root` into a plain, read-only outline tree, depth- and node-capped.
+ * `visited` is a single shared counter across the whole walk (closed over,
+ * not per-branch) so "total nodes <=2000" is a genuine whole-tree budget, not
+ * a per-branch one — a wide shallow tree and a narrow deep tree hit the same
+ * ceiling. `maxDepth` bounds the deepest node VALUE the tree can contain
+ * (root is depth 0); a node landing exactly at `maxDepth` is still included
+ * itself, just childless in the output even if it has real DOM children
+ * (which is what flips `truncated`).
+ */
+export function serializeCcDomOutline(
+  root: Element,
+  maxDepth: number = CC_DOM_OUTLINE_MAX_DEPTH,
+  maxNodes: number = CC_DOM_OUTLINE_MAX_NODES,
+): { tree: CcDomOutlineNode; truncated: boolean } {
+  let visited = 0;
+  let truncated = false;
+
+  function walk(el: Element, depth: number): CcDomOutlineNode {
+    visited += 1;
+    const childCount = el.children.length;
+    const children: CcDomOutlineNode[] = [];
+    if (depth >= maxDepth) {
+      if (childCount > 0) truncated = true;
+    } else {
+      for (const child of Array.from(el.children)) {
+        if (visited >= maxNodes) {
+          truncated = true;
+          break;
+        }
+        children.push(walk(child, depth + 1));
+      }
+    }
+    return {
+      tag: el.tagName.toLowerCase(),
+      id: el.id || null,
+      className: typeof el.className === 'string' && el.className ? el.className : null,
+      textPreview: directTextPreview(el),
+      childCount,
+      children,
+    };
+  }
+
+  return { tree: walk(root, 0), truncated };
+}
+
+/**
+ * Serializes `root` (defaults to document.body, parity with D1's capture
+ * target) and posts the result to window.parent as `cc-dom-outline-result`.
+ * try/catch mirrors captureCcBridgeSnapshot's defensive shape even though the
+ * DOM walk itself is synchronous — a custom element with a throwing getter
+ * (e.g. a hostile/buggy `id`/`className` accessor) is plausible in a
+ * producer's own markup, and this is one-shot best-effort telemetry, not a
+ * mutation that must never silently no-op.
+ */
+export function postCcDomOutlineResult(root: Element = document.body): void {
+  try {
+    const { tree, truncated } = serializeCcDomOutline(root);
+    window.parent.postMessage({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree, truncated }, '*');
+  } catch {
+    window.parent.postMessage({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false }, '*');
+  }
 }
 
 /**
@@ -179,8 +313,10 @@ export function withCcBridge<P extends Record<string, unknown>>(
         } else if (msg.kind === 'reset') {
           setOverrides({});
           setResetKey((k) => k + 1);
-        } else {
+        } else if (msg.kind === 'capture') {
           void captureCcBridgeSnapshot(msg.requestId);
+        } else {
+          postCcDomOutlineResult();
         }
       }
       window.addEventListener('message', onMessage);

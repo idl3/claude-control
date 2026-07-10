@@ -5,15 +5,31 @@ import {
   CC_PROPS_RESET_TYPE,
   CC_CAPTURE_REQUEST_TYPE,
   CC_CAPTURE_RESULT_TYPE,
+  CC_DOM_OUTLINE_REQUEST_TYPE,
+  CC_DOM_OUTLINE_RESULT_TYPE,
   isCcBridgeReadyShape,
   isCcCaptureResultShape,
+  isCcDomOutlineResultShape,
   isTrustedCcBridgeSource,
   isValidCcBridgeReady,
   isValidCcCaptureResult,
+  isValidCcDomOutlineResult,
   sendCcPropsSet,
   sendCcPropsReset,
   sendCcCaptureRequest,
+  sendCcDomOutlineRequest,
+  type CcDomOutlineNode,
 } from './appBridge';
+
+/** A minimal well-formed outline node — reused as a base fixture below. */
+const LEAF: CcDomOutlineNode = {
+  tag: 'span',
+  id: null,
+  className: null,
+  textPreview: null,
+  childCount: 0,
+  children: [],
+};
 
 describe('isCcBridgeReadyShape', () => {
   it('accepts the exact shape', () => {
@@ -187,5 +203,121 @@ describe('sendCcCaptureRequest', () => {
       { type: CC_CAPTURE_REQUEST_TYPE, requestId: 'req-1' },
       '*',
     );
+  });
+});
+
+describe('isCcDomOutlineResultShape', () => {
+  it('accepts tree:null (the producer-side degrade case)', () => {
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false })).toBe(
+      true,
+    );
+  });
+
+  it('accepts a well-formed non-null tree, including nested children', () => {
+    const tree: CcDomOutlineNode = { ...LEAF, tag: 'div', id: 'root', childCount: 1, children: [LEAF] };
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree, truncated: true })).toBe(
+      true,
+    );
+  });
+
+  it('rejects a missing/non-boolean truncated, a wrong type, or extra top-level keys', () => {
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null })).toBe(false);
+    expect(
+      isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: 'no' }),
+    ).toBe(false);
+    expect(isCcDomOutlineResultShape({ type: 'nope', tree: null, truncated: false })).toBe(false);
+    expect(
+      isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false, extra: 1 }),
+    ).toBe(false);
+  });
+
+  it('rejects a node missing a required key, an extra key, or a wrong field type', () => {
+    const { childCount: _drop, ...missingChildCount } = LEAF;
+    expect(
+      isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: missingChildCount, truncated: false }),
+    ).toBe(false);
+    expect(
+      isCcDomOutlineResultShape({
+        type: CC_DOM_OUTLINE_RESULT_TYPE,
+        tree: { ...LEAF, extra: 'x' },
+        truncated: false,
+      }),
+    ).toBe(false);
+    expect(
+      isCcDomOutlineResultShape({
+        type: CC_DOM_OUTLINE_RESULT_TYPE,
+        tree: { ...LEAF, childCount: '0' },
+        truncated: false,
+      }),
+    ).toBe(false);
+    expect(
+      isCcDomOutlineResultShape({
+        type: CC_DOM_OUTLINE_RESULT_TYPE,
+        tree: { ...LEAF, children: 'nope' },
+        truncated: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a tree deeper than the shared 12-level budget, even though each individual node is well-formed', () => {
+    // Build a chain 14 nodes deep (depths 0..13) — one past the 12 ceiling.
+    let node: CcDomOutlineNode = LEAF;
+    for (let i = 0; i < 13; i++) {
+      node = { ...LEAF, children: [node] };
+    }
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: node, truncated: true })).toBe(
+      false,
+    );
+  });
+
+  it('rejects a tree wider than the shared 2000-node budget', () => {
+    const children = Array.from({ length: 2001 }, () => ({ ...LEAF }));
+    const tree: CcDomOutlineNode = { ...LEAF, children };
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree, truncated: true })).toBe(
+      false,
+    );
+  });
+
+  it('accepts a tree exactly at the depth/node ceilings (never rejects a legitimately-capped result)', () => {
+    // Exactly 12 nested levels below the root (depths 0..12 inclusive = 13
+    // nodes total) is what serializeCcDomOutline itself can legitimately
+    // produce at maxDepth=12 — must not be rejected here.
+    let node: CcDomOutlineNode = LEAF;
+    for (let i = 0; i < 12; i++) {
+      node = { ...LEAF, children: [node] };
+    }
+    expect(isCcDomOutlineResultShape({ type: CC_DOM_OUTLINE_RESULT_TYPE, tree: node, truncated: true })).toBe(
+      true,
+    );
+  });
+});
+
+describe('isValidCcDomOutlineResult (combined check)', () => {
+  const win = {};
+
+  it('accepts a matching source + exact shape', () => {
+    expect(
+      isValidCcDomOutlineResult(win, win, { type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false }),
+    ).toBe(true);
+  });
+
+  it('rejects a spoofed source even with a perfectly valid shape', () => {
+    expect(
+      isValidCcDomOutlineResult({}, win, { type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null, truncated: false }),
+    ).toBe(false);
+  });
+
+  it('rejects a valid source with a malformed shape', () => {
+    expect(isValidCcDomOutlineResult(win, win, { type: CC_DOM_OUTLINE_RESULT_TYPE, tree: null })).toBe(
+      false,
+    );
+  });
+});
+
+describe('sendCcDomOutlineRequest', () => {
+  it('posts a bare cc-dom-outline-request message to the target window', () => {
+    const postMessage = vi.fn();
+    sendCcDomOutlineRequest({ postMessage } as unknown as Window);
+    expect(postMessage).toHaveBeenCalledWith({ type: CC_DOM_OUTLINE_REQUEST_TYPE }, '*');
   });
 });
