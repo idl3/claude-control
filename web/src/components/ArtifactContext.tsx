@@ -293,6 +293,10 @@ export function ArtifactPanelProvider({ children, sessionId }: ArtifactPanelProv
     const persisted = loadSessionPanels();
     const initial: Record<string, PanelState> = {};
     for (const [sid, p] of Object.entries(persisted)) {
+      // NO_SESSION_KEY is a same-page-load fallback bucket, not a real
+      // session — never rehydrate into it (see the matching skip in the
+      // persist effect below for why nothing is ever written there either).
+      if (sid === NO_SESSION_KEY) continue;
       initial[sid] = { artifacts: p.artifacts, activeId: p.activeId };
     }
     return initial;
@@ -326,10 +330,18 @@ export function ArtifactPanelProvider({ children, sessionId }: ArtifactPanelProv
 
   // Persist on every state change across every session, not just the
   // current one — a background session's app tabs (opened earlier, now
-  // switched away from) must still survive a reload.
+  // switched away from) must still survive a reload. NO_SESSION_KEY is
+  // deliberately excluded: it's a same-page-load fallback for "no session
+  // selected yet" (and for the many pre-existing tests/callers that mount
+  // `<ArtifactPanelProvider>` with no `sessionId` prop at all) — persisting
+  // it would let unrelated no-session mounts silently accumulate and
+  // rehydrate each other's artifacts across page loads (or, in a real
+  // browser/CI localStorage rather than this repo's broken-by-default dev
+  // shadow, across supposedly-isolated test runs in the same file).
   useEffect(() => {
     const out: Record<string, PersistedPanelState> = {};
     for (const [sid, s] of Object.entries(byId)) {
+      if (sid === NO_SESSION_KEY) continue;
       const p = toPersisted(s);
       if (p) out[sid] = p;
     }

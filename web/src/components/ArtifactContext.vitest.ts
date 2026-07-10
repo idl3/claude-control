@@ -359,4 +359,21 @@ describe('ArtifactContext — persistence (localStorage round-trip)', () => {
     saveSessionPanels(shape);
     expect(loadSessionPanels()).toEqual(shape);
   });
+
+  it('a provider mounted with no sessionId (or null) never persists — the no-session bucket cannot leak across mounts/tests', () => {
+    // Regression: a real (non-broken) localStorage previously let every
+    // no-sessionId mount in this suite rehydrate the PRIOR no-sessionId
+    // mount's pinned apps, inflating the LRU-cap tests' counts by however
+    // many artifacts an earlier `it()` had left behind — reproduced only in
+    // environments where bare `localStorage` actually works (this repo's
+    // local dev Node shadow silently no-ops instead, which is why it passed
+    // here but failed in CI). No-session mounts must never touch storage.
+    const first = setupSession(null);
+    act(() => first.result.current.open(appArtifact('leaky', true)));
+    expect(loadSessionPanels()).toEqual({});
+    first.unmount();
+
+    const second = setupSession(null);
+    expect(second.result.current.artifacts).toEqual([]);
+  });
 });
