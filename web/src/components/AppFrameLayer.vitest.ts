@@ -18,6 +18,7 @@ import {
   hoistZIndex,
   nextScrollStreak,
   shouldEngageScrollFade,
+  shouldCrossFadeHoist,
   type RectLike,
 } from './AppFrameLayer';
 // C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
@@ -263,6 +264,35 @@ describe('shouldEngageScrollFade (fade-during-scroll: streak-length gate, pure)'
 
   it('stays engaged well past the minimum streak', () => {
     expect(shouldEngageScrollFade(10, 3)).toBe(true);
+  });
+});
+
+describe('shouldCrossFadeHoist (B3: studio open/close cross-fade edge-detector, pure)', () => {
+  it('fires when entering studio from transcript', () => {
+    expect(shouldCrossFadeHoist('transcript', 'studio')).toBe(true);
+  });
+
+  it('fires when entering studio from panel', () => {
+    expect(shouldCrossFadeHoist('panel', 'studio')).toBe(true);
+  });
+
+  it('fires when leaving studio back to transcript', () => {
+    expect(shouldCrossFadeHoist('studio', 'transcript')).toBe(true);
+  });
+
+  it('fires when leaving studio back to panel', () => {
+    expect(shouldCrossFadeHoist('studio', 'panel')).toBe(true);
+  });
+
+  it('does not fire for a panel <-> transcript handoff (no animated chrome to desync from)', () => {
+    expect(shouldCrossFadeHoist('panel', 'transcript')).toBe(false);
+    expect(shouldCrossFadeHoist('transcript', 'panel')).toBe(false);
+  });
+
+  it('does not fire when the context is unchanged, including a steady studio host', () => {
+    expect(shouldCrossFadeHoist('transcript', 'transcript')).toBe(false);
+    expect(shouldCrossFadeHoist('panel', 'panel')).toBe(false);
+    expect(shouldCrossFadeHoist('studio', 'studio')).toBe(false);
   });
 });
 

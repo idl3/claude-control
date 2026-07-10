@@ -437,6 +437,21 @@ export function shouldEngageScrollFade(streakCount: number, minStreak: number): 
   return streakCount >= minStreak;
 }
 
+// B3: pure edge-detector for tick()'s cross-fade call site below — studio
+// open/close is the only host-context transition wrapped in its own
+// animated (GSAP) chrome (StudioModal.tsx's useModalTransition), so it's the
+// only transition where the hoisted iframe popping straight to its new
+// rect/opacity (a separate portaled subtree from the animating panel) can
+// visibly desync from the surrounding chrome's ~280ms fade. Kept as its own
+// testable predicate rather than inlined at the call site, matching this
+// file's existing shouldEngageScrollFade/shouldElevateHoist pattern.
+export function shouldCrossFadeHoist(
+  prevContext: 'panel' | 'transcript' | 'studio',
+  nextContext: 'panel' | 'transcript' | 'studio',
+): boolean {
+  return (prevContext === 'studio') !== (nextContext === 'studio');
+}
+
 function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -1019,6 +1034,34 @@ export function AppFrameLayer() {
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
+          // B3: studio open/close is the only host-context transition
+          // wrapped in its own animated (GSAP) chrome — see StudioModal.tsx's
+          // useModalTransition. The hoisted iframe's own position/size jumps
+          // to the new host's rect this same tick (via the JSX render below,
+          // driven by slot.rect), fully decoupled from that ~280ms panel
+          // tween since it's a separate portaled subtree (createPortal to
+          // document.body) — so without this, the iframe pops in/out fully
+          // opaque while the surrounding backdrop/chrome is still visibly
+          // fading (confirmed via the B3 harness video: studio-phase-b-flow
+          // .webm, ~t=1.6s open / ~t=4.4s close both show a fully-settled,
+          // opaque device frame while the backdrop/toolbar are still
+          // mid-fade). Cross-fade it instead: opacity 0 immediately
+          // (invisible for the one frame it jumps to the new rect), then
+          // release next frame so the existing `.embed-app-hoist {
+          // transition: opacity 100ms }` (styles.css, shared with the
+          // scroll-fade mechanism above) animates it back in. Scoped to
+          // studio transitions only — panel/transcript handoffs have no
+          // animated chrome to desync from, so fading those would just add
+          // visible latency with nothing to hide it from.
+          if (shouldCrossFadeHoist(slot.context, host.context)) {
+            const hoistEl = hoistElsRef.current.get(url);
+            if (hoistEl) {
+              hoistEl.style.opacity = '0';
+              requestAnimationFrame(() => {
+                hoistEl.style.opacity = '';
+              });
+            }
+          }
           // D2: the winning host can change context/trackLatest tick-to-tick
           // (e.g. a panel pin/unpin, or D4 flipping a tab's mode) — no re-
           // render needed for this alone, it only feeds shouldReloadOnFrame.
