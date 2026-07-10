@@ -2883,10 +2883,19 @@ body.is-external-display .composer {
   animation: shimmer-sweep 1.8s linear infinite;
   color: oklch(97% 0.01 240);
   text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
-  border-radius: 3px;
+  border-radius: 4px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  /* NO padding, NO margin, NO border, NO font-weight/size change — metric constraint */
+  /* Metric-neutral breathing room: padding grows the box on every side, and
+     the exactly-equal-and-opposite negative margin pulls it back in, netting
+     zero net advance in both axes — the background/glow/radius render
+     outward into the margin's negative space while every glyph position
+     before/inside/after this span stays pixel-identical to the zero-padding
+     version. This is NOT relaxing the METRIC CONSTRAINT above to "some
+     padding is fine" — it's padding cancelled by matching negative margin,
+     still zero net advance. Do not change one value without the other. */
+  padding: 1px 2px;
+  margin: -1px -2px;
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-goal-pill {
@@ -2912,7 +2921,12 @@ body.is-external-display .composer {
   animation: thinking-flash 2.2s linear infinite;
   /* NO font-weight change (the transcript's .ultrathink-text is bold) —
      metric constraint: bolding widens glyphs vs. the textarea's regular
-     weight and would drift everything after it out of alignment. */
+     weight and would drift everything after it out of alignment.
+     Deliberately skips the .composer-goal-pill padding/negative-margin
+     breathing-room trick above: this rule paints gradient-filled text
+     (background-clip: text) with no visible background box, border, or
+     shadow, so padding would add space around glyphs with nothing drawn
+     in it — a no-op visually, not worth the added metric-neutrality risk. */
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-ultrathink {
@@ -7671,10 +7685,19 @@ select.config-input {
   animation: shimmer-sweep 1.8s linear infinite;
   color: oklch(97% 0.01 240);
   text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
-  border-radius: 3px;
+  border-radius: 4px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  /* NO padding, NO margin, NO border, NO font-weight/size change — metric constraint */
+  /* Metric-neutral breathing room: padding grows the box on every side, and
+     the exactly-equal-and-opposite negative margin pulls it back in, netting
+     zero net advance in both axes — the background/glow/radius render
+     outward into the margin's negative space while every glyph position
+     before/inside/after this span stays pixel-identical to the zero-padding
+     version. This is NOT relaxing the METRIC CONSTRAINT above to "some
+     padding is fine" — it's padding cancelled by matching negative margin,
+     still zero net advance. Do not change one value without the other. */
+  padding: 1px 2px;
+  margin: -1px -2px;
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-goal-pill {
@@ -7700,7 +7723,12 @@ select.config-input {
   animation: thinking-flash 2.2s linear infinite;
   /* NO font-weight change (the transcript's .ultrathink-text is bold) —
      metric constraint: bolding widens glyphs vs. the textarea's regular
-     weight and would drift everything after it out of alignment. */
+     weight and would drift everything after it out of alignment.
+     Deliberately skips the .composer-goal-pill padding/negative-margin
+     breathing-room trick above: this rule paints gradient-filled text
+     (background-clip: text) with no visible background box, border, or
+     shadow, so padding would add space around glyphs with nothing drawn
+     in it — a no-op visually, not worth the added metric-neutrality risk. */
 }
 @media (prefers-reduced-motion: reduce) {
   .composer-ultrathink {

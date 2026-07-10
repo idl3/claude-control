@@ -63,9 +63,40 @@ describe('composerHighlightSegments', () => {
     ]);
   });
 
-  it('does not match /goal mid-message', () => {
-    expect(composerHighlightSegments('remember /goal later')).toEqual([
-      { kind: 'text', text: 'remember /goal later' },
+  it('detects /goal mid-message, not just at the start', () => {
+    expect(composerHighlightSegments('deploy then /goal ship it now')).toEqual([
+      { kind: 'text', text: 'deploy then ' },
+      { kind: 'goal', text: '/goal' },
+      { kind: 'text', text: ' ship it now' },
+    ]);
+  });
+
+  it('detects every /goal occurrence when there are multiple', () => {
+    expect(composerHighlightSegments('/goal one /goal two')).toEqual([
+      { kind: 'goal', text: '/goal' },
+      { kind: 'text', text: ' one ' },
+      { kind: 'goal', text: '/goal' },
+      { kind: 'text', text: ' two' },
+    ]);
+  });
+
+  it('flags a /goal token directly adjacent to an ultrathink match', () => {
+    expect(composerHighlightSegments('ultrathink /goal')).toEqual([
+      { kind: 'ultrathink', text: 'ultrathink' },
+      { kind: 'text', text: ' ' },
+      { kind: 'goal', text: '/goal' },
+    ]);
+  });
+
+  it('does not match a /goal-looking substring with no preceding whitespace or start (path-like)', () => {
+    expect(composerHighlightSegments('remember foo/goal later')).toEqual([
+      { kind: 'text', text: 'remember foo/goal later' },
+    ]);
+  });
+
+  it('does not treat /goal-plan (a longer command sharing the prefix) as a match', () => {
+    expect(composerHighlightSegments('/goal-plan do the thing')).toEqual([
+      { kind: 'text', text: '/goal-plan do the thing' },
     ]);
   });
 
@@ -91,6 +122,11 @@ describe('composerHighlightSegments', () => {
       'remember /goal later',
       '/goal fix the flaky test\n',
       'ultrathink then ultrathink again',
+      'deploy then /goal ship it now',
+      '/goal one /goal two',
+      'ultrathink /goal',
+      'remember foo/goal later',
+      '/goal-plan do the thing',
     ];
     for (const value of cases) expect(rebuild(value)).toBe(value);
   });
