@@ -5007,6 +5007,28 @@ select.config-input {
 /* Phase C, C3: "pin to panel" affordance — mirrors .embed-app-reload-btn's
    quiet-corner idiom exactly, opposite corner (top:6/left:6 vs reload's
    top:6/right:6) so the two never overlap in any chrome state. */
+
+.embed-app-fullscreen-btn {
+  position: absolute;
+  top: 6px;
+  right: 34px; /* corner slot next to the reload button (right: 6px) */
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-1) 82%, transparent);
+  color: var(--text-faint);
+  opacity: 0.55;
+  transition:
+    opacity var(--ease) 0.15s,
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.embed-app-fullscreen-btn:hover,
+.embed-app-fullscreen-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-1);
+}
+
 .embed-app-pin-btn {
   position: absolute;
   top: 6px;
@@ -7718,73 +7740,551 @@ select.config-input {
 }
 .olam-terminal-newtab:hover { color: var(--text-dim, #aaa); text-decoration: underline; }
 
-/* ── Live /goal + ultrathink highlighting (composer overlay only) ──────────
-   Same reserved-token gradients as the transcript (.goal-pill / .ultrathink-
-   text below, in the /goal + ultrathink section), but stripped of every
-   property that would change glyph advance width — the transcript versions
-   add padding/margin/border/font-weight for a static one-shot render; the
-   composer overlay sits pixel-for-pixel over live (invisible) textarea text,
-   so it must obey the same METRIC CONSTRAINT as .composer-pill above. */
-.composer-goal-pill {
-  background-image: linear-gradient(
-    100deg,
-    oklch(55% 0.03 240) 0%,
-    oklch(68% 0.05 235) 25%,
-    oklch(72% 0.04 230) 50%,
-    oklch(68% 0.05 235) 75%,
-    oklch(55% 0.03 240) 100%
-  );
-  background-size: 200% auto;
-  animation: shimmer-sweep 1.8s linear infinite;
-  color: oklch(97% 0.01 240);
-  text-shadow: 0 1px 2px oklch(20% 0.02 240 / 0.55);
-  border-radius: 4px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-  /* Metric-neutral breathing room: padding grows the box on every side, and
-     the exactly-equal-and-opposite negative margin pulls it back in, netting
-     zero net advance in both axes — the background/glow/radius render
-     outward into the margin's negative space while every glyph position
-     before/inside/after this span stays pixel-identical to the zero-padding
-     version. This is NOT relaxing the METRIC CONSTRAINT above to "some
-     padding is fine" — it's padding cancelled by matching negative margin,
-     still zero net advance. Do not change one value without the other. */
-  padding: 1px 2px;
-  margin: -1px -2px;
+/* --- A4: StudioModal (fullscreen device-preview shell) ---
+   z-index 300: above the mobile panel sheet (.artifact-panel[data-mode='sheet'],
+   200) and elevated hoists (PANEL_SHEET_HOIST_Z_INDEX, 210 — see
+   AppFrameLayer.tsx), below the sub-agent drawer (.sa-backdrop/.sa-panel,
+   899/900) and the real attachment lightbox (.lightbox, 1000). */
+.studio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.88);
 }
-@media (prefers-reduced-motion: reduce) {
-  .composer-goal-pill {
-    animation: none;
-  }
+.studio-panel {
+  position: relative; /* D1/D2/D3: anchors .studio-capture-overlay's inset:0 */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
-.composer-ultrathink {
-  background-image: linear-gradient(
-    90deg,
-    oklch(70% 0.25 20),
-    oklch(75% 0.2 80),
-    oklch(78% 0.2 140),
-    oklch(72% 0.2 200),
-    oklch(68% 0.24 260),
-    oklch(70% 0.25 320),
-    oklch(70% 0.25 20)
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: thinking-flash 2.2s linear infinite;
-  /* NO font-weight change (the transcript's .ultrathink-text is bold) —
-     metric constraint: bolding widens glyphs vs. the textarea's regular
-     weight and would drift everything after it out of alignment.
-     Deliberately skips the .composer-goal-pill padding/negative-margin
-     breathing-room trick above: this rule paints gradient-filled text
-     (background-clip: text) with no visible background box, border, or
-     shadow, so padding would add space around glyphs with nothing drawn
-     in it — a no-op visually, not worth the added metric-neutrality risk. */
+.studio-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
-@media (prefers-reduced-motion: reduce) {
-  .composer-ultrathink {
-    animation: none;
-  }
+.studio-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
+.studio-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-version {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.studio-close {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.studio-close:hover {
+  color: var(--text);
+}
+.studio-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.studio-suppress-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-device-bar {
+  display: flex;
+  gap: 6px;
+}
+.studio-device-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-device-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.studio-device-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  overflow: auto;
+  padding: 24px;
+}
+.studio-frame {
+  /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder
+     filling it at 100%/100% (see EmbeddedApp.tsx's frameStyle) — the inline
+     width/height set by StudioModal.tsx must land exactly at the device
+     preset's own pixel size so the embedded app's own media queries respond
+     to the real breakpoint, not a shrunken one. `* { box-sizing: border-box
+     }` (styles.css line ~70) means padding here would eat directly into that
+     size, so this box carries none (the border-only bezel below is a
+     negligible, deliberate 1px/side device-frame affordance). The
+     font-size/text-align/padding this box carried in Phase A were for the
+     "hosting arrives in Phase B" placeholder text only — dead since B1
+     replaced that text with the live app; removed here as part of the same
+     box this task (B2) resizes.
+  */
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- C3/E1/E2: .studio-side-panel is the permanently-visible sibling of
+   .studio-frame, never a hide/show tab ITSELF (see StudioModal.tsx's
+   StudioSidePanel doc comment: unmounting/hiding .studio-frame risks the
+   iframe reload this feature must never cause). Its Props/Inspector/Console
+   tab strip switches which CHILD content pane is visible (via the `hidden`
+   attribute on .studio-side-tab-body, not a conditional render) — the panel
+   box itself, and everything mounted inside it, never unmounts. */
+.studio-side-panel {
+  flex: 0 0 320px;
+  align-self: stretch;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+}
+.studio-side-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+.studio-side-tab {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-side-tab:hover:not(:disabled) {
+  color: var(--text);
+}
+.studio-side-tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.studio-side-tab-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-side-tab-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.studio-props-panel {
+  height: 100%;
+}
+.studio-props-degrade {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.studio-props-degrade-msg {
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.studio-props-degrade-cmd {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text);
+}
+.studio-props-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.studio-props-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.studio-props-reset {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-props-reset:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.studio-prop-field {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.studio-prop-field:first-of-type {
+  border-top: none;
+}
+.studio-prop-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.studio-prop-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.studio-prop-type {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: monospace;
+}
+.studio-prop-example-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-prop-example-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.studio-prop-raw {
+  width: 100%;
+  min-height: 44px;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text);
+}
+.studio-prop-raw-toggle {
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* --- E1: StudioInspector — read-only DOM outline tree. Native <details>/
+   <summary> drive expand/collapse (StudioInspector.tsx), so no JS-owned
+   open/closed state needs styling here; .studio-inspector-children just
+   indents one level per nesting depth. */
+.studio-inspector-panel {
+  height: 100%;
+}
+.studio-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.studio-inspector-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.studio-inspector-refresh {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-inspector-refresh:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.studio-inspector-truncated-notice {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text-dim);
+}
+.studio-inspector-empty {
+  color: var(--text-dim);
+}
+.studio-inspector-node {
+  margin: 2px 0;
+}
+.studio-inspector-node summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+.studio-inspector-leaf {
+  padding-left: 14px;
+}
+.studio-inspector-children {
+  padding-left: 14px;
+}
+.studio-inspector-node-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+}
+.studio-inspector-node-tag {
+  font-family: monospace;
+  color: var(--text);
+}
+.studio-inspector-node-text {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.studio-inspector-node-count {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+/* --- D1/D2/D3: Screenshot button + capture/annotate/save flow. The overlay
+   stays WITHIN .studio-panel (itself already inside .studio-overlay's
+   z-index:300 stack) — no new z-index tier needed, `position: absolute;
+   inset: 0` on .studio-capture-overlay anchors against .studio-panel's now
+   `position: relative` regardless of how deep in the toolbar this renders. */
+.studio-capture-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.studio-capture-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.studio-capture-btn:hover {
+  border-color: var(--accent);
+}
+.studio-capture-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.studio-capture-error-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: var(--radius);
+  border: 1px solid #d33;
+  color: #d33;
+}
+.studio-capture-error-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.studio-capture-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  padding: 24px;
+}
+/* The studio-context hoisted live-app iframe is a position:fixed portal
+   rendered straight to document.body (AppFrameLayer.tsx), not a descendant
+   of .studio-panel — so its inline z-index: 310 (STUDIO_HOIST_Z_INDEX,
+   deliberately above .studio-overlay's 300 for normal Studio use) is
+   compared at the SAME stacking context as .studio-capture-overlay above
+   and wins, silently intercepting every click meant for the annotation
+   canvas / Save / Cancel. body.studio-capture-reviewing is toggled by
+   StudioCapture (StudioModal.tsx) only while stage.kind is
+   review/saving/saved, so this only neutralizes the hoisted iframe during
+   that sub-state — normal Studio use is untouched.
+
+   Studio Phase D CP3 audit, FIX 3: scoped to [data-embed-app-context='studio']
+   (set by AppFrameLayer.tsx on every hoist span, per its own `slot.context`)
+   — NOT every .embed-app-hoist. Only a studio-context hoist ever reaches
+   STUDIO_HOIST_Z_INDEX (310), so panel/transcript-hosted hoists were never
+   the actual collision this rule exists for; the unscoped selector was a
+   latent landmine (a future z-index bump on a non-studio hoist would have
+   been silently neutralized body-wide during Studio capture review) rather
+   than a live bug — no behavior change today. */
+body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] {
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+.studio-capture-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 100%;
+  max-height: 100%;
+}
+.studio-capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.studio-capture-actions button {
+  padding: 6px 16px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.studio-capture-actions button:hover {
+  border-color: var(--accent);
+}
+.studio-capture-saving,
+.studio-capture-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+}
+.studio-capture-tag {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--text);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* --- D2: canvas annotation overlay (StudioAnnotate.tsx) */
+.studio-annotate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+.studio-annotate-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.studio-annotate-tool-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  text-transform: capitalize;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-annotate-tool-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.studio-annotate-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+.studio-annotate-undo {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-annotate-undo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.studio-annotate-canvas {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  touch-action: none; /* pointer events drive drawing; no browser scroll/zoom gesture should intercept them */
+}
+

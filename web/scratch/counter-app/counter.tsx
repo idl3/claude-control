@@ -17,8 +17,18 @@
 // beacon is part of. componentDidCatch (not getDerivedStateFromError) is the
 // right lifecycle for this: it runs post-render and is documented as safe
 // for side effects, and fires exactly once per catch.
+//
+// Phase C, C4: `Counter` takes props (label/initialCount/theme) and is
+// wrapped with withCcBridge (ccBridgeRuntime.tsx) so the studio's Props tab
+// (C3) can drive it live — see build.mjs, which runs docgen against THIS
+// file's `CounterProps` interface to emit the sibling manifest. Only ONE
+// component in this file carries a named props interface docgen can latch
+// onto (CounterBoundary's props are an inline `{ children }` literal, not a
+// named interface) — deliberate, so `--infer-manifest`'s single-component
+// parse always resolves to `Counter`, never the boundary.
 import { Component, StrictMode, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { withCcBridge } from '../../src/lib/ccBridgeRuntime';
 
 class CounterBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -44,19 +54,28 @@ class CounterBoundary extends Component<{ children: ReactNode }, { error: Error 
   }
 }
 
-function Counter() {
-  const [count, setCount] = useState(0);
+export interface CounterProps {
+  /** Text shown above the counter value. */
+  label?: string;
+  /** Starting/reset value for the counter. */
+  initialCount?: number;
+}
+
+export function Counter({ label = 'react counter — own root, own boundary', initialCount = 0 }: CounterProps) {
+  const [count, setCount] = useState(initialCount);
   const [doomed, setDoomed] = useState(false);
 
   // Deliberate render-time throw — the boundary above catches it. Nothing
-  // outside this iframe ever sees the error.
+  // outside this iframe ever sees the error. Also reachable via the studio's
+  // raw-JSON override (e.g. injecting a non-numeric `initialCount`) once the
+  // bridge is wired — see withCcBridge below.
   if (doomed) {
     throw new Error('deliberate render crash (demo)');
   }
 
   return (
     <div className="counter-card" data-testid="counter">
-      <div className="counter-label">react counter — own root, own boundary</div>
+      <div className="counter-label">{label}</div>
       <div className="count">{count}</div>
       <div className="counter-actions">
         <button type="button" onClick={() => setCount((c) => c - 1)}>
@@ -73,12 +92,17 @@ function Counter() {
   );
 }
 
+const BridgedCounter = withCcBridge(Counter, {
+  label: 'react counter — own root, own boundary',
+  initialCount: 0,
+});
+
 const rootEl = document.getElementById('root');
 if (rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
       <CounterBoundary>
-        <Counter />
+        <BridgedCounter />
       </CounterBoundary>
     </StrictMode>,
   );

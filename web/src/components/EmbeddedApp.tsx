@@ -46,7 +46,10 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  *  - `context` ('transcript' default): rides as `data-embed-app-context` so
  *    AppFrameLayer can pick a single deterministic host per url when the same
  *    app is embedded in both the transcript AND pinned into the panel
- *    (panel-context always wins — see AppFrameLayer's tick()).
+ *    (panel-context always wins — see AppFrameLayer's tick()). Phase B, B1
+ *    adds a third value, 'studio' — StudioModal renders one of these for the
+ *    currently-open url, and it outranks panel too (studio > panel >
+ *    transcript, see AppFrameLayer's pickHost) while the studio stays open.
  *  - `hidden` (false default): the panel renders EVERY open app artifact's
  *    placeholder simultaneously so tab switches never tear one down (that
  *    would reload the iframe), but only the ACTIVE tab's should actually be
@@ -89,7 +92,7 @@ export function EmbeddedApp({
 }: {
   url: string;
   height: number;
-  context?: 'panel' | 'transcript';
+  context?: 'panel' | 'transcript' | 'studio';
   hidden?: boolean;
   trackLatest?: boolean;
   suspended?: boolean;
@@ -103,11 +106,12 @@ export function EmbeddedApp({
     return <code className="embed-media-rejected">app url rejected: {url}</code>;
   }
 
-  // Panel context fills its slot exactly (ArtifactPanel/.artifact-app-slot
-  // sizes the box); transcript context keeps the reserved-box width cap +
-  // fixed height from the tag's `height` attr.
+  // Panel and studio contexts both fill their slot exactly (ArtifactPanel/
+  // .artifact-app-slot sizes the panel box; StudioModal's .studio-frame sizes
+  // the device-preset box — see B2) instead of the transcript's reserved-box
+  // width cap + fixed height from the tag's `height` attr.
   const frameStyle =
-    context === 'panel'
+    context === 'panel' || context === 'studio'
       ? { width: '100%', height: '100%' }
       : { width: '100%', maxWidth: APP_FRAME_MAX_WIDTH, height: `${height}px` };
 
@@ -211,7 +215,9 @@ function PinIcon({ filled }: { filled: boolean }) {
 }
 
 /**
- * Phase C, C3: "pin to panel" affordance — rendered by AppFrameLayer next to
+ * Phase C, C3 (A2: relabeled "Pin to panel" -> "Open in panel"; className
+ * tokens kept as-is since AppFrameLayer.tsx positions by them): "pin to
+ * panel" affordance — rendered by AppFrameLayer next to
  * AppReloadButton in every chrome state (healthy iframe corner, failed strip,
  * crashed strip), same presentation/composition split as AppReloadButton
  * above: this file owns only the button's look; AppFrameLayer owns the
@@ -244,13 +250,67 @@ export function AppPinButton({
       className={`act-btn embed-app-pin-btn${quiet ? '' : ' embed-app-pin-btn-labeled'}${
         pinned ? ' embed-app-pin-btn-active' : ''
       }`}
-      aria-label={pinned ? 'Pinned to panel' : 'Pin to panel'}
+      aria-label={pinned ? 'Opened in panel' : 'Open in panel'}
       aria-pressed={pinned}
       onClick={onClick}
       style={style}
     >
       <PinIcon filled={pinned} />
-      {quiet ? null : pinned ? 'Pinned' : 'Pin'}
+      {quiet ? null : pinned ? 'Opened' : 'Open'}
+    </button>
+  );
+}
+
+function FullscreenIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M8 3H4v4M16 3h4v4M8 21H4v-4M16 21h4v-4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A4: dispatches `cockpit:studio-open` — same window-CustomEvent idiom as
+ * `cockpit:app-reload` above (AppReloadButton's doc comment) — carrying the
+ * app's url in `detail`. StudioModal.tsx owns the actual studio (derives
+ * name/version from the url, renders the fullscreen overlay); this button
+ * only ever signals intent.
+ *
+ * BOUNDARY NOTE: like AppReloadButton/AppPinButton, this file owns only the
+ * button's presentation — composing it into the actually-visible hoisted
+ * chrome (next to the Reload/Pin buttons, in all three chrome states) is
+ * AppFrameLayer.tsx's job (it is the sole caller of AppReloadButton/
+ * AppPinButton). Phase B, B1 wires this in: AppFrameLayer now imports and
+ * renders it alongside AppReloadButton/AppPinButton in every chrome state.
+ */
+export function AppFullscreenButton({
+  url,
+  quiet = true,
+  style,
+}: {
+  url: string;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const onClick = () => {
+    window.dispatchEvent(new CustomEvent('cockpit:studio-open', { detail: { url } }));
+  };
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-fullscreen-btn${quiet ? '' : ' embed-app-fullscreen-btn-labeled'}`}
+      aria-label="Open in studio"
+      onClick={onClick}
+      style={style}
+    >
+      <FullscreenIcon />
+      {quiet ? null : 'Fullscreen'}
     </button>
   );
 }

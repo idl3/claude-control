@@ -546,6 +546,83 @@ describe('EmbeddedApp — live sandboxed micro-app rendering via AppFrameLayer (
       expect(recoveredIframe.getAttribute('srcdoc')).toBe('<html><body>recovered</body></html>');
     });
   });
+
+  // Studio Phase E CP3 audit, FIX 1: a studio-hosted app that crashes while
+  // the studio is its only host used to be unrecoverable short of closing
+  // and reopening the whole modal — Studio Phase B CP3's FIX 2 suppressed
+  // the reload/pin/fullscreen trio for EVERY studio-context render branch,
+  // including crashed. The crashed branch now renders AppReloadButton
+  // unconditionally (same cockpit:app-reload CustomEvent, same reload()
+  // remount path exercised by the plain B2 suite above); pin + fullscreen
+  // stay suppressed in every branch, crashed included.
+  describe('Studio Phase E CP3 audit, FIX 1: in-studio crash-reload affordance', () => {
+    it('a crashed studio-context host renders a Reload control that recovers it via cockpit:app-reload', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>hi</body></html>'),
+      });
+
+      mount(
+        createElement(
+          ArtifactPanelProvider,
+          null,
+          createElement(EmbeddedApp, { url: 'apps/studio-crash.html', height: 320, context: 'studio' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      const iframe = (await screen.findByTitle('apps/studio-crash.html')) as HTMLIFrameElement;
+      const win = iframe.contentWindow;
+      expect(win).toBeTruthy();
+
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'cc-app-error', message: 'studio boom' }, source: win }),
+      );
+
+      expect(await screen.findByText('app crashed: apps/studio-crash.html')).toBeTruthy();
+
+      // Pre-fix: isStudioHost suppressed all three buttons here too, so
+      // 'Reload app' would be null — the ONLY way out was closing the modal.
+      const reloadBtn = screen.getByLabelText('Reload app');
+      expect(reloadBtn).toBeTruthy();
+      // Pin + fullscreen stay studio-suppressed even in the crashed branch.
+      expect(screen.queryByLabelText('Open in panel')).toBeNull();
+      expect(screen.queryByLabelText('Open in studio')).toBeNull();
+
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>recovered</body></html>'),
+      });
+      fireEvent.click(reloadBtn);
+
+      await vi.waitFor(() => {
+        expect(screen.queryByText(/app crashed/)).toBeNull();
+      });
+      const recoveredIframe = (await screen.findByTitle('apps/studio-crash.html')) as HTMLIFrameElement;
+      expect(recoveredIframe.getAttribute('srcdoc')).toBe('<html><body>recovered</body></html>');
+    });
+
+    it('a healthy studio-context host still renders no corner chrome — the fix is scoped to the crashed branch only', async () => {
+      authFetchMock.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('<html><body>hi</body></html>'),
+      });
+
+      mount(
+        createElement(
+          ArtifactPanelProvider,
+          null,
+          createElement(EmbeddedApp, { url: 'apps/studio-healthy.html', height: 320, context: 'studio' }),
+          createElement(AppFrameLayer),
+        ),
+      );
+
+      await screen.findByTitle('apps/studio-healthy.html');
+      expect(screen.queryByLabelText('Reload app')).toBeNull();
+      expect(screen.queryByLabelText('Open in panel')).toBeNull();
+      expect(screen.queryByLabelText('Open in studio')).toBeNull();
+    });
+  });
 });
 
 describe('D cache-bypass (capstone follow-up)', () => {
@@ -879,7 +956,7 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     // No artifact pinned yet — no panel, no tab.
     expect(screen.queryByRole('tab')).toBeNull();
 
-    fireEvent.click(screen.getByLabelText('Pin to panel'));
+    fireEvent.click(screen.getByLabelText('Open in panel'));
 
     // A panel tab appears, titled from the url's basename, and is focused.
     const tab = await screen.findByRole('tab', { name: 'pin1.html' });
@@ -890,10 +967,10 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     expect(await screen.findByText('open in panel ↗')).toBeTruthy();
     expect(screen.getAllByTitle('apps/pin1.html')).toHaveLength(1);
     expect(authFetchMock).toHaveBeenCalledTimes(1); // pinning never re-fetches
-    expect(screen.getByLabelText('Pinned to panel')).toBeTruthy(); // button reflects pinned state
+    expect(screen.getByLabelText('Opened in panel')).toBeTruthy(); // button reflects pinned state
 
     // Pin again — idempotent focus, no duplicate tab, no extra fetch.
-    fireEvent.click(screen.getByLabelText('Pinned to panel'));
+    fireEvent.click(screen.getByLabelText('Opened in panel'));
     expect(screen.getAllByRole('tab', { name: 'pin1.html' })).toHaveLength(1);
     expect(authFetchMock).toHaveBeenCalledTimes(1);
 
@@ -906,7 +983,7 @@ describe('C3: pin-to-panel affordance (mounted)', () => {
     });
     expect(await screen.findByTitle('apps/pin1.html')).toBeTruthy();
     expect(authFetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Pin to panel')).toBeTruthy(); // back to unpinned state
+    expect(screen.getByLabelText('Open in panel')).toBeTruthy(); // back to unpinned state
   });
 });
 

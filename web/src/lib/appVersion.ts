@@ -4,7 +4,8 @@
 // `latest` pointer layout and the GET /api/media-apps/<name>/versions
 // response shape this file's types describe.
 
-import { mediaAppFramePath } from './mediaUrl';
+import { mediaAppFramePath, resolveMediaUrl } from './mediaUrl';
+import { authFetch } from './api';
 
 export interface AppVersionEntry {
   filename: string;
@@ -71,4 +72,79 @@ export function versionedAppUrl(name: string, filename: string): string {
  */
 export function sortVersionsDesc(versions: AppVersionEntry[]): AppVersionEntry[] {
   return [...versions].sort((a, b) => (a.filename < b.filename ? 1 : a.filename > b.filename ? -1 : 0));
+}
+
+// --- Phase C, C3: prop manifest fetch --------------------------------------
+// Schema v1, as emitted by ~/.claude/skills/prototype-component/scripts/
+// manifest.mjs (C1) and versioned as a sibling file alongside the app's HTML
+// by that skill's --write-app --manifest passthrough: <stamp>.manifest.json
+// next to <stamp>.html (+ a flat apps/<name>.manifest.json compat alias next
+// to the flat apps/<name>.html, mirroring the existing HTML alias pattern).
+
+export interface AppManifestProp {
+  name: string;
+  tsType: string;
+  required: boolean;
+  default?: unknown;
+  enumOptions?: string[];
+  example?: unknown;
+}
+
+export interface AppManifest {
+  'schema-version': 1;
+  component: string;
+  props: AppManifestProp[];
+}
+
+/**
+ * Shape check on fetched JSON — deliberately loose (only the fields the
+ * Props panel actually branches on), matching manifest.mjs's own "never
+ * block on anything unexpected" philosophy: an oddly-shaped `props` entry
+ * degrades to raw-JSON-only editing in the UI rather than being rejected
+ * outright by this check.
+ */
+export function isValidAppManifestShape(data: unknown): data is AppManifest {
+  if (typeof data !== 'object' || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  if (rec['schema-version'] !== 1) return false;
+  if (typeof rec.component !== 'string') return false;
+  if (!Array.isArray(rec.props)) return false;
+  return rec.props.every(
+    (p) => typeof p === 'object' && p !== null && typeof (p as { name?: unknown }).name === 'string',
+  );
+}
+
+/**
+ * Derives the manifest's sibling url for an app embed's html url — same
+ * versioned/flat pairing convention C1's producer-side writeVersionedApp
+ * uses ("apps/<name>/<stamp>.html" -> "apps/<name>/<stamp>.manifest.json",
+ * flat "apps/<name>.html" -> "apps/<name>.manifest.json"). Returns null for
+ * anything that isn't a local media-apps html url (mirrors appNameFromUrl).
+ */
+export function manifestUrlForAppUrl(url: string): string | null {
+  const normalized = mediaAppFramePath(url) ?? url;
+  if (!normalized.endsWith('.html')) return null;
+  return normalized.slice(0, -'.html'.length) + '.manifest.json';
+}
+
+/**
+ * Fetches (and validates) the prop manifest for an app embed's url. Returns
+ * null for every failure mode — no manifest written yet (old, pre-C4-rebuild
+ * artifact: a 404), a malformed/unreadable response, or a network error —
+ * so the Props panel's degrade path (StudioModal.tsx) is the ONE place that
+ * decides what "no manifest" looks like; this helper never throws.
+ */
+export async function fetchAppManifest(url: string): Promise<AppManifest | null> {
+  const manifestUrl = manifestUrlForAppUrl(url);
+  if (!manifestUrl) return null;
+  const resolution = resolveMediaUrl(manifestUrl);
+  if (resolution.kind !== 'fetch') return null;
+  try {
+    const res = await authFetch(resolution.fetchUrl, { cache: 'reload' });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    return isValidAppManifestShape(data) ? data : null;
+  } catch {
+    return null;
+  }
 }
