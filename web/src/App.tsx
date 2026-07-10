@@ -1904,7 +1904,7 @@ function AppInner() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-    <ArtifactPanelProvider>
+    <ArtifactPanelProvider sessionId={cockpit.selectedId}>
       <div
         ref={appRef}
         className="app"
