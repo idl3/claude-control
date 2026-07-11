@@ -4,6 +4,8 @@
 // computePaneClip/shouldKeepPolling suites above it are pure, DOM-free
 // functions and would pass equally under the bare 'node' environment.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createElement } from 'react';
 import { render, cleanup, screen, act, waitFor } from '@testing-library/react';
 import {
@@ -167,6 +169,20 @@ describe('hoistTransform (scroll-lag fix: compositor-friendly positioning, pure)
 
   it('parks off-screen when there is no rect (grace-hidden / not-yet-found)', () => {
     expect(hoistTransform(null)).toBe('translate3d(-99999px, -99999px, 0)');
+  });
+
+  it('INVARIANT (mobile blank-render fix): always a 3D translate3d, never a plain 2D translate', () => {
+    // styles.css's touch-only compositing fix (`.embed-app-hoist` under
+    // `@media (hover: none) and (pointer: coarse)`) relies on the hoist's
+    // transform always already being 3D — that's what promotes its own
+    // compositing layer without needing `will-change: transform` on touch.
+    // If this function ever regressed to a 2D `translate(x, y)`, the touch
+    // media query's `will-change: auto` would stop having any GPU-layer
+    // guarantee behind it. See styles.css's FIX N comment above
+    // `.embed-app-hoist`'s touch media query block.
+    for (const arg of [{ top: 1, left: 2, width: 3, height: 4 }, null] as const) {
+      expect(hoistTransform(arg)).toMatch(/^translate3d\(/);
+    }
   });
 });
 
@@ -1443,5 +1459,62 @@ describe('Studio Phase B CP3 audit, FIX 2: studio hosts render no corner-button 
     expect(transcriptHoist.querySelector('[aria-label="Reload app"]')).not.toBeNull();
     expect(transcriptHoist.querySelector('[aria-label="Open in panel"]')).not.toBeNull();
     expect(transcriptHoist.querySelector('[aria-label="Open in studio"]')).not.toBeNull();
+  });
+});
+
+describe('Mobile transcript-embed blank-render fix (iOS Safari compositing, touch-gated, styles.css)', () => {
+  // Real-device-only bug (reporter-confirmed): the hoisted iframe span
+  // composited as a fully blank/dark box on a real iPhone — no shimmer, no
+  // error chip, scroll/rotate didn't recover it. Two headless-WebKit repro
+  // attempts (a synthetic mount, and a real-server + real-nav-flow Playwright
+  // run against production bundle+backend) could NOT reproduce it: the
+  // hoist/iframe painted correctly within ~50ms of every `data-detail`
+  // navigation flip tested (both a hash-restored return visit and a fresh
+  // first click), so AppFrameLayer's tick()/MutationObserver nav-reflow path
+  // is NOT the root cause — this is a real-iOS GPU/compositing bug (see
+  // https://gwwar.com/debugging-hard-things-safari-edition/). The fix is
+  // CSS-only and cannot be proven by any headless test; this suite instead
+  // guards the two concrete regressions that would silently break the fix:
+  // (1) someone reverting the touch-gated mitigation, (2) someone "helpfully"
+  // adding a CSS `transform` to that block, which would be dead code — see
+  // below.
+  // process.cwd()-relative, not import.meta.url-relative: vitest's module
+  // runner doesn't always give import.meta.url a real `file:` URL, but this
+  // suite (like every other vitest invocation in the repo) always runs from
+  // the `web/` package root.
+  const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
+  // Isolate the touch-only override block so assertions can't accidentally
+  // match the unconditional `.embed-app-hoist` rule above it.
+  const touchBlockMatch = css.match(
+    /@media \(hover: none\) and \(pointer: coarse\) \{\s*\.embed-app-hoist \{([\s\S]*?)\}\s*\}/,
+  );
+
+  it('the touch-only mitigation block exists', () => {
+    expect(touchBlockMatch).not.toBeNull();
+  });
+
+  it('drops the redundant will-change hint on touch (GPU memory pressure is the suspected trigger)', () => {
+    expect(touchBlockMatch?.[1]).toMatch(/will-change:\s*auto/);
+  });
+
+  it('adds backface-visibility: hidden on touch (documented WebKit blank-tile mitigation)', () => {
+    expect(touchBlockMatch?.[1]).toMatch(/backface-visibility:\s*hidden/);
+  });
+
+  it('REGRESSION GUARD: never adds a CSS `transform` override in this block — it would be dead code', () => {
+    // hoistTransform() (AppFrameLayer.tsx) writes `el.style.transform`
+    // directly on every tick; an inline style always wins over any
+    // stylesheet rule regardless of specificity or media query, so a
+    // `transform:` declaration here can never take effect. This guards
+    // against silently reintroducing the exact mistake this fix's own
+    // authoring caught: adding `translateZ(0)` via CSS, believing it does
+    // something, when the browser is already applying (and always applying)
+    // the inline `translate3d(x, y, 0)` from hoistTransform() instead.
+    expect(touchBlockMatch?.[1]).not.toMatch(/(?<!-webkit-)\btransform\s*:/);
+  });
+
+  it('the base (non-touch) rule still promotes via will-change: transform — desktop scroll-lag fix is untouched', () => {
+    const baseBlockMatch = css.match(/\.embed-app-hoist \{([\s\S]*?)\n\}/);
+    expect(baseBlockMatch?.[1]).toMatch(/will-change:\s*transform/);
   });
 });

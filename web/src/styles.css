@@ -4972,6 +4972,47 @@ select.config-input {
   transition: opacity 100ms var(--ease);
 }
 
+/* FIX N (mobile transcript embed blank-render, iOS Safari only): on a real
+   iPhone the hoisted iframe span sometimes composites as a fully blank/dark
+   box — no shimmer, no error chip, scroll/rotate don't recover it. Two
+   headless-WebKit repro attempts (a synthetic mount and this fix's own
+   real-server + real-nav-flow Playwright run) could NOT reproduce it —
+   Playwright's "webkit" is the desktop macOS WebKit build, not real iOS
+   Mobile Safari's GPU/compositor, so this is a real-device-only compositing
+   bug, not a positioning/logic race (AppFrameLayer's tick()/MutationObserver
+   nav-reflow path was independently verified correct: the hoist repaints
+   within ~50ms of a `data-detail` flip in real WebKit).
+   Documented WebKit bug class this matches: an oversized `position: fixed`
+   layer holding a nested iframe, promoted via `will-change: transform`,
+   blanking during async tile painting under GPU-memory pressure — iOS
+   Safari's per-tab compositing memory budget is far tighter than desktop's
+   (see https://gwwar.com/debugging-hard-things-safari-edition/, a WebKit
+   engineer's own case study of this exact fixed-div + iframe + z-index
+   pattern). `will-change: transform` is redundant on touch: the hoist's
+   `transform` is already always a 3D `translate3d(x, y, 0)` (set inline by
+   hoistTransform(), never a plain 2D translate — see that function below),
+   which already promotes its own compositing layer with no extra hint
+   needed, so `will-change` here only adds GPU memory pressure without the
+   desktop scroll-lag benefit it exists for (mouse-wheel scroll perf isn't
+   the touch concern here — correctness is). NOTE: do not add a CSS
+   `transform` override in this block — hoistTransform()'s inline
+   `el.style.transform` write always wins over any stylesheet rule and would
+   make it dead code. `-webkit-backface-visibility: hidden` is the standard,
+   long-documented WebKit "kill the flash / blank tile" mitigation for this
+   failure mode (https://viget.com/articles/webkit-transform-kill-the-flash/,
+   https://ryanseddon.com/css/composited-layers-ios/) — reversible, and
+   scoped to touch-primary devices only so desktop's scroll-lag fix above is
+   untouched. This is a best-effort mitigation, NOT a proven root-cause fix:
+   it cannot be verified by CI or a headless browser — the reporter must
+   confirm on-device. */
+@media (hover: none) and (pointer: coarse) {
+  .embed-app-hoist {
+    will-change: auto;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+}
+
 /* B2: quiet corner reload affordance for a live/failed app iframe, and the
    crashed-strip retry CTA — reuses .act-btn's icon-button idiom (msg-actions)
    rather than inventing new button chrome. Absolutely positioned against
