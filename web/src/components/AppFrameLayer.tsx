@@ -457,22 +457,61 @@ export function clampChromeInsets(clip: ClipInsets | null): ChromeClamp {
 // insets (already relative to the placeholder's own border-box-local
 // top-left — see its doc comment) need no coordinate adjustment: the box
 // they describe is identical either way.
-export function hoistTransform(r: RectLike | null): string {
-  return r ? `translate3d(${r.left}px, ${r.top}px, 0)` : 'translate3d(-99999px, -99999px, 0)';
+export function hoistTransform(r: RectLike | null, scale = 1): string {
+  if (!r) return 'translate3d(-99999px, -99999px, 0)';
+  return scale === 1
+    ? `translate3d(${r.left}px, ${r.top}px, 0)`
+    : `translate3d(${r.left}px, ${r.top}px, 0) scale(${scale})`;
 }
 
 // Pulled out of the render below so the imperative scroll/resize sync path
 // (tick()'s useEffect) can apply the identical clip-path string without
 // duplicating the null/hidden tri-state logic inline — the two paths must
 // never be able to drift from each other.
+//
+// Mobile-UX fix #3: `scale` divides the clip values because `clip` (from
+// computePaneClip) is expressed in SCREEN px relative to the placeholder's
+// own (scaled) footprint box, but `inset()` here is applied to the hoist
+// span AFTER its `scale(...)` transform (see hoistTransform) — CSS applies
+// `clip-path` in the element's own (pre-transform, i.e. LOGICAL/unscaled)
+// coordinate space, so a screen-px inset has to be converted back to
+// logical px by dividing out the scale factor. `scale === 1` (every
+// existing call site) returns byte-for-byte the pre-fix-3 string.
 export function hoistClipPath(
   r: RectLike | null,
   paneHidden: boolean,
   clip: ClipInsets | null,
+  scale = 1,
 ): string | undefined {
-  return r && !paneHidden && clip
-    ? `inset(${clip.top}px ${clip.right}px ${clip.bottom}px ${clip.left}px)`
-    : undefined;
+  if (!r || paneHidden || !clip) return undefined;
+  const s = scale || 1;
+  return `inset(${clip.top / s}px ${clip.right / s}px ${clip.bottom / s}px ${clip.left / s}px)`;
+}
+
+/**
+ * Mobile-UX fix #3: the hoist span's LOGICAL size + display scale for one
+ * slot. When the placeholder carries true logical dims (StudioModal scaling
+ * a device preset down to fit — see EmbeddedApp's `logicalWidth`/
+ * `logicalHeight` doc comment), the hoist span is sized to those logical
+ * dims and `scale` is derived from how much smaller the placeholder's own
+ * (already-scaled) footprint rect is — so the app iframe always renders at
+ * its true viewport size and paints scaled down to fit the footprint,
+ * DevTools-device-mode-zoom style. When no logical dims are present (every
+ * transcript/panel slot, and a studio preset that already fits at 1:1),
+ * this returns the placeholder's own rect at scale 1 — byte-for-byte the
+ * pre-fix-3 behavior.
+ */
+export type HoistGeometry = { width: number; height: number; scale: number };
+
+export function hoistGeometry(
+  rect: RectLike,
+  logicalWidth: number | null,
+  logicalHeight: number | null,
+): HoistGeometry {
+  if (logicalWidth != null && logicalWidth > 0 && logicalHeight != null && logicalHeight > 0 && rect.width > 0) {
+    return { width: logicalWidth, height: logicalHeight, scale: rect.width / logicalWidth };
+  }
+  return { width: rect.width, height: rect.height, scale: 1 };
 }
 
 // Fade-during-scroll pure helpers — same DOM-free rationale as the rest of
@@ -696,6 +735,12 @@ type Slot = {
   // Generic elevation hook — see shouldElevateHoist above. Render-only,
   // not part of the scroll/resize sync path (structural, not scroll-driven).
   elevate: boolean;
+  // Mobile-UX fix #3: mirrors the winning host's `logicalWidth`/
+  // `logicalHeight` (SlotEl, above) — the render/syncPositions hoist-geometry
+  // computation reads these via hoistGeometry(). null for every slot except a
+  // studio host that's currently scaling a preset down to fit.
+  logicalWidth: number | null;
+  logicalHeight: number | null;
 };
 
 type SlotEl = {
@@ -717,6 +762,14 @@ type SlotEl = {
   // EmbeddedApp.tsx doesn't emit this yet — forward-compatible plumbing for
   // whichever placeholder wires it up next (e.g. a fullscreen panel mode).
   elevate: boolean;
+  // Mobile-UX fix #3: the placeholder's TRUE device-viewport dims when
+  // StudioModal is scaling a preset down to fit (see EmbeddedApp.tsx's
+  // `logicalWidth`/`logicalHeight` doc comment) — null for every other
+  // placeholder (the overwhelming majority), which is what keeps
+  // hoistGeometry's fallback branch (byte-for-byte the pre-fix-3 rect-only
+  // behavior) in play for them.
+  logicalWidth: number | null;
+  logicalHeight: number | null;
 };
 
 function readSlotEls(): SlotEl[] {
@@ -735,6 +788,10 @@ function readSlotEls(): SlotEl[] {
     const trackLatest = el.dataset.embedAppTrackLatest !== 'false';
     const suspended = el.dataset.embedAppSuspended === 'true';
     const elevate = el.dataset.embedAppElevate === 'true';
+    const logicalWidthRaw = Number.parseInt(el.dataset.embedAppLogicalWidth ?? '', 10);
+    const logicalHeightRaw = Number.parseInt(el.dataset.embedAppLogicalHeight ?? '', 10);
+    const logicalWidth = Number.isFinite(logicalWidthRaw) && logicalWidthRaw > 0 ? logicalWidthRaw : null;
+    const logicalHeight = Number.isFinite(logicalHeightRaw) && logicalHeightRaw > 0 ? logicalHeightRaw : null;
     out.push({
       url,
       height: Number.isFinite(height) ? height : 360,
@@ -744,6 +801,8 @@ function readSlotEls(): SlotEl[] {
       trackLatest,
       suspended,
       elevate,
+      logicalWidth,
+      logicalHeight,
     });
   });
   return out;
@@ -1101,6 +1160,8 @@ export function AppFrameLayer() {
             hostEl: host.el,
             explicitlyHidden: host.explicitlyHidden,
             elevate: host.elevate,
+            logicalWidth: host.logicalWidth,
+            logicalHeight: host.logicalHeight,
           };
           slotsRef.current.set(url, slot);
           fetchHtml(url);
@@ -1113,7 +1174,9 @@ export function AppFrameLayer() {
             slot.rect.width !== rect.width ||
             slot.rect.height !== rect.height ||
             slot.paneHidden !== paneHidden ||
-            !clipEquals(slot.clip, clip)
+            !clipEquals(slot.clip, clip) ||
+            slot.logicalWidth !== host.logicalWidth ||
+            slot.logicalHeight !== host.logicalHeight
           ) {
             changed = true;
           }
@@ -1122,6 +1185,8 @@ export function AppFrameLayer() {
           slot.paneHidden = paneHidden;
           slot.clip = clip;
           slot.lastSeen = now;
+          slot.logicalWidth = host.logicalWidth;
+          slot.logicalHeight = host.logicalHeight;
           // B3: studio open/close is the only host-context transition
           // wrapped in its own animated (GSAP) chrome — see StudioModal.tsx's
           // useModalTransition. The hoisted iframe's own position/size jumps
@@ -1253,12 +1318,13 @@ export function AppFrameLayer() {
         const el = hoistElsRef.current.get(url);
         if (!el) continue;
         const hidden = paneHidden;
-        el.style.transform = hoistTransform(rect);
-        el.style.width = `${rect.width}px`;
-        el.style.height = `${rect.height}px`;
+        const geom = hoistGeometry(rect, slot.logicalWidth, slot.logicalHeight);
+        el.style.transform = hoistTransform(rect, geom.scale);
+        el.style.width = `${geom.width}px`;
+        el.style.height = `${geom.height}px`;
         el.style.visibility = hidden ? 'hidden' : 'visible';
         el.style.pointerEvents = hidden ? 'none' : 'auto';
-        const clipPath = hoistClipPath(rect, paneHidden, clip);
+        const clipPath = hoistClipPath(rect, paneHidden, clip, geom.scale);
         if (clipPath) el.style.clipPath = clipPath;
         else el.style.removeProperty('clip-path');
       }
@@ -1492,7 +1558,12 @@ export function AppFrameLayer() {
         // (pre-existing grace-hide behavior) OR it's found but scrolled
         // fully outside its pane (paneHidden) — either way, no eviction.
         const hidden = !r || slot.paneHidden;
-        const clipPath = hoistClipPath(r, slot.paneHidden, slot.clip);
+        // Mobile-UX fix #3: the logical hoist size + display scale for this
+        // slot — see hoistGeometry's doc comment. `{ width: 1, height: 1,
+        // scale: 1 }` when there's no rect yet mirrors the pre-fix-3
+        // `r ? r.width : 1` fallback below exactly.
+        const geom = r ? hoistGeometry(r, slot.logicalWidth, slot.logicalHeight) : { width: 1, height: 1, scale: 1 };
+        const clipPath = hoistClipPath(r, slot.paneHidden, slot.clip, geom.scale);
         // B audit follow-up (CP3-B, FIX 1): see clampChromeInsets' doc
         // comment — clamps the corner reload button and the crashed strip
         // into the visible slice of a partially-clipped placeholder.
@@ -1535,9 +1606,10 @@ export function AppFrameLayer() {
               // identical to the old top:r.top/left:r.left.
               top: 0,
               left: 0,
-              transform: hoistTransform(r),
-              width: r ? r.width : 1,
-              height: r ? r.height : 1,
+              transform: hoistTransform(r, geom.scale),
+              width: geom.width,
+              height: geom.height,
+              transformOrigin: '0 0',
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,

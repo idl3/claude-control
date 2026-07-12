@@ -13,8 +13,19 @@
 // who care) — this is the "native platform feature already covers it" case,
 // not something to hand-roll two ways.
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { PencilIcon, ArrowUpRightIcon, TypeIcon, UndoIcon } from './icons';
 
 export type AnnotateTool = 'pen' | 'arrow' | 'text';
+
+// Mobile-UX fix #1: icon-led tool buttons — mirrors icons.tsx's
+// `Svg`-wrapper glyphs (24-grid, currentColor). aria-label stays the tool
+// name (icon-only is fine here, same idiom as the reload/pin/fullscreen
+// corner buttons in EmbeddedApp.tsx).
+const TOOL_ICONS: Record<AnnotateTool, typeof PencilIcon> = {
+  pen: PencilIcon,
+  arrow: ArrowUpRightIcon,
+  text: TypeIcon,
+};
 
 export type Point = { x: number; y: number };
 
@@ -282,17 +293,21 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
     return (
       <div className="studio-annotate">
         <div className="studio-annotate-toolbar">
-          {(['pen', 'arrow', 'text'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className="studio-annotate-tool-btn"
-              aria-pressed={tool === t}
-              onClick={() => setTool(t)}
-            >
-              {t}
-            </button>
-          ))}
+          {(['pen', 'arrow', 'text'] as const).map((t) => {
+            const Icon = TOOL_ICONS[t];
+            return (
+              <button
+                key={t}
+                type="button"
+                className="studio-annotate-tool-btn"
+                aria-pressed={tool === t}
+                aria-label={t}
+                onClick={() => setTool(t)}
+              >
+                <Icon className="studio-tool-ico" />
+              </button>
+            );
+          })}
           <input
             type="color"
             aria-label="annotation color"
@@ -306,6 +321,7 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
             disabled={strokes.length === 0}
             onClick={() => setStrokes(undoStrokes)}
           >
+            <UndoIcon className="studio-tool-ico" />
             Undo
           </button>
         </div>

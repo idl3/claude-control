@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement } from 'react';
-import { StudioModal } from './StudioModal';
+import { StudioModal, studioFitScale, studioAvailableWidth } from './StudioModal';
 import { AppFrameLayer } from './AppFrameLayer';
 import { ArtifactPanelProvider } from './ArtifactContext';
 import { getHotkeySuppressed, setHotkeySuppressed } from '../lib/hotkeySuppression';
@@ -46,6 +46,16 @@ vi.mock('gsap', () => {
 // jsdom implements no matchMedia at all. Mocks any `(min-width:Npx)` query
 // against a fake viewport width; anything else (e.g. prefers-reduced-motion)
 // defaults to non-matching, same as a real browser at default settings.
+//
+// Mobile-UX fix #3: also stubs `window.innerWidth` to the same px.
+// `useViewportWidth()` (StudioModal.tsx) reads raw `window.innerWidth`
+// directly for the scale-to-fit computation — a DIFFERENT mechanism from the
+// matchMedia-based `useMinWidth()` that drives `fitsById`/`columnMode`'s
+// yes/no boundary checks. Without this, `viewportW` stayed permanently at
+// jsdom's default (1024) regardless of the mocked px, decoupled from every
+// test's intended viewport width. A real browser's matchMedia and
+// innerWidth always agree on the current viewport, so coupling them here
+// under one px argument matches reality, not a divergence.
 function mockViewportWidth(px: number): void {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -64,6 +74,7 @@ function mockViewportWidth(px: number): void {
       };
     }),
   });
+  Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: px });
 }
 
 function openStudio(url = 'apps/counter.html'): void {
@@ -152,17 +163,41 @@ describe('StudioModal — Studio Phase B CP3 audit, FIX 4: rapid app swap is ign
   });
 });
 
-describe('StudioModal — device-mode gating', () => {
-  // Studio Phase B CP3 audit, FIX 3 (widened by Studio Phase E polish, F2):
-  // gating now requires the raw device width PLUS `.studio-body`'s own
-  // chrome width (STUDIO_BODY_CHROME_WIDTH = 390 in StudioModal.tsx — F2
-  // folded in the 320px side panel + 20px gap, not just padding/border), so
-  // Mobile's real threshold is 390 + 390 = 780. 800px sits above that
-  // threshold (Mobile enabled) but below iPad's 768 + 390 = 1158
-  // (iPad/Desktop stay disabled) — the same "only Mobile fits" shape the
-  // old case asserted, just at the width that's actually enabled post-fix.
-  it('at 800px, only Mobile is enabled', () => {
-    mockViewportWidth(800);
+describe('StudioModal — pure helpers: studioFitScale / studioAvailableWidth', () => {
+  it('studioFitScale scales down (never upscales) to fit the logical width inside the available width', () => {
+    expect(studioFitScale(1280, 366)).toBeCloseTo(0.2859, 4);
+  });
+
+  it('studioFitScale never upscales past 1 when there is more room than the logical width needs', () => {
+    expect(studioFitScale(390, 800)).toBe(1);
+  });
+
+  it('studioFitScale returns identity (1) when availableWidth is non-positive, rather than dividing by zero/negative', () => {
+    expect(studioFitScale(390, 0)).toBe(1);
+  });
+
+  it('studioAvailableWidth subtracts the column-mode padding in column mode', () => {
+    expect(studioAvailableWidth(390, true)).toBe(366);
+  });
+
+  it('studioAvailableWidth subtracts the row-mode chrome width (side panel + gap) outside column mode', () => {
+    expect(studioAvailableWidth(1600, false)).toBe(1210);
+  });
+
+  it('studioAvailableWidth floors at 0 rather than going negative', () => {
+    expect(studioAvailableWidth(0, false)).toBe(0);
+  });
+});
+
+describe('StudioModal — device-mode gating (Mobile-UX fix #3: every preset always selectable, scaled to fit)', () => {
+  // Studio Phase B CP3 audit, FIX 3 gated which modes were *reachable* by
+  // screen size. Mobile-UX fix #3 supersedes that: every preset is always
+  // selectable — a mode that doesn't fit at 1:1 scales down instead of
+  // disabling (see studioFitScale/studioAvailableWidth above and the B2
+  // describe block below for the scaled-footprint assertions). These tests
+  // replace the old disabled-at-narrow-width gating tests.
+  it('at a narrow width (390px), all three device buttons are enabled — no size gating', () => {
+    mockViewportWidth(390);
     render(createElement(StudioModal));
     openStudio();
 
@@ -170,32 +205,8 @@ describe('StudioModal — device-mode gating', () => {
     const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
     const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
     expect(mobile.disabled).toBe(false);
-    expect(ipad.disabled).toBe(true);
-    expect(desktop.disabled).toBe(true);
-  });
-
-  // Regression test proving the boundary-band bug FIX 3 closes: pre-fix,
-  // Mobile enabled the instant the window matched its RAW 390px width, even
-  // though `.studio-body`'s 24px padding (both sides) + `.studio-frame`'s
-  // 1px border (both sides) — 50px total — meant a 390px window could not
-  // actually fit a 390px device box without `.studio-body`'s own
-  // `overflow: auto` kicking in (a boundary-band horizontal scrollbar).
-  it('at exactly the raw device width (390px), Mobile is now disabled — the pre-fix boundary-band bug', () => {
-    mockViewportWidth(390);
-    render(createElement(StudioModal));
-    openStudio();
-
-    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
-    expect(mobile.disabled).toBe(true);
-  });
-
-  it('at exactly the chrome-aware threshold (780px = 390 + 390), Mobile is enabled', () => {
-    mockViewportWidth(780);
-    render(createElement(StudioModal));
-    openStudio();
-
-    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
-    expect(mobile.disabled).toBe(false);
+    expect(ipad.disabled).toBe(false);
+    expect(desktop.disabled).toBe(false);
   });
 
   it('at 1800px, all three modes are enabled', () => {
@@ -210,14 +221,34 @@ describe('StudioModal — device-mode gating', () => {
     expect(desktop.disabled).toBe(false);
   });
 
-  it('disabled modes carry a "screen too small" tooltip', () => {
-    mockViewportWidth(800); // FIX 3: see "at 800px, only Mobile is enabled" above
+  it('a mode that does not fit at 1:1 carries a "scaled to fit" tooltip; a mode that fits carries none', () => {
+    mockViewportWidth(800); // clears Mobile's 780px threshold, not iPad's 1158px one
     render(createElement(StudioModal));
     openStudio();
     expect(screen.getByRole('button', { name: /iPad 768/ }).getAttribute('title')).toBe(
-      'screen too small',
+      'iPad 768 — scaled to fit',
     );
     expect(screen.getByRole('button', { name: /Mobile 390/ }).getAttribute('title')).toBeNull();
+  });
+
+  it('a scaled-down mode passes its true logical dims to the EmbeddedApp placeholder', () => {
+    mockViewportWidth(390);
+    render(createElement(StudioModal));
+    openStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /Desktop 1280/ }));
+    const placeholder = document.querySelector('[data-embed-app-context="studio"]') as HTMLElement;
+    expect(placeholder.getAttribute('data-embed-app-logical-width')).toBe('1280');
+    expect(placeholder.getAttribute('data-embed-app-logical-height')).toBe('800');
+  });
+
+  it('a mode that fits at 1:1 passes no logical dims — byte-for-byte the pre-fix-3 unscaled path', () => {
+    render(createElement(StudioModal)); // beforeEach mocks 1800px — Desktop fits at 1:1
+    openStudio();
+
+    const placeholder = document.querySelector('[data-embed-app-context="studio"]') as HTMLElement;
+    expect(placeholder.hasAttribute('data-embed-app-logical-width')).toBe(false);
+    expect(placeholder.hasAttribute('data-embed-app-logical-height')).toBe(false);
   });
 });
 
@@ -291,19 +322,23 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     expect(authFetchMock).toHaveBeenCalledTimes(callsAtOpen); // no new fetches from mode switches
   });
 
-  it('gated modes stay unreachable at small screens even with AppFrameLayer mounted (Phase A gating unchanged)', () => {
+  it('a previously-gated mode is now selectable at a narrow viewport and the frame resizes to its SCALED footprint (Mobile-UX fix #3)', () => {
     mockViewportWidth(390);
     renderStudio();
     openStudio('apps/gated-small.html');
 
     const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
     const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
-    expect(ipad.disabled).toBe(true);
-    expect(desktop.disabled).toBe(true);
+    expect(ipad.disabled).toBe(false);
+    expect(desktop.disabled).toBe(false);
 
-    fireEvent.click(ipad); // disabled — StudioPanel's onClick guards `enabled &&`
+    fireEvent.click(ipad); // no longer disabled — scales down to fit instead of refusing the click
     const frame = document.querySelector('.studio-frame') as HTMLElement;
-    expect(frame.style.width).toBe('390px'); // stays on the only enabled mode, Mobile
+    // availableW = studioAvailableWidth(390, columnMode=true) = 390 - 24 = 366
+    // scale = studioFitScale(768, 366) = 366/768 = 0.4765625
+    // footprint = floor(768*scale) x floor(1024*scale) = 366 x 488
+    expect(frame.style.width).toBe('366px');
+    expect(frame.style.height).toBe('488px');
   });
 });
 

@@ -4965,6 +4965,13 @@ select.config-input {
      late layer promotion. Bounded cost: at most a handful of concurrent
      hoist spans exist at once (LIVE_APP_CAP caps panel-context hosts at 6). */
   will-change: transform;
+  /* Mobile-UX fix #3: the hoist span's inline `transform` composes a
+     `scale(...)` after the translate3d() whenever AppFrameLayer's
+     hoistGeometry finds a placeholder scaled down to fit (studio device
+     presets) — top-left-anchored, matching hoistTransform's translate3d
+     origin, so the scaled box's top-left corner never drifts from the
+     unscaled position. A no-op (scale is always 1) for every other slot. */
+  transform-origin: 0 0;
   /* Fade-during-scroll (AppFrameLayer.tsx SCROLL_FADE_DURATION_MS): only
      `opacity` is ever transitioned here — keep this duration in sync with
      that constant if it changes. Compositor-only property, same rationale
@@ -7815,7 +7822,13 @@ select.config-input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px;
+  /* Mobile-UX fix #2: clear the iOS status bar / notch — same safe-area idiom
+     as .sa-panel-head/.detail-head (var(--safe-top), styles.css ~L38). The
+     studio overlay is position:fixed inset:0, so without this the close
+     button (.studio-close, already 44x44 per Apple HIG) sits partly under
+     the Dynamic Island cluster on notched phones. Desktop's inset is 0 ->
+     unchanged 10px. */
+  padding: calc(10px + var(--safe-top)) 16px 10px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
   background: var(--bg-1);
@@ -7879,8 +7892,27 @@ select.config-input {
   display: flex;
   gap: 6px;
 }
+/* Mobile-UX fix #1: leading-icon glyph shared by every icon-led Studio
+   button (device bar, capture controls, annotate toolbar) — fixed 16px so it
+   reads consistently at the compact 32px button height below, distinct from
+   .act-ico's em-relative sizing (which tracks the action-bar's own font-size
+   scaling and isn't a fit here). */
+.studio-tool-ico {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+/* Mobile-UX fix #1: compact icon+label pill — display:inline-flex row so the
+   leading .studio-tool-ico and the (optionally hidden, see the 420px rule
+   below) text label sit on one baseline at a fixed, touch-friendly 32px
+   height. @media(pointer:coarse) below still floors this to 44px (min-height
+   wins over the shorter fixed height here). */
 .studio-device-btn {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -8212,7 +8244,11 @@ select.config-input {
   gap: 8px;
 }
 .studio-capture-btn {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -8299,7 +8335,11 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   gap: 8px;
 }
 .studio-capture-actions button {
-  padding: 6px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -8366,7 +8406,12 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   gap: 6px;
 }
 .studio-annotate-tool-btn {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   text-transform: capitalize;
   border-radius: var(--radius);
@@ -8389,7 +8434,11 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   cursor: pointer;
 }
 .studio-annotate-undo {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -8473,6 +8522,15 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   }
   .studio-prop-example-chip {
     min-height: 32px;
+  }
+}
+/* Mobile-UX fix #1: at the tightest widths (the 3-up device bar alongside the
+   close button leaves little room per label) drop the device bar's text
+   label, keeping just the icon + aria-label — mirrors the icon-only annotate
+   tool buttons above. */
+@media (max-width: 420px) {
+  .studio-device-btn .studio-btn-label {
+    display: none;
   }
 }
 
