@@ -16,6 +16,7 @@ import {
   shouldReloadOnFrame,
   hoistTransform,
   hoistClipPath,
+  hoistGeometry,
   shouldElevateHoist,
   hoistZIndex,
   nextScrollStreak,
@@ -184,6 +185,18 @@ describe('hoistTransform (scroll-lag fix: compositor-friendly positioning, pure)
       expect(hoistTransform(arg)).toMatch(/^translate3d\(/);
     }
   });
+
+  it('Mobile-UX fix #3: composes a scale(...) after the translate3d when scale is not 1', () => {
+    expect(hoistTransform({ top: 120, left: 40, width: 300, height: 200 }, 0.5)).toBe(
+      'translate3d(40px, 120px, 0) scale(0.5)',
+    );
+  });
+
+  it('Mobile-UX fix #3: scale omitted (or 1) stays byte-for-byte the pre-fix-3 string — no every-call-site regression', () => {
+    const r = { top: 120, left: 40, width: 300, height: 200 };
+    expect(hoistTransform(r)).toBe(hoistTransform(r, 1));
+    expect(hoistTransform(r, 1)).toBe('translate3d(40px, 120px, 0)');
+  });
 });
 
 describe('hoistClipPath (scroll-lag fix: shared clip-path string, pure)', () => {
@@ -204,6 +217,40 @@ describe('hoistClipPath (scroll-lag fix: shared clip-path string, pure)', () => 
 
   it('returns undefined when there is no clip (fully inside the pane)', () => {
     expect(hoistClipPath(rect, false, null)).toBeUndefined();
+  });
+
+  it('Mobile-UX fix #3: divides the clip insets by scale (clip-path applies in the pre-transform/logical coordinate space)', () => {
+    expect(hoistClipPath(rect, false, clip, 0.5)).toBe('inset(20px 0px 0px 0px)');
+  });
+
+  it('Mobile-UX fix #3: scale omitted (or 1) stays byte-for-byte the pre-fix-3 string', () => {
+    expect(hoistClipPath(rect, false, clip)).toBe(hoistClipPath(rect, false, clip, 1));
+  });
+});
+
+describe('hoistGeometry (Mobile-UX fix #3: logical size + display scale for one hoist slot, pure)', () => {
+  it('scales up to the logical dims when both are present and the rect has width — scale derived from footprint/logical', () => {
+    expect(hoistGeometry({ top: 0, left: 0, width: 366, height: 229 }, 1280, 800)).toEqual({
+      width: 1280,
+      height: 800,
+      scale: 366 / 1280,
+    });
+  });
+
+  it('identity (own rect, scale 1) when logicalWidth/logicalHeight are both null — the pre-fix-3 / non-scaling case', () => {
+    const rect = { top: 0, left: 0, width: 366, height: 229 };
+    expect(hoistGeometry(rect, null, null)).toEqual({ width: 366, height: 229, scale: 1 });
+  });
+
+  it('identity when only one of logicalWidth/logicalHeight is present', () => {
+    const rect = { top: 0, left: 0, width: 366, height: 229 };
+    expect(hoistGeometry(rect, 1280, null)).toEqual({ width: 366, height: 229, scale: 1 });
+    expect(hoistGeometry(rect, null, 800)).toEqual({ width: 366, height: 229, scale: 1 });
+  });
+
+  it('identity when the rect has zero width (not-yet-measured slot) even with logical dims present', () => {
+    const rect = { top: 0, left: 0, width: 0, height: 0 };
+    expect(hoistGeometry(rect, 1280, 800)).toEqual({ width: 0, height: 0, scale: 1 });
   });
 });
 

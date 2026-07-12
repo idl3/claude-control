@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement, createRef } from 'react';
 import {
   toCanvasPoint,
@@ -212,9 +212,11 @@ describe('StudioAnnotate (mounted component)', () => {
     render(createElement(StudioAnnotate, { imageDataUrl: 'data:image/png;base64,AAAA' }));
     const canvas = document.querySelector('[data-testid="studio-annotate-canvas"]') as HTMLCanvasElement;
     const undoBtn = document.querySelector('.studio-annotate-undo') as HTMLButtonElement;
-    const textBtn = Array.from(document.querySelectorAll('.studio-annotate-tool-btn')).find(
-      (b) => b.textContent === 'text',
-    ) as HTMLButtonElement;
+    // Mobile-UX fix #1: tool buttons are icon-only now (aria-label={t}, no
+    // text children) — textContent-based lookup silently stopped matching
+    // once the icon replaced the plain-text label; select by the accessible
+    // name instead.
+    const textBtn = screen.getByRole('button', { name: 'text' }) as HTMLButtonElement;
 
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}),
