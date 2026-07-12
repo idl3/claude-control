@@ -89,6 +89,8 @@ export function EmbeddedApp({
   hidden = false,
   trackLatest = true,
   suspended = false,
+  logicalWidth,
+  logicalHeight,
 }: {
   url: string;
   height: number;
@@ -96,6 +98,20 @@ export function EmbeddedApp({
   hidden?: boolean;
   trackLatest?: boolean;
   suspended?: boolean;
+  /**
+   * Mobile-UX fix #3: when set (StudioModal scaling a device preset down to
+   * fit), the TRUE device-viewport dims the app iframe should see — distinct
+   * from the SCALED footprint this placeholder's own frame occupies in
+   * layout. AppFrameLayer reads these via the `data-embed-app-logical-*`
+   * attrs below to size the hoisted iframe to the logical dims and compose
+   * the display scale into its transform, so the app always renders at its
+   * real viewport and paints scaled to fit (DevTools device-mode style).
+   * Undefined (the default, every non-scaling caller) means "no scaling" —
+   * AppFrameLayer's hoist geometry falls back to the placeholder's own rect,
+   * byte-for-byte the pre-existing behavior.
+   */
+  logicalWidth?: number;
+  logicalHeight?: number;
 }) {
   const resolution = resolveMediaUrl(url);
 
@@ -129,6 +145,8 @@ export function EmbeddedApp({
       data-embed-app-hidden={hidden ? 'true' : undefined}
       data-embed-app-track-latest={trackLatest === false ? 'false' : undefined}
       data-embed-app-suspended={suspended ? 'true' : undefined}
+      data-embed-app-logical-width={logicalWidth != null ? logicalWidth : undefined}
+      data-embed-app-logical-height={logicalHeight != null ? logicalHeight : undefined}
       aria-label="embedded app"
     />
   );

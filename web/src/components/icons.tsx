@@ -199,6 +199,83 @@ export function SkillIcon(p: IconProps) {
   );
 }
 
+// Mobile-UX fix #1 (Prototype Studio icon-led toolbar): leading icons for the
+// Screenshot button, the device-size bar (phone/tablet/monitor), and the
+// annotate toolbar (text tool, undo, cancel/save). Reuses PencilIcon (pen
+// tool) and XIcon (cancel) rather than adding near-duplicates.
+export function CameraIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z" />
+      <circle cx="12" cy="13" r="3" />
+    </Svg>
+  );
+}
+
+export function SmartphoneIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect width="14" height="20" x="5" y="2" rx="2" />
+      <path d="M12 18h.01" />
+    </Svg>
+  );
+}
+
+export function TabletIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect width="16" height="20" x="4" y="2" rx="2" />
+      <path d="M12 18h.01" />
+    </Svg>
+  );
+}
+
+export function MonitorIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <line x1="8" x2="16" y1="21" y2="21" />
+      <line x1="12" x2="12" y1="17" y2="21" />
+    </Svg>
+  );
+}
+
+export function TypeIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" x2="15" y1="20" y2="20" />
+      <line x1="12" x2="12" y1="4" y2="20" />
+    </Svg>
+  );
+}
+
+export function UndoIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </Svg>
+  );
+}
+
+export function CheckIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M20 6 9 17l-5-5" />
+    </Svg>
+  );
+}
+
+export function ArrowUpRightIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M7 7h10v10" />
+      <path d="M7 17 17 7" />
+    </Svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (

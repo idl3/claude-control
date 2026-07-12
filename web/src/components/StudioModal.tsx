@@ -15,6 +15,7 @@ import { saveCapture } from '../lib/api';
 import { EmbeddedApp } from './EmbeddedApp';
 import { StudioAnnotate, type StudioAnnotateHandle } from './StudioAnnotate';
 import { StudioInspector } from './StudioInspector';
+import { CameraIcon, SmartphoneIcon, TabletIcon, MonitorIcon, XIcon, CheckIcon } from './icons';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
 // per the ≤150ms acceptance budget.
@@ -476,16 +477,16 @@ const DEVICE_MODES = [
 
 type DeviceModeId = (typeof DEVICE_MODES)[number]['id'];
 
+const DEVICE_MODE_ICONS: Record<DeviceModeId, typeof SmartphoneIcon> = {
+  mobile: SmartphoneIcon,
+  ipad: TabletIcon,
+  desktop: MonitorIcon,
+};
+
 // Studio Phase B CP3 audit, FIX 3: `.studio-body` (styles.css) reserves
 // 24px padding on every side (48px horizontal total) around `.studio-frame`,
 // which itself carries a 1px border on every side (2px horizontal total) —
-// 50px of chrome the device box's raw preset width doesn't account for. A
-// mode used to enable the instant the window matched the RAW device width
-// (useMinWidth(DEVICE_MODES[i].width)), so a window exactly at (or a few px
-// above) a preset's width enabled that mode yet couldn't actually fit its
-// device box without `.studio-body`'s own `overflow: auto` kicking in — a
-// boundary-band horizontal scrollbar. Gating on `width + chrome` instead
-// means "enabled" now genuinely implies "fits with no scrollbar."
+// 50px of chrome the device box's raw preset width doesn't account for.
 //
 // Studio Phase E polish, F2: the original 50px only accounted for
 // `.studio-body`'s padding+border — it never counted the 320px
@@ -493,9 +494,36 @@ type DeviceModeId = (typeof DEVICE_MODES)[number]['id'];
 // between the frame and that panel, both of which also eat into the
 // available width whenever the side panel is visible (i.e. always — it's
 // permanently mounted, see StudioSidePanel's doc comment). 50 + 320 + 20 =
-// 390: "enabled" now genuinely implies the frame AND the props panel both
-// fit with no scrollbar, not just the frame alone.
+// 390.
+//
+// Mobile-UX fix #3: every preset is now always selectable — a device box
+// that can't fit at 1:1 scales down to fit instead of the button disabling
+// (see `studioFitScale`/`studioAvailableWidth` below). This constant no
+// longer GATES which modes are reachable; it now (a) picks the *default*
+// mode at open time (the largest preset that fits at scale 1, via
+// `fitsById`) and (b) is the row-mode (side panel visible) available-width
+// denominator that `studioAvailableWidth` uses to compute the fit scale.
+// Column mode (side panel stacks below `.studio-frame`, narrow viewports —
+// see the `@media (max-width:640px)` block in styles.css) uses
+// `STUDIO_BODY_COLUMN_PADDING` instead, since the 320px side-panel width
+// doesn't apply there.
 const STUDIO_BODY_CHROME_WIDTH = 390;
+
+// Mobile-UX fix #3: column-mode (side panel stacked, not side-by-side)
+// available-width denominator — just `.studio-body`'s own padding+border,
+// no side-panel width to subtract.
+const STUDIO_BODY_COLUMN_PADDING = 24;
+
+/** Pure: the scale factor (≤1) that fits `logicalWidth` inside `availableWidth`. Never upscales. */
+export function studioFitScale(logicalWidth: number, availableWidth: number): number {
+  if (logicalWidth <= 0 || availableWidth <= 0) return 1;
+  return Math.min(1, availableWidth / logicalWidth);
+}
+
+/** Pure: the width `.studio-frame` has to work with, minus whichever chrome applies for the current layout mode. */
+export function studioAvailableWidth(innerWidth: number, columnMode: boolean): number {
+  return Math.max(0, innerWidth - (columnMode ? STUDIO_BODY_COLUMN_PADDING : STUDIO_BODY_CHROME_WIDTH));
+}
 
 /**
  * Same SSR-safe matchMedia idiom as `useIsNarrow` (hooks/useIsNarrow.ts),
@@ -517,6 +545,22 @@ function useMinWidth(px: number): boolean {
     return () => mq.removeEventListener('change', handler);
   }, [query]);
   return matches;
+}
+
+/**
+ * Mobile-UX fix #3: raw `window.innerWidth`, tracked via a resize listener —
+ * `useMinWidth` above answers yes/no boundary questions (matchMedia), but the
+ * scale-to-fit computation needs the actual number to divide by.
+ */
+function useViewportWidth(): number {
+  const [width, setWidth] = useState<number>(() => (typeof window === 'undefined' ? 0 : window.innerWidth));
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
 }
 
 const APP_VERSION_URL_RE = /^apps\/[a-z0-9-]+\/([^/]+)\.html$/;
@@ -684,6 +728,7 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
         onClick={startCapture}
         disabled={stage.kind === 'capturing'}
       >
+        <CameraIcon className="studio-tool-ico" />
         {stage.kind === 'capturing' ? 'Capturing…' : 'Screenshot'}
       </button>
       {stage.kind === 'error' && (
@@ -706,9 +751,11 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
               />
               <div className="studio-capture-actions">
                 <button type="button" onClick={() => setStage({ kind: 'idle' })}>
+                  <XIcon className="studio-tool-ico" />
                   Cancel
                 </button>
                 <button type="button" className="studio-capture-save" onClick={save} disabled={!annotateReady}>
+                  <CheckIcon className="studio-tool-ico" />
                   Save
                 </button>
               </div>
@@ -768,25 +815,44 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     };
   }, [url]);
 
-  // Studio Phase B CP3 audit, FIX 3: gate on the device width PLUS
-  // `.studio-body`'s own chrome width (see STUDIO_BODY_CHROME_WIDTH), not
-  // the raw device width alone — see that constant's doc comment.
-  const mobileEnabled = useMinWidth(DEVICE_MODES[0].width + STUDIO_BODY_CHROME_WIDTH);
-  const ipadEnabled = useMinWidth(DEVICE_MODES[1].width + STUDIO_BODY_CHROME_WIDTH);
-  const desktopEnabled = useMinWidth(DEVICE_MODES[2].width + STUDIO_BODY_CHROME_WIDTH);
-  const enabledById: Record<DeviceModeId, boolean> = {
-    mobile: mobileEnabled,
-    ipad: ipadEnabled,
-    desktop: desktopEnabled,
+  // Studio Phase B CP3 audit, FIX 3 (superseded by mobile-UX fix #3 below):
+  // whether each preset fits at 1:1 scale — gates the DEFAULT mode choice
+  // only now, not which modes are reachable (every preset is always
+  // selectable; a mode that doesn't fit scales down instead — see `scale`
+  // below).
+  const mobileFits = useMinWidth(DEVICE_MODES[0].width + STUDIO_BODY_CHROME_WIDTH);
+  const ipadFits = useMinWidth(DEVICE_MODES[1].width + STUDIO_BODY_CHROME_WIDTH);
+  const desktopFits = useMinWidth(DEVICE_MODES[2].width + STUDIO_BODY_CHROME_WIDTH);
+  const fitsById: Record<DeviceModeId, boolean> = {
+    mobile: mobileFits,
+    ipad: ipadFits,
+    desktop: desktopFits,
   };
 
-  // Default to the largest enabled mode at open time; users can switch freely
-  // among whatever stays enabled afterward (a resize disabling the current
-  // mode just greys its button out — acceptance doesn't require auto-switch).
+  // Default to the largest mode that fits at open time; users can switch
+  // freely to any preset afterward — one that doesn't fit at 1:1 scales down
+  // instead of disabling (mobile-UX fix #3).
   const [mode, setMode] = useState<DeviceModeId>(() =>
-    enabledById.desktop ? 'desktop' : enabledById.ipad ? 'ipad' : 'mobile',
+    fitsById.desktop ? 'desktop' : fitsById.ipad ? 'ipad' : 'mobile',
   );
   const device = DEVICE_MODES.find((d) => d.id === mode) ?? DEVICE_MODES[0];
+
+  // Mobile-UX fix #3: DevTools-device-mode-style scale-to-fit. `.studio-body`
+  // stacks the side panel below `.studio-frame` under the same breakpoint
+  // (styles.css `@media (max-width:640px)`) that drives the rest of the
+  // studio's column layout — `columnMode` mirrors that breakpoint so the
+  // available-width denominator matches whichever chrome is actually in
+  // play. `scale` never exceeds 1 (never upscale a preset that already
+  // fits); `footprintW/H` is what `.studio-frame` actually reserves in
+  // layout — the scaled-down footprint when scaling, the raw preset size
+  // otherwise (byte-for-byte the old behavior in that case).
+  const viewportW = useViewportWidth();
+  const columnMode = !useMinWidth(641);
+  const availableW = studioAvailableWidth(viewportW, columnMode);
+  const scale = studioFitScale(device.width, availableW);
+  const scaling = scale < 1;
+  const footprintW = scaling ? Math.floor(device.width * scale) : device.width;
+  const footprintH = scaling ? Math.floor(device.height * scale) : device.height;
 
   // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device-mode
   // switch via the Web Animations API (transform/opacity only — never a raw
@@ -856,13 +922,13 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   };
 
   // Studio Phase E polish, F13: roving tabindex + arrow traversal across the
-  // device bar, restricted to the currently-ENABLED set (wrapping) so arrow
-  // keys never land on a disabled ("screen too small") button.
+  // device bar. Mobile-UX fix #3: every preset is reachable now (a mode that
+  // doesn't fit at 1:1 scales down instead of disabling), so `enabledIds` is
+  // simply all modes, not filtered by `fitsById`.
   const onDeviceKeyDown = (e: React.KeyboardEvent, currentId: DeviceModeId) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
-    const enabledIds = DEVICE_MODES.map((d) => d.id).filter((id) => enabledById[id]);
-    if (enabledIds.length === 0) return;
+    const enabledIds = DEVICE_MODES.map((d) => d.id);
     const dir = e.key === 'ArrowRight' ? 1 : -1;
     const at = enabledIds.indexOf(currentId);
     const from = at === -1 ? 0 : at;
@@ -892,7 +958,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
           </label>
           <div className="studio-device-bar" role="group" aria-label="Device size">
             {DEVICE_MODES.map((d) => {
-              const enabled = enabledById[d.id];
+              const Icon = DEVICE_MODE_ICONS[d.id];
               return (
                 <button
                   key={d.id}
@@ -900,13 +966,16 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
                   type="button"
                   className="studio-device-btn"
                   aria-pressed={mode === d.id}
-                  disabled={!enabled}
-                  title={enabled ? undefined : 'screen too small'}
+                  aria-label={`${d.label} ${d.width}`}
+                  title={fitsById[d.id] ? undefined : `${d.label} ${d.width} — scaled to fit`}
                   tabIndex={mode === d.id ? 0 : -1}
                   onKeyDown={(e) => onDeviceKeyDown(e, d.id)}
-                  onClick={() => enabled && setMode(d.id)}
+                  onClick={() => setMode(d.id)}
                 >
-                  {d.label} {d.width}
+                  <Icon className="studio-tool-ico" />
+                  <span className="studio-btn-label">
+                    {d.label} {d.width}
+                  </span>
                 </button>
               );
             })}
@@ -923,8 +992,14 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               `.studio-frame` box below stays the device-sized reservation
               from Phase A (B2 sizes it per device mode) — EmbeddedApp fills
               it at 100%/100% (studio context, same treatment as panel). */}
-          <div className="studio-frame" ref={frameRef} style={{ width: device.width, height: device.height }}>
-            <EmbeddedApp url={url} height={device.height} context="studio" />
+          <div className="studio-frame" ref={frameRef} style={{ width: footprintW, height: footprintH }}>
+            <EmbeddedApp
+              url={url}
+              height={device.height}
+              context="studio"
+              logicalWidth={scaling ? device.width : undefined}
+              logicalHeight={scaling ? device.height : undefined}
+            />
           </div>
           <StudioSidePanel url={url} manifest={manifest} />
         </div>
