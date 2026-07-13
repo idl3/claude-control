@@ -49,3 +49,51 @@ test('validateTranscriptPath confines to projectsRoot + requires .jsonl + existi
   // non-string
   assert.equal(validateTranscriptPath(null, root), null);
 });
+
+test('validateTranscriptPath allows any configured root + rejects escapes', () => {
+  const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-rootA-'));
+  const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-rootB-'));
+  const goodA = path.join(rootA, 'a.jsonl');
+  fs.writeFileSync(goodA, '{}');
+  const goodB = path.join(rootB, 'b.jsonl');
+  fs.writeFileSync(goodB, '{}');
+
+  assert.equal(validateTranscriptPath(goodA, [rootA, rootB]), goodA);
+  assert.equal(validateTranscriptPath(goodB, [rootA, rootB]), goodB);
+
+  // Reject: exists, but outside ALL configured roots.
+  const rootC = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-rootC-'));
+  const outside = path.join(rootC, 'c.jsonl');
+  fs.writeFileSync(outside, '{}');
+  assert.equal(validateTranscriptPath(outside, [rootA, rootB]), null);
+
+  // Reject traversal.
+  assert.equal(validateTranscriptPath(path.join(rootA, '..', 'x.jsonl'), [rootA]), null);
+
+  // Reject symlink escape: a symlink INSIDE rootA pointing to a file OUTSIDE
+  // all roots must not be confined by lexical prefix alone.
+  const secret = path.join(rootC, 'secret.jsonl');
+  fs.writeFileSync(secret, '{}');
+  const evilLink = path.join(rootA, 'evil.jsonl');
+  try {
+    fs.symlinkSync(secret, evilLink);
+    assert.equal(validateTranscriptPath(evilLink, [rootA]), null);
+  } catch {
+    // symlink unsupported on this FS/runner — skip gracefully, nothing to assert
+  }
+
+  // Reject sibling-prefix: allow-list is [<base>/pa]; request a real .jsonl
+  // under <base>/pa-evil/ — a naive string-prefix check would wrongly accept.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-prefix-'));
+  const pa = path.join(base, 'pa');
+  fs.mkdirSync(pa, { recursive: true });
+  const paEvil = path.join(base, 'pa-evil');
+  fs.mkdirSync(paEvil, { recursive: true });
+  const sneaky = path.join(paEvil, 'sneaky.jsonl');
+  fs.writeFileSync(sneaky, '{}');
+  assert.equal(validateTranscriptPath(sneaky, [pa]), null);
+
+  // Back-compat: single-string root still works, with array-vs-string parity.
+  assert.equal(validateTranscriptPath(goodA, rootA), goodA);
+  assert.equal(validateTranscriptPath(goodA, rootA), validateTranscriptPath(goodA, [rootA]));
+});
