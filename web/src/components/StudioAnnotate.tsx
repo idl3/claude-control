@@ -516,6 +516,7 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
             ref={svgRef}
             data-testid="studio-annotate-canvas"
             className="studio-annotate-svg"
+            data-tool={tool}
             viewBox={`0 0 ${naturalSize?.w || 1} ${naturalSize?.h || 1}`}
             onPointerDown={onSvgPointerDown}
             onPointerMove={onSvgPointerMove}
