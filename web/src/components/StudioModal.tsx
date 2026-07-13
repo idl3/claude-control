@@ -1274,8 +1274,8 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   // Pass logical dims (→ AppFrameLayer scales the iframe) whenever the display
   // scale isn't exactly 1:1 — both fit-scaled-down AND zoomed-past-100%.
   const displayScaling = Math.abs(effectiveScale - 1) > 1e-3;
-  const footprintW = displayScaling ? Math.round(dims.width * effectiveScale) : dims.width;
-  const footprintH = displayScaling ? Math.round(dims.height * effectiveScale) : dims.height;
+  const footprintW = displayScaling ? Math.floor(dims.width * effectiveScale) : dims.width;
+  const footprintH = displayScaling ? Math.floor(dims.height * effectiveScale) : dims.height;
   const scalePct = Math.round(effectiveScale * 100);
   const atFit = zoom === 1;
 
@@ -1297,7 +1297,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   // identically. `zoom`/`pan` are a pure display transform — no remount.
   const applyView = (nextZoom: number, nextPanRaw: Vec2) => {
     const s1 = studioEffectiveScale(fitScale, nextZoom);
-    const fp: Vec2 = { x: Math.round(dims.width * s1), y: Math.round(dims.height * s1) };
+    const fp: Vec2 = { x: Math.floor(dims.width * s1), y: Math.floor(dims.height * s1) };
     setZoom(nextZoom);
     setPan(clampPan(nextPanRaw, fp, stageViewport));
   };

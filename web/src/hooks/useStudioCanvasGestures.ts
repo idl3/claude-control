@@ -74,7 +74,7 @@ export function useStudioCanvasGestures(
 
     const footprintOf = (v: StudioCanvasView): Vec2 => {
       const eff = studioEffectiveScale(v.fitScale, v.zoom);
-      return { x: Math.round(v.dims.width * eff), y: Math.round(v.dims.height * eff) };
+      return { x: Math.floor(v.dims.width * eff), y: Math.floor(v.dims.height * eff) };
     };
     const focalFrom = (clientX: number, clientY: number): Vec2 => {
       const r = stage.getBoundingClientRect();
