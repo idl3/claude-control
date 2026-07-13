@@ -1,4 +1,12 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useModalTransition, prefersReducedMotion } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
@@ -505,6 +513,31 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
   const propsRef = useRef<StudioPropsHandle | null>(null);
   const propCount = manifest && typeof manifest === 'object' ? manifest.props.length : null;
 
+  // Refinement #4 (mobile polish pass): a single sliding underline — instead
+  // of each tab carrying its own static `border-bottom-color` — replaces the
+  // Props/Inspector active indicator so switching tabs animates a slide
+  // rather than an instant color swap. `offsetLeft`/`offsetWidth` (not
+  // `getBoundingClientRect`, which one existing vitest test globally mocks
+  // to a fixed rect) measured against `.studio-side-tabs`'s own
+  // `position: relative` give the underline's target box; the CSS side
+  // (styles.css `.studio-tab-underline`) turns that into one
+  // `transform: translateX() scaleX()` off a 1px base, so nothing here ever
+  // animates `left`/`width` (layout-triggering, banned by the perf rules).
+  const propsTabBtnRef = useRef<HTMLButtonElement | null>(null);
+  const inspectorTabBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [underline, setUnderline] = useState({ x: 0, w: 0 });
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = tab === 'props' ? propsTabBtnRef.current : inspectorTabBtnRef.current;
+      if (el) setUnderline({ x: el.offsetLeft, w: el.offsetWidth });
+    };
+    measure();
+    // Re-measure on resize too (e.g. orientation change while the sheet is
+    // open) — same SSR-safe listener idiom as useViewportWidth below.
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [tab, propCount]);
+
   // Never-reload seam: on mobile the expanded sheet is an overlay that covers
   // the device-frame rect, but the studio-context hosted iframe paints at
   // z-index 310 (AppFrameLayer's STUDIO_HOIST_Z_INDEX) — above the overlay —
@@ -549,6 +582,7 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
       <div className="studio-side-head">
         <div className="studio-side-tabs" role="tablist">
           <button
+            ref={propsTabBtnRef}
             type="button"
             role="tab"
             id="studio-tab-props"
@@ -567,6 +601,7 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
             )}
           </button>
           <button
+            ref={inspectorTabBtnRef}
             type="button"
             role="tab"
             id="studio-tab-inspector"
@@ -594,6 +629,11 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
               soon
             </span>
           </button>
+          <span
+            className="studio-tab-underline"
+            aria-hidden="true"
+            style={{ transform: `translateX(${underline.x}px) scaleX(${underline.w})` }}
+          />
         </div>
         <button
           type="button"
