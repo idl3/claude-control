@@ -8172,6 +8172,19 @@ select.config-input {
   background-size: 22px 22px;
   color: color-mix(in oklch, var(--text) 8%, transparent);
 }
+/* Canvas pan affordance: while zoomed (data-zoomed), the empty stage shows a
+   grab cursor and claims touch so a one-/two-finger drag pans instead of
+   scrolling. Only when zoomed — at Fit the stage stays passive so a tall
+   preset's `.studio-body` can still scroll on touch. The device frame itself is
+   the body-portaled z-310 iframe (its own layer), so its pointer/touch
+   behavior is unaffected. */
+.studio-stage[data-zoomed='true'] {
+  cursor: grab;
+  touch-action: none;
+}
+.studio-stage[data-zoomed='true'].is-grabbing {
+  cursor: grabbing;
+}
 .studio-stage-fit {
   position: absolute;
   inset: 0;
@@ -8234,23 +8247,81 @@ select.config-input {
   flex: 0 0 auto;
   min-width: 0;
 }
-/* Persistent scale chip (Finding 12) — the fit % + logical dims, shown only
-   when the preset is scaled. Toolbar-anchored so it always clears the hosted
-   iframe (z-index 310), which occludes anything painted inside the stage. */
-.studio-scale-chip {
+/* Zoom cluster (replaces Finding 12's static scale chip): −  [Fit|NN%]  +  Fit.
+   One inset pill, modeled on `.studio-segmented`, groups the controls.
+   Toolbar-anchored so it always clears the z-310 hosted iframe (which occludes
+   anything painted inside the stage). tabular-nums keeps the % readout from
+   jittering as digits change during a continuous zoom. */
+.studio-zoom-cluster {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-1);
-  padding: 0 var(--s-2);
-  height: 22px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  white-space: nowrap;
-  color: var(--text-dim);
+  gap: 1px;
+  height: 30px;
+  padding: 3px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: var(--r-pill);
+}
+.studio-zoom-btn,
+.studio-zoom-readout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition:
+    background 0.16s var(--ease),
+    color 0.16s var(--ease),
+    transform 0.12s var(--ease);
+}
+.studio-zoom-btn {
+  width: 26px;
+  font-size: 16px;
+  line-height: 1;
+}
+.studio-zoom-readout {
+  min-width: 48px;
+  padding: 0 var(--s-2);
+  color: var(--text-dim);
+}
+.studio-zoom-fit {
+  width: auto;
+  padding: 0 var(--s-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.studio-zoom-btn:hover:not(:disabled),
+.studio-zoom-readout:hover,
+.studio-zoom-fit:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--text-dim) 16%, transparent);
+  color: var(--text);
+}
+.studio-zoom-btn:active:not(:disabled),
+.studio-zoom-readout:active,
+.studio-zoom-fit:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.studio-zoom-btn:disabled,
+.studio-zoom-fit:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-zoom-btn,
+  .studio-zoom-readout,
+  .studio-zoom-fit {
+    transition: none;
+  }
 }
 
 /* --- C3/E1/E2: .studio-side-panel is the permanently-visible sibling of
@@ -8986,7 +9057,8 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 }
 .studio-icon-btn:focus-visible,
 .studio-segment:focus-visible,
-.studio-scale-chip:focus-visible,
+.studio-zoom-btn:focus-visible,
+.studio-zoom-readout:focus-visible,
 .studio-sheet-grip:focus-visible,
 .studio-side-tab:focus-visible,
 .studio-suppress-toggle input:focus-visible,
@@ -9095,10 +9167,10 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   .studio-stage-fit {
     padding: var(--s-4) var(--s-4) calc(var(--sheet-peek, 108px) + var(--s-3));
   }
-  /* Keep the toolbar compact on a phone — the scale % alone carries the signal;
-     the logical dims live in the chip's title. */
-  .studio-scale-dims {
-    display: none;
+  /* Keep the zoom cluster compact on a phone — trim the readout width; the
+     Fit button stays (double-tap on the canvas also resets to Fit). */
+  .studio-zoom-readout {
+    min-width: 40px;
   }
   .studio-side-panel {
     --sheet-peek: 108px;

@@ -297,19 +297,57 @@ describe('StudioModal — Feature 1: device category + select + orientation pick
     }
   });
 
-  it('a preset that does not fit at 1:1 shows a "scaled to fit" scale chip; a preset that fits shows none', () => {
-    // 700px: still sheet mode (< STUDIO_DOCK_MIN_WIDTH 720, so opens
-    // phone/iphone-13) but wide enough that iphone-13 (390 logical px) fits
-    // at 1:1 once column-mode's 24px chrome is subtracted (676 available).
+  it('renders the zoom cluster; at open (Fit) the readout reads "Fit" and zoom-out/Fit are disabled', () => {
     mockViewportWidth(700);
     render(createElement(StudioModal));
     openStudio();
-    expect(document.querySelector('.studio-scale-chip')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Desktop' })); // laptop 1280x800 — does not fit in 676px
-    const chip = document.querySelector('.studio-scale-chip') as HTMLElement;
-    expect(chip).not.toBeNull();
-    expect(chip.getAttribute('title')).toBe('Laptop · 1280×800 — scaled to fit');
+    // The cluster is always present (it replaced the old scaled-to-fit chip).
+    const readout = screen.getByRole('button', { name: /Zoom: fit to view/ });
+    expect(readout.textContent).toBe('Fit');
+    expect((screen.getByRole('button', { name: 'Zoom out' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Fit to view' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Zoom in' }) as HTMLButtonElement).disabled).toBe(false);
+
+    // Switching device keeps the readout on Fit and carries the device dims in
+    // the readout's title (no "scaled to fit" suffix — the label is Fit/NN%).
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop' })); // laptop 1280×800
+    const readout2 = screen.getByRole('button', { name: /Zoom: fit to view/ });
+    expect(readout2.textContent).toBe('Fit');
+    expect(readout2.getAttribute('title')).toBe('Laptop · 1280×800');
+  });
+
+  it('the − / + buttons zoom in 25% grid steps and enable Fit / zoom-out', () => {
+    // 700px column-mode: laptop 1280 logical px, 676 available → fitScale ≈ 0.53.
+    mockViewportWidth(700);
+    render(createElement(StudioModal));
+    openStudio();
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop' }));
+
+    // + snaps effective scale up onto the 25% grid: 0.53 (Fit) → 0.75 (75%).
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.getByRole('button', { name: /Zoom 75%/ }).textContent).toBe('75%');
+    expect((screen.getByRole('button', { name: 'Zoom out' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Fit to view' }) as HTMLButtonElement).disabled).toBe(false);
+
+    // − steps back down to Fit (0.5 grid step would fall below fitScale ≈ 0.53).
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(screen.getByRole('button', { name: /Zoom: fit to view/ }).textContent).toBe('Fit');
+  });
+
+  it('zoomed-in past 100% passes logical dims so the app keeps its true resolution (capture unaffected)', () => {
+    // A phone preset that FITS at 1:1 (no logical dims at Fit) still gets
+    // logical dims once zoomed past 1:1 — the app renders at true device px and
+    // is merely magnified, so html-to-image capture stays at native resolution.
+    mockViewportWidth(700);
+    render(createElement(StudioModal));
+    openStudio(); // iphone-13, fits at 1:1
+    const ph = () => document.querySelector('[data-embed-app-context="studio"]') as HTMLElement;
+    expect(ph().getAttribute('data-embed-app-logical-width')).toBeNull(); // 1:1, no scaling
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' })); // 100% → 125%
+    expect(ph().getAttribute('data-embed-app-logical-width')).toBe('390');
+    expect(ph().getAttribute('data-embed-app-logical-height')).toBe('844');
   });
 
   it('a scaled-down preset passes its true logical dims to the EmbeddedApp placeholder', () => {
