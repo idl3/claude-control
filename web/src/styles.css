@@ -31,6 +31,27 @@
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* Graphite Inspector redesign (Prototype Studio) — spacing + radius + surface
+     tiers. Spacing is a 4pt base / 8pt rhythm; radii are tiered (inputs/chips
+     tighter than cards, cards tighter than the sheet/device bezel) so the studio
+     reads intentional rather than one-radius templatey. Surface tiers alias the
+     existing oklch ramp so studio rules can speak in elevation, not raw bg-N. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --surface-0: var(--bg);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: var(--bg-hover);
+  --line-strong: oklch(40% 0.015 260);
+
   /* iOS safe-area insets — phone notch/Dynamic Island (top) + home indicator
      (bottom). Zeroed at the iPad+ breakpoint below: iPad has no Dynamic Island
      and we don't want the extra top/bottom gap there. Desktop env() is already
@@ -7817,154 +7838,251 @@ select.config-input {
   flex-direction: column;
   background: var(--bg);
 }
+/* ============================================================================
+   Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
+   Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;
+   Props dock is a right column on desktop and a bottom sheet on mobile. Radii
+   are tiered (--r-sm inputs/chips/segments, --r-md cards/panels, --r-lg sheet
+   + device bezel); accent is reserved for selection/focus/required only.
+   ========================================================================== */
 .studio-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  /* Mobile-UX fix #2: clear the iOS status bar / notch — same safe-area idiom
-     as .sa-panel-head/.detail-head (var(--safe-top), styles.css ~L38). The
-     studio overlay is position:fixed inset:0, so without this the close
-     button (.studio-close, already 44x44 per Apple HIG) sits partly under
-     the Dynamic Island cluster on notched phones. Desktop's inset is 0 ->
-     unchanged 10px. */
-  padding: calc(10px + var(--safe-top)) 16px 10px;
+  gap: var(--s-3);
+  /* Mobile-UX fix #2: clear the iOS status bar / notch (var(--safe-top)); the
+     overlay is position:fixed inset:0. Compact bottom padding (--s-2) keeps
+     total top chrome tight per Finding 3. */
+  padding: calc(var(--s-2) + var(--safe-top)) var(--s-4) var(--s-2);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
-  background: var(--bg-1);
+  background: var(--surface-1);
 }
 .studio-title-group {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--s-2);
   min-width: 0;
 }
 .studio-title {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .studio-version {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-dim);
   white-space: nowrap;
+  padding: 2px var(--s-2);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
 }
-.studio-close {
-  width: 44px;
-  height: 44px;
+.studio-head-actions {
   display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 0 0 auto;
+}
+/* Shared square icon button (head overflow + close). 36px, floored to 44 on
+   coarse pointers below. */
+.studio-icon-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
   color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
   cursor: pointer;
-  flex: 0 0 auto;
 }
-.studio-close:hover {
+.studio-icon-btn:hover {
   color: var(--text);
+  background: var(--surface-2);
+}
+.studio-overflow {
+  position: relative;
+}
+.studio-overflow-btn[aria-expanded='true'] {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.studio-overflow-menu {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  right: 0;
+  z-index: 2;
+  min-width: 220px;
+  padding: var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+}
+.studio-overflow-menu[hidden] {
+  display: none;
+}
+.studio-suppress-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.studio-suppress-toggle:hover {
+  background: var(--surface-2);
+}
+.studio-suppress-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 .studio-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 8px 16px;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
-  background: var(--bg-1);
+  background: var(--surface-1);
 }
-.studio-suppress-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.studio-device-bar {
-  display: flex;
-  gap: 6px;
-}
-/* Mobile-UX fix #1: leading-icon glyph shared by every icon-led Studio
-   button (device bar, capture controls, annotate toolbar) — fixed 16px so it
-   reads consistently at the compact 32px button height below, distinct from
-   .act-ico's em-relative sizing (which tracks the action-bar's own font-size
-   scaling and isn't a fit here). */
+/* Fixed 16px leading glyph shared across the studio's icon-led controls. */
 .studio-tool-ico {
   width: 16px;
   height: 16px;
   flex: none;
 }
-/* Mobile-UX fix #1: compact icon+label pill — display:inline-flex row so the
-   leading .studio-tool-ico and the (optionally hidden, see the 420px rule
-   below) text label sit on one baseline at a fixed, touch-friendly 32px
-   height. @media(pointer:coarse) below still floors this to 44px (min-height
-   wins over the shorter fixed height here). */
-.studio-device-btn {
+/* ---- Segmented control (device modes AND small enum props) --------------- */
+.studio-segmented {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.studio-segment {
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
+  justify-content: center;
+  gap: var(--s-2);
+  height: 34px;
+  padding: 0 var(--s-3);
   font-size: 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+  transition: background var(--duration, 150ms) var(--ease), color var(--duration, 150ms) var(--ease);
+  white-space: nowrap;
 }
-.studio-device-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+.studio-segment:hover:not([aria-pressed='true']) {
   color: var(--text);
 }
-.studio-device-btn[aria-pressed='true'] {
-  background: color-mix(in oklch, var(--accent) 16%, transparent);
-  border-color: var(--accent);
+.studio-segment[aria-pressed='true'] {
+  background: var(--surface-0);
+  border-color: var(--line);
   color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
-.studio-device-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.studio-device-segmented {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .studio-body {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: safe center;
-  gap: 20px;
-  overflow: auto;
-  padding: 24px;
-  background: radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--bg) 86%, black) 0%, color-mix(in oklch, var(--bg) 66%, black) 100%);
+  align-items: stretch;
+  gap: var(--s-5);
+  overflow: hidden;
+  padding: var(--s-5);
+  background:
+    radial-gradient(90% 60% at 50% 8%, color-mix(in oklch, var(--accent) 5%, transparent) 0%, transparent 70%),
+    radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--bg) 92%, black) 0%, color-mix(in oklch, var(--bg) 72%, black) 100%);
 }
-.studio-frame {
-  /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder
-     filling it at 100%/100% (see EmbeddedApp.tsx's frameStyle) — the inline
-     width/height set by StudioModal.tsx must land exactly at the device
-     preset's own pixel size so the embedded app's own media queries respond
-     to the real breakpoint, not a shrunken one. `* { box-sizing: border-box
-     }` (styles.css line ~70) means padding here would eat directly into that
-     size, so this box carries none (the border-only bezel below is a
-     negligible, deliberate 1px/side device-frame affordance). The
-     font-size/text-align/padding this box carried in Phase A were for the
-     "hosting arrives in Phase B" placeholder text only — dead since B1
-     replaced that text with the live app; removed here as part of the same
-     box this task (B2) resizes.
-  */
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in oklch, var(--line) 82%, white 12%);
-  border-radius: var(--radius);
-  background: var(--bg-1);
-  box-shadow: 0 24px 60px -18px rgba(0,0,0,0.65), 0 6px 18px -6px rgba(0,0,0,0.45);
+/* The stage is the hero: it fills all remaining space and centers the device.
+   A faint dot-grid gives the void texture + depth (Finding 8). */
+.studio-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--r-md);
+  background-image: radial-gradient(currentColor 0.8px, transparent 0.8px);
+  background-size: 22px 22px;
+  color: color-mix(in oklch, var(--text) 8%, transparent);
+}
+.studio-stage-fit {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--s-4);
+  color: var(--text);
+}
+.studio-frame {
+  /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder at
+     100%/100% — the inline width/height from StudioModal.tsx must land at the
+     device preset's own pixel size so the app's media queries see the real
+     breakpoint. Border-box + zero padding keeps that exact; the bezel is a
+     deliberate 1px border + inner highlight device affordance (Finding 8). */
+  position: relative;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, white 4%, transparent) inset,
+    0 30px 70px -24px rgba(0, 0, 0, 0.7),
+    0 8px 22px -8px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* Toolbar right cluster: persistent scale readout + Screenshot. */
+.studio-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* Persistent scale chip (Finding 12) — the fit % + logical dims, shown only
+   when the preset is scaled. Toolbar-anchored so it always clears the hosted
+   iframe (z-index 310), which occludes anything painted inside the stage. */
+.studio-scale-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 0 var(--s-2);
+  height: 22px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
 }
 
 /* --- C3/E1/E2: .studio-side-panel is the permanently-visible sibling of
@@ -7975,24 +8093,47 @@ select.config-input {
    attribute on .studio-side-tab-body, not a conditional render) — the panel
    box itself, and everything mounted inside it, never unmounts. */
 .studio-side-panel {
-  flex: 0 0 320px;
+  flex: 0 0 340px;
   align-self: stretch;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
 }
-.studio-side-tabs {
+/* Drag-handle grip — the bottom-sheet affordance. Hidden on desktop (docked
+   column needs no handle); revealed in the mobile @media block below. */
+.studio-sheet-grip {
+  display: none;
+}
+.studio-sheet-grip-ico {
+  width: 26px;
+  height: 26px;
+}
+.studio-side-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
   flex: 0 0 auto;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
   border-bottom: 1px solid var(--line);
 }
+.studio-side-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-width: 0;
+}
 .studio-side-tab {
-  flex: 1 1 0;
-  padding: 8px 10px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-1);
+  font-size: 13px;
+  font-weight: 500;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
@@ -8006,38 +8147,76 @@ select.config-input {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
+.studio-side-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+.studio-side-tab[aria-selected='true'] .studio-side-tab-count {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--text);
+}
 .studio-side-tab-disabled {
-  opacity: 0.4;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 .studio-side-tab-soon {
   display: inline-flex;
   align-items: center;
-  margin-left: 6px;
   padding: 1px 6px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-radius: 999px;
-  background: var(--bg-2);
-  color: var(--text-faint);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-dim);
   vertical-align: middle;
+}
+.studio-props-reset {
+  flex: 0 0 auto;
+  padding: var(--s-1) var(--s-3);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.studio-props-reset:hover {
+  color: var(--red);
+  border-color: color-mix(in oklch, var(--red) 60%, var(--line));
+}
+.studio-props-reset[hidden] {
+  display: none;
 }
 .studio-side-tab-body {
   flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: var(--s-4);
   font-size: 12px;
   color: var(--text-dim);
 }
 .studio-props-panel {
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
 }
 .studio-props-degrade {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--s-3);
 }
 .studio-props-degrade-msg {
   color: var(--text-dim);
@@ -8046,18 +8225,20 @@ select.config-input {
 .studio-props-degrade-cmd {
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 11px;
-  padding: 8px;
+  line-height: 1.5;
+  padding: var(--s-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-2);
+  border-radius: var(--r-md);
+  background: var(--surface-0);
   color: var(--text);
 }
 .studio-props-degrade-copy {
   align-self: flex-start;
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: var(--radius);
+  padding: var(--s-1) var(--s-3);
+  font-size: 12px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--line);
   background: transparent;
   color: var(--text-dim);
@@ -8071,88 +8252,202 @@ select.config-input {
   color: var(--green);
   border-color: var(--green);
 }
-.studio-props-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.studio-props-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-}
-.studio-props-reset {
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.studio-props-reset:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
+/* ---- one prop field ----------------------------------------------------- */
 .studio-prop-field {
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-.studio-prop-field:first-of-type {
-  border-top: none;
+  gap: var(--s-2);
 }
 .studio-prop-label {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
 }
 .studio-prop-name {
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 550;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-prop-required {
+  color: var(--accent);
+  font-weight: 700;
+}
+.studio-prop-label-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 0 0 auto;
 }
 .studio-prop-type {
-  font-size: 10px;
+  font-size: 11px;
+  padding: 1px var(--s-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
   color: var(--text-dim);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.studio-prop-example-chip {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
+.studio-prop-raw-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.studio-prop-raw-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.studio-prop-raw-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.studio-prop-control-row {
+  display: flex;
+}
+/* ---- Finding 2: base input/select spec ---------------------------------- */
+.studio-props-panel input[type='text'],
+.studio-props-panel input[type='number'],
+.studio-props-panel select,
+.studio-prop-control {
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--s-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.studio-props-panel input::placeholder {
+  color: var(--text-faint);
+}
+select.studio-prop-control {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: calc(var(--s-3) + 18px);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--s-3) center;
+  cursor: pointer;
+}
+.studio-prop-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio-prop-input-wrap.has-swatch .studio-prop-control {
+  padding-right: calc(var(--s-3) + 26px);
+}
+.studio-prop-swatch {
+  position: absolute;
+  top: 50%;
+  right: var(--s-2);
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 1px color-mix(in oklch, white 22%, transparent) inset;
+  pointer-events: none;
+}
+/* Small-enum segmented prop (Finding 4 / segmented spec). */
+.studio-prop-segmented {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio-prop-segmented .studio-segment {
+  height: 32px;
+  text-transform: none;
+}
+/* Boolean → switch (replaces a bare checkbox). */
+.studio-prop-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.studio-prop-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--line-strong);
+  transition: background var(--duration, 150ms) var(--ease);
+}
+.studio-prop-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: var(--text-dim);
+  transition: transform var(--duration, 150ms) var(--ease), background var(--duration, 150ms) var(--ease);
+}
+.studio-prop-switch[aria-checked='true'] .studio-prop-switch-track {
+  background: color-mix(in oklch, var(--accent) 55%, transparent);
+  border-color: var(--accent);
+}
+.studio-prop-switch[aria-checked='true'] .studio-prop-switch-thumb {
+  transform: translateX(16px);
+  background: var(--text);
+}
+.studio-prop-switch-label {
+  font-variant-numeric: tabular-nums;
+}
+.studio-prop-example {
+  align-self: flex-start;
+  padding: var(--s-1) var(--s-2);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  border: 1px dashed var(--line-strong);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
 }
-.studio-prop-example-chip:hover {
+.studio-prop-example:hover {
   color: var(--text);
   border-color: var(--accent);
+  border-style: solid;
 }
 .studio-prop-raw {
   width: 100%;
-  min-height: 44px;
+  min-height: 72px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-2);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
   color: var(--text);
-}
-.studio-prop-raw-toggle {
-  align-self: flex-start;
-  padding: 2px 8px;
-  font-size: 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
+  resize: vertical;
 }
 
 /* --- E1: StudioInspector — read-only DOM outline tree. Native <details>/
@@ -8170,13 +8465,13 @@ select.config-input {
 }
 .studio-inspector-title {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
   color: var(--text);
 }
 .studio-inspector-refresh {
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: var(--radius);
+  padding: var(--s-1) var(--s-3);
+  font-size: 12px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--line);
   background: transparent;
   color: var(--text-dim);
@@ -8246,18 +8541,22 @@ select.config-input {
 .studio-capture-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-3);
   font-size: 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
+  transition: border-color var(--duration, 150ms) var(--ease), background var(--duration, 150ms) var(--ease);
 }
 .studio-capture-btn:hover {
   border-color: var(--accent);
+  background: var(--surface-3);
 }
 .studio-capture-btn:disabled {
   opacity: 0.5;
@@ -8337,13 +8636,14 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-actions button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-4);
   font-size: 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
 }
@@ -8409,40 +8709,41 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-3);
   font-size: 12px;
   text-transform: capitalize;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   color: var(--text-dim);
   cursor: pointer;
 }
 .studio-annotate-tool-btn[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--text);
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-2));
 }
 .studio-annotate-color {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
   background: transparent;
   cursor: pointer;
 }
 .studio-annotate-undo {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-3);
   font-size: 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: transparent;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   color: var(--text-dim);
   cursor: pointer;
 }
@@ -8455,82 +8756,168 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   max-height: 70vh;
   object-fit: contain;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-1);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
   touch-action: none; /* pointer events drive drawing; no browser scroll/zoom gesture should intercept them */
 }
 
-.studio-close:focus-visible,
-.studio-device-btn:focus-visible,
+/* Focus rings: a border-tint + soft accent ring for text inputs/controls
+   (Finding 2), a crisp outline for everything button-like. */
+.studio-props-panel input:focus-visible,
+.studio-props-panel select:focus-visible,
+.studio-prop-control:focus-visible,
+.studio-prop-raw:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 40%, transparent);
+}
+.studio-icon-btn:focus-visible,
+.studio-segment:focus-visible,
+.studio-scale-chip:focus-visible,
+.studio-sheet-grip:focus-visible,
 .studio-side-tab:focus-visible,
 .studio-suppress-toggle input:focus-visible,
 .studio-capture-btn:focus-visible,
 .studio-capture-actions button:focus-visible,
 .studio-capture-error-chip button:focus-visible,
 .studio-props-reset:focus-visible,
-.studio-prop-example-chip:focus-visible,
+.studio-prop-example:focus-visible,
 .studio-prop-raw-toggle:focus-visible,
-.studio-prop-raw:focus-visible,
+.studio-prop-switch:focus-visible,
 .studio-props-degrade-copy:focus-visible,
-.studio-props-panel select:focus-visible,
-.studio-props-panel input:focus-visible,
 .studio-inspector-refresh:focus-visible,
 .studio-inspector-node summary:focus-visible,
 .studio-annotate-tool-btn:focus-visible,
 .studio-annotate-undo:focus-visible,
 .studio-annotate-color:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
-@media (max-width: 640px) {
+/* ============================================================================
+   Mobile (narrow OR coarse pointer): Props dock becomes a bottom SHEET.
+   The dock container is ALWAYS mounted; only a transform slides it, so the
+   hosted iframe never reloads. Collapsed → header peeks; expanded → ~72vh.
+   ========================================================================== */
+@media (max-width: 640px), (pointer: coarse) {
   .studio-body {
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 12px;
+    display: block;
+    position: relative;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
   }
-  .studio-frame {
-    align-self: center;
-    max-width: 100%;
+  .studio-stage {
+    position: absolute;
+    inset: 0;
+    border-radius: 0;
+  }
+  /* Reserve the peek strip at the bottom so the centered device never hides
+     behind the collapsed sheet header (the measured contentRect excludes this
+     padding → both-axis fit lands the card fully visible above the peek). */
+  .studio-stage-fit {
+    padding: var(--s-4) var(--s-4) calc(var(--sheet-peek, 108px) + var(--s-3));
+  }
+  /* Keep the toolbar compact on a phone — the scale % alone carries the signal;
+     the logical dims live in the chip's title. */
+  .studio-scale-dims {
+    display: none;
   }
   .studio-side-panel {
-    flex: 0 0 auto;
-    width: 100%;
-    max-height: 52vh;
+    --sheet-peek: 108px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    flex: none;
+    width: auto;
+    height: 72vh;
+    max-height: calc(100% - 12px);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-width: 1px 0 0;
+    box-shadow: 0 -18px 44px -18px rgba(0, 0, 0, 0.7);
+    /* Collapsed: slide down so only the peek (grip + header) shows. */
+    transform: translateY(calc(100% - var(--sheet-peek)));
+    transition: transform 260ms var(--ease);
+    padding-bottom: var(--safe-bottom);
   }
-  .studio-title {
-    font-size: 15px;
+  .studio-side-panel[data-expanded='true'] {
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .studio-side-panel {
+      transition: none;
+    }
+  }
+  /* Dim the stage behind an expanded sheet (Finding: stage dims 8%). */
+  .studio-stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.34);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 260ms var(--ease);
+  }
+  .studio-body:has(.studio-side-panel[data-expanded='true']) .studio-stage::after {
+    opacity: 1;
+  }
+  .studio-sheet-grip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 24px;
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .studio-sheet-grip-ico {
+    stroke-width: 3;
+  }
+  .studio-device-segment .studio-btn-label {
+    display: none;
+  }
+  /* While the sheet is expanded, drop the studio hoist below the overlay so
+     the sheet's fields aren't punched through by the live iframe (see the
+     body-class doc comment in StudioSidePanel). Scoped to this mobile block so
+     the desktop docked layout — no overlap — is untouched. */
+  body.studio-sheet-open .embed-app-hoist[data-embed-app-context='studio'] {
+    z-index: 0 !important;
+    pointer-events: none !important;
   }
 }
 @media (pointer: coarse) {
-  .studio-device-btn,
+  .studio-icon-btn,
+  .studio-segment,
   .studio-side-tab,
   .studio-capture-btn,
   .studio-capture-actions button,
   .studio-props-reset,
-  .studio-prop-raw-toggle,
-  .studio-inspector-refresh,
   .studio-annotate-tool-btn,
   .studio-annotate-undo {
     min-height: 44px;
+  }
+  .studio-segment {
+    height: 42px;
+  }
+  .studio-props-panel input[type='text'],
+  .studio-props-panel input[type='number'],
+  .studio-props-panel select,
+  .studio-prop-control {
+    height: 44px;
   }
   .studio-annotate-color {
     width: 44px;
     height: 44px;
   }
-  .studio-prop-example-chip {
-    min-height: 32px;
-  }
-}
-/* Mobile-UX fix #1: at the tightest widths (the 3-up device bar alongside the
-   close button leaves little room per label) drop the device bar's text
-   label, keeping just the icon + aria-label — mirrors the icon-only annotate
-   tool buttons above. */
-@media (max-width: 420px) {
-  .studio-device-btn .studio-btn-label {
-    display: none;
+  .studio-prop-raw-toggle {
+    width: 34px;
+    height: 34px;
   }
 }
 
