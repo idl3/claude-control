@@ -8066,6 +8066,14 @@ select.config-input {
 .studio-head-toolbar .studio-segment {
   height: 24px;
 }
+.studio-head-toolbar .studio-device-segmented {
+  /* The segmented pill has no explicit height upstream (unlike
+     `.studio-zoom-cluster`, which clamps to 30px), so it would otherwise sit
+     at its intrinsic 32px (24px button + 3px+3px padding + 1px+1px border).
+     Clamp it the same way the zoom cluster clamps its own 24px buttons, so
+     all four controls render at an identical 30px. */
+  height: 30px;
+}
 .studio-head-toolbar .studio-device-select,
 .studio-head-toolbar .studio-orientation-btn,
 .studio-head-toolbar .studio-capture-btn {
