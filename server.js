@@ -62,6 +62,7 @@ import { replyShouldBlock } from './lib/reply-guard.js';
 import { shouldRefuseSendForPicker } from './lib/picker-send-guard.js';
 import { listSkills, readSkill } from './lib/skills.js';
 import { reapSiblingServers } from './lib/reap-siblings.js';
+import { deriveProjectsRoots } from './lib/projects-roots.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -82,6 +83,14 @@ const PUBLIC_DIR = fs.existsSync(path.join(DIST_DIR, 'index.html'))
 const env = (name) =>
   process.env[`CLAUDE_CONTROL_${name}`] ?? process.env[`COCKPIT_${name}`];
 
+// Truthy when the env var is set to anything other than empty / 0 / false / no / off.
+const envFlag = (name) => {
+  const v = env(name);
+  if (v == null) return false;
+  const s = String(v).trim().toLowerCase();
+  return s !== '' && s !== '0' && s !== 'false' && s !== 'no' && s !== 'off';
+};
+
 // Durable token: when no token env var is set, read the persisted one at
 // ~/.claude-control/token (written by bin/install-service.sh / first run). This
 // keeps the same token — and therefore the same phone URL — across restarts and
@@ -100,6 +109,12 @@ const CONFIG = {
   host: env('HOST') || '127.0.0.1',
   projectsRoot:
     env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
+  projectsRoots: deriveProjectsRoots({
+    homeDir: os.homedir(),
+    primaryRoot: env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
+    singleRoot: envFlag('SINGLE_ROOT'),   // CLAUDE_CONTROL_SINGLE_ROOT=1 opt-out
+    dataDir: env('DATA') || path.join(os.homedir(), '.claude-control'),
+  }),
   codexSessionsRoot:
     env('CODEX_SESSIONS') || path.join(os.homedir(), '.codex', 'sessions'),
   // Experimental Codex app-server transport. New Codex sessions use a tmux
@@ -190,7 +205,7 @@ const VIDEO_MIME = {
 };
 
 // --- shared state -----------------------------------------------------------
-const registry = new SessionRegistry({ projectsRoot: CONFIG.projectsRoot, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
+const registry = new SessionRegistry({ projectsRoots: CONFIG.projectsRoots, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const collab = new Collab(); // session-to-session collaboration rooms (lib/collab.js)
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 const codexRpc = new CodexRpcManager();
@@ -446,7 +461,7 @@ const _handler = (req, res) => {
   }
   if (u.pathname === '/api/transcripts') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
-    return listRecentTranscripts({ projectsRoot: CONFIG.projectsRoot })
+    return listRecentTranscripts({ projectsRoots: CONFIG.projectsRoots })
       .then((list) => endJson(res, 200, { transcripts: list }))
       .catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
   }
@@ -1615,7 +1630,7 @@ async function handleSetPin(req, res) {
   if (raw == null || raw === '') {
     delete pins[key];
   } else {
-    const full = validateTranscriptPath(raw, CONFIG.projectsRoot);
+    const full = validateTranscriptPath(raw, CONFIG.projectsRoots);
     if (!full) return endJson(res, 400, { error: 'invalid transcript path' });
     pins = { ...pins, [key]: full };
   }
