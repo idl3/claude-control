@@ -9204,6 +9204,22 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
       transition: none;
     }
   }
+  /* Mobile capture-review exit fix: this sheet is `position: absolute` with
+     `z-index: 3` (above), so on mobile it paints OVER `.studio-capture-overlay`
+     (`z-index: 1`, set in .studio-panel — see the D1/D2/D3 comment near that
+     rule), burying the annotate Cancel/Save action bar with no way to
+     dismiss capture-review. Desktop is unaffected — there the docked side
+     panel already sits fully behind the overlay (same D1/D2/D3 comment), so
+     this rule is scoped inside this <720px block only. Props editing is
+     irrelevant while reviewing a capture, so hide the sheet outright for the
+     duration rather than juggling z-index/visibility — it reappears the
+     instant capture-review ends. Reuses `body.studio-capture-reviewing`,
+     already toggled by StudioCapture (StudioModal.tsx) for the hoisted-iframe
+     fix above (see the `body.studio-capture-reviewing
+     .embed-app-hoist[data-embed-app-context='studio']` rule). */
+  body.studio-capture-reviewing .studio-side-panel {
+    display: none;
+  }
   /* Refinement #4: prop rows fade+slide in with a light stagger each time the
      sheet opens. `[data-expanded='true']` newly matching re-triggers the
      keyframe animation on every re-open (and switching back to the Props tab
