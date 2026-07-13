@@ -263,6 +263,18 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
       if (!imgReady || !naturalSize || editingText) return;
       const svg = svgRef.current;
       if (!svg) return;
+      // Suppress the browser's own post-mousedown default focus action.
+      // Without this, a real mouse click with the text tool races: React
+      // synchronously mounts+autofocuses the new inline <input>, but Chromium
+      // then applies its default mousedown focus behavior — refocusing the
+      // nearest focusable ANCESTOR of the original pointerdown target (this
+      // component's tabIndex=0 root div) — which steals focus straight back
+      // off the input, fires its onBlur, and commitTextEdit() immediately
+      // discards the still-empty draft. jsdom (this project's test env) does
+      // not implement this default-focus-on-mousedown behavior at all, so
+      // StudioAnnotate.vitest.ts's fireEvent-based drawText() never surfaced
+      // it; only real-browser (Playwright) verification caught it.
+      e.preventDefault();
       const rect = svg.getBoundingClientRect();
       const nextScale = rect.width > 0 ? rect.width / naturalSize.w : 1;
       displayScaleRef.current = nextScale;
