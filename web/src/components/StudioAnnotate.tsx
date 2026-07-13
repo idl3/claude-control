@@ -1,206 +1,144 @@
-// cockpit-prototype-studio, Phase D (D2): canvas annotation overlay for a
-// captured Studio screenshot (D1's cc-capture-result dataUrl). A single
-// <canvas> IS the composite from the start — the source image is drawn onto
-// it once (at the image's own natural resolution, so exported quality never
-// degrades from a shrunken display size) and every annotation stroke is
-// drawn on top of that same canvas, so `exportPng()` is just
-// `canvas.toDataURL('image/png')`: no separate offscreen compositing pass,
-// no image+overlay layering to keep in sync.
+// cockpit-prototype-studio, Phase D annotation overlay — RETAINED, EDITABLE
+// object model rendered as an SVG overlay (replaces the old baked-raster
+// <canvas> where every stroke was drawn once and forgotten). The base image
+// is displayed responsively via a plain <img>; a same-size <svg
+// viewBox="0 0 W H"> (W/H = the image's NATURAL resolution) sits on top of
+// it. Every annotation is stored in IMAGE space (viewBox units), so it stays
+// correct across resize/zoom and `exportPng()` needs zero coordinate
+// remapping — it just replays the same annotations onto an offscreen canvas
+// at the image's natural size.
 //
 // Pointer Events (onPointerDown/Move/Up), not separate mouse+touch handlers:
 // the Pointer Events spec already unifies mouse, touch, and pen input under
-// one event model (`event.pointerType` distinguishes them only for callers
-// who care) — this is the "native platform feature already covers it" case,
-// not something to hand-roll two ways.
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { PencilIcon, ArrowUpRightIcon, TypeIcon, UndoIcon } from './icons';
+// one event model.
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { PencilIcon, ArrowUpRightIcon, TypeIcon, UndoIcon, MousePointerIcon, Trash2Icon } from './icons';
+import {
+  type Annotation,
+  type AnnId,
+  type Point,
+  type TextAnnotation,
+  type History,
+  createHistory,
+  pushHistory,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+  createPen,
+  createArrow,
+  createText,
+  translateAnnotation,
+  retargetArrow,
+  recolorAnnotation,
+  resizeText,
+  editText,
+} from '../lib/annotationModel';
+import {
+  clientToImagePoint,
+  pxToImg,
+  handleRadiusPx,
+  topmostHit,
+  nearestArrowHandle,
+  annotationBounds,
+  computeArrowHeadPoints,
+  drawAnnotation,
+  type DrawCtx,
+} from '../lib/annotationGeometry';
 
-export type AnnotateTool = 'pen' | 'arrow' | 'text';
+export type { Point } from '../lib/annotationModel';
 
-// Mobile-UX fix #1: icon-led tool buttons — mirrors icons.tsx's
-// `Svg`-wrapper glyphs (24-grid, currentColor). aria-label stays the tool
-// name (icon-only is fine here, same idiom as the reload/pin/fullscreen
-// corner buttons in EmbeddedApp.tsx).
-const TOOL_ICONS: Record<AnnotateTool, typeof PencilIcon> = {
+type DrawTool = 'pen' | 'arrow' | 'text';
+export type AnnotateTool = 'select' | DrawTool;
+
+const TOOL_ICONS: Record<DrawTool, typeof PencilIcon> = {
   pen: PencilIcon,
   arrow: ArrowUpRightIcon,
   text: TypeIcon,
 };
 
-export type Point = { x: number; y: number };
-
-export type Stroke =
-  | { tool: 'pen'; color: string; points: Point[] }
-  | { tool: 'arrow'; color: string; points: [Point, Point] }
-  | { tool: 'text'; color: string; points: [Point]; text: string };
+const COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
+const DEFAULT_TEXT_SIZE = 20;
+const MIN_TEXT_SIZE = 10;
+const MAX_TEXT_SIZE = 64;
+const FINE_HIT_TOLERANCE_PX = 10;
+const COARSE_HIT_TOLERANCE_PX = 18;
 
 export interface StudioAnnotateHandle {
-  /** Composites the source image + every committed stroke into a single PNG dataUrl, at the image's own natural resolution. */
+  /** Composites the source image + every committed annotation into a single PNG dataUrl, at the image's own natural resolution. */
   exportPng(): Promise<string>;
 }
 
-/**
- * Pure coordinate transform: a pointer event's viewport-relative
- * (clientX/clientY) coordinates, converted into the canvas's own backing-
- * buffer pixel space. Needed because the canvas is displayed at whatever
- * size CSS gives it (e.g. `max-width: 100%`) while its `width`/`height`
- * attributes (and therefore every drawing coordinate) are fixed at the
- * source image's natural resolution — the two can differ by an arbitrary
- * scale factor.
- */
-export function toCanvasPoint(
-  clientX: number,
-  clientY: number,
-  rect: { left: number; top: number; width: number; height: number },
-  canvasWidth: number,
-  canvasHeight: number,
-): Point {
-  const scaleX = rect.width > 0 ? canvasWidth / rect.width : 1;
-  const scaleY = rect.height > 0 ? canvasHeight / rect.height : 1;
-  return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
-}
-
-/**
- * Pure geometry: the two "barb" endpoints of an arrowhead pointing from
- * `from` to `to`. Returned in the order [left barb, right barb] as seen
- * facing along the direction of travel.
- */
-export function computeArrowHeadPoints(
-  from: Point,
-  to: Point,
-  headLength = 14,
-  headAngleRad = Math.PI / 7,
-): [Point, Point] {
-  const angle = Math.atan2(to.y - from.y, to.x - from.x);
-  const left: Point = {
-    x: to.x - headLength * Math.cos(angle - headAngleRad),
-    y: to.y - headLength * Math.sin(angle - headAngleRad),
-  };
-  const right: Point = {
-    x: to.x - headLength * Math.cos(angle + headAngleRad),
-    y: to.y - headLength * Math.sin(angle + headAngleRad),
-  };
-  return [left, right];
-}
-
-/** Pure: drop the most recently committed stroke. No-op on an empty list — undo with nothing to undo is a safe idle, not an error. */
-export function undoStrokes(strokes: Stroke[]): Stroke[] {
-  return strokes.length === 0 ? strokes : strokes.slice(0, -1);
-}
-
-/**
- * Draws one stroke onto a 2D rendering context. `ctx` is typed as a minimal
- * structural subset of CanvasRenderingContext2D so tests can pass a plain
- * call-recording mock instead of a real canvas context (jsdom's canvas
- * support is unreliable/absent without the optional `canvas` native module).
- */
-export interface DrawCtx {
-  strokeStyle: string;
-  fillStyle: string;
-  lineWidth: number;
-  font: string;
-  beginPath(): void;
-  moveTo(x: number, y: number): void;
-  lineTo(x: number, y: number): void;
-  closePath(): void;
-  stroke(): void;
-  fill(): void;
-  fillText(text: string, x: number, y: number): void;
-}
-
-export function drawStroke(ctx: DrawCtx, stroke: Stroke): void {
-  ctx.strokeStyle = stroke.color;
-  ctx.fillStyle = stroke.color;
-  ctx.lineWidth = 3;
-  if (stroke.tool === 'pen') {
-    if (stroke.points.length < 2) return;
-    ctx.beginPath();
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    for (const p of stroke.points.slice(1)) ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    return;
-  }
-  if (stroke.tool === 'arrow') {
-    const [from, to] = stroke.points;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    const [left, right] = computeArrowHeadPoints(from, to);
-    ctx.beginPath();
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(left.x, left.y);
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(right.x, right.y);
-    ctx.stroke();
-    return;
-  }
-  // text
-  ctx.font = '20px ui-monospace, "SF Mono", Menlo, monospace';
-  ctx.fillText(stroke.text, stroke.points[0].x, stroke.points[0].y);
-}
-
-const COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
-
 export interface StudioAnnotateProps {
   imageDataUrl: string;
-  /**
-   * Studio Phase D CP3 audit, FIX 1: fires `true` once the source image has
-   * successfully decoded (canvas sized + drawable) and `false` at the start
-   * of every load attempt AND on decode failure — the caller (StudioModal)
-   * gates the Save button on this so a malformed/undecodable dataUrl can
-   * never reach exportPng() from the UI.
-   */
+  /** Fires `true` once the source image has successfully decoded and `false` at the start of every load attempt AND on decode failure. */
   onReady?: (ready: boolean) => void;
-  /**
-   * Fires when the source image fails to decode (the browser's native
-   * `<img>` onerror — an invalid/truncated/non-image dataUrl). The caller
-   * surfaces this as a real error stage, mirroring the existing capture-
-   * failed error chip idiom.
-   */
+  /** Fires when the source image fails to decode. */
   onError?: () => void;
 }
 
+/** jsdom (this project's test environment) does not implement `matchMedia` at all — every call must be guarded, mirroring lib/anim.ts's `prefersReducedMotion()`. */
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia('(pointer: coarse)').matches;
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const handler = (e: MediaQueryListEvent) => setCoarse(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return coarse;
+}
+
+type DragState =
+  | { kind: 'draw-pen'; id: AnnId; pointerId: number }
+  | { kind: 'draw-arrow'; id: AnnId; pointerId: number }
+  | { kind: 'move'; id: AnnId; start: Point; original: Annotation; pointerId: number; moved: boolean }
+  | { kind: 'retarget'; id: AnnId; which: 'start' | 'end'; pointerId: number; moved: boolean };
+
+type EditingText = { id: AnnId; isNew: boolean; draft: string };
+
 export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotateProps>(
   function StudioAnnotate({ imageDataUrl, onReady, onError }, ref) {
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const [tool, setTool] = useState<AnnotateTool>('pen');
-    const [color, setColor] = useState(COLORS[0]);
-    const [strokes, setStrokes] = useState<Stroke[]>([]);
-    const [imgReady, setImgReady] = useState(false);
-    const imgRef = useRef<HTMLImageElement | null>(null);
-    const drawingRef = useRef(false);
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const svgRef = useRef<SVGSVGElement | null>(null);
+    const imgRef = useRef<HTMLImageElement | null>(null); // decode probe; not rendered (see the visible <img> below)
+    const dragRef = useRef<DragState | null>(null);
+    const displayScaleRef = useRef(1);
 
-    // Load the source image once; the canvas backing buffer is sized to its
-    // NATURAL resolution (never the on-screen display size), so annotations
-    // and the exported PNG stay full quality regardless of how small the
-    // review overlay renders the preview.
+    const [tool, setTool] = useState<AnnotateTool>('select');
+    const [color, setColor] = useState(COLORS[0]);
+    const [imgReady, setImgReady] = useState(false);
+    const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+    const [history, setHistory] = useState<History>(() => createHistory());
+    const [liveAnnotations, setLiveAnnotations] = useState<Annotation[] | null>(null);
+    const [selectedId, setSelectedId] = useState<AnnId | null>(null);
+    const [editingText, setEditingText] = useState<EditingText | null>(null);
+    const [displayScale, setDisplayScale] = useState(1);
+    const coarse = useCoarsePointer();
+
+    const annotations = liveAnnotations ?? history.present;
+    const selectedAnn = selectedId ? (annotations.find((a) => a.id === selectedId) ?? null) : null;
+
+    // Decode probe: a DETACHED `new Image()`, deliberately separate from the
+    // visible <img> below. This preserves the exact imgReady/onReady/onError
+    // contract StudioModal.vitest.ts asserts on (its stubImageLoad() helper
+    // stubs the global `Image` constructor, which only affects `new Image()`
+    // calls, not React's JSX-rendered <img>).
     useEffect(() => {
-      // Reset to not-ready at the start of every load attempt (not just on
-      // failure) — defensive against a future reuse of this component that
-      // loads a second imageDataUrl into an already-mounted instance without
-      // unmounting first; today StudioModal always unmounts/remounts between
-      // captures, but this keeps the invariant true regardless.
       setImgReady(false);
+      setNaturalSize(null);
       onReady?.(false);
       const img = new Image();
       img.onload = () => {
         imgRef.current = img;
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-        }
+        setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
         setImgReady(true);
         onReady?.(true);
       };
-      // Studio Phase D CP3 audit, FIX 1: a malformed/undecodable dataUrl
-      // (truncated base64, non-PNG bytes, etc.) fires the native <img>
-      // onerror — previously unhandled, leaving imgReady permanently false
-      // with no user-visible signal and Save unguarded (a stale/blank canvas
-      // could still export). Surfaces a real error to the caller AND keeps
-      // imgReady false, which now also gates Save (see exportPng() below and
-      // StudioModal's `disabled={!annotateReady}`).
       img.onerror = () => {
         setImgReady(false);
         onReady?.(false);
@@ -213,86 +151,324 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
       };
     }, [imageDataUrl, onReady, onError]);
 
-    // Redraw the full picture (base image + every committed stroke) any time
-    // the stroke list changes or the image finishes loading.
+    // A new source image means a fresh annotation history.
     useEffect(() => {
-      const canvas = canvasRef.current;
-      const img = imgRef.current;
-      if (!canvas || !img || !imgReady) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      for (const s of strokes) drawStroke(ctx as unknown as DrawCtx, s);
-    }, [strokes, imgReady]);
+      setHistory(createHistory());
+      setLiveAnnotations(null);
+      setSelectedId(null);
+      setEditingText(null);
+      dragRef.current = null;
+    }, [imageDataUrl]);
 
-    useImperativeHandle(ref, () => ({
-      async exportPng() {
-        // Studio Phase D CP3 audit, FIX 1: belt-and-suspenders — StudioModal
-        // already disables the Save button while !annotateReady (mirrors
-        // this component's own imgReady), but exportPng() ALSO refuses here
-        // so a malformed/undecodable dataUrl can never silently produce a
-        // blank-canvas PNG even if a future caller invokes it directly,
-        // bypassing the disabled button.
-        if (!imgReady) throw new Error('image not ready — cannot export');
-        const canvas = canvasRef.current;
-        if (!canvas) throw new Error('canvas not ready');
-        return canvas.toDataURL('image/png');
-      },
-    }));
+    const measureScale = useCallback(() => {
+      const svg = svgRef.current;
+      if (!svg || !naturalSize || naturalSize.w <= 0) return;
+      const rect = svg.getBoundingClientRect();
+      const next = rect.width > 0 ? rect.width / naturalSize.w : 1;
+      displayScaleRef.current = next;
+      setDisplayScale((prev) => (Math.abs(prev - next) > 1e-6 ? next : prev));
+    }, [naturalSize]);
 
-    const pointFromEvent = (e: { clientX: number; clientY: number }): Point | null => {
-      const canvas = canvasRef.current;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      return toCanvasPoint(e.clientX, e.clientY, rect, canvas.width, canvas.height);
+    useEffect(() => {
+      measureScale();
+      if (typeof window === 'undefined') return;
+      window.addEventListener('resize', measureScale);
+      return () => window.removeEventListener('resize', measureScale);
+    }, [measureScale]);
+
+    // Drop a stale selection (its annotation was deleted or undone away).
+    useEffect(() => {
+      if (selectedId && !history.present.some((a) => a.id === selectedId)) setSelectedId(null);
+    }, [history.present, selectedId]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        async exportPng() {
+          if (!imgReady || !naturalSize || !imgRef.current) throw new Error('image not ready — cannot export');
+          const canvas = document.createElement('canvas');
+          canvas.width = naturalSize.w;
+          canvas.height = naturalSize.h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(imgRef.current, 0, 0, naturalSize.w, naturalSize.h);
+            for (const a of history.present) drawAnnotation(ctx as unknown as DrawCtx, a);
+          }
+          return canvas.toDataURL('image/png');
+        },
+      }),
+      [imgReady, naturalSize, history.present],
+    );
+
+    const commit = (next: Annotation[]) => {
+      setHistory((h) => pushHistory(h, next));
+      setLiveAnnotations(null);
     };
 
-    const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      const p = pointFromEvent(e);
-      if (!p) return;
-      if (tool === 'text') {
-        // ponytail: window.prompt is the native, zero-dependency text-input
-        // affordance — a custom inline editor is real scope this feature
-        // doesn't need yet.
-        const text = window.prompt('Annotation text:');
-        if (text) setStrokes((prev) => [...prev, { tool: 'text', color, points: [p], text }]);
+    const deleteSelected = () => {
+      if (!selectedId) return;
+      commit(history.present.filter((a) => a.id !== selectedId));
+      setSelectedId(null);
+      setEditingText(null);
+    };
+
+    const startEditingText = (ann: TextAnnotation, isNew: boolean) => {
+      setSelectedId(ann.id);
+      setEditingText({ id: ann.id, isNew, draft: ann.content });
+    };
+
+    const commitTextEdit = () => {
+      const editing = editingText;
+      if (!editing) return;
+      setEditingText(null);
+      const trimmed = editing.draft.trim();
+      if (editing.isNew) {
+        if (trimmed === '') {
+          setLiveAnnotations(null);
+          setSelectedId(null);
+          return;
+        }
+        const source = liveAnnotations ?? history.present;
+        const draftAnn = source.find((a): a is TextAnnotation => a.id === editing.id && a.kind === 'text');
+        if (draftAnn) {
+          commit([...history.present, editText(draftAnn, trimmed)]);
+          setSelectedId(editing.id);
+          setTool('select');
+        } else {
+          setLiveAnnotations(null);
+        }
         return;
       }
-      drawingRef.current = true;
-      if (tool === 'pen') {
-        setStrokes((prev) => [...prev, { tool: 'pen', color, points: [p] }]);
-      } else {
-        setStrokes((prev) => [...prev, { tool: 'arrow', color, points: [p, p] }]);
+      if (trimmed === '') {
+        commit(history.present.filter((a) => a.id !== editing.id));
+        setSelectedId(null);
+        return;
+      }
+      const target = history.present.find((a): a is TextAnnotation => a.id === editing.id && a.kind === 'text');
+      if (target) commit(history.present.map((a) => (a.id === editing.id ? editText(target, trimmed) : a)));
+    };
+
+    const cancelTextEdit = () => {
+      const editing = editingText;
+      setEditingText(null);
+      if (editing?.isNew) {
+        setLiveAnnotations(null);
+        setSelectedId(null);
       }
     };
 
-    const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!drawingRef.current) return;
-      const p = pointFromEvent(e);
-      if (!p) return;
-      setStrokes((prev) => {
-        if (prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        if (last.tool === 'pen') {
-          const updated: Stroke = { ...last, points: [...last.points, p] };
-          return [...prev.slice(0, -1), updated];
+    const hitTolerance = (scale: number) => pxToImg(coarse ? COARSE_HIT_TOLERANCE_PX : FINE_HIT_TOLERANCE_PX, scale);
+
+    const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+      if (!imgReady || !naturalSize || editingText) return;
+      const svg = svgRef.current;
+      if (!svg) return;
+      // Suppress the browser's own post-mousedown default focus action.
+      // Without this, a real mouse click with the text tool races: React
+      // synchronously mounts+autofocuses the new inline <input>, but Chromium
+      // then applies its default mousedown focus behavior — refocusing the
+      // nearest focusable ANCESTOR of the original pointerdown target (this
+      // component's tabIndex=0 root div) — which steals focus straight back
+      // off the input, fires its onBlur, and commitTextEdit() immediately
+      // discards the still-empty draft. jsdom (this project's test env) does
+      // not implement this default-focus-on-mousedown behavior at all, so
+      // StudioAnnotate.vitest.ts's fireEvent-based drawText() never surfaced
+      // it; only real-browser (Playwright) verification caught it.
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const nextScale = rect.width > 0 ? rect.width / naturalSize.w : 1;
+      displayScaleRef.current = nextScale;
+      setDisplayScale((prev) => (Math.abs(prev - nextScale) > 1e-6 ? nextScale : prev));
+      const p = clientToImagePoint(e.clientX, e.clientY, rect, naturalSize.w, naturalSize.h);
+      const tol = hitTolerance(nextScale);
+
+      if (tool === 'pen') {
+        const ann = createPen(color, [p]);
+        setLiveAnnotations([...history.present, ann]);
+        setSelectedId(null);
+        dragRef.current = { kind: 'draw-pen', id: ann.id, pointerId: e.pointerId };
+        svg.setPointerCapture?.(e.pointerId);
+        return;
+      }
+      if (tool === 'arrow') {
+        const ann = createArrow(color, p, p);
+        setLiveAnnotations([...history.present, ann]);
+        setSelectedId(null);
+        dragRef.current = { kind: 'draw-arrow', id: ann.id, pointerId: e.pointerId };
+        svg.setPointerCapture?.(e.pointerId);
+        return;
+      }
+      if (tool === 'text') {
+        const ann = createText(color, p, '', DEFAULT_TEXT_SIZE);
+        setLiveAnnotations([...history.present, ann]);
+        startEditingText(ann, true);
+        return;
+      }
+      // select tool: prefer an arrow handle on the current selection, else hit-test everything.
+      if (selectedAnn && selectedAnn.kind === 'arrow') {
+        const which = nearestArrowHandle(selectedAnn, p, tol);
+        if (which) {
+          dragRef.current = { kind: 'retarget', id: selectedAnn.id, which, pointerId: e.pointerId, moved: false };
+          svg.setPointerCapture?.(e.pointerId);
+          return;
         }
-        if (last.tool === 'arrow') {
-          const updated: Stroke = { ...last, points: [last.points[0], p] };
-          return [...prev.slice(0, -1), updated];
-        }
-        return prev;
-      });
+      }
+      const hit = topmostHit(history.present, p, tol);
+      if (hit) {
+        const original = history.present.find((a) => a.id === hit)!;
+        setSelectedId(hit);
+        dragRef.current = { kind: 'move', id: hit, start: p, original, pointerId: e.pointerId, moved: false };
+        svg.setPointerCapture?.(e.pointerId);
+      } else {
+        setSelectedId(null);
+      }
     };
 
-    const onPointerUp = () => {
-      drawingRef.current = false;
+    const onSvgPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+      const drag = dragRef.current;
+      if (!drag || !naturalSize) return;
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const p = clientToImagePoint(e.clientX, e.clientY, rect, naturalSize.w, naturalSize.h);
+
+      if (drag.kind === 'draw-pen') {
+        setLiveAnnotations((prev) => {
+          if (!prev) return prev;
+          return prev.map((a) => (a.id === drag.id && a.kind === 'pen' ? { ...a, points: [...a.points, p] } : a));
+        });
+        return;
+      }
+      if (drag.kind === 'draw-arrow') {
+        setLiveAnnotations((prev) => {
+          if (!prev) return prev;
+          return prev.map((a) => (a.id === drag.id && a.kind === 'arrow' ? retargetArrow(a, 'end', p) : a));
+        });
+        return;
+      }
+      if (drag.kind === 'move') {
+        drag.moved = true;
+        const dx = p.x - drag.start.x;
+        const dy = p.y - drag.start.y;
+        setLiveAnnotations(
+          history.present.map((a) => (a.id === drag.id ? translateAnnotation(drag.original, dx, dy) : a)),
+        );
+        return;
+      }
+      if (drag.kind === 'retarget') {
+        drag.moved = true;
+        setLiveAnnotations(
+          history.present.map((a) => (a.id === drag.id && a.kind === 'arrow' ? retargetArrow(a, drag.which, p) : a)),
+        );
+      }
+    };
+
+    const onSvgPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+      const drag = dragRef.current;
+      dragRef.current = null;
+      if (!drag) return;
+      svgRef.current?.releasePointerCapture?.(e.pointerId);
+
+      if (drag.kind === 'draw-pen') {
+        const list = liveAnnotations ?? history.present;
+        const ann = list.find((a) => a.id === drag.id);
+        if (ann && ann.kind === 'pen' && ann.points.length >= 2) {
+          commit(list);
+          setSelectedId(ann.id);
+          setTool('select');
+        } else {
+          setLiveAnnotations(null);
+        }
+        return;
+      }
+      if (drag.kind === 'draw-arrow') {
+        const list = liveAnnotations ?? history.present;
+        const ann = list.find((a) => a.id === drag.id);
+        if (ann && ann.kind === 'arrow' && (ann.start.x !== ann.end.x || ann.start.y !== ann.end.y)) {
+          commit(list);
+          setSelectedId(ann.id);
+          setTool('select');
+        } else {
+          setLiveAnnotations(null);
+        }
+        return;
+      }
+      // move / retarget
+      if (drag.moved && liveAnnotations) {
+        commit(liveAnnotations);
+      } else {
+        setLiveAnnotations(null);
+      }
+    };
+
+    const onSvgDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
+      if (tool !== 'select' || !imgReady || !naturalSize) return;
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const p = clientToImagePoint(e.clientX, e.clientY, rect, naturalSize.w, naturalSize.h);
+      const tol = hitTolerance(displayScaleRef.current || 1);
+      const hit = topmostHit(history.present, p, tol);
+      if (!hit) return;
+      const ann = history.present.find((a) => a.id === hit);
+      if (ann && ann.kind === 'text') startEditingText(ann, false);
+    };
+
+    const onRootKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const targetTag = (e.target as HTMLElement).tagName;
+      if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        setLiveAnnotations(null);
+        dragRef.current = null;
+        setHistory((h) => (e.shiftKey ? redo(h) : undo(h)));
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+
+    const onColorChange = (next: string) => {
+      setColor(next);
+      if (selectedId) {
+        commit(history.present.map((a) => (a.id === selectedId ? recolorAnnotation(a, next) : a)));
+      }
+    };
+
+    const onSizeChange = (next: number) => {
+      if (selectedAnn && selectedAnn.kind === 'text') {
+        const id = selectedAnn.id;
+        commit(history.present.map((a) => (a.id === id && a.kind === 'text' ? resizeText(a, next) : a)));
+      }
+    };
+
+    const onUndoClick = () => {
+      setLiveAnnotations(null);
+      dragRef.current = null;
+      setHistory((h) => undo(h));
+    };
+
+    const onRedoClick = () => {
+      setLiveAnnotations(null);
+      dragRef.current = null;
+      setHistory((h) => redo(h));
     };
 
     return (
-      <div className="studio-annotate">
+      <div ref={rootRef} className="studio-annotate" tabIndex={0} onKeyDown={onRootKeyDown}>
         <div className="studio-annotate-toolbar">
+          <button
+            type="button"
+            className="studio-annotate-tool-btn studio-annotate-select"
+            aria-pressed={tool === 'select'}
+            aria-label="select"
+            onClick={() => setTool('select')}
+          >
+            <MousePointerIcon className="studio-tool-ico" />
+          </button>
           {(['pen', 'arrow', 'text'] as const).map((t) => {
             const Icon = TOOL_ICONS[t];
             return (
@@ -313,28 +489,226 @@ export const StudioAnnotate = forwardRef<StudioAnnotateHandle, StudioAnnotatePro
             aria-label="annotation color"
             className="studio-annotate-color"
             value={color}
-            onChange={(e) => setColor(e.target.value)}
+            onChange={(e) => onColorChange(e.target.value)}
           />
-          <button
-            type="button"
-            className="studio-annotate-undo"
-            disabled={strokes.length === 0}
-            onClick={() => setStrokes(undoStrokes)}
-          >
+          {selectedAnn && selectedAnn.kind === 'text' && (
+            <input
+              type="range"
+              aria-label="text size"
+              className="studio-annotate-size"
+              min={MIN_TEXT_SIZE}
+              max={MAX_TEXT_SIZE}
+              step={2}
+              value={selectedAnn.size}
+              onChange={(e) => onSizeChange(Number(e.target.value))}
+            />
+          )}
+          <button type="button" className="studio-annotate-undo" disabled={!canUndo(history)} onClick={onUndoClick}>
             <UndoIcon className="studio-tool-ico" />
             Undo
           </button>
+          <button type="button" className="studio-annotate-redo" disabled={!canRedo(history)} onClick={onRedoClick}>
+            <UndoIcon className="studio-tool-ico studio-annotate-redo-ico" />
+            Redo
+          </button>
+          <button
+            type="button"
+            className="studio-annotate-delete"
+            disabled={!selectedId}
+            aria-label="delete annotation"
+            onClick={deleteSelected}
+          >
+            <Trash2Icon className="studio-tool-ico" />
+            Delete
+          </button>
         </div>
-        <canvas
-          ref={canvasRef}
-          className="studio-annotate-canvas"
-          data-testid="studio-annotate-canvas"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-        />
+        <div className="studio-annotate-stage">
+          <img src={imageDataUrl} alt="" aria-hidden="true" draggable={false} className="studio-annotate-img" />
+          <svg
+            ref={svgRef}
+            data-testid="studio-annotate-canvas"
+            className="studio-annotate-svg"
+            data-tool={tool}
+            viewBox={`0 0 ${naturalSize?.w || 1} ${naturalSize?.h || 1}`}
+            onPointerDown={onSvgPointerDown}
+            onPointerMove={onSvgPointerMove}
+            onPointerUp={onSvgPointerUp}
+            onPointerLeave={onSvgPointerUp}
+            onDoubleClick={onSvgDoubleClick}
+          >
+            {annotations.map((a) => (
+              <AnnotationShape key={a.id} a={a} hideText={editingText?.id === a.id} />
+            ))}
+            {tool === 'select' && selectedAnn && (
+              <SelectionChrome ann={selectedAnn} displayScale={displayScale || 1} coarse={coarse} />
+            )}
+          </svg>
+          {tool === 'select' && selectedAnn && (
+            <button
+              type="button"
+              className="studio-annotate-float-delete"
+              style={floatingDeleteStyle(selectedAnn, displayScale || 1)}
+              aria-label="Delete annotation"
+              onClick={deleteSelected}
+            >
+              <Trash2Icon className="studio-tool-ico" />
+            </button>
+          )}
+          {editingText &&
+            (() => {
+              const ann = (liveAnnotations ?? history.present).find(
+                (a): a is TextAnnotation => a.id === editingText.id && a.kind === 'text',
+              );
+              return (
+                <TextEditorOverlay
+                  ann={ann}
+                  draft={editingText.draft}
+                  displayScale={displayScale || 1}
+                  onChange={(v) => setEditingText((cur) => (cur ? { ...cur, draft: v } : cur))}
+                  onCommit={commitTextEdit}
+                  onCancel={cancelTextEdit}
+                />
+              );
+            })()}
+        </div>
       </div>
     );
   },
 );
+
+function AnnotationShape({ a, hideText }: { a: Annotation; hideText: boolean }) {
+  if (a.kind === 'pen') {
+    if (a.points.length < 2) return null;
+    const d = a.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+    return (
+      <path
+        d={d}
+        fill="none"
+        stroke={a.color}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        data-ann-id={a.id}
+        data-ann-kind="pen"
+      />
+    );
+  }
+  if (a.kind === 'arrow') {
+    const [left, right] = computeArrowHeadPoints(a.start, a.end);
+    return (
+      <g data-ann-id={a.id} data-ann-kind="arrow">
+        <line
+          x1={a.start.x}
+          y1={a.start.y}
+          x2={a.end.x}
+          y2={a.end.y}
+          stroke={a.color}
+          strokeWidth={3}
+          strokeLinecap="round"
+        />
+        <path
+          d={`M${left.x},${left.y} L${a.end.x},${a.end.y} L${right.x},${right.y}`}
+          fill="none"
+          stroke={a.color}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </g>
+    );
+  }
+  if (hideText) return null;
+  return (
+    <text
+      x={a.pos.x}
+      y={a.pos.y}
+      fill={a.color}
+      fontSize={a.size}
+      fontFamily='ui-monospace, "SF Mono", Menlo, monospace'
+      data-ann-id={a.id}
+      data-ann-kind="text"
+    >
+      {a.content}
+    </text>
+  );
+}
+
+function SelectionChrome({ ann, displayScale, coarse }: { ann: Annotation; displayScale: number; coarse: boolean }) {
+  const b = annotationBounds(ann);
+  const pad = pxToImg(8, displayScale);
+  return (
+    <g className="studio-annotate-selection" aria-hidden="true">
+      <rect
+        x={b.x - pad}
+        y={b.y - pad}
+        width={b.w + pad * 2}
+        height={b.h + pad * 2}
+        className="studio-annotate-selection-outline"
+        vectorEffect="non-scaling-stroke"
+      />
+      {ann.kind === 'arrow' &&
+        (['start', 'end'] as const).map((which) => {
+          const pt = which === 'start' ? ann.start : ann.end;
+          const r = pxToImg(handleRadiusPx(coarse), displayScale);
+          return (
+            <circle
+              key={which}
+              cx={pt.x}
+              cy={pt.y}
+              r={r}
+              className="studio-annotate-handle"
+              vectorEffect="non-scaling-stroke"
+              data-handle={which}
+            />
+          );
+        })}
+    </g>
+  );
+}
+
+function floatingDeleteStyle(ann: Annotation, displayScale: number): React.CSSProperties {
+  const b = annotationBounds(ann);
+  return { left: (b.x + b.w) * displayScale, top: b.y * displayScale };
+}
+
+function TextEditorOverlay({
+  ann,
+  draft,
+  displayScale,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  ann: TextAnnotation | undefined;
+  draft: string;
+  displayScale: number;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  if (!ann) return null;
+  const left = ann.pos.x * displayScale;
+  const top = (ann.pos.y - ann.size * 0.82) * displayScale;
+  const fontSize = Math.max(10, ann.size * displayScale);
+  return (
+    <input
+      autoFocus
+      data-testid="studio-annotate-text-editor"
+      className="studio-annotate-text-editor"
+      style={{ left, top, fontSize, color: ann.color }}
+      value={draft}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onCommit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onCommit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+        e.stopPropagation();
+      }}
+    />
+  );
+}

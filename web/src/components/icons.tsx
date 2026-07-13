@@ -310,6 +310,29 @@ export function RotateIcon(p: IconProps) {
   );
 }
 
+// Prototype Studio editable annotations — default "Select" tool glyph
+// (lucide "mouse-pointer"): a cursor arrow, distinct from the draw tools.
+export function MousePointerIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 3 10 20.5l2-7 7-2Z" />
+    </Svg>
+  );
+}
+
+// Prototype Studio editable annotations — Delete tool/floating-chip glyph
+// (lucide "trash-2").
+export function Trash2Icon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </Svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (
