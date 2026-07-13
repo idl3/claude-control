@@ -11,6 +11,7 @@ import { useModalTransition, prefersReducedMotion } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
+import { useStudioCanvasGestures } from '../hooks/useStudioCanvasGestures';
 import {
   DEVICE_CATEGORIES,
   DEFAULT_DEVICE_BY_CATEGORY,
@@ -20,6 +21,13 @@ import {
   studioLayoutMode,
   resolveSheetSnap,
   STUDIO_DOCK_MIN_WIDTH,
+  studioEffectiveScale,
+  zoomForEffectiveScale,
+  zoomStep,
+  clampPan,
+  panForFocalZoom,
+  ZOOM_MAX_SCALE,
+  type Vec2,
   type DeviceCategory,
   type Orientation,
 } from '../lib/studioDevices';
@@ -1224,6 +1232,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   // exactly the pre-redesign width-only behavior, keeping unit tests
   // deterministic (a real browser always measures).
   const stageFitRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const el = stageFitRef.current;
@@ -1245,11 +1254,74 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
 
   const availableW = stageSize?.w ?? studioAvailableWidth(viewportW, columnMode);
   const availableH = stageSize?.h ?? Number.POSITIVE_INFINITY;
-  const scale = studioFitScale(dims.width, dims.height, availableW, availableH);
-  const scaling = scale < 1;
-  const footprintW = scaling ? Math.floor(dims.width * scale) : dims.width;
-  const footprintH = scaling ? Math.floor(dims.height * scale) : dims.height;
-  const scalePct = Math.round(scale * 100);
+  const fitScale = studioFitScale(dims.width, dims.height, availableW, availableH);
+
+  // Canvas zoom/pan view state. `zoom === 1` is "Fit"; the EFFECTIVE display
+  // scale = fitScale × zoom feeds the SAME site fitScale used to (footprint box
+  // + EmbeddedApp logical dims + `--studio-screen-radius`), so the hosted app
+  // always renders at its true logical device dims and only its DISPLAY scale
+  // changes — pure transform, never a reload. `pan` translates the footprint
+  // container; AppFrameLayer's rect-based hoist positioning tracks it for free.
+  // A device/orientation switch is a fresh canvas → reset both.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState<Vec2>({ x: 0, y: 0 });
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [deviceId, orientation]);
+
+  const effectiveScale = studioEffectiveScale(fitScale, zoom);
+  // Pass logical dims (→ AppFrameLayer scales the iframe) whenever the display
+  // scale isn't exactly 1:1 — both fit-scaled-down AND zoomed-past-100%.
+  const displayScaling = Math.abs(effectiveScale - 1) > 1e-3;
+  const footprintW = displayScaling ? Math.round(dims.width * effectiveScale) : dims.width;
+  const footprintH = displayScaling ? Math.round(dims.height * effectiveScale) : dims.height;
+  const scalePct = Math.round(effectiveScale * 100);
+  const atFit = zoom === 1;
+
+  // The stage viewport the frame pans within (measured content box; height
+  // falls back to the footprint in SSR/jsdom where it can't be measured, which
+  // yields zero pan bounds — deterministic for unit tests).
+  const stageViewport: Vec2 = {
+    x: availableW,
+    y: Number.isFinite(availableH) ? availableH : footprintH,
+  };
+  const footprint: Vec2 = { x: footprintW, y: footprintH };
+  // Render-time clamp: a resize/device/zoom change that shrinks the bounds
+  // pulls an out-of-range pan back into view without a separate effect.
+  const clampedPan = clampPan(pan, footprint, stageViewport);
+
+  // The single view-commit primitive: set zoom + pan together, clamping the
+  // raw pan against the footprint the NEW zoom implies. Shared by the toolbar
+  // buttons and (via the gesture hook) every gesture, so all paths clamp
+  // identically. `zoom`/`pan` are a pure display transform — no remount.
+  const applyView = (nextZoom: number, nextPanRaw: Vec2) => {
+    const s1 = studioEffectiveScale(fitScale, nextZoom);
+    const fp: Vec2 = { x: Math.round(dims.width * s1), y: Math.round(dims.height * s1) };
+    setZoom(nextZoom);
+    setPan(clampPan(nextPanRaw, fp, stageViewport));
+  };
+  // −/+ buttons zoom about the stage CENTER (focal 0,0), so a panned view keeps
+  // the same content centered as it scales.
+  const zoomButton = (dir: 1 | -1) => {
+    const s0 = effectiveScale;
+    const nz = zoomStep(fitScale, zoom, dir);
+    const s1 = studioEffectiveScale(fitScale, nz);
+    applyView(nz, panForFocalZoom(pan, s0, s1, { x: 0, y: 0 }));
+  };
+  const resetFit = () => applyView(1, { x: 0, y: 0 });
+  // Readout / double-click toggles Fit ↔ 100% (1 device CSS px : 1 screen px).
+  const toggleFit100 = () => {
+    if (!atFit) {
+      resetFit();
+      return;
+    }
+    const s0 = effectiveScale;
+    const nz = zoomForEffectiveScale(fitScale, 1);
+    const s1 = studioEffectiveScale(fitScale, nz);
+    applyView(nz, panForFocalZoom(pan, s0, s1, { x: 0, y: 0 }));
+  };
+  const canZoomIn = effectiveScale < ZOOM_MAX_SCALE - 1e-3;
 
   // Feature 2 (bezel fix): scale-compensates the hoisted iframe's rounded
   // corner (styles.css's `.embed-app-hoist[data-embed-app-context='studio']`
@@ -1260,11 +1332,11 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   // (not a local ref) because the hoist is a body-portaled sibling, not a
   // descendant of this component's own DOM.
   useEffect(() => {
-    document.body.style.setProperty('--studio-screen-radius', `${13 / (scale || 1)}px`);
+    document.body.style.setProperty('--studio-screen-radius', `${13 / (effectiveScale || 1)}px`);
     return () => {
       document.body.style.removeProperty('--studio-screen-radius');
     };
-  }, [scale]);
+  }, [effectiveScale]);
 
   // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device/
   // orientation switch via the Web Animations API (transform/opacity only —
@@ -1348,6 +1420,15 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     selectCategory(next);
     requestAnimationFrame(() => document.getElementById(`studio-category-${next}`)?.focus());
   };
+
+  // Canvas gestures (wheel-zoom-to-cursor, drag-pan, pinch, dbl-click, keyboard
+  // nav). `ownsInput: suppressOn` gates keyboard shortcuts to when the studio
+  // owns input, matching the "Disable cockpit hotkeys" toggle.
+  useStudioCanvasGestures(
+    stageRef,
+    { zoom, pan: clampedPan, fitScale, dims, viewport: stageViewport, ownsInput: suppressOn },
+    { applyView },
+  );
 
   return (
     <div className="studio-overlay" ref={rootRef} role="presentation">
@@ -1437,21 +1518,50 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
             </button>
           </div>
           <div className="studio-toolbar-right">
-            {/* Finding 12: persistent scale readout. Lives in the toolbar (not
-                over the stage) because the studio-context hosted iframe paints
-                at z-index 310 — above the overlay (300) — so any chip inside
-                the stage would be occluded wherever the device rect sits. */}
-            {scaling && (
-              <span
-                className="studio-scale-chip"
-                title={`${device.name} · ${dims.width}×${dims.height} — scaled to fit`}
+            {/* Zoom cluster (was Finding 12's static scale chip): −  [Fit|NN%]
+                +  Fit. The readout is the effective display scale on a device-px
+                basis (Fit ≈ 47%, 100% = 1 device CSS px : 1 screen px) and
+                doubles as the Fit↔100% toggle. Toolbar-anchored, not over the
+                stage, because the z-310 hosted iframe occludes anything painted
+                inside the stage wherever the device rect sits. */}
+            <div className="studio-zoom-cluster" role="group" aria-label="Canvas zoom">
+              <button
+                type="button"
+                className="studio-zoom-btn"
+                aria-label="Zoom out"
+                onClick={() => zoomButton(-1)}
+                disabled={atFit}
               >
-                {scalePct}%
-                <span className="studio-scale-dims">
-                  · {dims.width}×{dims.height}
-                </span>
-              </span>
-            )}
+                <span aria-hidden="true">−</span>
+              </button>
+              <button
+                type="button"
+                className="studio-zoom-readout"
+                aria-label={atFit ? 'Zoom: fit to view — activate for actual size' : `Zoom ${scalePct}% — activate to fit`}
+                title={`${device.name} · ${dims.width}×${dims.height}`}
+                onClick={toggleFit100}
+              >
+                {atFit ? 'Fit' : `${scalePct}%`}
+              </button>
+              <button
+                type="button"
+                className="studio-zoom-btn"
+                aria-label="Zoom in"
+                onClick={() => zoomButton(1)}
+                disabled={!canZoomIn}
+              >
+                <span aria-hidden="true">+</span>
+              </button>
+              <button
+                type="button"
+                className="studio-zoom-btn studio-zoom-fit"
+                aria-label="Fit to view"
+                onClick={resetFit}
+                disabled={atFit && clampedPan.x === 0 && clampedPan.y === 0}
+              >
+                Fit
+              </button>
+            </div>
             <StudioCapture url={url} name={name} />
           </div>
         </div>
@@ -1466,15 +1576,23 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               `.studio-frame` box below stays the device-sized reservation
               from Phase A (B2 sizes it per device mode) — EmbeddedApp fills
               it at 100%/100% (studio context, same treatment as panel). */}
-          <div className="studio-stage">
-            <div className="studio-stage-fit" ref={stageFitRef}>
+          <div className="studio-stage" ref={stageRef} data-zoomed={atFit ? undefined : 'true'}>
+            <div
+              className="studio-stage-fit"
+              ref={stageFitRef}
+              style={
+                clampedPan.x !== 0 || clampedPan.y !== 0
+                  ? { transform: `translate(${clampedPan.x}px, ${clampedPan.y}px)` }
+                  : undefined
+              }
+            >
               <div className="studio-frame" ref={frameRef} style={{ width: footprintW, height: footprintH }}>
                 <EmbeddedApp
                   url={url}
                   height={dims.height}
                   context="studio"
-                  logicalWidth={scaling ? dims.width : undefined}
-                  logicalHeight={scaling ? dims.height : undefined}
+                  logicalWidth={displayScaling ? dims.width : undefined}
+                  logicalHeight={displayScaling ? dims.height : undefined}
                 />
               </div>
             </div>
