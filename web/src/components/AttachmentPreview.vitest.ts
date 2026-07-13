@@ -33,11 +33,14 @@ afterEach(cleanup);
 afterEach(() => document.documentElement.classList.remove('lightbox-open'));
 
 describe('Lightbox', () => {
-  it('tapping the image itself dismisses (no stopPropagation)', () => {
+  it('tapping the image itself no longer dismisses (deliberate change — see stopPropagation in AttachmentPreview.tsx)', () => {
+    // A single click on the image now has to coexist with drag-to-pan and
+    // double-tap-to-zoom, neither of which can work if the first tap also
+    // unmounts the Lightbox. Only the backdrop and the explicit X close it.
     const onClose = vi.fn();
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'a screenshot', onClose }));
     fireEvent.click(screen.getByAltText('a screenshot'));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('tapping the backdrop (outside the image) still dismisses', () => {
@@ -99,68 +102,150 @@ describe('Lightbox', () => {
   });
 });
 
-describe('Lightbox — scroll position preservation (opening the modal must not scroll the page)', () => {
-  // A synthetic scroll container standing in for `.thread-viewport` (or any
-  // other pane) — findScrollParent() is class-name-agnostic (walks ancestors
-  // for computed overflow-y + real overflow), so a plain styled/stubbed div
-  // is enough; it does not need the real class name to be picked up.
-  function makeScrollParent(initialScrollTop: number): { scrollParent: HTMLElement; container: HTMLElement } {
-    const scrollParent = document.createElement('div');
-    scrollParent.style.overflowY = 'auto';
-    Object.defineProperty(scrollParent, 'scrollHeight', { value: 1000, configurable: true });
-    Object.defineProperty(scrollParent, 'clientHeight', { value: 300, configurable: true });
-    document.body.appendChild(scrollParent);
-    const container = document.createElement('div');
-    scrollParent.appendChild(container);
-    scrollParent.scrollTop = initialScrollTop;
-    return { scrollParent, container };
-  }
-
-  it('focuses the dialog with preventScroll (the actual fix for the reported jump)', () => {
+describe('Lightbox — portal + focus (opening the modal must not scroll or get trapped by an ancestor pane)', () => {
+  it('focuses the dialog with preventScroll (standard dialog-focus hygiene)', () => {
     const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus');
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
     focusSpy.mockRestore();
   });
 
-  it('leaves the scroll parent untouched on mount (no real DOM jump in jsdom, sanity check)', () => {
-    const { scrollParent, container } = makeScrollParent(240);
-    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }), { container });
-    expect(scrollParent.scrollTop).toBe(240);
-    document.body.removeChild(scrollParent);
+  it('mounts directly on document.body regardless of the render container (real portal — a scrollable ancestor pane can no longer trap it)', () => {
+    // Regression guard for the root cause of the reported "Lightbox squished
+    // into a drawer" / off-viewport bug class: any transformed, contain-ing,
+    // or will-change:transform ancestor (e.g. SubAgentPanel's GSAP drawer)
+    // becomes a NEW containing block for a position:fixed descendant that
+    // isn't portaled — see the comment in SubAgentPanel.tsx. A real portal to
+    // document.body sidesteps that structurally, regardless of what DOM tree
+    // rendered the triggering <img>.
+    const outer = document.createElement('div');
+    outer.style.overflowY = 'auto';
+    document.body.appendChild(outer);
+    const inner = document.createElement('div');
+    outer.appendChild(inner);
+
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }), { container: inner });
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.parentElement).toBe(document.body);
+    expect(outer.contains(dialog)).toBe(false);
+
+    document.body.removeChild(outer);
+  });
+});
+
+describe('Lightbox — zoom/pan', () => {
+  /** jsdom has no layout engine (naturalWidth/offsetWidth are always 0), so
+   * gesture math that reads the image's real/displayed size needs an
+   * explicit stub per test. */
+  function mockImageSize(
+    img: HTMLImageElement,
+    natural: { width: number; height: number },
+    displayed: { width: number; height: number },
+  ) {
+    Object.defineProperty(img, 'naturalWidth', { value: natural.width, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: natural.height, configurable: true });
+    Object.defineProperty(img, 'offsetWidth', { value: displayed.width, configurable: true });
+    Object.defineProperty(img, 'offsetHeight', { value: displayed.height, configurable: true });
+  }
+
+  it('starts at Fit (scale 1, no pan) with the toolbar showing "Fit"', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    expect(img.dataset.zoomed).toBe('false');
+    expect(img.style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('Fit');
   });
 
-  it('restores the scroll parent immediately if focusing the dialog moved it (simulated engine jump)', () => {
-    const { scrollParent, container } = makeScrollParent(240);
-    // Simulate the real-world bug this fixes: some engines scroll an
-    // ancestor container to "reveal" a newly focused descendant even though
-    // the dialog is position:fixed and already fills the viewport.
-    const focusSpy = vi
-      .spyOn(HTMLElement.prototype, 'focus')
-      .mockImplementation(() => {
-        scrollParent.scrollTop = 0;
-      });
+  it('double-click toggles Fit -> 100% -> Fit, driving the transform, data-zoomed and the toolbar label', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 }); // actual-size ratio: 2x
 
-    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }), { container });
+    fireEvent.doubleClick(img);
+    expect(img.dataset.zoomed).toBe('true');
+    expect(img.style.transform).toContain('scale(2)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('200%');
 
-    expect(scrollParent.scrollTop).toBe(240); // restored right after the simulated jump
-    focusSpy.mockRestore();
-    document.body.removeChild(scrollParent);
+    fireEvent.doubleClick(img);
+    expect(img.dataset.zoomed).toBe('false');
+    expect(img.style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('Fit');
   });
 
-  it('restores the pre-open scrollTop on unmount (dismiss)', () => {
-    const { scrollParent, container } = makeScrollParent(180);
-    const { unmount } = render(
-      createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }),
-      { container },
-    );
-    expect(scrollParent.scrollTop).toBe(180);
+  it('double-click does not also close the Lightbox (stopPropagation)', () => {
+    const onClose = vi.fn();
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 });
+    fireEvent.doubleClick(img);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 
-    scrollParent.scrollTop = 999; // drifted somehow while the Lightbox was open
-    unmount();
-    expect(scrollParent.scrollTop).toBe(180); // reverted to where the user had it
+  it('the −/+ toolbar buttons step the zoom level by a fixed factor, clamped to the max', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    // Actual-size ratio here is only 1.2x, below the 4x floor — confirms
+    // stepping uses maxZoomScale's floor, not the raw actual-size ratio.
+    mockImageSize(img, { width: 1200, height: 1200 }, { width: 1000, height: 1000 });
 
-    document.body.removeChild(scrollParent);
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(img.style.transform).toContain('scale(1.5)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(img.style.transform).toContain('scale(2.25)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(img.style.transform).toContain('scale(1.5)');
+  });
+
+  it('clicking a zoom-control button does not also close the Lightbox via the backdrop', () => {
+    const onClose = vi.fn();
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('mouse drag-to-pan is a no-op until zoomed in, then pans (clamped to the bound)', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 2000 }, { width: 1000, height: 1000 }); // 100% == scale 2
+
+    fireEvent.mouseDown(img, { clientX: 500, clientY: 500 });
+    fireEvent.mouseMove(window, { clientX: 600, clientY: 460 });
+    expect(img.style.transform).toBe('translate(0px, 0px) scale(1)'); // not zoomed yet — drag ignored
+    fireEvent.mouseUp(window);
+
+    fireEvent.doubleClick(img); // zoom in to scale 2
+    fireEvent.mouseDown(img, { clientX: 500, clientY: 500 });
+    fireEvent.mouseMove(window, { clientX: 600, clientY: 460 });
+    expect(img.style.transform).toBe('translate(100px, -40px) scale(2)');
+
+    // Max pan at scale 2 on a 1000x1000 box is (1000*(2-1))/2 = 500 per axis.
+    fireEvent.mouseMove(window, { clientX: 5000, clientY: 460 });
+    expect(img.style.transform).toBe('translate(500px, -40px) scale(2)');
+
+    fireEvent.mouseUp(window);
+  });
+
+  it('wheel zooms in, clamped to at least 1x', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 });
+
+    fireEvent.wheel(screen.getByRole('dialog'), { deltaY: -200 });
+
+    const match = /scale\(([\d.]+)\)/.exec(img.style.transform);
+    expect(match).not.toBeNull();
+    expect(Number(match![1])).toBeGreaterThan(1);
+  });
+
+  it('wheel does not also scroll/close anything behind the Lightbox (preventDefault fires)', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const dialog = screen.getByRole('dialog');
+    const evt = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 });
+    dialog.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
   });
 });
 
