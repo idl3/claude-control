@@ -1130,7 +1130,16 @@ export function AppFrameLayer() {
         // viewportRect() fallback — the hoisted z-310 iframe then rendered
         // fully UNCLIPPED over .studio-head/.studio-toolbar (the close
         // button + device bar), stealing their hit-test area.
-        const ancestorEl = host.el.closest('.thread-viewport, .studio-body');
+        //
+        // Canvas zoom/pan: '.studio-stage' is added as the FIRST (nearest)
+        // studio ancestor. When the operator zooms a preset past the stage and
+        // pans, the frame overflows; clipping to '.studio-stage' (the dot-grid
+        // hero, left of the side panel) keeps the magnified iframe inside the
+        // stage instead of bleeding over the docked inspector. '.studio-stage'
+        // ⊆ '.studio-body', so the taller-than-modal scroll case above still
+        // clips at least as tightly; '.studio-body' stays in the list as the
+        // fallback for any studio host not inside a stage (there is none today).
+        const ancestorEl = host.el.closest('.thread-viewport, .studio-stage, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         // C2: an explicitly-hidden host (inactive panel tab) hides exactly
@@ -1307,7 +1316,7 @@ export function AppFrameLayer() {
         // tick() above — must stay in lockstep with that call site (see its
         // comment for the full rationale) or the sync path and the rAF path
         // would clip differently frame-to-frame.
-        const ancestorEl = hostEl.closest('.thread-viewport, .studio-body');
+        const ancestorEl = hostEl.closest('.thread-viewport, .studio-stage, .studio-body');
         const ancestorRect = ancestorEl ? ancestorEl.getBoundingClientRect() : viewportRect();
         const { paneHidden: geometryHidden, clip } = computePaneClip(rect, ancestorRect);
         const paneHidden = geometryHidden || slot.explicitlyHidden;
