@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  LIGHTBOX_MAX_SCALE_FLOOR,
+  LIGHTBOX_MAX_SCALE,
   LIGHTBOX_MIN_SCALE,
   clampPan,
   clampScale,
-  fitToActualScale,
-  maxZoomScale,
+  fitScale,
+  nextZoomStep,
   touchDistance,
   touchMidpoint,
 } from './lightboxZoom';
@@ -24,53 +24,67 @@ describe('clampScale', () => {
   });
 });
 
-describe('fitToActualScale', () => {
-  it('computes the ratio needed to reach natural pixel size', () => {
-    // Natural image is 2x the displayed (fitted) box on the wider axis.
-    expect(fitToActualScale({ width: 2000, height: 1000 }, { width: 1000, height: 800 })).toBe(2);
+describe('fitScale', () => {
+  it('computes the ratio of displayed (fitted) box to natural size', () => {
+    // Displayed box is half the natural width — "Fit" is 50% of actual pixels.
+    expect(fitScale({ width: 2000, height: 1000 }, { width: 1000, height: 500 })).toBe(0.5);
   });
 
-  it('picks the larger-axis ratio so both dimensions reach actual size', () => {
-    // Width ratio 2x, height ratio 3x — must use 3x or the height would
-    // still be short of "actual" once width hits 100%.
-    expect(fitToActualScale({ width: 2000, height: 3000 }, { width: 1000, height: 1000 })).toBe(3);
+  it('clamps to 1 when the displayed box is not smaller than natural size (Fit never exceeds 100%)', () => {
+    expect(fitScale({ width: 400, height: 300 }, { width: 800, height: 600 })).toBe(1);
   });
 
-  it('clamps to 1 when the image is already displayed larger than natural size (never shrinks below fit)', () => {
-    expect(fitToActualScale({ width: 400, height: 300 }, { width: 800, height: 600 })).toBe(1);
-  });
-
-  it('returns the min scale when displayed size is not yet known (zero box)', () => {
-    expect(fitToActualScale({ width: 2000, height: 1000 }, { width: 0, height: 0 })).toBe(
-      LIGHTBOX_MIN_SCALE,
-    );
+  it('returns 1 when sizes are not yet known (zero box, before image load)', () => {
+    expect(fitScale({ width: 2000, height: 1000 }, { width: 0, height: 0 })).toBe(1);
+    expect(fitScale({ width: 0, height: 0 }, { width: 0, height: 0 })).toBe(1);
   });
 });
 
-describe('maxZoomScale', () => {
-  it('uses the actual-size ratio when it exceeds the floor', () => {
-    expect(maxZoomScale({ width: 5000, height: 5000 }, { width: 500, height: 500 })).toBe(10);
+describe('nextZoomStep', () => {
+  it('steps up by exactly one 25% grid unit from an on-grid value', () => {
+    expect(nextZoomStep(0.5, 1)).toBe(0.75);
   });
 
-  it('uses the floor when the actual-size ratio is smaller than it', () => {
-    // Actual-size ratio here is only 1.5x — the floor (4x) should win so a
-    // modest image can still be pinch-zoomed meaningfully past "100%".
-    expect(maxZoomScale({ width: 1500, height: 1500 }, { width: 1000, height: 1000 })).toBe(
-      LIGHTBOX_MAX_SCALE_FLOOR,
-    );
+  it('steps down by exactly one 25% grid unit from an on-grid value', () => {
+    expect(nextZoomStep(0.5, -1)).toBe(0.25);
+  });
+
+  it('always advances at least one full step from an exact grid value (never a no-op)', () => {
+    expect(nextZoomStep(1, 1)).toBe(1.25);
+    expect(nextZoomStep(1, -1)).toBe(0.75);
+  });
+
+  it('snaps an off-grid value (left by continuous pinch/wheel zoom) to the nearest stop past it', () => {
+    // 42% up -> the next stop strictly above it, 50%.
+    expect(nextZoomStep(0.42, 1)).toBeCloseTo(0.5, 10);
+    // 42% down -> the next stop strictly below it, 25%.
+    expect(nextZoomStep(0.42, -1)).toBeCloseTo(0.25, 10);
+  });
+
+  it('holds at the floor once stepping down would go below it', () => {
+    expect(nextZoomStep(LIGHTBOX_MIN_SCALE, -1)).toBe(LIGHTBOX_MIN_SCALE);
+  });
+
+  it('holds at the ceiling once stepping up would exceed it', () => {
+    expect(nextZoomStep(LIGHTBOX_MAX_SCALE, 1)).toBe(LIGHTBOX_MAX_SCALE);
+  });
+
+  it('clamps a below-floor or above-ceiling input into range before stepping', () => {
+    expect(nextZoomStep(0.1, -1)).toBe(LIGHTBOX_MIN_SCALE);
+    expect(nextZoomStep(5, 1)).toBe(LIGHTBOX_MAX_SCALE);
   });
 });
 
 describe('clampPan', () => {
   const displayed = { width: 400, height: 200 };
 
-  it('forces pan to origin at or below the minimum scale (no room to pan when not zoomed)', () => {
+  it('forces pan to origin at or below cssScale 1 (no room to pan when not zoomed past Fit)', () => {
     expect(clampPan({ x: 999, y: 999 }, 1, displayed)).toEqual({ x: 0, y: 0 });
     expect(clampPan({ x: 999, y: 999 }, 0.8, displayed)).toEqual({ x: 0, y: 0 });
   });
 
   it('passes pan through when within bounds', () => {
-    // At scale 2, max offset is (400*1)/2=200 x, (200*1)/2=100 y.
+    // At cssScale 2, max offset is (400*1)/2=200 x, (200*1)/2=100 y.
     expect(clampPan({ x: 50, y: -30 }, 2, displayed)).toEqual({ x: 50, y: -30 });
   });
 
