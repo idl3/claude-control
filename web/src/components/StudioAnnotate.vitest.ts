@@ -170,7 +170,7 @@ describe('StudioAnnotate — pen tool', () => {
   it('a multi-point stroke commits a visible path and enables Undo', async () => {
     const { svg } = await renderReady();
     drawPen(svg, [{ x: 50, y: 50 }, { x: 80, y: 80 }]);
-    const path = svg.querySelector('[data-ann-kind="pen"]');
+    const path = svg.querySelector('[data-ann-kind="pen"]')!;
     expect(path).toBeTruthy();
     expect(path.getAttribute('d')).toBe('M50,50 L80,80');
     expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(false);
@@ -190,7 +190,7 @@ describe('StudioAnnotate — arrow tool', () => {
   it('drags out an arrow, commits it, auto-selects it, and switches back to select', async () => {
     const { svg } = await renderReady();
     drawArrow(svg, { x: 0, y: 0 }, { x: 100, y: 0 });
-    const line = svg.querySelector('[data-ann-kind="arrow"] line');
+    const line = svg.querySelector('[data-ann-kind="arrow"] line')!;
     expect(line).toBeTruthy();
     expect(line.getAttribute('x1')).toBe('0');
     expect(line.getAttribute('y1')).toBe('0');
@@ -214,7 +214,7 @@ describe('StudioAnnotate — text tool', () => {
   it('commits typed text, switches to select, and selects the new annotation', async () => {
     const { svg } = await renderReady();
     drawText(svg, { x: 50, y: 50 }, 'Hello');
-    const text = svg.querySelector('[data-ann-kind="text"]');
+    const text = svg.querySelector('[data-ann-kind="text"]')!;
     expect(text).toBeTruthy();
     expect(text?.textContent).toBe('Hello');
     expect(text.getAttribute('x')).toBe('50');
@@ -252,7 +252,8 @@ describe('StudioAnnotate — select tool: move / retarget / delete / edit-in-pla
     pointer(svg, 'pointerDown', 50, 0); // midpoint of the shaft, far from either handle
     pointer(svg, 'pointerMove', 55, 10); // dx=5, dy=10
     pointer(svg, 'pointerUp', 55, 10);
-    const line = svg.querySelector('[data-ann-kind="arrow"] line');
+    const line = svg.querySelector('[data-ann-kind="arrow"] line')!;
+    expect(line).toBeTruthy();
     expect(line.getAttribute('x1')).toBe('5');
     expect(line.getAttribute('y1')).toBe('10');
     expect(line.getAttribute('x2')).toBe('105');
@@ -265,7 +266,8 @@ describe('StudioAnnotate — select tool: move / retarget / delete / edit-in-pla
     pointer(svg, 'pointerDown', 2, 0); // within tolerance of the start handle
     pointer(svg, 'pointerMove', 20, 30);
     pointer(svg, 'pointerUp', 20, 30);
-    const line = svg.querySelector('[data-ann-kind="arrow"] line');
+    const line = svg.querySelector('[data-ann-kind="arrow"] line')!;
+    expect(line).toBeTruthy();
     expect(line.getAttribute('x1')).toBe('20');
     expect(line.getAttribute('y1')).toBe('30');
     expect(line.getAttribute('x2')).toBe('100');
@@ -349,7 +351,9 @@ describe('StudioAnnotate — color & size controls', () => {
     drawPen(svg, [{ x: 10, y: 10 }, { x: 20, y: 20 }]); // auto-selected after commit
     const colorInput = document.querySelector('.studio-annotate-color') as HTMLInputElement;
     fireEvent.change(colorInput, { target: { value: '#00ff00' } });
-    expect(svg.querySelector('[data-ann-kind="pen"]').getAttribute('stroke')).toBe('#00ff00');
+    const pen = svg.querySelector('[data-ann-kind="pen"]');
+    expect(pen).toBeTruthy();
+    expect(pen!.getAttribute('stroke')).toBe('#00ff00');
   });
 
   it('the size slider only appears for a selected text annotation, and resizes it', async () => {
