@@ -1430,6 +1430,115 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     { applyView },
   );
 
+  // Feature 1 (device presets + orientation) + D1/D2/D3 (Screenshot) content,
+  // shared verbatim between the mobile layout (unchanged separate
+  // `.studio-toolbar` band below `.studio-head`) and the desktop layout
+  // (Reflow: merged into `.studio-head` itself as `.studio-head-toolbar`,
+  // which replaces the separate band so `.studio-stage` reclaims its height —
+  // see styles.css's `.studio-head-toolbar` rules). Exactly one of the two
+  // renders per paint (gated by `columnMode`), so this is plain JSX reuse,
+  // not a second live instance.
+  const devicePicker = (
+    <div className="studio-device-picker">
+      <div className="studio-segmented studio-device-segmented" role="group" aria-label="Device category">
+        {DEVICE_CATEGORIES.map((c) => {
+          const Icon = CATEGORY_ICONS[c];
+          return (
+            <button
+              key={c}
+              id={`studio-category-${c}`}
+              type="button"
+              className="studio-segment studio-device-segment"
+              aria-pressed={category === c}
+              aria-label={CATEGORY_LABELS[c]}
+              tabIndex={category === c ? 0 : -1}
+              onKeyDown={(e) => onCategoryKeyDown(e, c)}
+              onClick={() => selectCategory(c)}
+            >
+              <Icon className="studio-tool-ico" />
+              <span className="studio-btn-label">{CATEGORY_LABELS[c]}</span>
+            </button>
+          );
+        })}
+      </div>
+      {/* >4 options within a category → native <select>, not a segmented
+          row (which would wrap/out-clutter — same threshold rule as
+          StudioPropField's enum control above). */}
+      <select
+        className="studio-device-select"
+        aria-label="Device"
+        value={deviceId}
+        onChange={(e) => selectDevice(e.target.value)}
+      >
+        {devicesByCategory(category).map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="studio-icon-btn studio-orientation-btn"
+        aria-label="Rotate orientation"
+        aria-pressed={orientation === 'landscape'}
+        disabled={category === 'desktop'}
+        onClick={toggleOrientation}
+      >
+        <RotateIcon className="studio-tool-ico" />
+      </button>
+    </div>
+  );
+
+  const zoomAndCapture = (
+    <div className="studio-toolbar-right">
+      {/* Zoom cluster (was Finding 12's static scale chip): −  [Fit|NN%]
+          +  Fit. The readout is the effective display scale on a device-px
+          basis (Fit ≈ 47%, 100% = 1 device CSS px : 1 screen px) and
+          doubles as the Fit↔100% toggle. Toolbar-anchored, not over the
+          stage, because the z-310 hosted iframe occludes anything painted
+          inside the stage wherever the device rect sits. */}
+      <div className="studio-zoom-cluster" role="group" aria-label="Canvas zoom">
+        <button
+          type="button"
+          className="studio-zoom-btn"
+          aria-label="Zoom out"
+          onClick={() => zoomButton(-1)}
+          disabled={atFit}
+        >
+          <span aria-hidden="true">−</span>
+        </button>
+        <button
+          type="button"
+          className="studio-zoom-readout"
+          aria-label={atFit ? 'Zoom: fit to view — activate for actual size' : `Zoom ${scalePct}% — activate to fit`}
+          title={`${device.name} · ${dims.width}×${dims.height}`}
+          onClick={toggleFit100}
+        >
+          {atFit ? 'Fit' : `${scalePct}%`}
+        </button>
+        <button
+          type="button"
+          className="studio-zoom-btn"
+          aria-label="Zoom in"
+          onClick={() => zoomButton(1)}
+          disabled={!canZoomIn}
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+        <button
+          type="button"
+          className="studio-zoom-btn studio-zoom-fit"
+          aria-label="Fit to view"
+          onClick={resetFit}
+          disabled={atFit && clampedPan.x === 0 && clampedPan.y === 0}
+        >
+          Fit
+        </button>
+      </div>
+      <StudioCapture url={url} name={name} />
+    </div>
+  );
+
   return (
     <div className="studio-overlay" ref={rootRef} role="presentation">
       <div className="studio-panel" role="dialog" aria-modal="true" aria-label={`${name} studio`}>
@@ -1438,6 +1547,17 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
             <span className="studio-title">{name}</span>
             <span className="studio-version">{versionTag}</span>
           </div>
+          {/* Desktop reflow: toolbar controls merge into the header row
+              itself instead of a separate band below it (columnMode false
+              ⇔ viewport ≥ STUDIO_DOCK_MIN_WIDTH/720 — see the columnMode
+              doc comment above). Mobile renders the original separate
+              `.studio-toolbar` row below, untouched. */}
+          {!columnMode && (
+            <div className="studio-head-toolbar">
+              {devicePicker}
+              {zoomAndCapture}
+            </div>
+          )}
           <div className="studio-head-actions">
             <div className="studio-overflow">
               <button
@@ -1468,103 +1588,12 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
           </div>
         </div>
 
-        <div className="studio-toolbar">
-          <div className="studio-device-picker">
-            <div className="studio-segmented studio-device-segmented" role="group" aria-label="Device category">
-              {DEVICE_CATEGORIES.map((c) => {
-                const Icon = CATEGORY_ICONS[c];
-                return (
-                  <button
-                    key={c}
-                    id={`studio-category-${c}`}
-                    type="button"
-                    className="studio-segment studio-device-segment"
-                    aria-pressed={category === c}
-                    aria-label={CATEGORY_LABELS[c]}
-                    tabIndex={category === c ? 0 : -1}
-                    onKeyDown={(e) => onCategoryKeyDown(e, c)}
-                    onClick={() => selectCategory(c)}
-                  >
-                    <Icon className="studio-tool-ico" />
-                    <span className="studio-btn-label">{CATEGORY_LABELS[c]}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {/* >4 options within a category → native <select>, not a segmented
-                row (which would wrap/out-clutter — same threshold rule as
-                StudioPropField's enum control above). */}
-            <select
-              className="studio-device-select"
-              aria-label="Device"
-              value={deviceId}
-              onChange={(e) => selectDevice(e.target.value)}
-            >
-              {devicesByCategory(category).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="studio-icon-btn studio-orientation-btn"
-              aria-label="Rotate orientation"
-              aria-pressed={orientation === 'landscape'}
-              disabled={category === 'desktop'}
-              onClick={toggleOrientation}
-            >
-              <RotateIcon className="studio-tool-ico" />
-            </button>
+        {columnMode && (
+          <div className="studio-toolbar">
+            {devicePicker}
+            {zoomAndCapture}
           </div>
-          <div className="studio-toolbar-right">
-            {/* Zoom cluster (was Finding 12's static scale chip): −  [Fit|NN%]
-                +  Fit. The readout is the effective display scale on a device-px
-                basis (Fit ≈ 47%, 100% = 1 device CSS px : 1 screen px) and
-                doubles as the Fit↔100% toggle. Toolbar-anchored, not over the
-                stage, because the z-310 hosted iframe occludes anything painted
-                inside the stage wherever the device rect sits. */}
-            <div className="studio-zoom-cluster" role="group" aria-label="Canvas zoom">
-              <button
-                type="button"
-                className="studio-zoom-btn"
-                aria-label="Zoom out"
-                onClick={() => zoomButton(-1)}
-                disabled={atFit}
-              >
-                <span aria-hidden="true">−</span>
-              </button>
-              <button
-                type="button"
-                className="studio-zoom-readout"
-                aria-label={atFit ? 'Zoom: fit to view — activate for actual size' : `Zoom ${scalePct}% — activate to fit`}
-                title={`${device.name} · ${dims.width}×${dims.height}`}
-                onClick={toggleFit100}
-              >
-                {atFit ? 'Fit' : `${scalePct}%`}
-              </button>
-              <button
-                type="button"
-                className="studio-zoom-btn"
-                aria-label="Zoom in"
-                onClick={() => zoomButton(1)}
-                disabled={!canZoomIn}
-              >
-                <span aria-hidden="true">+</span>
-              </button>
-              <button
-                type="button"
-                className="studio-zoom-btn studio-zoom-fit"
-                aria-label="Fit to view"
-                onClick={resetFit}
-                disabled={atFit && clampedPan.x === 0 && clampedPan.y === 0}
-              >
-                Fit
-              </button>
-            </div>
-            <StudioCapture url={url} name={name} />
-          </div>
-        </div>
+        )}
 
         <div className="studio-body">
           {/* B1: a context='studio' EmbeddedApp placeholder — same

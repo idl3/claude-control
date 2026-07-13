@@ -8039,6 +8039,49 @@ select.config-input {
   accent-color: var(--accent);
   cursor: pointer;
 }
+/* Desktop toolbar reflow: on ≥720px (columnMode false in StudioModal.tsx),
+   the device/zoom/Screenshot controls render here, INSIDE `.studio-head`,
+   instead of in the separate `.studio-toolbar` band below — which frees that
+   band's whole row height for `.studio-stage`. No media query needed: JS
+   only ever mounts `.studio-head-toolbar` at ≥720px (the same STUDIO_DOCK_
+   MIN_WIDTH predicate `.studio-toolbar`'s absence there implies), so these
+   rules are inherently desktop-only. `flex: 1 1 auto` claims the header's
+   remaining width between the title and the overflow/close cluster;
+   `justify-content: space-between` then reads as "device controls
+   left/center, zoom + Screenshot right, next to ⋯ ×" per the spec. */
+.studio-head-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* Shrink the device segmented/select/rotate + Screenshot controls to match
+   `.studio-zoom-cluster`'s 30px pill height (3px padding + 24px inner row +
+   3px, mirrored below) so the merged header reads as one compact bar rather
+   than two mismatched control heights. Scoped to `.studio-head-toolbar`
+   only — the mobile `.studio-toolbar` band and the side panel's
+   `.studio-prop-segmented` enum control keep their existing, larger sizes. */
+.studio-head-toolbar .studio-segment {
+  height: 24px;
+}
+.studio-head-toolbar .studio-device-segmented {
+  /* The segmented pill has no explicit height upstream (unlike
+     `.studio-zoom-cluster`, which clamps to 30px), so it would otherwise sit
+     at its intrinsic 32px (24px button + 3px+3px padding + 1px+1px border).
+     Clamp it the same way the zoom cluster clamps its own 24px buttons, so
+     all four controls render at an identical 30px. */
+  height: 30px;
+}
+.studio-head-toolbar .studio-device-select,
+.studio-head-toolbar .studio-orientation-btn,
+.studio-head-toolbar .studio-capture-btn {
+  height: 30px;
+}
+.studio-head-toolbar .studio-orientation-btn {
+  width: 30px;
+}
 .studio-toolbar {
   display: flex;
   align-items: center;
