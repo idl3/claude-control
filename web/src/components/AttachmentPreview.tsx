@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { authFetch, uploadServeUrl } from '../lib/api';
+import { prefersReducedMotion } from '../lib/anim';
+import {
+  clampPan,
+  clampScale,
+  fitToActualScale,
+  LIGHTBOX_MIN_SCALE,
+  maxZoomScale,
+  touchDistance,
+  touchMidpoint,
+  type Point,
+  type Size,
+} from '../lib/lightboxZoom';
 import { XIcon } from './icons';
 
 /**
@@ -72,82 +85,281 @@ interface LightboxProps {
   onClose: () => void;
 }
 
-/**
- * Walks up from `el` to the nearest ancestor that is actually scrolled
- * (computed overflow-y is auto/scroll AND its content overflows) — a plain,
- * class-name-agnostic detector rather than a hardcoded selector, since the
- * Lightbox mounts from many different panes (main transcript, sub-agent
- * thread, attachments) each with their own scroll container.
- */
-function findScrollParent(el: HTMLElement | null): HTMLElement | null {
-  let node = el?.parentElement ?? null;
-  while (node && node !== document.documentElement) {
-    const { overflowY } = window.getComputedStyle(node);
-    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return null;
+/** Reads a touch's viewport coordinates as a plain Point (see lightboxZoom.ts). */
+function touchPoint(t: Touch): Point {
+  return { x: t.clientX, y: t.clientY };
 }
+
+/** In-progress single/two-finger gesture, tracked across one touchstart →
+ * touchmove* → touchend/touchcancel cycle. `onImage` gates double-tap
+ * detection to taps that actually started on the image (see touchend). */
+type Gesture =
+  | { mode: 'pinch'; startDist: number; startScale: number; startMid: Point; startPan: Point }
+  | { mode: 'pan'; startPoint: Point; startPan: Point }
+  | { mode: 'tap'; startPoint: Point; onImage: boolean };
+
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_SLOP_PX = 24;
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+const ZOOM_STEP_FACTOR = 1.5;
 
 export function Lightbox({ src, alt, onClose }: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
-  // Focus the dialog for a11y/Escape, without the browser's default
-  // scroll-into-view. The backdrop is `position: fixed` (already covers the
-  // full viewport) but is still a DOM descendant of whichever scrollable
-  // pane rendered the triggering image, and some engines still try to
-  // scroll that ancestor to "reveal" a newly focused descendant — which is
-  // what was snapping the transcript to the top on open. `preventScroll`
-  // stops that at the source; the scrollTop capture/restore is the belt-
-  // and-braces fallback, and also covers the symmetric case on dismiss
-  // (this element unmounting shouldn't leave the pane scrolled anywhere
-  // other than where the user had it).
-  useEffect(() => {
-    const node = dialogRef.current;
-    const scroller = findScrollParent(node);
-    const savedScrollTop = scroller?.scrollTop ?? null;
+  // Live zoom/pan state. `scaleRef`/`panRef` are the source of truth read by
+  // the native gesture handlers below (they're set up once, on mount, so a
+  // React-state closure would go stale); `renderScale`/`renderPan` mirror
+  // them purely to drive the <img> transform + toolbar label on re-render.
+  // `applyZoom` is the single path that ever writes either.
+  const scaleRef = useRef(LIGHTBOX_MIN_SCALE);
+  const panRef = useRef<Point>({ x: 0, y: 0 });
+  const [renderScale, setRenderScale] = useState(LIGHTBOX_MIN_SCALE);
+  const [renderPan, setRenderPan] = useState<Point>({ x: 0, y: 0 });
+  const [snapping, setSnapping] = useState(false);
+  const gestureRef = useRef<Gesture | null>(null);
+  const lastTapRef = useRef<{ time: number; point: Point } | null>(null);
 
-    node?.focus({ preventScroll: true });
-    if (scroller && savedScrollTop !== null && scroller.scrollTop !== savedScrollTop) {
-      scroller.scrollTop = savedScrollTop;
-    }
-
-    return () => {
-      if (scroller && savedScrollTop !== null) {
-        scroller.scrollTop = savedScrollTop;
-      }
-    };
+  const applyZoom = useCallback((scale: number, pan: Point, animate: boolean) => {
+    scaleRef.current = scale;
+    panRef.current = pan;
+    setSnapping(animate && !prefersReducedMotion());
+    setRenderScale(scale);
+    setRenderPan(pan);
   }, []);
 
-  // Scroll-lock + pull-to-refresh guard while the Lightbox is open. Belt and
-  // braces, mounted for the lifetime of this single Lightbox instance:
+  /** The image's own laid-out (untransformed) box — constant across zoom,
+   * since `transform: scale()` never affects layout. */
+  const displayedSize = useCallback((): Size => {
+    const img = imgRef.current;
+    return { width: img?.offsetWidth ?? 0, height: img?.offsetHeight ?? 0 };
+  }, []);
+
+  const naturalSize = useCallback((): Size => {
+    const img = imgRef.current;
+    return { width: img?.naturalWidth ?? 0, height: img?.naturalHeight ?? 0 };
+  }, []);
+
+  /** Fit ↔ 100% (actual pixel size) toggle — shared by double-tap,
+   * double-click and the toolbar's middle button. No-ops before the image
+   * has finished loading (naturalWidth still 0). */
+  const toggleZoom = useCallback(() => {
+    const natural = naturalSize();
+    if (natural.width === 0) return;
+    const displayed = displayedSize();
+    const target = scaleRef.current > LIGHTBOX_MIN_SCALE
+      ? LIGHTBOX_MIN_SCALE
+      : fitToActualScale(natural, displayed);
+    applyZoom(target, { x: 0, y: 0 }, true);
+  }, [applyZoom, displayedSize, naturalSize]);
+
+  /** −/+ toolbar buttons — steps by a fixed factor, clamped to [fit, max]. */
+  const stepZoom = useCallback(
+    (direction: 1 | -1) => {
+      const natural = naturalSize();
+      if (natural.width === 0) return;
+      const displayed = displayedSize();
+      const max = maxZoomScale(natural, displayed);
+      const nextScale = clampScale(
+        scaleRef.current * (direction === 1 ? ZOOM_STEP_FACTOR : 1 / ZOOM_STEP_FACTOR),
+        LIGHTBOX_MIN_SCALE,
+        max,
+      );
+      applyZoom(nextScale, clampPan(panRef.current, nextScale, displayed), true);
+    },
+    [applyZoom, displayedSize, naturalSize],
+  );
+
+  // Focus the dialog for a11y/Escape, without the browser's default
+  // scroll-into-view. Now that the backdrop is portaled straight onto
+  // `document.body` (see the return below), there's no scrollable
+  // transcript/sub-agent-pane ancestor left to fight over scroll position —
+  // `preventScroll` is kept purely as cheap, standard dialog-focus hygiene.
+  useEffect(() => {
+    dialogRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // Scroll-lock + gesture handling while the Lightbox is open, mounted for
+  // the lifetime of this single instance. All of it lives in ONE native
+  // (non-React) listener set on the backdrop, deliberately NOT React's
+  // synthetic touch/wheel props: React attaches those passively by default,
+  // so `preventDefault()` inside them silently no-ops (with a console
+  // warning) — fatal for both the pull-to-refresh guard and pinch/wheel zoom
+  // below, which all depend on actually blocking the browser's default.
   //  - `lightbox-open` on <html> (styles.css) hard-locks page scroll/rubber-band.
-  //  - `touch-action`/`overscroll-behavior` on .lightbox-backdrop (styles.css)
-  //    tell the browser not to hand this element's touches to native scrolling.
-  //  - the non-passive touchmove listener below both preventDefaults (blocks
-  //    iOS Safari's native pull-to-refresh, which our CSS overscroll-behavior
-  //    normally suppresses but a fixed full-viewport overlay can bypass) and
-  //    stopPropagation()s — this app also drives its OWN pull-to-refresh via
-  //    JS (see hooks/usePullToRefresh.ts, bound to the app root and keyed off
-  //    `.thread-viewport` scrollTop). Without stopping propagation here, a
-  //    drag on the overlay — which sits inside `.thread-viewport` in the DOM
-  //    despite being visually fixed on top — would still bubble to that
-  //    listener and could trigger its hard `window.location.reload()`.
+  //  - `touch-action: none` on .lightbox-backdrop/.lightbox-img (styles.css)
+  //    tells the browser not to hand these elements' touches to native
+  //    scrolling/pinch-zoom, so our own gesture math is the only thing
+  //    driving them.
+  //  - touchmove preventDefault()s+stopPropagation()s in every case: pinch
+  //    and single-finger-pan-while-zoomed are handled below (and still
+  //    preventDefault, since native scroll must stay off), and a plain drag
+  //    with no recognized gesture falls through to the same
+  //    preventDefault+stopPropagation as before — this app also drives its
+  //    OWN pull-to-refresh via JS (hooks/usePullToRefresh.ts, bound to the
+  //    app root and keyed off `.thread-viewport` scrollTop). Post-portal this
+  //    node is no longer a DOM descendant of that root at all, so
+  //    stopPropagation is now defensive-only — kept anyway, it's free.
   useEffect(() => {
     document.documentElement.classList.add('lightbox-open');
     const node = dialogRef.current;
-    const blockTouchMove = (e: TouchEvent) => {
+
+    function onTouchStart(e: TouchEvent) {
+      const touches = e.touches;
+      if (touches.length === 2) {
+        const t0 = touchPoint(touches[0]);
+        const t1 = touchPoint(touches[1]);
+        gestureRef.current = {
+          mode: 'pinch',
+          startDist: touchDistance(t0, t1),
+          startScale: scaleRef.current,
+          startMid: touchMidpoint(t0, t1),
+          startPan: panRef.current,
+        };
+        return;
+      }
+      if (touches.length === 1) {
+        const t0 = touchPoint(touches[0]);
+        gestureRef.current =
+          scaleRef.current > LIGHTBOX_MIN_SCALE
+            ? { mode: 'pan', startPoint: t0, startPan: panRef.current }
+            : { mode: 'tap', startPoint: t0, onImage: e.target === imgRef.current };
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      const gesture = gestureRef.current;
+      if (gesture?.mode === 'pinch' && e.touches.length === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        const t0 = touchPoint(e.touches[0]);
+        const t1 = touchPoint(e.touches[1]);
+        const displayed = displayedSize();
+        const max = maxZoomScale(naturalSize(), displayed);
+        const dist = touchDistance(t0, t1);
+        const mid = touchMidpoint(t0, t1);
+        const nextScale = clampScale(
+          gesture.startScale * (dist / gesture.startDist),
+          LIGHTBOX_MIN_SCALE,
+          max,
+        );
+        const nextPan = clampPan(
+          {
+            x: gesture.startPan.x + (mid.x - gesture.startMid.x),
+            y: gesture.startPan.y + (mid.y - gesture.startMid.y),
+          },
+          nextScale,
+          displayed,
+        );
+        applyZoom(nextScale, nextPan, false);
+        return;
+      }
+      if (gesture?.mode === 'pan' && e.touches.length === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        const t0 = touchPoint(e.touches[0]);
+        const nextPan = clampPan(
+          {
+            x: gesture.startPan.x + (t0.x - gesture.startPoint.x),
+            y: gesture.startPan.y + (t0.y - gesture.startPoint.y),
+          },
+          scaleRef.current,
+          displayedSize(),
+        );
+        applyZoom(scaleRef.current, nextPan, false);
+        return;
+      }
+      // No recognized multi-touch gesture in progress (plain scroll-attempt
+      // drag, or a 'tap' gesture that turned into a move) — the
+      // pull-to-refresh / native-scroll guard described above.
       e.preventDefault();
       e.stopPropagation();
-    };
-    node?.addEventListener('touchmove', blockTouchMove, { passive: false });
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      const gesture = gestureRef.current;
+      gestureRef.current = null;
+      // ponytail: lifting one finger mid-pinch just ends the gesture rather
+      // than smoothly handing off to single-finger pan — add a hand-off if
+      // that jump ever bothers real users.
+      if (gesture?.mode !== 'tap' || !gesture.onImage || e.touches.length > 0) return;
+      const now = Date.now();
+      const last = lastTapRef.current;
+      lastTapRef.current = { time: now, point: gesture.startPoint };
+      if (
+        last &&
+        now - last.time < DOUBLE_TAP_MS &&
+        touchDistance(gesture.startPoint, last.point) < DOUBLE_TAP_SLOP_PX
+      ) {
+        // Suppress the synthesized "ghost click" that would otherwise follow
+        // this touchend — without it, the second tap's click would bubble to
+        // the backdrop's onClick and close the Lightbox right as it zooms in.
+        e.preventDefault();
+        lastTapRef.current = null;
+        toggleZoom();
+      }
+    }
+
+    function onTouchCancel() {
+      gestureRef.current = null;
+    }
+
+    function onWheel(e: WheelEvent) {
+      // Always claimed while the Lightbox is open — there is nothing behind
+      // this fixed, fully-covering overlay that should scroll or that the
+      // browser should page-zoom via ctrl/⌘+wheel.
+      e.preventDefault();
+      const natural = naturalSize();
+      if (natural.width === 0) return;
+      const displayed = displayedSize();
+      const max = maxZoomScale(natural, displayed);
+      const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
+      const nextScale = clampScale(scaleRef.current * factor, LIGHTBOX_MIN_SCALE, max);
+      applyZoom(nextScale, clampPan(panRef.current, nextScale, displayed), false);
+    }
+
+    node?.addEventListener('touchstart', onTouchStart, { passive: true });
+    node?.addEventListener('touchmove', onTouchMove, { passive: false });
+    node?.addEventListener('touchend', onTouchEnd, { passive: false });
+    node?.addEventListener('touchcancel', onTouchCancel, { passive: true });
+    node?.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       document.documentElement.classList.remove('lightbox-open');
-      node?.removeEventListener('touchmove', blockTouchMove);
+      node?.removeEventListener('touchstart', onTouchStart);
+      node?.removeEventListener('touchmove', onTouchMove);
+      node?.removeEventListener('touchend', onTouchEnd);
+      node?.removeEventListener('touchcancel', onTouchCancel);
+      node?.removeEventListener('wheel', onWheel);
     };
-  }, []);
+  }, [applyZoom, displayedSize, naturalSize, toggleZoom]);
+
+  // Desktop drag-to-pan (mouse). Only active once zoomed in; plain React
+  // handlers are fine here (unlike touch/wheel, mouse events aren't passive
+  // by default, so preventDefault works normally).
+  const onImgMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (scaleRef.current <= LIGHTBOX_MIN_SCALE) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startPoint = { x: e.clientX, y: e.clientY };
+      const startPan = panRef.current;
+      function onMove(ev: MouseEvent) {
+        const nextPan = clampPan(
+          { x: startPan.x + (ev.clientX - startPoint.x), y: startPan.y + (ev.clientY - startPoint.y) },
+          scaleRef.current,
+          displayedSize(),
+        );
+        applyZoom(scaleRef.current, nextPan, false);
+      }
+      function onUp() {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [applyZoom, displayedSize],
+  );
 
   // Dismiss on Escape.
   const onKeyDown = useCallback(
@@ -160,7 +372,10 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
     [onClose],
   );
 
-  return (
+  const zoomed = renderScale > LIGHTBOX_MIN_SCALE;
+  const zoomPercent = Math.round(renderScale * 100);
+
+  return createPortal(
     <div
       className="lightbox-backdrop"
       role="dialog"
@@ -187,8 +402,41 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       >
         <XIcon size={20} />
       </button>
-      <img className="lightbox-img" src={src} alt={alt} />
-    </div>
+      <img
+        ref={imgRef}
+        className={`lightbox-img${snapping ? ' lightbox-img--snap' : ''}`}
+        style={{ transform: `translate(${renderPan.x}px, ${renderPan.y}px) scale(${renderScale})` }}
+        data-zoomed={zoomed}
+        src={src}
+        alt={alt}
+        onTransitionEnd={() => setSnapping(false)}
+        // A single click/tap on the image no longer closes the Lightbox —
+        // that's a deliberate change from the pre-zoom behavior, needed so a
+        // tap can start a drag-to-pan or land as one half of a double-tap
+        // without also dismissing. Backdrop-click and the explicit close
+        // button remain the two dismiss paths.
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          toggleZoom();
+        }}
+        onMouseDown={onImgMouseDown}
+      />
+      {/* Fit/100%/percentage zoom controls — stopPropagation on every button
+          so clicking one doesn't also bubble into the backdrop's onClose. */}
+      <div className="lightbox-zoom-controls" onClick={(e) => e.stopPropagation()}>
+        <button type="button" aria-label="Zoom out" onClick={() => stepZoom(-1)}>
+          −
+        </button>
+        <button type="button" aria-label="Toggle fit / 100% zoom" onClick={toggleZoom}>
+          {zoomed ? `${zoomPercent}%` : 'Fit'}
+        </button>
+        <button type="button" aria-label="Zoom in" onClick={() => stepZoom(1)}>
+          +
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
