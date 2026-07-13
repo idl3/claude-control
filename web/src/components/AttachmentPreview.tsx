@@ -5,9 +5,10 @@ import { prefersReducedMotion } from '../lib/anim';
 import {
   clampPan,
   clampScale,
-  fitToActualScale,
+  fitScale,
+  LIGHTBOX_MAX_SCALE,
   LIGHTBOX_MIN_SCALE,
-  maxZoomScale,
+  nextZoomStep,
   touchDistance,
   touchMidpoint,
   type Point,
@@ -101,7 +102,16 @@ type Gesture =
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_SLOP_PX = 24;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
-const ZOOM_STEP_FACTOR = 1.5;
+
+/** The `transform: scale()` multiplier ("cssScale" — see lightboxZoom.ts's
+ * module docs) at which the image sits exactly in its laid-out "Fit" box,
+ * i.e. untransformed. This is always 1 by construction (the CSS box IS
+ * Fit before any scale is applied), independent of the image's natural
+ * pixel size — unlike the *effective*-scale value of Fit (see fitScale),
+ * which does depend on natural size and is only meaningful once the image
+ * has loaded. `scaleRef`/`renderScale` below store cssScale, so this is
+ * the single "am I zoomed past Fit at all" threshold used throughout. */
+const CSS_SCALE_AT_FIT = 1;
 
 export function Lightbox({ src, alt, onClose }: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -111,10 +121,15 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
   // the native gesture handlers below (they're set up once, on mount, so a
   // React-state closure would go stale); `renderScale`/`renderPan` mirror
   // them purely to drive the <img> transform + toolbar label on re-render.
-  // `applyZoom` is the single path that ever writes either.
-  const scaleRef = useRef(LIGHTBOX_MIN_SCALE);
+  // `applyZoom` is the single path that ever writes either. `scaleRef`
+  // stores cssScale (the transform multiplier — see CSS_SCALE_AT_FIT
+  // above), NOT the toolbar's natural-pixel-relative effective scale;
+  // toggleZoom/stepZoom/pinch/wheel convert to/from effective scale via
+  // fitScale() only at the point they need to check the manual [25%,300%]
+  // bounds or the 25% step grid.
+  const scaleRef = useRef(CSS_SCALE_AT_FIT);
   const panRef = useRef<Point>({ x: 0, y: 0 });
-  const [renderScale, setRenderScale] = useState(LIGHTBOX_MIN_SCALE);
+  const [renderScale, setRenderScale] = useState(CSS_SCALE_AT_FIT);
   const [renderPan, setRenderPan] = useState<Point>({ x: 0, y: 0 });
   const [snapping, setSnapping] = useState(false);
   const gestureRef = useRef<Gesture | null>(null);
@@ -141,30 +156,37 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
   }, []);
 
   /** Fit ↔ 100% (actual pixel size) toggle — shared by double-tap,
-   * double-click and the toolbar's middle button. No-ops before the image
-   * has finished loading (naturalWidth still 0). */
+   * double-click and the toolbar's middle button. Also doubles as the
+   * always-available "return to Fit" affordance from any zoom level (not
+   * just from 100%): toggling FROM anything other than Fit always lands
+   * back on Fit first. No-ops before the image has finished loading
+   * (naturalWidth still 0). */
   const toggleZoom = useCallback(() => {
     const natural = naturalSize();
     if (natural.width === 0) return;
     const displayed = displayedSize();
-    const target = scaleRef.current > LIGHTBOX_MIN_SCALE
-      ? LIGHTBOX_MIN_SCALE
-      : fitToActualScale(natural, displayed);
+    const fit = fitScale(natural, displayed);
+    const atFit = scaleRef.current === CSS_SCALE_AT_FIT;
+    // atFit -> 100% actual pixels (cssScale = 1/fit); otherwise -> Fit
+    // (cssScale = 1, by construction always in range — see CSS_SCALE_AT_FIT).
+    const target = atFit ? 1 / fit : CSS_SCALE_AT_FIT;
     applyZoom(target, { x: 0, y: 0 }, true);
   }, [applyZoom, displayedSize, naturalSize]);
 
-  /** −/+ toolbar buttons — steps by a fixed factor, clamped to [fit, max]. */
+  /** −/+ toolbar buttons — snap to the next 25%-of-natural-pixels grid stop
+   * (see nextZoomStep), clamped to [LIGHTBOX_MIN_SCALE, LIGHTBOX_MAX_SCALE].
+   * Fit itself is intentionally not on this grid (it can legitimately fall
+   * below 25% for a very large image) — the toolbar's middle button always
+   * gets back to Fit regardless of where stepping lands (see toggleZoom). */
   const stepZoom = useCallback(
     (direction: 1 | -1) => {
       const natural = naturalSize();
       if (natural.width === 0) return;
       const displayed = displayedSize();
-      const max = maxZoomScale(natural, displayed);
-      const nextScale = clampScale(
-        scaleRef.current * (direction === 1 ? ZOOM_STEP_FACTOR : 1 / ZOOM_STEP_FACTOR),
-        LIGHTBOX_MIN_SCALE,
-        max,
-      );
+      const fit = fitScale(natural, displayed);
+      const currentEffective = scaleRef.current * fit;
+      const nextEffective = nextZoomStep(currentEffective, direction);
+      const nextScale = nextEffective / fit;
       applyZoom(nextScale, clampPan(panRef.current, nextScale, displayed), true);
     },
     [applyZoom, displayedSize, naturalSize],
@@ -221,7 +243,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       if (touches.length === 1) {
         const t0 = touchPoint(touches[0]);
         gestureRef.current =
-          scaleRef.current > LIGHTBOX_MIN_SCALE
+          scaleRef.current > CSS_SCALE_AT_FIT
             ? { mode: 'pan', startPoint: t0, startPan: panRef.current }
             : { mode: 'tap', startPoint: t0, onImage: e.target === imgRef.current };
       }
@@ -235,14 +257,17 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
         const t0 = touchPoint(e.touches[0]);
         const t1 = touchPoint(e.touches[1]);
         const displayed = displayedSize();
-        const max = maxZoomScale(naturalSize(), displayed);
+        // Pinch is CONTINUOUS manual zoom (unlike the +/- buttons' grid
+        // snap) — the raw multiplicative gesture delta is applied in
+        // effective (natural-pixel-relative) space so it's clamped against
+        // the spec's [25%,300%] bounds, then converted back to cssScale for
+        // storage/render.
+        const fit = fitScale(naturalSize(), displayed);
         const dist = touchDistance(t0, t1);
         const mid = touchMidpoint(t0, t1);
-        const nextScale = clampScale(
-          gesture.startScale * (dist / gesture.startDist),
-          LIGHTBOX_MIN_SCALE,
-          max,
-        );
+        const rawEffective = gesture.startScale * fit * (dist / gesture.startDist);
+        const nextEffective = clampScale(rawEffective, LIGHTBOX_MIN_SCALE, LIGHTBOX_MAX_SCALE);
+        const nextScale = nextEffective / fit;
         const nextPan = clampPan(
           {
             x: gesture.startPan.x + (mid.x - gesture.startMid.x),
@@ -312,9 +337,12 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       const natural = naturalSize();
       if (natural.width === 0) return;
       const displayed = displayedSize();
-      const max = maxZoomScale(natural, displayed);
+      // Continuous manual zoom, same effective-space clamp as pinch above.
+      const fit = fitScale(natural, displayed);
       const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
-      const nextScale = clampScale(scaleRef.current * factor, LIGHTBOX_MIN_SCALE, max);
+      const rawEffective = scaleRef.current * fit * factor;
+      const nextEffective = clampScale(rawEffective, LIGHTBOX_MIN_SCALE, LIGHTBOX_MAX_SCALE);
+      const nextScale = nextEffective / fit;
       applyZoom(nextScale, clampPan(panRef.current, nextScale, displayed), false);
     }
 
@@ -338,7 +366,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
   // by default, so preventDefault works normally).
   const onImgMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (scaleRef.current <= LIGHTBOX_MIN_SCALE) return;
+      if (scaleRef.current <= CSS_SCALE_AT_FIT) return;
       e.preventDefault();
       e.stopPropagation();
       const startPoint = { x: e.clientX, y: e.clientY };
@@ -372,8 +400,18 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
     [onClose],
   );
 
-  const zoomed = renderScale > LIGHTBOX_MIN_SCALE;
-  const zoomPercent = Math.round(renderScale * 100);
+  // Any zoomed (non-Fit) state can only be reached through toggleZoom/
+  // stepZoom/pinch/wheel, all of which require the image to have already
+  // loaded (they early-return while naturalWidth is 0) — so it's always
+  // safe to read natural/displayed size here once `zoomed` is true. Uses
+  // `!==`, not `>`: cssScale can legitimately sit *below* 1 too (a large
+  // image zoomed out past its own Fit, toward the 25%-effective floor —
+  // see stepZoom/pinch/wheel), and that state must still show its
+  // percentage rather than being mislabeled "Fit".
+  const zoomed = renderScale !== CSS_SCALE_AT_FIT;
+  const zoomPercent = zoomed
+    ? Math.round(renderScale * fitScale(naturalSize(), displayedSize()) * 100)
+    : 100;
 
   return createPortal(
     <div

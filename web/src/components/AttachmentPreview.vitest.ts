@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import { AttachPreviewItem, Lightbox } from './AttachmentPreview';
 import { MarkdownImg } from './EmbeddedMedia';
@@ -149,6 +149,21 @@ describe('Lightbox — zoom/pan', () => {
     Object.defineProperty(img, 'offsetHeight', { value: displayed.height, configurable: true });
   }
 
+  /** RTL's `fireEvent` doesn't have a dedicated touch helper that wires up a
+   * multi-item `touches` list, so these are dispatched as raw TouchEvents —
+   * `touches` is stamped on after construction (mirroring the touchmove-guard
+   * test above's raw-dispatch style); the component only ever duck-types
+   * `.clientX`/`.clientY`/`.length` off these, so plain objects are
+   * sufficient. Unlike `fireEvent.*`, a raw `dispatchEvent` isn't wrapped in
+   * React's `act()`, so the resulting state update isn't guaranteed to be
+   * flushed to the DOM before the next line runs — callers must wrap the
+   * dispatch in `act()` themselves. */
+  function touchEvt(type: string, touches: Array<{ clientX: number; clientY: number }>) {
+    const evt = new TouchEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'touches', { value: touches, configurable: true });
+    return evt;
+  }
+
   it('starts at Fit (scale 1, no pan) with the toolbar showing "Fit"', () => {
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
     const img = screen.getByAltText('shot') as HTMLImageElement;
@@ -160,15 +175,34 @@ describe('Lightbox — zoom/pan', () => {
   it('double-click toggles Fit -> 100% -> Fit, driving the transform, data-zoomed and the toolbar label', () => {
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
     const img = screen.getByAltText('shot') as HTMLImageElement;
-    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 }); // actual-size ratio: 2x
+    // Fit box is half the natural size on both axes -> Fit = 50% effective,
+    // 100% actual pixels needs cssScale 1/0.5 = 2.
+    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 });
 
     fireEvent.doubleClick(img);
     expect(img.dataset.zoomed).toBe('true');
     expect(img.style.transform).toContain('scale(2)');
-    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('200%');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('100%');
 
     fireEvent.doubleClick(img);
     expect(img.dataset.zoomed).toBe('false');
+    expect(img.style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('Fit');
+  });
+
+  it('toggle always returns to Fit from any zoom level, not only from 100% (the "Fit must always be reachable" affordance)', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 2000 }, { width: 1000, height: 1000 }); // fit = 0.5
+
+    // Step up to 200% (well past 100%) via the toolbar first.
+    const zoomIn = screen.getByRole('button', { name: 'Zoom in' });
+    fireEvent.click(zoomIn); // 50% -> 75%
+    fireEvent.click(zoomIn); // 75% -> 100%
+    fireEvent.click(zoomIn); // 100% -> 125%
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('125%');
+
+    fireEvent.doubleClick(img);
     expect(img.style.transform).toBe('translate(0px, 0px) scale(1)');
     expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('Fit');
   });
@@ -182,21 +216,45 @@ describe('Lightbox — zoom/pan', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('the −/+ toolbar buttons step the zoom level by a fixed factor, clamped to the max', () => {
+  it('the −/+ toolbar buttons snap to the next 25%-of-natural-pixels grid stop', () => {
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
     const img = screen.getByAltText('shot') as HTMLImageElement;
-    // Actual-size ratio here is only 1.2x, below the 4x floor — confirms
-    // stepping uses maxZoomScale's floor, not the raw actual-size ratio.
-    mockImageSize(img, { width: 1200, height: 1200 }, { width: 1000, height: 1000 });
+    mockImageSize(img, { width: 2000, height: 2000 }, { width: 1000, height: 1000 }); // fit = 0.5, Fit = 50%
 
+    // Fit (50%) -> next stop up is 75% -> cssScale 0.75/0.5 = 1.5.
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(img.style.transform).toContain('scale(1.5)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('75%');
 
+    // 75% -> 100% -> cssScale 1.0/0.5 = 2.
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
-    expect(img.style.transform).toContain('scale(2.25)');
+    expect(img.style.transform).toContain('scale(2)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('100%');
 
+    // 100% -> back down to 75%.
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(img.style.transform).toContain('scale(1.5)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('75%');
+  });
+
+  it('+ holds at the 300% ceiling once reached', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 100, height: 100 }, { width: 100, height: 100 }); // fit = 1, Fit = 100%
+    const zoomIn = screen.getByRole('button', { name: 'Zoom in' });
+    for (let i = 0; i < 20; i++) fireEvent.click(zoomIn); // far past the ceiling
+    expect(img.style.transform).toContain('scale(3)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('300%');
+  });
+
+  it('− holds at the 25% floor once reached', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 100, height: 100 }, { width: 100, height: 100 }); // fit = 1, Fit = 100%
+    const zoomOut = screen.getByRole('button', { name: 'Zoom out' });
+    for (let i = 0; i < 20; i++) fireEvent.click(zoomOut); // far past the floor
+    expect(img.style.transform).toContain('scale(0.25)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('25%');
   });
 
   it('clicking a zoom-control button does not also close the Lightbox via the backdrop', () => {
@@ -228,7 +286,7 @@ describe('Lightbox — zoom/pan', () => {
     fireEvent.mouseUp(window);
   });
 
-  it('wheel zooms in, clamped to at least 1x', () => {
+  it('wheel zooms in continuously from Fit (no snapping)', () => {
     render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
     const img = screen.getByAltText('shot') as HTMLImageElement;
     mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 });
@@ -237,7 +295,22 @@ describe('Lightbox — zoom/pan', () => {
 
     const match = /scale\(([\d.]+)\)/.exec(img.style.transform);
     expect(match).not.toBeNull();
+    // Continuous, not grid-snapped — an off-grid value like 1.35 is a
+    // correct outcome here (unlike the toolbar buttons above).
     expect(Number(match![1])).toBeGreaterThan(1);
+    expect(Number(match![1])).not.toBe(1.5);
+  });
+
+  it('wheel zoom-out is clamped to the 25% effective-scale floor, not below it', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 1000 }, { width: 1000, height: 500 }); // fit = 0.5, Fit = 50%
+
+    // A large positive deltaY is a strong zoom-out — should land exactly at
+    // the 25% floor (cssScale 0.25/0.5 = 0.5), not drift below it.
+    fireEvent.wheel(screen.getByRole('dialog'), { deltaY: 5000 });
+    expect(img.style.transform).toContain('scale(0.5)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('25%');
   });
 
   it('wheel does not also scroll/close anything behind the Lightbox (preventDefault fires)', () => {
@@ -246,6 +319,61 @@ describe('Lightbox — zoom/pan', () => {
     const evt = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 });
     dialog.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it('pinch zooms continuously, clamped to the 25%-300% effective range', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 2000 }, { width: 1000, height: 1000 }); // fit = 0.5, Fit = 50%
+    const backdrop = screen.getByRole('dialog');
+
+    act(() => {
+      backdrop.dispatchEvent(
+        touchEvt('touchstart', [
+          { clientX: 400, clientY: 400 },
+          { clientX: 600, clientY: 400 },
+        ]),
+      );
+    });
+    // Doubling the finger spread doubles cssScale: 1 -> 2 (effective 50% -> 100%).
+    act(() => {
+      backdrop.dispatchEvent(
+        touchEvt('touchmove', [
+          { clientX: 300, clientY: 400 },
+          { clientX: 700, clientY: 400 },
+        ]),
+      );
+    });
+    expect(img.style.transform).toContain('scale(2)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('100%');
+  });
+
+  it('pinch zoom-out is clamped to the 25% effective-scale floor', () => {
+    render(createElement(Lightbox, { src: 'blob:fake', alt: 'shot', onClose: () => {} }));
+    const img = screen.getByAltText('shot') as HTMLImageElement;
+    mockImageSize(img, { width: 2000, height: 2000 }, { width: 1000, height: 1000 }); // fit = 0.5, Fit = 50%
+    const backdrop = screen.getByRole('dialog');
+
+    act(() => {
+      backdrop.dispatchEvent(
+        touchEvt('touchstart', [
+          { clientX: 400, clientY: 400 },
+          { clientX: 600, clientY: 400 },
+        ]),
+      );
+    });
+    // Pinching the fingers almost fully together is a huge zoom-out —
+    // should hold at the 25% floor (cssScale 0.25/0.5 = 0.5), not go lower.
+    act(() => {
+      backdrop.dispatchEvent(
+        touchEvt('touchmove', [
+          { clientX: 499, clientY: 400 },
+          { clientX: 501, clientY: 400 },
+        ]),
+      );
+    });
+    expect(img.style.transform).toContain('scale(0.5)');
+    expect(screen.getByRole('button', { name: 'Toggle fit / 100% zoom' }).textContent).toBe('25%');
   });
 });
 
