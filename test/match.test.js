@@ -235,6 +235,86 @@ test('resumed session: most-active transcript wins over a freshly-born sibling',
   assert.equal(out.get('0:1.1').transcriptPath, '/p/resumed.jsonl');
 });
 
+// ── resume-id exact bind (bypasses the temporal guard for resumed-but-idle) ──
+
+test('resume-id bind: idle resumed transcript (mtime a week before procStart) binds via resumeSessionId', () => {
+  // THE BUG (grain window 17): pane resumed session X (proc started NOW) but
+  // X.jsonl was last written a week ago (idle — no message since). The temporal
+  // guard would reject it as a stale leftover → empty chat. The explicit
+  // resume-id must bind it anyway.
+  const paneStart = 1_000_000_000;
+  const uuid = 'd026972b-1e35-49ea-8063-0aed3abfa873';
+  const panes = [{ target: '0:17.1', windowName: 'grain', cwd, procStartMs: paneStart, resumeSessionId: uuid }];
+  const candidates = [
+    cand({
+      transcriptPath: `/p/${uuid}.jsonl`,
+      sessionId: uuid,
+      birthtimeMs: 1,
+      lastActivityMs: paneStart - 7 * 24 * 60 * 60_000, // a week BEFORE proc start
+    }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:17.1').transcriptPath, `/p/${uuid}.jsonl`,
+    'resumed-idle transcript must bind by session id despite stale mtime');
+});
+
+test('resume-id bind: matches by transcript BASENAME when the sessionId field is absent', () => {
+  // Candidates without a recorded sessionId still match on <uuid>.jsonl basename.
+  const paneStart = 1_000_000_000;
+  const uuid = 'a1b2c3d4-0000-4000-8000-000000000000';
+  const panes = [{ target: '0:1.1', windowName: 'x', cwd, procStartMs: paneStart, resumeSessionId: uuid }];
+  const candidates = [
+    cand({ transcriptPath: `/p/${uuid}.jsonl`, lastActivityMs: paneStart - 3_600_000 }), // no sessionId
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:1.1').transcriptPath, `/p/${uuid}.jsonl`);
+});
+
+test('resume-id GUARD PRESERVED: fresh pane (no resume id) + only a stale sibling → binds NOTHING', () => {
+  // The invariant the temporal guard protects. No resumeSessionId → Pass 0
+  // no-ops; the stale sibling (active before proc start) is rejected. A fresh
+  // session must stay empty until it writes its own transcript.
+  const paneStart = 1_000_000_000;
+  const slack = 5 * 60_000; // DEFAULT_START_SLACK_MS
+  const panes = [{ target: '0:2.1', windowName: 'fresh', cwd, procStartMs: paneStart }]; // no resumeSessionId
+  const candidates = [
+    cand({ transcriptPath: '/p/stale.jsonl', sessionId: 'stale-sess', lastActivityMs: paneStart - slack - 60_000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.has('0:2.1'), false, 'fresh pane must not inherit a stale sibling (guard intact)');
+});
+
+test('resume-id de-dup: two panes, one holds the resume id → only that pane gets the transcript', () => {
+  // The transcript is cwd-consistent AND temporally plausible for BOTH panes, so
+  // without the id pass the non-resume pane could grab it. The id pass claims it
+  // for the resuming pane FIRST; the other pane must get nothing (1:1).
+  const paneStart = 1_000_000_000;
+  const uuid = 'feedface-0000-4000-8000-000000000001';
+  const panes = [
+    { target: '0:1.1', windowName: 'resumer', cwd, procStartMs: paneStart, resumeSessionId: uuid },
+    { target: '0:2.1', windowName: 'other',   cwd, procStartMs: paneStart }, // no id
+  ];
+  const candidates = [
+    cand({ transcriptPath: `/p/${uuid}.jsonl`, sessionId: uuid, birthtimeMs: 1, lastActivityMs: paneStart + 1000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:1.1').transcriptPath, `/p/${uuid}.jsonl`, 'resuming pane claims its id-matched transcript');
+  assert.equal(out.has('0:2.1'), false, 'the other pane must not also get it (de-dup / 1:1)');
+});
+
+test('resume-id falls through gracefully when the id is not among the candidates', () => {
+  // Pane claims resume id X, but no candidate has it. Pass 0 finds no match; the
+  // pane falls through to the normal heuristic on the remaining candidates.
+  const paneStart = 1_000_000_000;
+  const panes = [{ target: '0:1.1', windowName: 'x', cwd, procStartMs: paneStart, resumeSessionId: '0badf00d-0000-4000-8000-000000000009' }];
+  const candidates = [
+    // A genuinely live transcript (active after proc start) with a different id.
+    cand({ transcriptPath: '/p/live.jsonl', sessionId: 'live-one', birthtimeMs: paneStart + 10, lastActivityMs: paneStart + 5000 }),
+  ];
+  const out = assignTranscripts(panes, candidates);
+  assert.equal(out.get('0:1.1').transcriptPath, '/p/live.jsonl', 'falls through to the normal matcher when id absent');
+});
+
 // ── PLE-41: content-fingerprint tiebreak ─────────────────────────────────────
 
 // fingerprintScore unit tests
