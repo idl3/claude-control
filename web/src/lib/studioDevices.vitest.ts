@@ -9,6 +9,15 @@ import {
   studioLayoutMode,
   resolveSheetSnap,
   STUDIO_DOCK_MIN_WIDTH,
+  studioEffectiveScale,
+  zoomForEffectiveScale,
+  zoomStep,
+  panBounds,
+  clampPan,
+  panForFocalZoom,
+  wheelZoomScale,
+  ZOOM_MAX_SCALE,
+  PAN_REVEAL_SLACK_PX,
   type DevicePreset,
 } from './studioDevices';
 
@@ -178,5 +187,148 @@ describe('studioDevices — resolveSheetSnap', () => {
 
   it('zero velocity at the very bottom resolves to collapsed', () => {
     expect(resolveSheetSnap({ offset: collapsedOffset, collapsedOffset, velocity: 0 })).toBe('collapsed');
+  });
+});
+
+describe('studioDevices — studioEffectiveScale (effective = fitScale × zoom)', () => {
+  it('zoom 1 is exactly Fit (effective === fitScale)', () => {
+    expect(studioEffectiveScale(0.47, 1)).toBeCloseTo(0.47, 10);
+    expect(studioEffectiveScale(1, 1)).toBe(1);
+  });
+
+  it('multiplies fitScale by zoom', () => {
+    expect(studioEffectiveScale(0.5, 2)).toBeCloseTo(1, 10);
+    expect(studioEffectiveScale(0.25, 4)).toBeCloseTo(1, 10);
+  });
+
+  it('floors at fitScale — never below Fit', () => {
+    expect(studioEffectiveScale(0.47, 0.5)).toBeCloseTo(0.47, 10);
+    expect(studioEffectiveScale(0.47, 0)).toBeCloseTo(0.47, 10);
+  });
+
+  it('ceils at ZOOM_MAX_SCALE (300%)', () => {
+    expect(studioEffectiveScale(0.5, 100)).toBe(ZOOM_MAX_SCALE);
+    expect(studioEffectiveScale(1, 10)).toBe(ZOOM_MAX_SCALE);
+  });
+});
+
+describe('studioDevices — zoomForEffectiveScale (inverse)', () => {
+  it('round-trips with studioEffectiveScale', () => {
+    const fit = 0.47;
+    for (const eff of [0.47, 0.5, 0.75, 1, 2, 3]) {
+      const zoom = zoomForEffectiveScale(fit, eff);
+      expect(studioEffectiveScale(fit, zoom)).toBeCloseTo(eff, 10);
+    }
+  });
+
+  it('effective 1.0 (100%) maps to zoom = 1/fitScale', () => {
+    expect(zoomForEffectiveScale(0.5, 1)).toBeCloseTo(2, 10);
+  });
+
+  it('clamps out-of-band effective into [fitScale, max] before inverting', () => {
+    expect(zoomForEffectiveScale(0.5, 0.1)).toBeCloseTo(1, 10); // below Fit -> Fit
+    expect(zoomForEffectiveScale(0.5, 99)).toBeCloseTo(ZOOM_MAX_SCALE / 0.5, 10); // above max -> max
+  });
+});
+
+describe('studioDevices — zoomStep (−/+ snap to 25% grid)', () => {
+  const fit = 0.47;
+
+  it('+ from Fit snaps up to the first grid step above fit', () => {
+    const z = zoomStep(fit, 1, 1);
+    expect(studioEffectiveScale(fit, z)).toBeCloseTo(0.5, 10);
+  });
+
+  it('+ walks the 25% grid: 0.5 -> 0.75 -> 1.0', () => {
+    const z1 = zoomForEffectiveScale(fit, 0.5);
+    const z2 = zoomStep(fit, z1, 1);
+    expect(studioEffectiveScale(fit, z2)).toBeCloseTo(0.75, 10);
+    const z3 = zoomStep(fit, z2, 1);
+    expect(studioEffectiveScale(fit, z3)).toBeCloseTo(1.0, 10);
+  });
+
+  it('− from a grid step drops to the previous grid step', () => {
+    const z = zoomForEffectiveScale(fit, 1.0);
+    expect(studioEffectiveScale(fit, zoomStep(fit, z, -1))).toBeCloseTo(0.75, 10);
+  });
+
+  it('− that would fall below Fit resolves to Fit (zoom 1)', () => {
+    const z = zoomForEffectiveScale(fit, 0.5); // one grid step above fit(0.47)
+    expect(zoomStep(fit, z, -1)).toBeCloseTo(1, 10); // -> Fit
+  });
+
+  it('− at Fit stays at Fit', () => {
+    expect(zoomStep(fit, 1, -1)).toBeCloseTo(1, 10);
+  });
+
+  it('+ never exceeds the 300% ceiling', () => {
+    const z = zoomForEffectiveScale(fit, 3);
+    expect(studioEffectiveScale(fit, zoomStep(fit, z, 1))).toBe(ZOOM_MAX_SCALE);
+  });
+});
+
+describe('studioDevices — panBounds / clampPan', () => {
+  it('is zero on an axis that does not overflow the viewport (frame stays centered)', () => {
+    const b = panBounds({ x: 800, y: 600 }, { x: 1000, y: 800 });
+    expect(b).toEqual({ x: 0, y: 0 });
+    const clamped = clampPan({ x: 200, y: -50 }, { x: 800, y: 600 }, { x: 1000, y: 800 });
+    expect(clamped.x).toBe(0);
+    expect(Math.abs(clamped.y)).toBe(0); // no pan on a non-overflowing axis (±0 both fine)
+  });
+
+  it('allows half the overflow plus the reveal slack on an overflowing axis', () => {
+    const b = panBounds({ x: 2000, y: 3000 }, { x: 1000, y: 800 });
+    expect(b.x).toBeCloseTo((2000 - 1000) / 2 + PAN_REVEAL_SLACK_PX, 10);
+    expect(b.y).toBeCloseTo((3000 - 800) / 2 + PAN_REVEAL_SLACK_PX, 10);
+  });
+
+  it('clamps an out-of-range pan back within bounds', () => {
+    const fp = { x: 2000, y: 800 };
+    const vp = { x: 1000, y: 800 };
+    const b = panBounds(fp, vp);
+    expect(clampPan({ x: 99999, y: 10 }, fp, vp)).toEqual({ x: b.x, y: 0 });
+    expect(clampPan({ x: -99999, y: 0 }, fp, vp)).toEqual({ x: -b.x, y: 0 });
+  });
+});
+
+describe('studioDevices — panForFocalZoom (zoom-to-cursor keeps focal fixed)', () => {
+  // The invariant: the screen position of the content point under the focal
+  // point is unchanged across the zoom. Screen position of that point =
+  // frameCenter + (scale/scale0)·(pointScreen0 − frameCenter0), and here we
+  // assert the algebraic identity the component relies on.
+  it('a focal point at the stage center leaves pan unchanged (center-anchored zoom)', () => {
+    expect(panForFocalZoom({ x: 30, y: -20 }, 1, 2, { x: 0, y: 0 })).toEqual({ x: 60, y: -40 });
+  });
+
+  it('keeps the focal point stationary: focal − pan scales by k about the focal', () => {
+    const pan = { x: 40, y: 10 };
+    const s0 = 1;
+    const s1 = 2;
+    const focal = { x: 100, y: 50 };
+    const pan2 = panForFocalZoom(pan, s0, s1, focal);
+    // vector from (stage-center + pan) to focal, before and after, must scale by k
+    const before = { x: focal.x - pan.x, y: focal.y - pan.y };
+    const after = { x: focal.x - pan2.x, y: focal.y - pan2.y };
+    expect(after.x).toBeCloseTo((s1 / s0) * before.x, 10);
+    expect(after.y).toBeCloseTo((s1 / s0) * before.y, 10);
+  });
+
+  it('is a no-op when the scale does not change (k = 1)', () => {
+    expect(panForFocalZoom({ x: 12, y: -7 }, 1.5, 1.5, { x: 200, y: 90 })).toEqual({ x: 12, y: -7 });
+  });
+});
+
+describe('studioDevices — wheelZoomScale (continuous ⌘/pinch zoom)', () => {
+  it('negative deltaY (wheel up / pinch out) zooms in', () => {
+    expect(wheelZoomScale(1, -100, 0.47, 3)).toBeGreaterThan(1);
+  });
+
+  it('positive deltaY zooms out', () => {
+    expect(wheelZoomScale(1, 100, 0.47, 3)).toBeLessThan(1);
+  });
+
+  it('clamps to [minScale, maxScale] (i.e. [fitScale, 3])', () => {
+    expect(wheelZoomScale(2.9, -100000, 0.47, 3)).toBe(3);
+    expect(wheelZoomScale(0.6, 100000, 0.47, 3)).toBe(0.47);
   });
 });
