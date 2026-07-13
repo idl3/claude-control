@@ -8018,6 +8018,49 @@ select.config-input {
   flex: 0 1 auto;
   min-width: 0;
 }
+/* Feature 1: category segmented control + device <select> + orientation
+   toggle, grouped as one cluster in the toolbar's left slot. */
+.studio-device-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+/* Native select for the in-category device list (6/5/6 options — past the
+   >4 threshold where a segmented row would wrap/out-clutter, same rule
+   StudioPropField's enum control already follows). Sized/colored to match
+   the toolbar's other 36px controls rather than the platform default. */
+.studio-device-select {
+  height: 36px;
+  min-width: 0;
+  max-width: 168px;
+  padding: 0 var(--s-2);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.studio-device-select:hover {
+  border-color: var(--line-strong);
+}
+/* Orientation toggle composes the shared .studio-icon-btn base (36px square)
+   — this rule only adds the disabled treatment for the orientation-locked
+   desktop category. */
+.studio-orientation-btn[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.studio-orientation-btn:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.studio-orientation-btn:disabled:hover {
+  background: transparent;
+}
 .studio-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -8055,21 +8098,46 @@ select.config-input {
   /* Phase B, B1/B2: hosts a live context="studio" EmbeddedApp placeholder at
      100%/100% — the inline width/height from StudioModal.tsx must land at the
      device preset's own pixel size so the app's media queries see the real
-     breakpoint. Border-box + zero padding keeps that exact; the bezel is a
-     deliberate 1px border + inner highlight device affordance (Finding 8). */
+     breakpoint. Border-box + zero padding keeps that exact.
+
+     Feature 2 (bezel fix): this frame does NOT own the iframe as a DOM child
+     — AppFrameLayer body-portals the live app into `.embed-app-hoist` and
+     composites it over this placeholder's rect via `transform: translate3d
+     scale()`, so a `border` here can only ever peek at the corners (the
+     square hoist covers the whole border-box, painting over 3 of 4 edges).
+     Fixed by dropping the border entirely and turning the bezel into an
+     OUTSET ring via stacked box-shadows — the hairline (`--line-strong`) and
+     the thicker bezel-color ring both sit OUTSIDE this box, so the hoisted
+     iframe (clipped+rounded to match — see `.embed-app-hoist[data-embed-app-
+     context='studio']` below) never overlaps them. Concentric corners at
+     every scale, no AppFrameLayer changes needed. */
   position: relative;
   flex: 0 0 auto;
-  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   background: var(--surface-1);
   box-shadow:
-    0 0 0 1px color-mix(in oklch, white 4%, transparent) inset,
+    0 0 0 1px var(--line-strong),
+    0 0 0 5px var(--surface-2),
     0 30px 70px -24px rgba(0, 0, 0, 0.7),
     0 8px 22px -8px rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+/* Feature 2 (bezel fix): the body-portaled live-app hoist for the studio slot
+   (AppFrameLayer.tsx) is clipped+rounded to match `.studio-frame` above, so
+   its corners read as one continuous curve instead of a square edge peeking
+   past the frame's rounded corner. `--studio-screen-radius` is written by
+   StudioModal's scale effect (`13 / scale`, keyed on the live fit scale) so
+   the VISUAL radius stays ~13px regardless of the hoist's own `scale()`
+   transform; the 13px fallback only applies before that effect's first run. */
+.embed-app-hoist[data-embed-app-context='studio'] {
+  overflow: hidden;
+  border-radius: var(--studio-screen-radius, 13px);
+}
+.embed-app-hoist[data-embed-app-context='studio'] .embed-app {
+  border-radius: inherit;
 }
 /* Toolbar right cluster: persistent scale readout + Screenshot. */
 .studio-toolbar-right {
@@ -8914,7 +8982,14 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
    The dock container is ALWAYS mounted; only a transform slides it, so the
    hosted iframe never reloads. Collapsed → header peeks; expanded → ~72vh.
    ========================================================================== */
-@media (max-width: 640px), (pointer: coarse) {
+/* Feature 3a: sheet-vs-dock is decided PURELY by Studio's own viewport width
+   now (`studioLayoutMode` / `STUDIO_DOCK_MIN_WIDTH` in studioDevices.ts) —
+   dropped the `(pointer: coarse)` half of this query so a wide touch device
+   (e.g. an iPad in dock-capable width) gets the docked side-panel, not the
+   phone bottom-sheet. The separate `@media (pointer: coarse)` block below
+   (tap-target sizing, touch-action: manipulation on buttons) is untouched —
+   that's a pointer-ergonomics concern, orthogonal to layout mode. */
+@media (max-width: 719px) {
   .studio-body {
     display: block;
     position: relative;
@@ -9023,10 +9098,20 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
     background: transparent;
     color: var(--text-faint);
     cursor: pointer;
-    touch-action: manipulation;
+    /* Feature 3b: the grip owns a Pointer Events drag gesture (StudioModal.tsx
+       StudioSidePanel) — `none` (not `manipulation`) so the browser never
+       claims the vertical pan as a scroll/zoom gesture out from under it. */
+    touch-action: none;
   }
   .studio-sheet-grip-ico {
     stroke-width: 3;
+  }
+  /* Feature 3b: the header is also a drag surface (drag-anywhere-on-header,
+     not just the grip) — same touch-action rationale. Buttons inside it
+     (tabs, reset) still receive their own taps fine; onHeadPointerDown
+     ignores pointerdowns that originate on a <button>. */
+  .studio-side-head {
+    touch-action: none;
   }
   .studio-device-segment .studio-btn-label {
     display: none;
@@ -9070,7 +9155,8 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   .studio-props-panel input[type='text'],
   .studio-props-panel input[type='number'],
   .studio-props-panel select,
-  .studio-prop-control {
+  .studio-prop-control,
+  .studio-device-select {
     height: 44px;
     font-size: 16px;
   }
@@ -9100,7 +9186,8 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   .studio-props-panel input[type='text'],
   .studio-props-panel input[type='number'],
   .studio-props-panel select,
-  .studio-prop-control {
+  .studio-prop-control,
+  .studio-device-select {
     touch-action: manipulation;
   }
 }
