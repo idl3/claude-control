@@ -49,9 +49,10 @@ vi.mock('gsap', () => {
 //
 // Mobile-UX fix #3: also stubs `window.innerWidth` to the same px.
 // `useViewportWidth()` (StudioModal.tsx) reads raw `window.innerWidth`
-// directly for the scale-to-fit computation — a DIFFERENT mechanism from the
-// matchMedia-based `useMinWidth()` that drives `fitsById`/`columnMode`'s
-// yes/no boundary checks. Without this, `viewportW` stayed permanently at
+// directly for the scale-to-fit computation AND the Feature 1 default
+// category/orientation pick (`studioLayoutMode(viewportW)`) — a DIFFERENT
+// mechanism from the matchMedia-based `useMinWidth()` that drives
+// `columnMode`'s yes/no boundary check. Without this, `viewportW` stayed permanently at
 // jsdom's default (1024) regardless of the mocked px, decoupled from every
 // test's intended viewport width. A real browser's matchMedia and
 // innerWidth always agree on the current viewport, so coupling them here
@@ -217,61 +218,113 @@ describe('StudioModal — studioFitScale: both-axis fit (Graphite Inspector Find
   });
 });
 
-describe('StudioModal — device-mode gating (Mobile-UX fix #3: every preset always selectable, scaled to fit)', () => {
-  // Studio Phase B CP3 audit, FIX 3 gated which modes were *reachable* by
-  // screen size. Mobile-UX fix #3 supersedes that: every preset is always
-  // selectable — a mode that doesn't fit at 1:1 scales down instead of
-  // disabling (see studioFitScale/studioAvailableWidth above and the B2
-  // describe block below for the scaled-footprint assertions). These tests
-  // replace the old disabled-at-narrow-width gating tests.
-  it('at a narrow width (390px), all three device buttons are enabled — no size gating', () => {
+describe('StudioModal — Feature 1: device category + select + orientation picker', () => {
+  // Wave 1 replaces the old fixed 3-mode segmented control (Mobile/iPad/
+  // Desktop, disabled-at-narrow-width gating) with a grouped registry
+  // (studioDevices.ts): a category segmented control, an in-category native
+  // <select>, and an orientation toggle. Every preset is still always
+  // selectable — a preset that doesn't fit at 1:1 scales down instead of
+  // disabling (Mobile-UX fix #3, preserved) — the B2 describe block below
+  // covers the scaled-footprint assertions.
+  it('opens to desktop/laptop/landscape on a dock-width viewport (studioLayoutMode(1800) === "dock")', () => {
+    render(createElement(StudioModal)); // beforeEach mocks 1800px
+    openStudio();
+
+    expect(screen.getByRole('button', { name: 'Desktop' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('laptop');
+    const rotate = screen.getByRole('button', { name: 'Rotate orientation' }) as HTMLButtonElement;
+    expect(rotate.disabled).toBe(true); // desktop is orientation-locked
+  });
+
+  it('opens to phone/iphone-13/portrait on a sheet-width viewport (studioLayoutMode(390) === "sheet")', () => {
     mockViewportWidth(390);
     render(createElement(StudioModal));
     openStudio();
 
-    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
-    const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
-    const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
-    expect(mobile.disabled).toBe(false);
-    expect(ipad.disabled).toBe(false);
-    expect(desktop.disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Phone' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('iphone-13');
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('at 1800px, all three modes are enabled', () => {
-    render(createElement(StudioModal)); // beforeEach already mocks 1800px
+  it('switching category picks that category\'s default device and resets orientation to portrait', () => {
+    render(createElement(StudioModal)); // opens desktop/laptop/landscape
     openStudio();
 
-    const mobile = screen.getByRole('button', { name: /Mobile 390/ }) as HTMLButtonElement;
-    const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
-    const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
-    expect(mobile.disabled).toBe(false);
-    expect(ipad.disabled).toBe(false);
-    expect(desktop.disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Tablet' }));
+    expect((screen.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('ipad-pro-11');
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('false');
+
+    // Rotate to landscape, then switch to Phone — orientation resets again.
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate orientation' }));
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Phone' }));
+    expect((screen.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('iphone-13');
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('a mode that does not fit at 1:1 carries a "scaled to fit" tooltip; a mode that fits carries none', () => {
-    mockViewportWidth(800); // clears Mobile's 780px threshold, not iPad's 1158px one
+  it('switching device within a category keeps the current orientation', () => {
+    mockViewportWidth(390);
+    render(createElement(StudioModal)); // opens phone/iphone-13/portrait
+    openStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate orientation' }));
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Device' }), { target: { value: 'pixel-8' } });
+    expect((screen.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('pixel-8');
+    expect(screen.getByRole('button', { name: 'Rotate orientation' }).getAttribute('aria-pressed')).toBe('true'); // preserved
+  });
+
+  it('the orientation toggle is disabled for desktop and enabled for phone/tablet', () => {
     render(createElement(StudioModal));
     openStudio();
-    expect(screen.getByRole('button', { name: /iPad 768/ }).getAttribute('title')).toBe(
-      'iPad 768 — scaled to fit',
-    );
-    expect(screen.getByRole('button', { name: /Mobile 390/ }).getAttribute('title')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Rotate orientation' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Phone' }));
+    expect((screen.getByRole('button', { name: 'Rotate orientation' }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tablet' }));
+    expect((screen.getByRole('button', { name: 'Rotate orientation' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('a scaled-down mode passes its true logical dims to the EmbeddedApp placeholder', () => {
+  it('no category/device is ever disabled by viewport width — Mobile-UX fix #3 still holds', () => {
     mockViewportWidth(390);
     render(createElement(StudioModal));
     openStudio();
 
-    fireEvent.click(screen.getByRole('button', { name: /Desktop 1280/ }));
+    for (const name of ['Phone', 'Tablet', 'Desktop']) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+  });
+
+  it('a preset that does not fit at 1:1 shows a "scaled to fit" scale chip; a preset that fits shows none', () => {
+    // 700px: still sheet mode (< STUDIO_DOCK_MIN_WIDTH 720, so opens
+    // phone/iphone-13) but wide enough that iphone-13 (390 logical px) fits
+    // at 1:1 once column-mode's 24px chrome is subtracted (676 available).
+    mockViewportWidth(700);
+    render(createElement(StudioModal));
+    openStudio();
+    expect(document.querySelector('.studio-scale-chip')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop' })); // laptop 1280x800 — does not fit in 676px
+    const chip = document.querySelector('.studio-scale-chip') as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.getAttribute('title')).toBe('Laptop · 1280×800 — scaled to fit');
+  });
+
+  it('a scaled-down preset passes its true logical dims to the EmbeddedApp placeholder', () => {
+    mockViewportWidth(390);
+    render(createElement(StudioModal));
+    openStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop' }));
     const placeholder = document.querySelector('[data-embed-app-context="studio"]') as HTMLElement;
     expect(placeholder.getAttribute('data-embed-app-logical-width')).toBe('1280');
     expect(placeholder.getAttribute('data-embed-app-logical-height')).toBe('800');
   });
 
-  it('a mode that fits at 1:1 passes no logical dims — byte-for-byte the pre-fix-3 unscaled path', () => {
-    render(createElement(StudioModal)); // beforeEach mocks 1800px — Desktop fits at 1:1
+  it('a preset that fits at 1:1 passes no logical dims — byte-for-byte the pre-fix-3 unscaled path', () => {
+    render(createElement(StudioModal)); // beforeEach mocks 1800px — Desktop/laptop fits at 1:1
     openStudio();
 
     const placeholder = document.querySelector('[data-embed-app-context="studio"]') as HTMLElement;
@@ -305,26 +358,31 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     );
   }
 
-  it('the device box (.studio-frame) is sized exactly to each preset — Mobile 390x844, iPad 768x1024, Desktop 1280x800', () => {
+  it('the device box (.studio-frame) is sized exactly to each default preset — laptop 1280x800, iphone-13 390x844, ipad-pro-11 834x1194', () => {
     renderStudio();
     openStudio('apps/device-size.html');
 
     const frame = document.querySelector('.studio-frame') as HTMLElement;
-    // Desktop viewport (beforeEach mocks 1800px) defaults to the largest
-    // enabled mode, Desktop, per StudioPanel's initial-mode logic.
+    // Desktop viewport (beforeEach mocks 1800px) defaults to desktop/laptop,
+    // which fits at 1:1 (no scaling) per StudioPanel's initial-state logic.
     expect(frame.style.width).toBe('1280px');
     expect(frame.style.height).toBe('800px');
 
-    fireEvent.click(screen.getByRole('button', { name: /Mobile 390/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Phone' }));
     expect(frame.style.width).toBe('390px');
     expect(frame.style.height).toBe('844px');
 
-    fireEvent.click(screen.getByRole('button', { name: /iPad 768/ }));
-    expect(frame.style.width).toBe('768px');
-    expect(frame.style.height).toBe('1024px');
+    fireEvent.click(screen.getByRole('button', { name: 'Tablet' }));
+    expect(frame.style.width).toBe('834px');
+    expect(frame.style.height).toBe('1194px');
+
+    // Feature 1: rotating a tablet/phone preset swaps the footprint too.
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate orientation' }));
+    expect(frame.style.width).toBe('1194px');
+    expect(frame.style.height).toBe('834px');
   });
 
-  it('zero iframe reloads across a full mode-switch cycle — one html fetch, one iframe node, for the entire journey', async () => {
+  it('zero iframe reloads across a full category/device/orientation switch cycle — one html fetch, one iframe node, for the entire journey', async () => {
     renderStudio();
     openStudio('apps/no-reload-resize.html');
 
@@ -338,35 +396,54 @@ describe('StudioModal — B2: device-mode resize (mounted with AppFrameLayer)', 
     await waitFor(() => expect(authFetchMock).toHaveBeenCalledTimes(2));
     const callsAtOpen = authFetchMock.mock.calls.length;
 
-    for (const label of [/Mobile 390/, /iPad 768/, /Desktop 1280/, /Mobile 390/]) {
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: label }));
-      });
-    }
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Phone' })));
+    await act(async () =>
+      fireEvent.change(screen.getByRole('combobox', { name: 'Device' }), { target: { value: 'pixel-8' } }),
+    );
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Rotate orientation' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Tablet' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Desktop' })));
+    await act(async () =>
+      fireEvent.change(screen.getByRole('combobox', { name: 'Device' }), { target: { value: 'qhd-27' } }),
+    );
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Phone' })));
 
     await waitFor(() => {
       expect(screen.getByTitle('apps/no-reload-resize.html')).toBe(iframeAtOpen);
     });
-    expect(authFetchMock).toHaveBeenCalledTimes(callsAtOpen); // no new fetches from mode switches
+    expect(authFetchMock).toHaveBeenCalledTimes(callsAtOpen); // no new fetches from any switch
   });
 
-  it('a previously-gated mode is now selectable at a narrow viewport and the frame resizes to its SCALED footprint (Mobile-UX fix #3)', () => {
+  it('a preset that does not fit at 1:1 is still selectable at a narrow viewport and the frame resizes to its SCALED footprint (Mobile-UX fix #3)', () => {
     mockViewportWidth(390);
     renderStudio();
     openStudio('apps/gated-small.html');
 
-    const ipad = screen.getByRole('button', { name: /iPad 768/ }) as HTMLButtonElement;
-    const desktop = screen.getByRole('button', { name: /Desktop 1280/ }) as HTMLButtonElement;
-    expect(ipad.disabled).toBe(false);
+    const tablet = screen.getByRole('button', { name: 'Tablet' }) as HTMLButtonElement;
+    const desktop = screen.getByRole('button', { name: 'Desktop' }) as HTMLButtonElement;
+    expect(tablet.disabled).toBe(false);
     expect(desktop.disabled).toBe(false);
 
-    fireEvent.click(ipad); // no longer disabled — scales down to fit instead of refusing the click
+    fireEvent.click(tablet); // no longer disabled — scales down to fit instead of refusing the click
     const frame = document.querySelector('.studio-frame') as HTMLElement;
     // availableW = studioAvailableWidth(390, columnMode=true) = 390 - 24 = 366
-    // scale = studioFitScale(768, 366) = 366/768 = 0.4765625
-    // footprint = floor(768*scale) x floor(1024*scale) = 366 x 488
+    // scale = studioFitScale(834, 1194, 366, Infinity) = 366/834
+    // footprint = floor(834*scale) x floor(1194*scale) = 366 x 523
     expect(frame.style.width).toBe('366px');
-    expect(frame.style.height).toBe('488px');
+    expect(frame.style.height).toBe('523px');
+  });
+
+  it('a heavily-scaled desktop preset (qhd-27) still resizes the frame correctly in row mode', () => {
+    renderStudio(); // beforeEach mocks 1800px — row mode (columnMode=false)
+    openStudio('apps/qhd-scale.html');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Device' }), { target: { value: 'qhd-27' } });
+    const frame = document.querySelector('.studio-frame') as HTMLElement;
+    // availableW = studioAvailableWidth(1800, columnMode=false) = 1800 - 390 = 1410
+    // scale = studioFitScale(2560, 1440, 1410, Infinity) = 1410/2560 = 0.55078125
+    // footprint = floor(2560*scale) x floor(1440*scale) = 1410 x 793
+    expect(frame.style.width).toBe('1410px');
+    expect(frame.style.height).toBe('793px');
   });
 });
 
@@ -526,6 +603,70 @@ describe('StudioModal — Graphite Inspector: props bottom-sheet peek/expand', (
     fireEvent.click(gripExpanded);
     expect(container.getAttribute('data-expanded')).toBe('false');
     expect(screen.getByRole('button', { name: 'Expand props sheet' })).toBeTruthy();
+  });
+
+  // Feature 3b: a real Pointer Events drag (not a click) on the grip. Only
+  // wired in sheet mode (<720px, studioLayoutMode) — beginDrag() no-ops
+  // outside it. offsetHeight is stubbed since jsdom never lays anything out
+  // (always 0), which would otherwise collapse collapsedOffset to 0 and make
+  // every drag degenerate.
+  it('a drag gesture on the grip moves the sheet and snaps per resolveSheetSnap, independent of click semantics', () => {
+    mockViewportWidth(390); // sheet mode
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    const sheet = document.querySelector('.studio-side-panel') as HTMLElement;
+    Object.defineProperty(sheet, 'offsetHeight', { configurable: true, value: 700 });
+    expect(sheet.getAttribute('data-expanded')).toBe('false');
+    expect(document.body.classList.contains('studio-sheet-open')).toBe(false);
+
+    const grip = screen.getByRole('button', { name: 'Expand props sheet' });
+
+    // Collapsed start: startOffset = collapsedOffset = 700 - 108 = 592.
+    // Drag up (dy = -500, past the 6px tap threshold) → next = max(0, 592 -
+    // 500) = 92, well under collapsedOffset/2 (296) → resolves 'expanded'
+    // by position regardless of the velocity path (jsdom's synthetic event
+    // timestamps can collapse dt to 0, so this assertion deliberately does
+    // not depend on the velocity branch).
+    fireEvent.pointerDown(grip, { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: 100 });
+    expect(document.body.classList.contains('studio-sheet-open')).toBe(true); // dragging => sheet-open
+    fireEvent.pointerUp(grip, { pointerId: 1, clientY: 100 });
+
+    expect(sheet.getAttribute('data-expanded')).toBe('true');
+    expect(document.body.classList.contains('studio-sheet-open')).toBe(true); // now expanded => still open
+
+    // A drag that ends the gesture suppresses the trailing synthetic click a
+    // real touch/mouse interaction would otherwise fire — onGripClick must
+    // NOT also toggle it back to collapsed.
+    fireEvent.click(grip);
+    expect(sheet.getAttribute('data-expanded')).toBe('true');
+
+    // The suppress flag is consumed by that one click — the NEXT plain click
+    // (a real tap, no drag) toggles normally.
+    fireEvent.click(grip);
+    expect(sheet.getAttribute('data-expanded')).toBe('false');
+  });
+
+  it('a small movement under the 6px tap threshold does not start a drag — endDrag no-ops and a plain click still toggles', () => {
+    mockViewportWidth(390);
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    const sheet = document.querySelector('.studio-side-panel') as HTMLElement;
+    Object.defineProperty(sheet, 'offsetHeight', { configurable: true, value: 700 });
+    const grip = screen.getByRole('button', { name: 'Expand props sheet' });
+
+    fireEvent.pointerDown(grip, { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: 597 }); // 3px, under threshold
+    expect(document.body.classList.contains('studio-sheet-open')).toBe(false); // never entered dragging
+    fireEvent.pointerUp(grip, { pointerId: 1, clientY: 597 });
+    expect(sheet.getAttribute('data-expanded')).toBe('false'); // endDrag no-op (drag.moved stayed false)
+
+    fireEvent.click(grip); // the tap itself still works
+    expect(sheet.getAttribute('data-expanded')).toBe('true');
   });
 });
 
