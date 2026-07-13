@@ -298,6 +298,18 @@ export function BracesIcon(p: IconProps) {
   );
 }
 
+// Prototype Studio — device-orientation toggle. A phone/tablet outline with a
+// short curved arrow, reading as "rotate this" beside the category picker.
+export function RotateIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect width="14" height="18" x="5" y="3" rx="2" />
+      <path d="M20 13a8 8 0 0 1-13.9 5.4" />
+      <path d="M20 18v-5h-5" />
+    </Svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (
