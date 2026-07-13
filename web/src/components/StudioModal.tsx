@@ -12,6 +12,18 @@ import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestPro
 import { mediaAppFramePath } from '../lib/mediaUrl';
 import { setHotkeySuppressed } from '../lib/hotkeySuppression';
 import {
+  DEVICE_CATEGORIES,
+  DEFAULT_DEVICE_BY_CATEGORY,
+  devicesByCategory,
+  findDevice,
+  orientedDims,
+  studioLayoutMode,
+  resolveSheetSnap,
+  STUDIO_DOCK_MIN_WIDTH,
+  type DeviceCategory,
+  type Orientation,
+} from '../lib/studioDevices';
+import {
   sendCcPropsSet,
   sendCcPropsReset,
   sendCcCaptureRequest,
@@ -28,6 +40,7 @@ import {
   SmartphoneIcon,
   TabletIcon,
   MonitorIcon,
+  RotateIcon,
   XIcon,
   CheckIcon,
   EllipsisIcon,
@@ -507,6 +520,13 @@ type SidePanelTab = 'props' | 'inspector';
  * The Reset control (Finding 9) rides in this header now, driving
  * StudioPropsPanel via an imperative `reset()` ref.
  */
+// Feature 3b: must match styles.css's `.studio-side-panel`'s `--sheet-peek`
+// custom property (the collapsed sheet's visible strip height) in the mobile
+// media-query block — the drag math below derives collapsedOffset from the
+// sheet's own measured height, so this constant only needs to match the
+// PEEK amount, not the sheet's full height.
+const SHEET_PEEK_PX = 108;
+
 function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
   const [tab, setTab] = useState<SidePanelTab>('props');
   const [expanded, setExpanded] = useState(false);
@@ -538,19 +558,126 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
     return () => window.removeEventListener('resize', measure);
   }, [tab, propCount]);
 
+  // Feature 3b: drag-to-snap on the phone sheet. Only meaningful in sheet
+  // layout (<720px — studioLayoutMode, same predicate StudioPanel uses for
+  // its own default-device pick); the dock layout leaves `expanded`/`dragging`
+  // inert regardless (`beginDrag` bails out early via the `layoutMode !==
+  // 'sheet'` guard, so pointer handlers wired below are harmless no-ops on
+  // desktop). The sheet itself is NEVER unmounted or re-keyed by dragging —
+  // only its inline `transform` is written during the gesture, same
+  // never-reload discipline as `.studio-frame`.
+  const viewportW = useViewportWidth();
+  const layoutMode = studioLayoutMode(viewportW);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startClientY: number;
+    startOffset: number;
+    collapsedOffset: number;
+    lastClientY: number;
+    lastT: number;
+    velocity: number;
+    moved: boolean;
+  } | null>(null);
+  // Set by endDrag right after a real drag resolves, so the grip's own click
+  // (pointerup + click both fire on a tap-release) doesn't ALSO toggle
+  // `expanded` a second time on top of the snap decision.
+  const suppressClickRef = useRef(false);
+
+  const beginDrag = (e: React.PointerEvent<HTMLButtonElement | HTMLDivElement>) => {
+    if (layoutMode !== 'sheet') return;
+    const sheetEl = sheetRef.current;
+    if (!sheetEl) return;
+    const collapsedOffset = Math.max(0, sheetEl.offsetHeight - SHEET_PEEK_PX);
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startClientY: e.clientY,
+      startOffset: expanded ? 0 : collapsedOffset,
+      collapsedOffset,
+      lastClientY: e.clientY,
+      lastT: e.timeStamp,
+      velocity: 0,
+      moved: false,
+    };
+    // jsdom 29's Element doesn't implement setPointerCapture — guard so tests
+    // firing raw pointer events never throw; real browsers always have it.
+    if (typeof e.currentTarget.setPointerCapture === 'function') {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  };
+
+  const onHeadPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Let the tab strip and Reset button own their own taps — only start a
+    // drag when the press originates on the header's own background.
+    if ((e.target as HTMLElement).closest('button')) return;
+    beginDrag(e);
+  };
+
+  const onDragMove = (e: React.PointerEvent<HTMLButtonElement | HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dy = e.clientY - drag.startClientY;
+    if (!drag.moved && Math.abs(dy) < 6) return;
+    const sheetEl = sheetRef.current;
+    if (!drag.moved) {
+      drag.moved = true;
+      setDragging(true);
+      if (sheetEl) {
+        sheetEl.style.transition = 'none';
+        sheetEl.style.willChange = 'transform';
+      }
+    }
+    const dt = e.timeStamp - drag.lastT;
+    if (dt > 0) drag.velocity = (e.clientY - drag.lastClientY) / dt;
+    drag.lastClientY = e.clientY;
+    drag.lastT = e.timeStamp;
+    const next = Math.min(drag.collapsedOffset, Math.max(0, drag.startOffset + dy));
+    if (sheetEl) sheetEl.style.transform = `translateY(${next}px)`;
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLButtonElement | HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    if (!drag.moved) return; // a plain tap — let the grip's onClick handle it
+    const sheetEl = sheetRef.current;
+    const dy = e.clientY - drag.startClientY;
+    const offset = Math.min(drag.collapsedOffset, Math.max(0, drag.startOffset + dy));
+    const snap = resolveSheetSnap({ offset, collapsedOffset: drag.collapsedOffset, velocity: drag.velocity });
+    if (sheetEl) {
+      sheetEl.style.transform = '';
+      sheetEl.style.transition = '';
+      sheetEl.style.willChange = '';
+    }
+    setDragging(false);
+    setExpanded(snap === 'expanded');
+    suppressClickRef.current = true;
+  };
+
+  const onGripClick = () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setExpanded((v) => !v);
+  };
+
   // Never-reload seam: on mobile the expanded sheet is an overlay that covers
   // the device-frame rect, but the studio-context hosted iframe paints at
   // z-index 310 (AppFrameLayer's STUDIO_HOIST_Z_INDEX) — above the overlay —
   // so it would punch through the sheet's fields. Same fix as StudioCapture's
   // review overlay: toggle a body class that drops the hoist below the overlay
-  // WHILE the sheet is expanded (the rule is scoped to the mobile layout in
-  // styles.css, so the desktop docked panel — where `expanded` is inert and
-  // there's no overlap — keeps the live app fully visible). Never unmounts the
-  // frame; only its paint order changes, so no iframe reload.
+  // WHILE the sheet is expanded OR mid-drag (dragging can pass through
+  // partially-open positions where the same occlusion applies — the rule is
+  // scoped to the mobile layout in styles.css, so the desktop docked panel —
+  // where both are inert and there's no overlap — keeps the live app fully
+  // visible). Never unmounts the frame; only its paint order changes, so no
+  // iframe reload.
   useEffect(() => {
-    document.body.classList.toggle('studio-sheet-open', expanded);
+    document.body.classList.toggle('studio-sheet-open', expanded || dragging);
     return () => document.body.classList.remove('studio-sheet-open');
-  }, [expanded]);
+  }, [expanded, dragging]);
 
   // Studio Phase E polish, F13: roving tabindex across the two REAL tabs
   // (Console never receives focus via arrows — it's `disabled` and has no
@@ -569,17 +696,27 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
   };
 
   return (
-    <div className="studio-side-panel" data-expanded={expanded ? 'true' : 'false'}>
+    <div className="studio-side-panel" ref={sheetRef} data-expanded={expanded ? 'true' : 'false'}>
       <button
         type="button"
         className="studio-sheet-grip"
         aria-label={expanded ? 'Collapse props sheet' : 'Expand props sheet'}
         aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
+        onPointerDown={beginDrag}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onClick={onGripClick}
       >
         <GripHandleIcon className="studio-sheet-grip-ico" />
       </button>
-      <div className="studio-side-head">
+      <div
+        className="studio-side-head"
+        onPointerDown={onHeadPointerDown}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
         <div className="studio-side-tabs" role="tablist">
           <button
             ref={propsTabBtnRef}
@@ -669,18 +806,20 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
 
 const SUPPRESS_STORAGE_KEY = 'cockpit:studio-suppress-hotkeys';
 
-const DEVICE_MODES = [
-  { id: 'mobile', label: 'Mobile', width: 390, height: 844 },
-  { id: 'ipad', label: 'iPad', width: 768, height: 1024 },
-  { id: 'desktop', label: 'Desktop', width: 1280, height: 800 },
-] as const;
-
-type DeviceModeId = (typeof DEVICE_MODES)[number]['id'];
-
-const DEVICE_MODE_ICONS: Record<DeviceModeId, typeof SmartphoneIcon> = {
-  mobile: SmartphoneIcon,
-  ipad: TabletIcon,
+// Feature 1 (device presets + orientation): the fixed 3-mode bar above is
+// replaced by the grouped registry in ../lib/studioDevices (17 real presets
+// across phone/tablet/desktop) — this file just maps each category to its
+// icon/label for the toolbar's category-segmented control.
+const CATEGORY_ICONS: Record<DeviceCategory, typeof SmartphoneIcon> = {
+  phone: SmartphoneIcon,
+  tablet: TabletIcon,
   desktop: MonitorIcon,
+};
+
+const CATEGORY_LABELS: Record<DeviceCategory, string> = {
+  phone: 'Phone',
+  tablet: 'Tablet',
+  desktop: 'Desktop',
 };
 
 // Studio Phase B CP3 audit, FIX 3: `.studio-body` (styles.css) reserves
@@ -699,14 +838,16 @@ const DEVICE_MODE_ICONS: Record<DeviceModeId, typeof SmartphoneIcon> = {
 // Mobile-UX fix #3: every preset is now always selectable — a device box
 // that can't fit at 1:1 scales down to fit instead of the button disabling
 // (see `studioFitScale`/`studioAvailableWidth` below). This constant no
-// longer GATES which modes are reachable; it now (a) picks the *default*
-// mode at open time (the largest preset that fits at scale 1, via
-// `fitsById`) and (b) is the row-mode (side panel visible) available-width
-// denominator that `studioAvailableWidth` uses to compute the fit scale.
+// longer GATES which modes are reachable; it is only (b) below now — the
+// default-category/device pick at open time comes from `studioLayoutMode`
+// (dock → desktop/laptop/landscape, sheet → phone/iphone-13/portrait; see
+// StudioPanel's initial state) instead of a fitsById largest-fit search.
+// (b) it's the row-mode (side panel visible) available-width denominator
+// that `studioAvailableWidth` uses to compute the fit scale.
 // Column mode (side panel stacks below `.studio-frame`, narrow viewports —
-// see the `@media (max-width:640px)` block in styles.css) uses
-// `STUDIO_BODY_COLUMN_PADDING` instead, since the 320px side-panel width
-// doesn't apply there.
+// see the `@media (max-width:719px)` block in styles.css, kept in sync with
+// `studioLayoutMode`'s STUDIO_DOCK_MIN_WIDTH) uses `STUDIO_BODY_COLUMN_PADDING`
+// instead, since the 320px side-panel width doesn't apply there.
 const STUDIO_BODY_CHROME_WIDTH = 390;
 
 // Mobile-UX fix #3: column-mode (side panel stacked, not side-by-side)
@@ -1031,39 +1172,48 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     };
   }, [url]);
 
-  // Studio Phase B CP3 audit, FIX 3 (superseded by mobile-UX fix #3 below):
-  // whether each preset fits at 1:1 scale — gates the DEFAULT mode choice
-  // only now, not which modes are reachable (every preset is always
-  // selectable; a mode that doesn't fit scales down instead — see `scale`
-  // below).
-  const mobileFits = useMinWidth(DEVICE_MODES[0].width + STUDIO_BODY_CHROME_WIDTH);
-  const ipadFits = useMinWidth(DEVICE_MODES[1].width + STUDIO_BODY_CHROME_WIDTH);
-  const desktopFits = useMinWidth(DEVICE_MODES[2].width + STUDIO_BODY_CHROME_WIDTH);
-  const fitsById: Record<DeviceModeId, boolean> = {
-    mobile: mobileFits,
-    ipad: ipadFits,
-    desktop: desktopFits,
-  };
-
-  // Default to the largest mode that fits at open time; users can switch
-  // freely to any preset afterward — one that doesn't fit at 1:1 scales down
-  // instead of disabling (mobile-UX fix #3).
-  const [mode, setMode] = useState<DeviceModeId>(() =>
-    fitsById.desktop ? 'desktop' : fitsById.ipad ? 'ipad' : 'mobile',
-  );
-  const device = DEVICE_MODES.find((d) => d.id === mode) ?? DEVICE_MODES[0];
-
-  // Mobile-UX fix #3: DevTools-device-mode-style scale-to-fit. `.studio-body`
-  // stacks the side panel below `.studio-frame` under the same breakpoint
-  // (styles.css `@media (max-width:640px)`) that drives the rest of the
-  // studio's column layout — `columnMode` mirrors that breakpoint so the
-  // available-width denominator matches whichever chrome is actually in
-  // play. `scale` never exceeds 1 (never upscale a preset that already
-  // fits); `footprintW/H` is what `.studio-frame` actually reserves in
-  // layout — the scaled-down footprint when scaling, the raw preset size
-  // otherwise (byte-for-byte the old behavior in that case).
+  // Feature 1 (device presets + orientation): category/device/orientation
+  // state replaces the old fixed 3-mode DEVICE_MODES bar + fitsById gating —
+  // every preset is always selectable (one that doesn't fit at 1:1 scales
+  // down instead of disabling, same as before — see `scale` below).
+  //
+  // Feature 3a: `columnMode` mirrors styles.css's `@media (max-width: 719px)`
+  // layout breakpoint (that rule carries its own cross-reference comment
+  // back to this line) — kept in sync with `studioLayoutMode`'s
+  // STUDIO_DOCK_MIN_WIDTH (720) constant from ../lib/studioDevices, the same
+  // pure predicate StudioSidePanel uses to decide dock-vs-sheet.
   const viewportW = useViewportWidth();
-  const columnMode = !useMinWidth(641);
+  const columnMode = !useMinWidth(STUDIO_DOCK_MIN_WIDTH);
+
+  // Default on open: a wide-enough viewport (dock layout) opens on the
+  // desktop/laptop preset landscape; a narrow one (sheet layout) opens on the
+  // phone/iPhone-13 preset portrait — using the SAME `studioLayoutMode`
+  // predicate the side panel uses, so both pick the layout consistently.
+  // Lazy initializers only run once at mount, matching "default on open"
+  // (not "keep re-picking on every resize").
+  const [category, setCategory] = useState<DeviceCategory>(() =>
+    studioLayoutMode(viewportW) === 'dock' ? 'desktop' : 'phone',
+  );
+  const [deviceId, setDeviceId] = useState<string>(() => DEFAULT_DEVICE_BY_CATEGORY[category]);
+  const [orientation, setOrientation] = useState<Orientation>(() =>
+    category === 'desktop' ? 'landscape' : 'portrait',
+  );
+
+  const device = findDevice(deviceId) ?? findDevice(DEFAULT_DEVICE_BY_CATEGORY[category])!;
+  const dims = orientedDims(device, orientation);
+
+  // Switching category picks that category's own default device and resets
+  // orientation (desktop ignores orientation entirely — see orientedDims —
+  // so 'portrait' here is just the neutral reset value). Switching device
+  // within a category keeps the current orientation. Neither ever remounts
+  // `.studio-frame` (no `key`, see below).
+  const selectCategory = (next: DeviceCategory) => {
+    setCategory(next);
+    setDeviceId(DEFAULT_DEVICE_BY_CATEGORY[next]);
+    setOrientation('portrait');
+  };
+  const selectDevice = (id: string) => setDeviceId(id);
+  const toggleOrientation = () => setOrientation((o) => (o === 'portrait' ? 'landscape' : 'portrait'));
 
   // Finding 1: both-axis fit. The stage's true inner box (content rect —
   // excludes its padding and, on mobile, the reserved sheet-peek strip) is
@@ -1095,19 +1245,35 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
 
   const availableW = stageSize?.w ?? studioAvailableWidth(viewportW, columnMode);
   const availableH = stageSize?.h ?? Number.POSITIVE_INFINITY;
-  const scale = studioFitScale(device.width, device.height, availableW, availableH);
+  const scale = studioFitScale(dims.width, dims.height, availableW, availableH);
   const scaling = scale < 1;
-  const footprintW = scaling ? Math.floor(device.width * scale) : device.width;
-  const footprintH = scaling ? Math.floor(device.height * scale) : device.height;
+  const footprintW = scaling ? Math.floor(dims.width * scale) : dims.width;
+  const footprintH = scaling ? Math.floor(dims.height * scale) : dims.height;
   const scalePct = Math.round(scale * 100);
 
-  // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device-mode
-  // switch via the Web Animations API (transform/opacity only — never a raw
-  // width tween, which would fight the layout-driven resize) instead of a
-  // hard cut. `frameRef` never gets a `key` — this must never remount the
-  // frame, which would tear down EmbeddedApp's placeholder and force an
-  // iframe reload. `frameFirstRef` skips the animation on first mount (only
-  // a mode CHANGE should animate, not the initial render).
+  // Feature 2 (bezel fix): scale-compensates the hoisted iframe's rounded
+  // corner (styles.css's `.embed-app-hoist[data-embed-app-context='studio']`
+  // rule) so the VISUAL radius reads as a constant ~13px at every zoom level.
+  // The hoist itself is scaled via `transform: scale()` (AppFrameLayer's
+  // hoistGeometry — untouched), so an unscaled CSS radius would shrink/grow
+  // with it; dividing by `scale` cancels that out. Set on `document.body`
+  // (not a local ref) because the hoist is a body-portaled sibling, not a
+  // descendant of this component's own DOM.
+  useEffect(() => {
+    document.body.style.setProperty('--studio-screen-radius', `${13 / (scale || 1)}px`);
+    return () => {
+      document.body.style.removeProperty('--studio-screen-radius');
+    };
+  }, [scale]);
+
+  // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device/
+  // orientation switch via the Web Animations API (transform/opacity only —
+  // never a raw width tween, which would fight the layout-driven resize)
+  // instead of a hard cut. `frameRef` never gets a `key` — this must never
+  // remount the frame, which would tear down EmbeddedApp's placeholder and
+  // force an iframe reload. `frameFirstRef` skips the animation on first
+  // mount (only a device/orientation CHANGE should animate, not the initial
+  // render).
   const frameRef = useRef<HTMLDivElement | null>(null);
   const frameFirstRef = useRef(true);
   useEffect(() => {
@@ -1124,7 +1290,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
       ],
       { duration: 220, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
     );
-  }, [mode]);
+  }, [deviceId, orientation]);
 
   // Suppression toggle: defaults ON the first time the studio is ever opened
   // in this tab session; after that it remembers the user's last choice
@@ -1168,20 +1334,19 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     }
   };
 
-  // Studio Phase E polish, F13: roving tabindex + arrow traversal across the
-  // device bar. Mobile-UX fix #3: every preset is reachable now (a mode that
-  // doesn't fit at 1:1 scales down instead of disabling), so `enabledIds` is
-  // simply all modes, not filtered by `fitsById`.
-  const onDeviceKeyDown = (e: React.KeyboardEvent, currentId: DeviceModeId) => {
+  // Studio Phase E polish, F13: roving tabindex + arrow traversal — now across
+  // the 3 category buttons rather than the old fixed 3-device bar. The device
+  // itself is picked via the native <select> beside it, which handles its own
+  // keyboard navigation for free.
+  const onCategoryKeyDown = (e: React.KeyboardEvent, currentCategory: DeviceCategory) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
-    const enabledIds = DEVICE_MODES.map((d) => d.id);
     const dir = e.key === 'ArrowRight' ? 1 : -1;
-    const at = enabledIds.indexOf(currentId);
+    const at = DEVICE_CATEGORIES.indexOf(currentCategory);
     const from = at === -1 ? 0 : at;
-    const nextId = enabledIds[(from + dir + enabledIds.length) % enabledIds.length];
-    setMode(nextId);
-    requestAnimationFrame(() => document.getElementById(`studio-device-${nextId}`)?.focus());
+    const next = DEVICE_CATEGORIES[(from + dir + DEVICE_CATEGORIES.length) % DEVICE_CATEGORIES.length];
+    selectCategory(next);
+    requestAnimationFrame(() => document.getElementById(`studio-category-${next}`)?.focus());
   };
 
   return (
@@ -1223,27 +1388,53 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
         </div>
 
         <div className="studio-toolbar">
-          <div className="studio-segmented studio-device-segmented" role="group" aria-label="Device size">
-            {DEVICE_MODES.map((d) => {
-              const Icon = DEVICE_MODE_ICONS[d.id];
-              return (
-                <button
-                  key={d.id}
-                  id={`studio-device-${d.id}`}
-                  type="button"
-                  className="studio-segment studio-device-segment"
-                  aria-pressed={mode === d.id}
-                  aria-label={`${d.label} ${d.width}`}
-                  title={fitsById[d.id] ? undefined : `${d.label} ${d.width} — scaled to fit`}
-                  tabIndex={mode === d.id ? 0 : -1}
-                  onKeyDown={(e) => onDeviceKeyDown(e, d.id)}
-                  onClick={() => setMode(d.id)}
-                >
-                  <Icon className="studio-tool-ico" />
-                  <span className="studio-btn-label">{d.label}</span>
-                </button>
-              );
-            })}
+          <div className="studio-device-picker">
+            <div className="studio-segmented studio-device-segmented" role="group" aria-label="Device category">
+              {DEVICE_CATEGORIES.map((c) => {
+                const Icon = CATEGORY_ICONS[c];
+                return (
+                  <button
+                    key={c}
+                    id={`studio-category-${c}`}
+                    type="button"
+                    className="studio-segment studio-device-segment"
+                    aria-pressed={category === c}
+                    aria-label={CATEGORY_LABELS[c]}
+                    tabIndex={category === c ? 0 : -1}
+                    onKeyDown={(e) => onCategoryKeyDown(e, c)}
+                    onClick={() => selectCategory(c)}
+                  >
+                    <Icon className="studio-tool-ico" />
+                    <span className="studio-btn-label">{CATEGORY_LABELS[c]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* >4 options within a category → native <select>, not a segmented
+                row (which would wrap/out-clutter — same threshold rule as
+                StudioPropField's enum control above). */}
+            <select
+              className="studio-device-select"
+              aria-label="Device"
+              value={deviceId}
+              onChange={(e) => selectDevice(e.target.value)}
+            >
+              {devicesByCategory(category).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="studio-icon-btn studio-orientation-btn"
+              aria-label="Rotate orientation"
+              aria-pressed={orientation === 'landscape'}
+              disabled={category === 'desktop'}
+              onClick={toggleOrientation}
+            >
+              <RotateIcon className="studio-tool-ico" />
+            </button>
           </div>
           <div className="studio-toolbar-right">
             {/* Finding 12: persistent scale readout. Lives in the toolbar (not
@@ -1253,11 +1444,11 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
             {scaling && (
               <span
                 className="studio-scale-chip"
-                title={`${device.label} · ${device.width}×${device.height} — scaled to fit`}
+                title={`${device.name} · ${dims.width}×${dims.height} — scaled to fit`}
               >
                 {scalePct}%
                 <span className="studio-scale-dims">
-                  · {device.width}×{device.height}
+                  · {dims.width}×{dims.height}
                 </span>
               </span>
             )}
@@ -1280,10 +1471,10 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               <div className="studio-frame" ref={frameRef} style={{ width: footprintW, height: footprintH }}>
                 <EmbeddedApp
                   url={url}
-                  height={device.height}
+                  height={dims.height}
                   context="studio"
-                  logicalWidth={scaling ? device.width : undefined}
-                  logicalHeight={scaling ? device.height : undefined}
+                  logicalWidth={scaling ? dims.width : undefined}
+                  logicalHeight={scaling ? dims.height : undefined}
                 />
               </div>
             </div>
