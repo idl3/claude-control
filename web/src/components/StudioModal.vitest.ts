@@ -165,15 +165,15 @@ describe('StudioModal — Studio Phase B CP3 audit, FIX 4: rapid app swap is ign
 
 describe('StudioModal — pure helpers: studioFitScale / studioAvailableWidth', () => {
   it('studioFitScale scales down (never upscales) to fit the logical width inside the available width', () => {
-    expect(studioFitScale(1280, 366)).toBeCloseTo(0.2859, 4);
+    expect(studioFitScale(1280, 800, 366, Number.POSITIVE_INFINITY)).toBeCloseTo(0.2859, 4);
   });
 
   it('studioFitScale never upscales past 1 when there is more room than the logical width needs', () => {
-    expect(studioFitScale(390, 800)).toBe(1);
+    expect(studioFitScale(390, 844, 800, Number.POSITIVE_INFINITY)).toBe(1);
   });
 
   it('studioFitScale returns identity (1) when availableWidth is non-positive, rather than dividing by zero/negative', () => {
-    expect(studioFitScale(390, 0)).toBe(1);
+    expect(studioFitScale(390, 844, 0, Number.POSITIVE_INFINITY)).toBe(1);
   });
 
   it('studioAvailableWidth subtracts the column-mode padding in column mode', () => {
@@ -186,6 +186,34 @@ describe('StudioModal — pure helpers: studioFitScale / studioAvailableWidth', 
 
   it('studioAvailableWidth floors at 0 rather than going negative', () => {
     expect(studioAvailableWidth(0, false)).toBe(0);
+  });
+});
+
+// Graphite Inspector redesign, Finding 1: studioFitScale is now both-axis —
+// the tighter of the width/height constraints wins.
+describe('StudioModal — studioFitScale: both-axis fit (Graphite Inspector Finding 1)', () => {
+  it('the height constraint binds when it is tighter than the width constraint', () => {
+    expect(studioFitScale(1280, 800, 1410, 608)).toBeCloseTo(0.76, 4);
+  });
+
+  it('the width constraint binds when it is tighter than the height constraint', () => {
+    expect(studioFitScale(768, 1024, 366, 900)).toBeCloseTo(0.4766, 4);
+  });
+
+  it('never upscales when neither axis constrains the preset', () => {
+    expect(studioFitScale(390, 844, 1200, 2000)).toBe(1);
+  });
+
+  it('availableHeight = Infinity recovers the exact width-only behavior', () => {
+    expect(studioFitScale(390, 844, 366, Number.POSITIVE_INFINITY)).toBeCloseTo(0.9385, 4);
+  });
+
+  it('returns identity (1) when availableHeight is non-positive', () => {
+    expect(studioFitScale(390, 844, 366, 0)).toBe(1);
+  });
+
+  it('returns identity (1) when logicalHeight is non-positive', () => {
+    expect(studioFitScale(390, 0, 366, 500)).toBe(1);
   });
 });
 
@@ -451,13 +479,125 @@ describe('StudioModal — C3: props panel manifest states', () => {
 
     await screen.findByLabelText('label'); // string input
     expect(screen.getByLabelText('count')).toBeTruthy(); // number input
-    expect(screen.getByLabelText('theme').tagName).toBe('SELECT'); // enum select
-    expect(document.querySelector('.studio-prop-name')?.textContent).toBe('label *'); // required marker
-    expect(screen.getByText('example: Clicks')).toBeTruthy();
+
+    // `theme` has 3 options (<= ENUM_SEGMENTED_MAX) — renders as a segmented
+    // group, not a native <select>.
+    const themeGroup = screen.getByRole('group', { name: 'theme' });
+    const themeButtons = within(themeGroup).getAllByRole('button');
+    expect(themeButtons).toHaveLength(3);
+    const activeThemeButton = themeButtons.find((b) => b.textContent === 'light');
+    expect(activeThemeButton?.getAttribute('aria-pressed')).toBe('true'); // default option is pressed
+
+    // required marker: `.studio-prop-name` renders `{name}` immediately
+    // followed by a separate `.studio-prop-required` span — no space.
+    expect(document.querySelector('.studio-prop-name')?.textContent).toBe('label*');
+    expect(document.querySelector('.studio-prop-required')).toBeTruthy();
+
+    // example affordance: a button, not a static chip.
+    expect(screen.getByRole('button', { name: 'Use example' })).toBeTruthy();
 
     // `onChange` (a function tsType) has no typed control — raw-JSON-only.
     expect(screen.queryByLabelText('onChange')).toBeNull();
     expect(screen.getByLabelText('onChange raw JSON')).toBeTruthy();
+  });
+});
+
+// Graphite Inspector redesign, Finding 9: the props dock is a bottom sheet on
+// mobile — pure `expanded` state, no AppFrameLayer/bridge needed to exercise
+// it, same as the C3 manifest-states block above.
+describe('StudioModal — Graphite Inspector: props bottom-sheet peek/expand', () => {
+  it('starts collapsed, expands on grip click, and collapses again on a second click', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+    await screen.findByLabelText('label');
+
+    const container = document.querySelector('.studio-side-panel') as HTMLElement;
+    expect(container.getAttribute('data-expanded')).toBe('false');
+
+    const grip = screen.getByRole('button', { name: 'Expand props sheet' });
+    expect(grip.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(grip);
+    expect(container.getAttribute('data-expanded')).toBe('true');
+    const gripExpanded = screen.getByRole('button', { name: 'Collapse props sheet' });
+    expect(gripExpanded.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(gripExpanded);
+    expect(container.getAttribute('data-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Expand props sheet' })).toBeTruthy();
+  });
+});
+
+// Graphite Inspector redesign, Finding 4: small enums (<= ENUM_SEGMENTED_MAX)
+// render as a segmented control instead of a native <select>. A local fixture
+// manifest (never mutates the shared FIXTURE_MANIFEST) exercises the
+// segmented control's aria-pressed state transitions.
+const SEGMENTED_ENUM_MANIFEST = {
+  'schema-version': 1,
+  component: 'Widget',
+  props: [
+    {
+      name: 'size',
+      tsType: '"sm" | "md" | "lg"',
+      required: false,
+      enumOptions: ['sm', 'md', 'lg'],
+      default: 'md',
+    },
+  ],
+};
+
+describe('StudioModal — Graphite Inspector: segmented enum control (size)', () => {
+  it('renders a 3-segment group with the default option pressed, and pressing a different segment moves the active state', async () => {
+    mockManifestFetch(SEGMENTED_ENUM_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/widget.html');
+
+    const group = await screen.findByRole('group', { name: 'size' });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons).toHaveLength(3);
+
+    const mdButton = buttons.find((b) => b.textContent === 'md') as HTMLButtonElement;
+    const lgButton = buttons.find((b) => b.textContent === 'lg') as HTMLButtonElement;
+    expect(mdButton.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(lgButton);
+    expect(lgButton.getAttribute('aria-pressed')).toBe('true');
+    expect(mdButton.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+// Graphite Inspector redesign, Finding 4: the segmented/select threshold sits
+// at ENUM_SEGMENTED_MAX (4) — a 5-option enum stays a native <select>, a
+// 3-option enum (in the same manifest) renders a segmented group.
+const ENUM_THRESHOLD_MANIFEST = {
+  'schema-version': 1,
+  component: 'Scheduler',
+  props: [
+    { name: 'weekday', tsType: 'string', required: false, enumOptions: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+    { name: 'plan', tsType: '"free" | "pro" | "team"', required: false, enumOptions: ['free', 'pro', 'team'] },
+  ],
+};
+
+describe('StudioModal — Graphite Inspector: enum segmented/select threshold', () => {
+  it('a 5-option enum renders a native <select>, not a segmented group', async () => {
+    mockManifestFetch(ENUM_THRESHOLD_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/scheduler.html');
+
+    const weekdaySelect = await screen.findByLabelText('weekday');
+    expect(weekdaySelect.tagName).toBe('SELECT');
+    expect(screen.queryByRole('group', { name: 'weekday' })).toBeNull();
+  });
+
+  it('a 3-option enum in the same manifest renders a segmented group, not a <select>', async () => {
+    mockManifestFetch(ENUM_THRESHOLD_MANIFEST);
+    render(createElement(StudioModal));
+    openStudio('apps/scheduler.html');
+
+    const planGroup = await screen.findByRole('group', { name: 'plan' });
+    expect(within(planGroup).getAllByRole('button')).toHaveLength(3);
+    expect(document.querySelector('select[aria-label="plan"]')).toBeNull();
   });
 });
 
@@ -543,7 +683,7 @@ describe('StudioModal — C3: props panel live injection (mounted with AppFrameL
     // `count` is a number prop; force raw-JSON editing via its toggle, then
     // type a deliberately invalid (unparseable) value.
     const countRow = screen.getByLabelText('count').closest('.studio-prop-field') as HTMLElement;
-    fireEvent.click(within(countRow).getByRole('button', { name: 'raw' }));
+    fireEvent.click(within(countRow).getByRole('button', { name: 'Edit as JSON' }));
     fireEvent.change(within(countRow).getByLabelText('count raw JSON'), { target: { value: 'not-json' } });
 
     await vi.waitFor(() => {
@@ -644,8 +784,12 @@ describe('StudioModal — E1/E2: side-panel tab strip (Props / Inspector / Conso
     // change Console's a11y identity), same as Props/Inspector already use.
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(3);
-    expect(tabs[0].textContent).toBe('Props');
-    expect(tabs[1].textContent).toBe('Inspector');
+    // Props now appends an aria-hidden count chip (`.studio-side-tab-count`,
+    // "4" for FIXTURE_MANIFEST's 4 props), so raw `.textContent` equality
+    // would break on that markup addition — the accessible-name check below
+    // excludes aria-hidden descendants, same discipline as the Console pill.
+    expect(screen.getByRole('tab', { name: 'Props' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Inspector' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Props' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab', { name: 'Inspector' }).getAttribute('aria-selected')).toBe('false');
 
@@ -750,7 +894,7 @@ describe('StudioModal — Studio Phase C CP3 audit, FIX 2: reset clears stale ra
 
     await screen.findByLabelText('count');
     const countRow = screen.getByLabelText('count').closest('.studio-prop-field') as HTMLElement;
-    fireEvent.click(within(countRow).getByRole('button', { name: 'raw' }));
+    fireEvent.click(within(countRow).getByRole('button', { name: 'Edit as JSON' }));
     const raw = within(countRow).getByLabelText('count raw JSON') as HTMLTextAreaElement;
     fireEvent.change(raw, { target: { value: 'not-json' } });
     expect(raw.value).toBe('not-json');

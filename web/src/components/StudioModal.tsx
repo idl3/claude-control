@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useModalTransition, prefersReducedMotion } from '../lib/anim';
 import { appNameFromUrl, fetchAppManifest, type AppManifest, type AppManifestProp } from '../lib/appVersion';
 import { mediaAppFramePath } from '../lib/mediaUrl';
@@ -15,7 +15,17 @@ import { saveCapture } from '../lib/api';
 import { EmbeddedApp } from './EmbeddedApp';
 import { StudioAnnotate, type StudioAnnotateHandle } from './StudioAnnotate';
 import { StudioInspector } from './StudioInspector';
-import { CameraIcon, SmartphoneIcon, TabletIcon, MonitorIcon, XIcon, CheckIcon } from './icons';
+import {
+  CameraIcon,
+  SmartphoneIcon,
+  TabletIcon,
+  MonitorIcon,
+  XIcon,
+  CheckIcon,
+  EllipsisIcon,
+  GripHandleIcon,
+  BracesIcon,
+} from './icons';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
 // per the ≤150ms acceptance budget.
@@ -57,6 +67,26 @@ function studioPropControlKind(prop: AppManifestProp): 'enum' | 'boolean' | 'num
   return 'raw';
 }
 
+// Graphite Inspector redesign, Finding 4/segmented-control spec: a small enum
+// (≤ this many options) renders as an inline segmented control — the
+// Storybook "radio-for-small-enums" pattern — rather than a native <select>,
+// which is reserved for enums with MORE options (a segmented row of 6+ chips
+// would wrap and out-clutter a dropdown). `size:"sm"|"md"|"lg"` (3) segments;
+// a 5+-option enum stays a <select>.
+const ENUM_SEGMENTED_MAX = 4;
+
+// Graphite Inspector, Finding 2 (color-aware string fields): a string prop
+// whose current value or manifest example parses as a CSS color gets a live
+// swatch inset on the right of its input. Deliberately conservative — only
+// the unambiguous machine-color forms (hex, rg[b]/hsl[a]/oklch/oklab/lab/lch
+// functions) — so an ordinary string like "Sunset" never sprouts a swatch.
+const CSS_COLOR_RE = /^(#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgb|rgba|hsl|hsla|oklch|oklab|lab|lch|hwb)\()/i;
+function asCssColor(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  return CSS_COLOR_RE.test(trimmed) ? trimmed : null;
+}
+
 function StudioPropField({
   prop,
   value,
@@ -96,14 +126,35 @@ function StudioPropField({
     }
   };
 
+  const opts = prop.enumOptions ?? [];
+  const enumSegmented = kind === 'enum' && opts.length > 0 && opts.length <= ENUM_SEGMENTED_MAX;
+
   let control: React.ReactNode = null;
   if (!rawMode) {
     if (kind === 'enum') {
-      const opts = prop.enumOptions ?? [];
-      control = (
+      const current = typeof value === 'string' ? value : String(prop.example ?? prop.default ?? opts[0] ?? '');
+      control = enumSegmented ? (
+        // Segmented control — buttons keep aria-label={prop.name} on the group
+        // so a11y/tests still address it by prop name (same identity a <select>
+        // carried), with aria-pressed marking the active option.
+        <div className="studio-segmented studio-prop-segmented" role="group" aria-label={prop.name}>
+          {opts.map((o) => (
+            <button
+              key={o}
+              type="button"
+              className="studio-segment"
+              aria-pressed={current === o}
+              onClick={() => onChange(o)}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      ) : (
         <select
+          className="studio-prop-control"
           aria-label={prop.name}
-          value={typeof value === 'string' ? value : String(prop.example ?? prop.default ?? opts[0] ?? '')}
+          value={current}
           onChange={(e) => onChange(e.target.value)}
         >
           {opts.map((o) => (
@@ -114,61 +165,102 @@ function StudioPropField({
         </select>
       );
     } else if (kind === 'boolean') {
+      const on = Boolean(value);
       control = (
-        <input
-          type="checkbox"
+        <button
+          type="button"
+          className="studio-prop-switch"
+          role="switch"
+          aria-checked={on}
           aria-label={prop.name}
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-        />
+          onClick={() => onChange(!on)}
+        >
+          <span className="studio-prop-switch-track" aria-hidden="true">
+            <span className="studio-prop-switch-thumb" />
+          </span>
+          <span className="studio-prop-switch-label">{on ? 'true' : 'false'}</span>
+        </button>
       );
     } else if (kind === 'number') {
       control = (
         <input
           type="number"
+          className="studio-prop-control"
           aria-label={prop.name}
+          placeholder={prop.example !== undefined ? String(prop.example) : undefined}
           value={typeof value === 'number' ? value : ''}
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
         />
       );
     } else if (kind === 'string') {
+      const swatch = asCssColor(value) ?? asCssColor(prop.example);
       control = (
-        <input
-          type="text"
-          aria-label={prop.name}
-          value={typeof value === 'string' ? value : ''}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <div className={`studio-prop-input-wrap${swatch ? ' has-swatch' : ''}`}>
+          <input
+            type="text"
+            className="studio-prop-control"
+            aria-label={prop.name}
+            placeholder={prop.example !== undefined ? String(prop.example) : undefined}
+            value={typeof value === 'string' ? value : ''}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {swatch && (
+            <span className="studio-prop-swatch" style={{ background: swatch }} aria-hidden="true" />
+          )}
+        </div>
       );
     }
   }
+
+  const showExample =
+    prop.example !== undefined && kind !== 'raw' && kind !== 'boolean' && !(kind === 'enum' && enumSegmented);
 
   return (
     <div className="studio-prop-field">
       <div className="studio-prop-label">
         <span className="studio-prop-name">
           {prop.name}
-          {prop.required ? ' *' : ''}
+          {prop.required && (
+            <span className="studio-prop-required" title="required" aria-label="required">
+              *
+            </span>
+          )}
         </span>
-        <span className="studio-prop-type">{prop.tsType}</span>
-        {prop.example !== undefined && (
-          <button type="button" className="studio-prop-example-chip" onClick={() => onChange(prop.example)}>
-            example: {String(prop.example)}
-          </button>
+        <span className="studio-prop-label-meta">
+          <span className="studio-prop-type">{prop.tsType}</span>
+          {kind !== 'raw' && (
+            <button
+              type="button"
+              className="studio-prop-raw-toggle"
+              aria-label="Edit as JSON"
+              aria-pressed={rawMode}
+              title="Edit as JSON"
+              onClick={() => setRawMode((r) => !r)}
+            >
+              <BracesIcon className="studio-tool-ico" />
+            </button>
+          )}
+        </span>
+      </div>
+      <div className="studio-prop-control-row">
+        {control ?? (
+          <textarea
+            key={resetGeneration}
+            className="studio-prop-raw"
+            aria-label={`${prop.name} raw JSON`}
+            defaultValue={value === undefined ? '' : JSON.stringify(value)}
+            onChange={(e) => onRawChange(e.target.value)}
+          />
         )}
       </div>
-      {control ?? (
-        <textarea
-          key={resetGeneration}
-          className="studio-prop-raw"
-          aria-label={`${prop.name} raw JSON`}
-          defaultValue={value === undefined ? '' : JSON.stringify(value)}
-          onChange={(e) => onRawChange(e.target.value)}
-        />
-      )}
-      {kind !== 'raw' && (
-        <button type="button" className="studio-prop-raw-toggle" onClick={() => setRawMode((r) => !r)}>
-          {rawMode ? 'typed' : 'raw'}
+      {showExample && (
+        <button
+          type="button"
+          className="studio-prop-example"
+          onClick={() => onChange(prop.example)}
+          title={`Use example: ${String(prop.example)}`}
+        >
+          Use example
         </button>
       )}
     </div>
@@ -184,7 +276,10 @@ function StudioPropField({
  * out. Renders one of three states: loading (manifest fetch in flight),
  * degrade (no manifest — old, pre-rebuild artifact), or the generated form.
  */
-function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
+type StudioPropsHandle = { reset: () => void };
+
+const StudioPropsPanel = forwardRef<StudioPropsHandle, { url: string; manifest: AppManifest | null | undefined }>(
+  function StudioPropsPanel({ url, manifest }, ref) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Studio Phase C CP3 audit, FIX 2: remount counter for the raw-JSON
@@ -305,6 +400,14 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
     if (win) sendCcPropsReset(win);
   };
 
+  // Finding 9: the "Reset to defaults" control now lives in the sheet/dock
+  // header (StudioSidePanel), one level up — this panel exposes its reset()
+  // so that header button can drive it without lifting all the props state up
+  // (which would also drag the never-unmount discipline and the bridge/queue
+  // machinery out of here). aria-label on the header button stays "Reset to
+  // defaults" so its accessible identity is unchanged.
+  useImperativeHandle(ref, () => ({ reset }));
+
   if (manifest === undefined) {
     return (
       <div className="studio-props-panel studio-props-loading" aria-label="Props">
@@ -351,12 +454,6 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
 
   return (
     <div className="studio-props-panel" aria-label="Props">
-      <div className="studio-props-head">
-        <span className="studio-props-title">Props</span>
-        <button type="button" className="studio-props-reset" onClick={reset}>
-          Reset to defaults
-        </button>
-      </div>
       {manifest.props.map((prop) => (
         <StudioPropField
           key={prop.name}
@@ -368,7 +465,7 @@ function StudioPropsPanel({ url, manifest }: { url: string; manifest: AppManifes
       ))}
     </div>
   );
-}
+});
 
 type SidePanelTab = 'props' | 'inspector';
 
@@ -386,63 +483,126 @@ type SidePanelTab = 'props' | 'inspector';
  * active (see phase-e-tasks.md's E2 CP0 log for why live forwarding wasn't
  * shipped this phase).
  */
+/**
+ * Graphite Inspector redesign — the Props/Inspector dock. ONE always-mounted
+ * tree serves both layouts (never a second render branch that would remount
+ * `.studio-frame` or tear down a panel body):
+ *   - Desktop (wide / fine pointer): a docked right-hand column, `data-expanded`
+ *     is inert, the grip is `display:none` (styles.css).
+ *   - Mobile (narrow / coarse pointer): a bottom SHEET — `position:absolute`,
+ *     `transform:translateY(...)`-slid over the stage, peeking its header when
+ *     collapsed and rising to ~72vh when expanded. Expansion is pure CSS off
+ *     `data-expanded`; the container and every body inside it stay mounted, so
+ *     sliding the sheet never reloads the hosted iframe (same discipline as
+ *     `.studio-frame`). Props/Inspector still toggle via `hidden`, never a
+ *     conditional render.
+ * The Reset control (Finding 9) rides in this header now, driving
+ * StudioPropsPanel via an imperative `reset()` ref.
+ */
 function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest | null | undefined }) {
   const [tab, setTab] = useState<SidePanelTab>('props');
+  const [expanded, setExpanded] = useState(false);
+  const propsRef = useRef<StudioPropsHandle | null>(null);
+  const propCount = manifest && typeof manifest === 'object' ? manifest.props.length : null;
+
+  // Never-reload seam: on mobile the expanded sheet is an overlay that covers
+  // the device-frame rect, but the studio-context hosted iframe paints at
+  // z-index 310 (AppFrameLayer's STUDIO_HOIST_Z_INDEX) — above the overlay —
+  // so it would punch through the sheet's fields. Same fix as StudioCapture's
+  // review overlay: toggle a body class that drops the hoist below the overlay
+  // WHILE the sheet is expanded (the rule is scoped to the mobile layout in
+  // styles.css, so the desktop docked panel — where `expanded` is inert and
+  // there's no overlap — keeps the live app fully visible). Never unmounts the
+  // frame; only its paint order changes, so no iframe reload.
+  useEffect(() => {
+    document.body.classList.toggle('studio-sheet-open', expanded);
+    return () => document.body.classList.remove('studio-sheet-open');
+  }, [expanded]);
 
   // Studio Phase E polish, F13: roving tabindex across the two REAL tabs
   // (Console never receives focus via arrows — it's `disabled` and has no
-  // panel). Shared by both real tab buttons below.
+  // panel). Shared by both real tab buttons below. Selecting a tab also opens
+  // the sheet (a no-op on desktop where `expanded` is inert).
+  const selectTab = (next: SidePanelTab) => {
+    setTab(next);
+    setExpanded(true);
+  };
   const onTabKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
     const next = tab === 'props' ? 'inspector' : 'props';
-    setTab(next);
+    selectTab(next);
     requestAnimationFrame(() => document.getElementById(`studio-tab-${next}`)?.focus());
   };
 
   return (
-    <div className="studio-side-panel">
-      <div className="studio-side-tabs" role="tablist">
+    <div className="studio-side-panel" data-expanded={expanded ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="studio-sheet-grip"
+        aria-label={expanded ? 'Collapse props sheet' : 'Expand props sheet'}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <GripHandleIcon className="studio-sheet-grip-ico" />
+      </button>
+      <div className="studio-side-head">
+        <div className="studio-side-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            id="studio-tab-props"
+            aria-selected={tab === 'props'}
+            aria-controls="studio-tabpanel-props"
+            tabIndex={tab === 'props' ? 0 : -1}
+            className="studio-side-tab"
+            onClick={() => selectTab('props')}
+            onKeyDown={onTabKeyDown}
+          >
+            Props
+            {propCount !== null && propCount > 0 && (
+              <span className="studio-side-tab-count" aria-hidden="true">
+                {propCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="studio-tab-inspector"
+            aria-selected={tab === 'inspector'}
+            aria-controls="studio-tabpanel-inspector"
+            tabIndex={tab === 'inspector' ? 0 : -1}
+            className="studio-side-tab"
+            onClick={() => selectTab('inspector')}
+            onKeyDown={onTabKeyDown}
+          >
+            Inspector
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="studio-tab-console"
+            aria-selected={false}
+            tabIndex={-1}
+            className="studio-side-tab studio-side-tab-disabled"
+            disabled
+            title="Console — coming soon"
+          >
+            Console
+            <span className="studio-side-tab-soon" aria-hidden="true">
+              soon
+            </span>
+          </button>
+        </div>
         <button
           type="button"
-          role="tab"
-          id="studio-tab-props"
-          aria-selected={tab === 'props'}
-          aria-controls="studio-tabpanel-props"
-          tabIndex={tab === 'props' ? 0 : -1}
-          className="studio-side-tab"
-          onClick={() => setTab('props')}
-          onKeyDown={onTabKeyDown}
+          className="studio-props-reset"
+          aria-label="Reset to defaults"
+          hidden={tab !== 'props'}
+          onClick={() => propsRef.current?.reset()}
         >
-          Props
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="studio-tab-inspector"
-          aria-selected={tab === 'inspector'}
-          aria-controls="studio-tabpanel-inspector"
-          tabIndex={tab === 'inspector' ? 0 : -1}
-          className="studio-side-tab"
-          onClick={() => setTab('inspector')}
-          onKeyDown={onTabKeyDown}
-        >
-          Inspector
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="studio-tab-console"
-          aria-selected={false}
-          tabIndex={-1}
-          className="studio-side-tab studio-side-tab-disabled"
-          disabled
-          title="Console — coming soon"
-        >
-          Console
-          <span className="studio-side-tab-soon" aria-hidden="true">
-            soon
-          </span>
+          Reset
         </button>
       </div>
       <div
@@ -452,7 +612,7 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
         aria-labelledby="studio-tab-props"
         hidden={tab !== 'props'}
       >
-        <StudioPropsPanel url={url} manifest={manifest} />
+        <StudioPropsPanel ref={propsRef} url={url} manifest={manifest} />
       </div>
       <div
         className="studio-side-tab-body"
@@ -514,10 +674,26 @@ const STUDIO_BODY_CHROME_WIDTH = 390;
 // no side-panel width to subtract.
 const STUDIO_BODY_COLUMN_PADDING = 24;
 
-/** Pure: the scale factor (≤1) that fits `logicalWidth` inside `availableWidth`. Never upscales. */
-export function studioFitScale(logicalWidth: number, availableWidth: number): number {
-  if (logicalWidth <= 0 || availableWidth <= 0) return 1;
-  return Math.min(1, availableWidth / logicalWidth);
+/**
+ * Pure: the scale factor (≤1) that fits a `logicalWidth × logicalHeight` device
+ * preset inside an `availableWidth × availableHeight` box, on BOTH axes
+ * (Finding 1 — the width-only predecessor let a tall preset overflow the stage
+ * vertically and paint off-screen). `min(1, availW/lw, availH/lh)`: the tighter
+ * constraint wins, and it never upscales a preset that already fits.
+ *
+ * `availableHeight === Infinity` recovers the exact old width-only behavior —
+ * the component passes Infinity as the height bound whenever it cannot measure
+ * the live stage (SSR / jsdom, which has no ResizeObserver), so a real browser
+ * fits on both axes while headless unit tests stay deterministic on width.
+ */
+export function studioFitScale(
+  logicalWidth: number,
+  logicalHeight: number,
+  availableWidth: number,
+  availableHeight: number,
+): number {
+  if (logicalWidth <= 0 || logicalHeight <= 0 || availableWidth <= 0 || availableHeight <= 0) return 1;
+  return Math.min(1, availableWidth / logicalWidth, availableHeight / logicalHeight);
 }
 
 /** Pure: the width `.studio-frame` has to work with, minus whichever chrome applies for the current layout mode. */
@@ -848,11 +1024,42 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   // otherwise (byte-for-byte the old behavior in that case).
   const viewportW = useViewportWidth();
   const columnMode = !useMinWidth(641);
-  const availableW = studioAvailableWidth(viewportW, columnMode);
-  const scale = studioFitScale(device.width, availableW);
+
+  // Finding 1: both-axis fit. The stage's true inner box (content rect —
+  // excludes its padding and, on mobile, the reserved sheet-peek strip) is
+  // measured live via ResizeObserver so the whole device fits and centers
+  // regardless of safe-area insets, chrome height, or the sheet peek. When
+  // measurement isn't available (SSR / jsdom has no ResizeObserver), width
+  // falls back to the existing viewport arithmetic and height to Infinity —
+  // exactly the pre-redesign width-only behavior, keeping unit tests
+  // deterministic (a real browser always measures).
+  const stageFitRef = useRef<HTMLDivElement | null>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = stageFitRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr && cr.width > 0 && cr.height > 0) setStageSize({ w: cr.width, h: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Findings 3/10: the "Disable cockpit hotkeys" toggle (and any future
+  // secondary studio option) is demoted off the toolbar into a `⋯` overflow
+  // popover in the head, recovering the toolbar to a single dense row. The
+  // popover content is always mounted and toggled via `hidden` (never a
+  // conditional render), so the hotkeys checkbox keeps a stable DOM identity.
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const availableW = stageSize?.w ?? studioAvailableWidth(viewportW, columnMode);
+  const availableH = stageSize?.h ?? Number.POSITIVE_INFINITY;
+  const scale = studioFitScale(device.width, device.height, availableW, availableH);
   const scaling = scale < 1;
   const footprintW = scaling ? Math.floor(device.width * scale) : device.width;
   const footprintH = scaling ? Math.floor(device.height * scale) : device.height;
+  const scalePct = Math.round(scale * 100);
 
   // Studio Phase E polish, F9: cross-fades `.studio-frame` on a device-mode
   // switch via the Web Animations API (transform/opacity only — never a raw
@@ -945,18 +1152,38 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
             <span className="studio-title">{name}</span>
             <span className="studio-version">{versionTag}</span>
           </div>
-          <button type="button" className="studio-close" aria-label="Close studio" onClick={onClose}>
-            ✕
-          </button>
+          <div className="studio-head-actions">
+            <div className="studio-overflow">
+              <button
+                type="button"
+                className="studio-icon-btn studio-overflow-btn"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <EllipsisIcon className="studio-tool-ico" />
+              </button>
+              <div className="studio-overflow-menu" role="menu" hidden={!menuOpen}>
+                <label className="studio-suppress-toggle" role="menuitemcheckbox" aria-checked={suppressOn}>
+                  <input type="checkbox" checked={suppressOn} onChange={toggleSuppress} />
+                  Disable cockpit hotkeys
+                </label>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="studio-icon-btn studio-close"
+              aria-label="Close studio"
+              onClick={onClose}
+            >
+              <XIcon className="studio-tool-ico" />
+            </button>
+          </div>
         </div>
 
         <div className="studio-toolbar">
-          <StudioCapture url={url} name={name} />
-          <label className="studio-suppress-toggle">
-            <input type="checkbox" checked={suppressOn} onChange={toggleSuppress} />
-            Disable cockpit hotkeys
-          </label>
-          <div className="studio-device-bar" role="group" aria-label="Device size">
+          <div className="studio-segmented studio-device-segmented" role="group" aria-label="Device size">
             {DEVICE_MODES.map((d) => {
               const Icon = DEVICE_MODE_ICONS[d.id];
               return (
@@ -964,7 +1191,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
                   key={d.id}
                   id={`studio-device-${d.id}`}
                   type="button"
-                  className="studio-device-btn"
+                  className="studio-segment studio-device-segment"
                   aria-pressed={mode === d.id}
                   aria-label={`${d.label} ${d.width}`}
                   title={fitsById[d.id] ? undefined : `${d.label} ${d.width} — scaled to fit`}
@@ -973,12 +1200,28 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
                   onClick={() => setMode(d.id)}
                 >
                   <Icon className="studio-tool-ico" />
-                  <span className="studio-btn-label">
-                    {d.label} {d.width}
-                  </span>
+                  <span className="studio-btn-label">{d.label}</span>
                 </button>
               );
             })}
+          </div>
+          <div className="studio-toolbar-right">
+            {/* Finding 12: persistent scale readout. Lives in the toolbar (not
+                over the stage) because the studio-context hosted iframe paints
+                at z-index 310 — above the overlay (300) — so any chip inside
+                the stage would be occluded wherever the device rect sits. */}
+            {scaling && (
+              <span
+                className="studio-scale-chip"
+                title={`${device.label} · ${device.width}×${device.height} — scaled to fit`}
+              >
+                {scalePct}%
+                <span className="studio-scale-dims">
+                  · {device.width}×{device.height}
+                </span>
+              </span>
+            )}
+            <StudioCapture url={url} name={name} />
           </div>
         </div>
 
@@ -992,14 +1235,18 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               `.studio-frame` box below stays the device-sized reservation
               from Phase A (B2 sizes it per device mode) — EmbeddedApp fills
               it at 100%/100% (studio context, same treatment as panel). */}
-          <div className="studio-frame" ref={frameRef} style={{ width: footprintW, height: footprintH }}>
-            <EmbeddedApp
-              url={url}
-              height={device.height}
-              context="studio"
-              logicalWidth={scaling ? device.width : undefined}
-              logicalHeight={scaling ? device.height : undefined}
-            />
+          <div className="studio-stage">
+            <div className="studio-stage-fit" ref={stageFitRef}>
+              <div className="studio-frame" ref={frameRef} style={{ width: footprintW, height: footprintH }}>
+                <EmbeddedApp
+                  url={url}
+                  height={device.height}
+                  context="studio"
+                  logicalWidth={scaling ? device.width : undefined}
+                  logicalHeight={scaling ? device.height : undefined}
+                />
+              </div>
+            </div>
           </div>
           <StudioSidePanel url={url} manifest={manifest} />
         </div>

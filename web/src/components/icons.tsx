@@ -276,6 +276,28 @@ export function ArrowUpRightIcon(p: IconProps) {
   );
 }
 
+// Graphite Inspector (Prototype Studio) — sheet drag-handle grip. A single
+// short rounded bar, sized by the caller; reads as a "pull me up" affordance
+// at the top of the mobile Props bottom-sheet.
+export function GripHandleIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <line x1="6" y1="12" x2="18" y2="12" />
+    </Svg>
+  );
+}
+
+// Graphite Inspector — `{}` glyph for the per-field "Edit as JSON" raw escape
+// hatch (replaces the old dangling bordered "raw" text box). Lucide "braces".
+export function BracesIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M7 4a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2" />
+      <path d="M17 4a2 2 0 0 1 2 2v3a2 2 0 0 1 2 2 2 2 0 0 1-2 2v3a2 2 0 0 1-2 2" />
+    </Svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (
