@@ -403,8 +403,12 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
   // Any zoomed (non-Fit) state can only be reached through toggleZoom/
   // stepZoom/pinch/wheel, all of which require the image to have already
   // loaded (they early-return while naturalWidth is 0) — so it's always
-  // safe to read natural/displayed size here once `zoomed` is true.
-  const zoomed = renderScale > CSS_SCALE_AT_FIT;
+  // safe to read natural/displayed size here once `zoomed` is true. Uses
+  // `!==`, not `>`: cssScale can legitimately sit *below* 1 too (a large
+  // image zoomed out past its own Fit, toward the 25%-effective floor —
+  // see stepZoom/pinch/wheel), and that state must still show its
+  // percentage rather than being mislabeled "Fit".
+  const zoomed = renderScale !== CSS_SCALE_AT_FIT;
   const zoomPercent = zoomed
     ? Math.round(renderScale * fitScale(naturalSize(), displayedSize()) * 100)
     : 100;
