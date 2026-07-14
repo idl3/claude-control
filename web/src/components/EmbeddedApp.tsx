@@ -1,4 +1,4 @@
-import { APP_FRAME_MAX_WIDTH } from '../lib/embeds';
+import type { EmbedAppWidth } from '../lib/embeds';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 
 /**
@@ -81,6 +81,22 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * hosting its live iframe in a transcript placeholder instead — defeating the
  * live-frame cap. A transcript placeholder for the same url renders the
  * existing non-host "open in panel" chip, relabeled "suspended in panel".
+ *
+ * Wide presentation embeds (`<embedded-app width="wide">`, lib/embeds.ts
+ * parseEmbedAppAttrs — the create-artifact skill's html/react lanes emit
+ * this for slide decks / webpages / dashboards): `width` ('default' default)
+ * adds an `embed-app-frame--wide` modifier class to the placeholder below.
+ * styles.css's `.embed-app-frame--wide` widens the reserved box to
+ * `min(90%, 1400px)` of the transcript column on desktop/iPad
+ * (`@media (min-width: 720px)`) only — mobile keeps today's 640px cap
+ * unchanged. AppFrameLayer needs no update for this: it sizes the hoisted
+ * iframe from the placeholder's own `getBoundingClientRect()` (see
+ * AppFrameLayer.tsx's `tick()`/`syncPositions()`), so a wider CSS box
+ * auto-widens the iframe with zero changes there. Ignored in effect for
+ * panel/studio contexts — `.artifact-app-slot .embed-app-frame` already
+ * overrides both the default and wide max-width via higher selector
+ * specificity, so those always fill their slot exactly regardless of this
+ * prop's value.
  */
 export function EmbeddedApp({
   url,
@@ -89,6 +105,7 @@ export function EmbeddedApp({
   hidden = false,
   trackLatest = true,
   suspended = false,
+  width = 'default',
   logicalWidth,
   logicalHeight,
 }: {
@@ -98,6 +115,7 @@ export function EmbeddedApp({
   hidden?: boolean;
   trackLatest?: boolean;
   suspended?: boolean;
+  width?: EmbedAppWidth;
   /**
    * Mobile-UX fix #3: when set (StudioModal scaling a device preset down to
    * fit), the TRUE device-viewport dims the app iframe should see — distinct
@@ -126,14 +144,17 @@ export function EmbeddedApp({
   // .artifact-app-slot sizes the panel box; StudioModal's .studio-frame sizes
   // the device-preset box — see B2) instead of the transcript's reserved-box
   // width cap + fixed height from the tag's `height` attr.
+  // maxWidth is CSS-owned now (styles.css .embed-app-frame / --wide), so the
+  // wide modifier's media-query override isn't fighting a higher-precedence
+  // inline style — see the width doc comment above.
   const frameStyle =
     context === 'panel' || context === 'studio'
       ? { width: '100%', height: '100%' }
-      : { width: '100%', maxWidth: APP_FRAME_MAX_WIDTH, height: `${height}px` };
+      : { width: '100%', height: `${height}px` };
 
   return (
     <span
-      className="embed-media-frame embed-app-frame"
+      className={`embed-media-frame embed-app-frame${width === 'wide' ? ' embed-app-frame--wide' : ''}`}
       style={{
         ...frameStyle,
         visibility: hidden ? 'hidden' : undefined,
@@ -142,6 +163,7 @@ export function EmbeddedApp({
       data-embed-app-url={url}
       data-embed-app-height={height}
       data-embed-app-context={context}
+      data-embed-app-width={width === 'wide' ? 'wide' : undefined}
       data-embed-app-hidden={hidden ? 'true' : undefined}
       data-embed-app-track-latest={trackLatest === false ? 'false' : undefined}
       data-embed-app-suspended={suspended ? 'true' : undefined}
