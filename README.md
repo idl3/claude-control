@@ -35,7 +35,7 @@ npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
   python3 -m venv ~/.claude-control/mlx-venv
   ~/.claude-control/mlx-venv/bin/pip install mlx-lm
   ```
-  claude-control lazily starts `mlx_lm.server` on first use, keeps it warm, and shuts it down when idle. The model (default `mlx-community/Llama-3.2-3B-Instruct-4bit`, ~1.8 GB) auto-downloads on first run. Pick the backend + model in **Settings** (`mlx` → `claude -p` → rules fallback). Without the venv (or on non-Apple hardware) the enhancer falls back to `claude -p`, then a deterministic rules optimiser. Env overrides: `CLAUDE_CONTROL_MLX_PYTHON`, `CLAUDE_CONTROL_MLX_PORT`.
+  claude-control lazily starts `mlx_lm.server` on first use, keeps it warm, and shuts it down when idle. The model (default `mlx-community/Llama-3.2-3B-Instruct-4bit`, ~1.8 GB) auto-downloads on first run. Pick the backend + model in **Settings** (`mlx` → deterministic rules fallback). Without the venv (or on non-Apple hardware) the enhancer uses the rules optimiser. Env overrides: `CLAUDE_CONTROL_MLX_PYTHON`, `CLAUDE_CONTROL_MLX_PORT`; set `CLAUDE_CONTROL_MLX_PREWARM=1` to trade the default lean startup for a warm model immediately after launch.
 
 ```bash
 claude-control                    # start the server (prints the URL)
