@@ -1928,6 +1928,7 @@ function AppInner() {
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
+        <div className="cosmos-backdrop" aria-hidden="true" />
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
         {pull > 0 || refreshing ? (
