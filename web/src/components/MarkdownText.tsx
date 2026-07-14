@@ -9,8 +9,10 @@ import type { TextMessagePartComponent } from '@assistant-ui/react';
 import remarkGfm from 'remark-gfm';
 import { highlightCode, resolveLanguage } from '../lib/highlight';
 import { remarkEmbeds } from '../lib/embeds';
+import { remarkDelivery } from '../lib/delivery';
 import { remarkUltrathink } from '../lib/reservedTokens';
 import { MarkdownImg } from './EmbeddedMedia';
+import { MarkdownDiv } from './DeliveryCard';
 import { UltrathinkText } from './ReservedTokens';
 import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
 
@@ -122,8 +124,16 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
 // The `ultrathink` rainbow highlight (lib/reservedTokens.ts remarkUltrathink)
 // only ever applies to USER messages — an assistant reply that happens to
 // contain the word is never repainted.
-const BASE_PLUGINS = [remarkGfm, remarkEmbeds];
-const USER_PLUGINS = [remarkGfm, remarkEmbeds, remarkUltrathink];
+//
+// remarkDelivery is listed before remarkEmbeds as a readability signal ("the
+// delivery blob is consumed first") — the actual reason it isn't fooled by
+// remark-gfm's autolink mangling is that it re-derives from the raw VFile
+// source rather than the (already gfm-mangled) parsed children; see
+// lib/delivery.ts's module doc for why array order among tree-transforms
+// can't by itself prevent that mangling (gfm's autolinking is a micromark
+// parse-time syntax extension, not a transform).
+const BASE_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds];
+const USER_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds, remarkUltrathink];
 
 const MarkdownTextImpl: TextMessagePartComponent = () => {
   const role = useMessage((m) => m.role);
@@ -142,6 +152,9 @@ const MarkdownTextImpl: TextMessagePartComponent = () => {
         // <embedded-image|video …/> blocks (rewritten to image nodes by
         // remarkEmbeds) render as real <img>/<video>; other images unchanged.
         img: MarkdownImg,
+        // delivery-payload blocks (rewritten to `div[data-delivery]` nodes by
+        // remarkDelivery) render as a DeliveryCard; other divs unchanged.
+        div: MarkdownDiv,
         // "ultrathink" (remarkUltrathink, user messages only) renders as an
         // animated rainbow gradient <mark>.
         mark: UltrathinkText,
