@@ -311,6 +311,33 @@ test('CodexRpcManager replaces stale or endpoint-changed clients on ensureAttach
   });
 });
 
+test('CodexRpcManager ignores close events from a superseded client', () => {
+  const manager = new CodexRpcManager();
+  const stale = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+  });
+  const current = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:2',
+    cwd: '/workspace',
+  });
+  manager._bind(stale);
+  manager._bind(current);
+  manager.clients.set(current.target, current);
+  const closed = [];
+  manager.on('close', (target) => closed.push(target));
+
+  stale.emit('close');
+  assert.equal(manager.clients.get(current.target), current);
+  assert.deepEqual(closed, []);
+
+  current.emit('close');
+  assert.equal(manager.clients.has(current.target), false);
+  assert.deepEqual(closed, ['s:0.0']);
+});
+
 // ── submit() — draft-composer initial-prompt delivery over an attached
 // RPC thread (server.js's handleSessionNew calls this right after attach()
 // resolves, so threadId is already populated — no separate "ready" wait

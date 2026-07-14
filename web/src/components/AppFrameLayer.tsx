@@ -915,6 +915,28 @@ export function AppFrameLayer() {
     // null == not currently scheduled (FIX 3 gate). Distinct from the old
     // always-scheduled `number` — the loop now stops entirely when idle.
     let rafId: number | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Geometry is already updated synchronously for scroll/resize and DOM
+    // mutations re-arm an immediate frame. The fallback scan only needs to
+    // catch quiet CSS/layout changes, so 10 Hz avoids a permanent 60 Hz full
+    // document query + geometry pass while preserving responsive movement.
+    function scheduleTick(delayMs = 0) {
+      if (!alive) return;
+      if (delayMs > 0) {
+        if (rafId !== null || pollTimer !== null) return;
+        pollTimer = setTimeout(() => {
+          pollTimer = null;
+          if (alive && rafId === null) rafId = requestAnimationFrame(tick);
+        }, delayMs);
+        return;
+      }
+      if (pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      if (rafId === null) rafId = requestAnimationFrame(tick);
+    }
 
     function fetchHtml(url: string) {
       // H1: an in-flight fetch for this url is never dropped by a reload
@@ -1277,7 +1299,7 @@ export function AppFrameLayer() {
 
       // FIX 3: only keep polling while there's something left to track.
       if (shouldKeepPolling(slotsRef.current.size, presentUrls.size)) {
-        rafId = requestAnimationFrame(tick);
+        scheduleTick(100);
       }
       // else: stop scheduling — the MutationObserver below re-arms the loop
       // next time the DOM changes (a new placeholder mounts, or a hidden
@@ -1453,7 +1475,7 @@ export function AppFrameLayer() {
     // genuinely idle DOM (no embeds, no mutations) schedules zero further
     // frames, which is the acceptance bar.
     const observer = new MutationObserver(() => {
-      if (rafId === null && alive) rafId = requestAnimationFrame(tick);
+      scheduleTick();
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
 
@@ -1510,7 +1532,7 @@ export function AppFrameLayer() {
     // schedule the first tick at all; tick() re-evaluates precisely and
     // self-corrects within one frame either way.
     if (shouldKeepPolling(slotsRef.current.size, document.querySelectorAll(SLOT_SELECTOR).length)) {
-      rafId = requestAnimationFrame(tick);
+      scheduleTick();
     }
 
     return () => {
@@ -1522,6 +1544,7 @@ export function AppFrameLayer() {
       window.removeEventListener('scroll', handleScroll, { capture: true });
       window.removeEventListener('resize', syncPositions);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      if (pollTimer !== null) clearTimeout(pollTimer);
       // Fade-during-scroll: a settle timer can still be pending at unmount
       // (session switch mid-scroll, etc.) — clear it so a stale callback
       // never fires after teardown. The placeholder itself is React/

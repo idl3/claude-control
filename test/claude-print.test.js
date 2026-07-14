@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -188,4 +189,69 @@ test('ClaudePrintManager sweep keeps fresh undiscovered clients during create gr
   manager.sweep([], { graceMs: 30_000 });
   assert.equal(manager.has('s:2.0'), false);
   assert.deepEqual(closed, ['fresh']);
+});
+
+test('ClaudePrintManager ignores close events from a superseded client', () => {
+  const manager = new ClaudePrintManager({ socketDir: os.tmpdir() });
+  const stale = new ClaudePrintClient({
+    target: 's:2.0',
+    socketPath: '/tmp/stale-claude-print.sock',
+    cwd: os.tmpdir(),
+  });
+  const current = new ClaudePrintClient({
+    target: 's:2.0',
+    socketPath: '/tmp/current-claude-print.sock',
+    cwd: os.tmpdir(),
+  });
+  manager._bind(stale);
+  manager._bind(current);
+  manager.clients.set(current.target, current);
+  const closed = [];
+  manager.on('close', (target) => closed.push(target));
+
+  stale.emit('close');
+  assert.equal(manager.clients.get(current.target), current);
+  assert.deepEqual(closed, []);
+
+  current.emit('close');
+  assert.equal(manager.clients.has(current.target), false);
+  assert.deepEqual(closed, ['s:2.0']);
+});
+
+test('ClaudePrintClient ignores a delayed close from its replaced socket', () => {
+  const manager = new ClaudePrintManager({ socketDir: os.tmpdir() });
+  const client = new ClaudePrintClient({
+    target: 's:3.0',
+    socketPath: '/tmp/reconnecting-claude-print.sock',
+    cwd: os.tmpdir(),
+  });
+  manager._bind(client);
+  manager.clients.set(client.target, client);
+  const closed = [];
+  manager.on('close', (target) => closed.push(target));
+
+  const fakeSocket = () => Object.assign(new EventEmitter(), {
+    destroyed: false,
+    destroy() { this.destroyed = true; },
+    setEncoding() {},
+    unref() {},
+  });
+  const oldSocket = fakeSocket();
+  const currentSocket = fakeSocket();
+
+  client._attach(oldSocket);
+  client._attach(currentSocket);
+  currentSocket.emit('data', `${JSON.stringify({ type: 'ready' })}\n`);
+  oldSocket.emit('close');
+
+  assert.equal(client.socket, currentSocket);
+  assert.equal(client.ready, true);
+  assert.equal(manager.clients.get(client.target), client);
+  assert.deepEqual(closed, []);
+
+  currentSocket.emit('close');
+  assert.equal(client.socket, null);
+  assert.equal(client.ready, false);
+  assert.equal(manager.clients.has(client.target), false);
+  assert.deepEqual(closed, ['s:3.0']);
 });

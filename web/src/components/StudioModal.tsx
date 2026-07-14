@@ -65,7 +65,7 @@ const PROPS_DEBOUNCE_MS = 150;
 // StudioPropsPanel below for the two races this constant closes. Chosen
 // comfortably above PROPS_DEBOUNCE_MS so the normal (fresh-open) path is
 // always resolved by the real `cc-bridge-ready` message, not the fallback.
-const BRIDGE_READY_FALLBACK_MS = 250;
+const BRIDGE_READY_FALLBACK_MS = 1000;
 
 /**
  * The live iframe hosting `url` is owned by AppFrameLayer (a hoisted portal,
@@ -366,8 +366,9 @@ const StudioPropsPanel = forwardRef<StudioPropsHandle, { url: string; manifest: 
   //     panel > transcript) can hand this panel an iframe that was already
   //     open elsewhere and already announced ready before this listener (or
   //     even this panel) existed — no second announcement is coming.
-  //     `BRIDGE_READY_FALLBACK_MS` (250ms, comfortably above
-  //     PROPS_DEBOUNCE_MS's 150ms) is the belt-and-suspenders half: by the
+  //     `BRIDGE_READY_FALLBACK_MS` (1s, comfortably above
+  //     PROPS_DEBOUNCE_MS's 150ms and slow loaded-host mounts) is the
+  //     belt-and-suspenders half: by the
   //     time it fires, the artifact's own listener is unconditionally live
   //     either way, so it's safe to stop gating and flush.
   useEffect(() => {

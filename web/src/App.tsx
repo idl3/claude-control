@@ -918,8 +918,9 @@ function AppInner() {
   }, [cockpit.selectedId]);
   // Pill click → show inline transcript; does NOT open the side panel.
   const openAgent = useCallback((agentId: string) => {
+    cockpit.requestSubagent(agentId);
     setViewingAgentId((prev) => (prev === agentId ? null : agentId));
-  }, []);
+  }, [cockpit.requestSubagent]);
   const closeAgent = useCallback(() => setViewingAgentId(null), []);
 
   // Inline session rename: null when not editing, else the draft name. Opening
@@ -2437,6 +2438,7 @@ function AppInner() {
           subagents={cockpit.subagents}
           open={panelOpen && cockpit.subagents.length > 0}
           onClose={() => setPanelOpen(false)}
+          onLoadAgent={cockpit.requestSubagent}
           focusAgentId={panelAgentId}
         />
 

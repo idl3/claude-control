@@ -249,3 +249,23 @@ test('_tick: guard prevents overlap — second tick skips when first in-flight',
 
   monitor.stop();
 });
+
+test('overlimit pressure relief repeats after cooldown while RSS stays high', () => {
+  const monitor = new ResourceMonitor({
+    intervalMs: 60000,
+    overlimitCooldownMs: 1000,
+  });
+  const high = { overLimit: true };
+  const normal = { overLimit: false };
+  const events = [];
+  monitor.on('overlimit', (snapshot) => events.push(snapshot));
+
+  monitor._maybeEmitOverlimit(high, 10_000); // rising edge
+  monitor._maybeEmitOverlimit(high, 10_999); // still cooling down
+  monitor._maybeEmitOverlimit(high, 11_000); // sustained pressure, cooldown elapsed
+  assert.deepEqual(events, [high, high]);
+
+  monitor._maybeEmitOverlimit(normal, 11_100); // recovery resets the edge detector
+  monitor._maybeEmitOverlimit(high, 11_101);   // new rising edge is immediate
+  assert.deepEqual(events, [high, high, high]);
+});

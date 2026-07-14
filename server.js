@@ -219,6 +219,12 @@ let pins = loadPins(CONFIG.pinsFile);
 const subscriptions = new Map();
 const RAW_EVENT_LIMIT = 200;
 const rawEventsById = new Map();
+// Answer delivery is a side effect in a shared tmux pane. Guard it separately
+// from the per-pane FIFO: two clients can otherwise both validate the same
+// pending question before either queued operation clears it.
+const answersInFlight = new Set();
+const answeredToolUses = new Map();
+const ANSWER_DEDUPE_TTL_MS = 10 * 60 * 1000;
 
 function sessionById(id) {
   return registry.getSessions().find((s) => s.id === id) || null;
@@ -1981,6 +1987,7 @@ codexRpc.on('close', (id) => {
   registry.setPending(id, false);
   registry.setPrompt(id, null);
   registry.setThinking(id, false);
+  registry.setTranscriptHint(id, null);
   emitRawEvent(id, {
     source: 'codex-rpc',
     kind: 'close',
@@ -2028,6 +2035,7 @@ claudePrint.on('error', (id, err) => {
 });
 claudePrint.on('close', (id) => {
   registry.setThinking(id, false);
+  registry.setTranscriptHint(id, null);
 });
 
 function ensureSubscription(id) {
@@ -2424,6 +2432,18 @@ async function handleClientMessage(ws, msg) {
       if (sub) { sub.clients.delete(ws); ws._subs.delete(msg.id); maybeTeardown(msg.id); }
       return;
     }
+    case 'subagent-load': {
+      const sub = subscriptions.get(msg.id);
+      if (!sub?.subagents || !sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
+      const entry = await sub.subagents.load(String(msg.agentId ?? ''));
+      if (!sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
+      if (!entry) throw new Error('unknown sub-agent');
+      return send(ws, { type: 'subagent', id: msg.id, subagent: entry });
+    }
     case 'reply': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
@@ -2582,16 +2602,29 @@ async function handleClientMessage(ws, msg) {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
-      const sub = subscriptions.get(msg.id);
-      const pending = sub?.tailer ? sub.tailer.getPending() : null;
+      const answerKey = `${session.target}\0${String(msg.toolUseId ?? '')}`;
+      const now = Date.now();
+      for (const [key, at] of answeredToolUses) {
+        if (now - at > ANSWER_DEDUPE_TTL_MS) answeredToolUses.delete(key);
+      }
+      if (answeredToolUses.has(answerKey)) {
+        return send(ws, { type: 'ack', op: 'answer', ok: true, duplicate: true });
+      }
+      if (answersInFlight.has(answerKey)) {
+        return send(ws, { type: 'ack', op: 'answer', ok: false, error: 'answer already in progress' });
+      }
+      answersInFlight.add(answerKey);
+
+      try {
+        return await runSerial(session.target, async () => {
+      // Revalidate only after reaching the head of the pane FIFO. The pending
+      // question may have changed while another operation was ahead of us.
+      const activeSub = subscriptions.get(msg.id);
+      const pending = activeSub?.tailer ? activeSub.tailer.getPending() : null;
       if (!pending) throw new Error('no pending question');
-      // Require the client to name the exact question it is answering, so a
-      // mismatched (or omitted) id can't be applied to whatever is now pending.
       if (msg.toolUseId !== pending.toolUseId) {
         throw new Error('stale question (already answered or changed)');
       }
-
-      return runSerial(session.target, async () => {
       // ── Capture-driven path ──────────────────────────────────────────────
       // Attempt to navigate by parsing the live picker render. Falls back to
       // the static buildAnswerProgram on ANY parse failure, unknown label, or
@@ -2831,8 +2864,12 @@ async function handleClientMessage(ws, msg) {
         console.log(`[answer] sent toolUseId=${msg.toolUseId} via dynamic path`);
       }
 
+      answeredToolUses.set(answerKey, Date.now());
       send(ws, { type: 'ack', op: 'answer', ok: true });
       }); // end runSerial
+      } finally {
+        answersInFlight.delete(answerKey);
+      }
     }
     case 'capture': {
       const session = sessionById(msg.id);
@@ -3061,8 +3098,13 @@ function firePushForChange(sessions) {
 }
 
 registry.on('change', (sessions) => {
-  codexRpc.sweep(sessions.map((s) => s.id));
-  claudePrint.sweep(sessions.map((s) => s.id));
+  const liveIds = sessions.map((s) => s.id);
+  codexRpc.sweep(liveIds);
+  claudePrint.sweep(liveIds);
+  const liveSet = new Set(liveIds);
+  for (const id of rawEventsById.keys()) {
+    if (!liveSet.has(id)) rawEventsById.delete(id);
+  }
   for (const s of sessions) upgradeSubscriptionIfTranscriptReady(s.id);
   firePushForChange(sessions);
   broadcast({ type: 'sessions', sessions });
@@ -3074,7 +3116,10 @@ resources.on('overlimit', (snapshot) => {
   const keep = Math.floor(CONFIG.maxBuffer / 2);
   for (const [id, sub] of subscriptions) {
     if (sub.clients.size === 0) maybeTeardown(id);
-    else if (sub.tailer) sub.tailer.trim(keep);
+    else {
+      sub.tailer?.trim(keep);
+      sub.subagents?.trim(Math.min(40, keep), 8);
+    }
   }
   broadcast({ type: 'resources', snapshot, warning: 'self RSS over limit — trimming buffers' });
 });

@@ -7,6 +7,7 @@ interface SubAgentPanelProps {
   subagents: SubAgent[];
   open: boolean;
   onClose: () => void;
+  onLoadAgent?: (agentId: string) => void;
   /** When set on open, jump straight into this agent's transcript (strip click). */
   focusAgentId?: string | null;
 }
@@ -118,7 +119,7 @@ function AgentBadge({ agent }: { agent: SubAgent }) {
  * chat). Tabs filter Active / Completed / All; selecting an agent opens its
  * transcript as a nested chat you can follow live, then back to the list.
  */
-export function SubAgentPanel({ subagents, open, onClose, focusAgentId }: SubAgentPanelProps) {
+export function SubAgentPanel({ subagents, open, onClose, onLoadAgent, focusAgentId }: SubAgentPanelProps) {
   const [tab, setTab] = useState<Tab>('active');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -137,6 +138,11 @@ export function SubAgentPanel({ subagents, open, onClose, focusAgentId }: SubAge
   const selected = selectedId
     ? subagents.find((a) => a.agentId === selectedId) ?? null
     : null;
+  useEffect(() => {
+    if (open && selected && selected.messagesLoaded === false) {
+      onLoadAgent?.(selected.agentId);
+    }
+  }, [open, selected?.agentId, selected?.messagesLoaded, onLoadAgent]);
   const list = useMemo(
     () =>
       subagents.filter((a) =>
@@ -209,7 +215,7 @@ export function SubAgentPanel({ subagents, open, onClose, focusAgentId }: SubAge
         </header>
         <AgentDefBlock def={selected.def} agentType={selected.agentType} />
         <NestedAgentList nested={selected.nested} />
-        <SubAgentThread messages={selected.messages} />
+        <SubAgentThread messages={selected.messages} loading={selected.messagesLoaded === false} />
         </div>
       </>
     );
