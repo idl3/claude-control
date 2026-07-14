@@ -874,6 +874,19 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
 
   let rectSpy: ReturnType<typeof vi.spyOn>;
   let currentTop = 0;
+  // Sidebar-fade fix: handleScroll now gates fade-engagement on the
+  // triggering scroll event's own `target` (`.closest('.thread-viewport')`),
+  // not just on "a window scroll happened" — see AppFrameLayer.tsx's
+  // handleScroll doc comment. A capture-phase `window` listener only sees a
+  // real `event.target` when the dispatch travels down from `window` through
+  // an actually-connected DOM node, so these two panes are real elements
+  // appended to `document.body` (not just constructed) and every
+  // `fireScrolls` call below dispatches on one of them instead of on
+  // `window` directly — `window.dispatchEvent(...)` sets `event.target` to
+  // `window` itself (not an Element), which would fail the new gate for
+  // every single existing test in this suite otherwise.
+  let threadViewportEl: HTMLDivElement;
+  let railScrollEl: HTMLDivElement;
 
   beforeEach(() => {
     authFetchMock.mockReset();
@@ -884,9 +897,17 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
     rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() =>
       mockRect({ top: currentTop, left: 20 }),
     );
+    threadViewportEl = document.createElement('div');
+    threadViewportEl.className = 'thread-viewport';
+    document.body.appendChild(threadViewportEl);
+    railScrollEl = document.createElement('div');
+    railScrollEl.className = 'rail-scroll';
+    document.body.appendChild(railScrollEl);
   });
   afterEach(() => {
     rectSpy.mockRestore();
+    threadViewportEl.remove();
+    railScrollEl.remove();
   });
 
   function mountApp(url: string, context: 'panel' | 'transcript' = 'transcript') {
@@ -903,11 +924,14 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
   // Dispatches N scroll events back-to-back in the same synchronous
   // callstack — real elapsed time between them is microseconds, comfortably
   // under SCROLL_SETTLE_MS (150ms), so every dispatch after the first
-  // extends the same streak rather than starting a new one.
-  function fireScrolls(n: number, topStep = 20) {
+  // extends the same streak rather than starting a new one. Defaults to
+  // originating from `.thread-viewport` (the real trigger for every
+  // pre-existing test below); pass `railScrollEl` explicitly to simulate a
+  // sidebar scroll instead.
+  function fireScrolls(n: number, topStep = 20, sourceEl: HTMLElement = threadViewportEl) {
     for (let i = 0; i < n; i++) {
       currentTop += topStep;
-      window.dispatchEvent(new Event('scroll'));
+      sourceEl.dispatchEvent(new Event('scroll'));
     }
   }
 
@@ -925,6 +949,36 @@ describe('Fade-during-scroll: opacity fade + placeholder skeleton (mounted)', ()
     expect(hoist.style.pointerEvents).toBe('none');
     // Never-reload seam: fading is opacity/pointer-events only.
     expect(screen.getByTitle('apps/fade-engage.html')).toBe(iframe);
+    const skeleton = placeholder.querySelector('[data-scroll-fade-skeleton]');
+    expect(skeleton).not.toBeNull();
+    expect(skeleton!.className).toBe('embed-media-skeleton');
+  });
+
+  // Sidebar-fade fix: the bug this test guards against. handleScroll is a
+  // single capture-phase `window` listener that sees every nested scroll
+  // pane's scroll events, including the sidebar's own `.rail-scroll` — which
+  // never moves a transcript embed at all (only `.thread-viewport` scrolling
+  // does). Before this fix, a `.rail-scroll` scroll built the exact same
+  // streak and called applyFadeState(true) a real transcript flick would,
+  // fading transcript embeds for a gesture that never touched them.
+  it('does NOT fade-to-skeleton for a scroll originating from the sidebar (`.rail-scroll`), even well past the streak threshold, but DOES for a `.thread-viewport`-targeted scroll on the same embed', async () => {
+    mountApp('apps/fade-sidebar-vs-transcript.html');
+    const iframe = await screen.findByTitle('apps/fade-sidebar-vs-transcript.html');
+    const hoist = iframe.closest('.embed-app-hoist') as HTMLElement;
+    const placeholder = document.querySelector(
+      '[data-embed-app-url="apps/fade-sidebar-vs-transcript.html"]',
+    ) as HTMLElement;
+
+    // Scroll the sidebar, aggressively — well past SCROLL_FADE_MIN_STREAK.
+    fireScrolls(10, 20, railScrollEl);
+    expect(hoist.style.opacity).toBe('');
+    expect(hoist.style.pointerEvents).toBe('auto');
+    expect(placeholder.querySelector('[data-scroll-fade-skeleton]')).toBeNull();
+
+    // The SAME embed's hoist still fades for a real transcript scroll.
+    fireScrolls(3, 20, threadViewportEl);
+    expect(hoist.style.opacity).toBe('0');
+    expect(hoist.style.pointerEvents).toBe('none');
     const skeleton = placeholder.querySelector('[data-scroll-fade-skeleton]');
     expect(skeleton).not.toBeNull();
     expect(skeleton!.className).toBe('embed-media-skeleton');
