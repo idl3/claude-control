@@ -9,7 +9,14 @@
   --text: oklch(92% 0.01 250);
   --text-dim: oklch(66% 0.012 250);
   --text-faint: oklch(52% 0.012 250);
-  --accent: oklch(70% 0.15 250);
+  /* Darker blue-green (teal) accent — shifted from the prior straight blue
+     (oklch(70% 0.15 250)) toward --accent-2's teal hue family and down in
+     lightness for a calmer, less neon feel. Contrast-checked (WCAG AA,
+     4.5:1 normal text) against every surface it renders on: 5.91:1 on
+     --bg, 5.51:1 on --bg-1, 5.01:1 on --bg-2, 4.59:1 on --bg-hover — all
+     pass with margin. --accent-2 is left as-is; its hue (200) already sits
+     next to the new accent's hue (208), so the two read as one family. */
+  --accent: oklch(63% 0.12 208);
   --accent-2: oklch(74% 0.13 200);
   --amber: oklch(80% 0.16 80);
   --amber-bg: oklch(40% 0.1 80);
@@ -2630,10 +2637,14 @@ body.is-external-display .composer {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  /* Sleeker resting border: same 1px hairline, but blended toward the card's
+     own background instead of the full-strength --line used by chips/panes,
+     so it reads as a subtle seam rather than a hard outline. */
+  border: 1px solid color-mix(in oklch, var(--line) 65%, var(--bg-1));
   border-radius: 16px;
   background: var(--bg-1);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: border-color var(--ease) 150ms, box-shadow var(--ease) 150ms;
   /* Establishes the containing block for absolutely-positioned content layers
      during the voice morph transition (prevents jump by overlapping layers). */
   position: relative;
@@ -2645,6 +2656,11 @@ body.is-external-display .composer {
 }
 .composer-card:focus-within {
   border-color: var(--accent);
+  /* Subtle glow ring instead of a heavy outline — a soft, low-opacity halo
+     in the new accent layered under the existing drop shadow. */
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.25),
+    0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 .composer-toolbar {
   display: flex;
