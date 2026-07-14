@@ -3227,10 +3227,14 @@ async function main() {
     } else {
       console.log('   (no COCKPIT_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
     }
-    // Pre-warm the local MLX enhancer so the first ✨ enhance is fast (best-effort;
-    // only when that backend is selected and an mlx python is available).
+    // A local MLX model retains roughly 2 GB. Keep startup lean by loading it
+    // lazily on first use unless the operator explicitly opts into prewarming.
     try {
-      if (readConfig().optimizeBackend === 'mlx' && mlx.resolveMlxPython()) {
+      if (
+        mlx.shouldPrewarm() &&
+        readConfig().optimizeBackend === 'mlx' &&
+        mlx.resolveMlxPython()
+      ) {
         mlx.warm();
         console.log('   (pre-warming local MLX enhancer model…)');
       }
