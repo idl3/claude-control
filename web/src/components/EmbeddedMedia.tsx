@@ -168,6 +168,7 @@ type MdImgProps = {
   'data-embed'?: string;
   'data-size'?: string;
   'data-height'?: string;
+  'data-width'?: string;
   'data-url'?: string;
 } & React.ImgHTMLAttributes<HTMLImageElement>;
 
@@ -218,6 +219,7 @@ export function MarkdownImg(props: MdImgProps) {
     'data-embed': kind,
     'data-size': size,
     'data-height': height,
+    'data-width': width,
     'data-url': rawUrl,
     ...rest
   } = props;
@@ -236,6 +238,7 @@ export function MarkdownImg(props: MdImgProps) {
       <EmbeddedApp
         url={rawUrl ?? rest.src ?? ''}
         height={Number.isFinite(parsedHeight) ? parsedHeight : APP_HEIGHT_DEFAULT}
+        width={width === 'wide' ? 'wide' : 'default'}
       />
     );
   }

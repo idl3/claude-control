@@ -3,7 +3,7 @@
 // Agent responses may contain self-closing blocks:
 //   <embedded-image url="…" size="sm|md|lg|full" />
 //   <embedded-video url="…" size="sm|md|lg|full" />
-//   <embedded-app url="…" height="160-800" />
+//   <embedded-app url="…" height="160-800" width="wide"? />
 // react-markdown (no rehype-raw) renders raw HTML as escaped literal text, so
 // remarkEmbeds() rewrites the mdast `html` nodes into `image` nodes carrying
 // data-embed / data-size|data-height / data-url props. MarkdownText maps
@@ -16,6 +16,12 @@
 
 export type EmbedKind = 'image' | 'video';
 export type EmbedSize = 'sm' | 'md' | 'lg' | 'full';
+// <embedded-app width="…"> — 'wide' opts a presentation-type app (slide
+// deck / webpage / dashboard, see the create-artifact skill's html/react
+// lanes) into the widened, desktop/iPad-only reserved box (styles.css
+// .embed-app-frame--wide). Missing/unknown value → 'default' (today's
+// APP_FRAME_MAX_WIDTH cap, every breakpoint).
+export type EmbedAppWidth = 'default' | 'wide';
 
 // Mapped widths (full = 100% of the bubble). Missing/unknown size → md.
 export const EMBED_WIDTH: Record<EmbedSize, string> = {
@@ -58,11 +64,14 @@ export function parseEmbedAttrs(
 /**
  * Parse an `<embedded-app>` tag's attribute string. Returns null when there
  * is no url. `height` is clamped to [APP_HEIGHT_MIN, APP_HEIGHT_MAX]; a
- * missing or non-numeric value falls back to APP_HEIGHT_DEFAULT.
+ * missing or non-numeric value falls back to APP_HEIGHT_DEFAULT. `width` is
+ * 'wide' only for an exact `width="wide"` match; anything else (missing,
+ * unrecognized value) falls back to 'default' — same robustness contract as
+ * `size` in parseEmbedAttrs above.
  */
 export function parseEmbedAppAttrs(
   attrs: string,
-): { url: string; height: number } | null {
+): { url: string; height: number; width: EmbedAppWidth } | null {
   const url = /(?:^|\s)url="([^"]+)"/.exec(attrs)?.[1];
   if (!url) return null;
   const raw = /(?:^|\s)height="(-?\d+)"/.exec(attrs)?.[1];
@@ -70,7 +79,9 @@ export function parseEmbedAppAttrs(
   const height = Number.isFinite(parsed)
     ? Math.min(APP_HEIGHT_MAX, Math.max(APP_HEIGHT_MIN, parsed))
     : APP_HEIGHT_DEFAULT;
-  return { url, height };
+  const width: EmbedAppWidth =
+    /(?:^|\s)width="wide"/.exec(attrs) !== null ? 'wide' : 'default';
+  return { url, height, width };
 }
 
 // mdast image node carrying the embed props. The raw url rides in data-url
@@ -89,13 +100,19 @@ function embedNode(kind: EmbedKind, url: string, size: EmbedSize): MdNode {
 // height rides as a string (like dataSize) — MarkdownImg re-parses it, so
 // there is one source of truth for "what does an invalid/missing value mean"
 // (parseEmbedAppAttrs) rather than relying on hProperties value-type passthrough.
-function embedAppNode(url: string, height: number): MdNode {
+// width rides the same way, alongside it.
+function embedAppNode(url: string, height: number, width: EmbedAppWidth): MdNode {
   return {
     type: 'image',
     url,
     alt: '',
     data: {
-      hProperties: { dataEmbed: 'app', dataHeight: String(height), dataUrl: url },
+      hProperties: {
+        dataEmbed: 'app',
+        dataHeight: String(height),
+        dataWidth: width,
+        dataUrl: url,
+      },
     },
   };
 }
@@ -120,7 +137,7 @@ export function embedNodesFromHtml(value: string): MdNode[] | null {
       const parsed = parseEmbedAppAttrs(m[2]);
       out.push(
         parsed
-          ? embedAppNode(parsed.url, parsed.height)
+          ? embedAppNode(parsed.url, parsed.height, parsed.width)
           : { type: 'text', value: m[0] }, // malformed (no url) — keep visible
       );
     } else {
