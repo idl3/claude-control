@@ -216,6 +216,22 @@ function basename(url: string): string {
  * a skip, which is what correctly un-fades a slot that transitions out of
  * 'transcript' context mid-gesture (e.g. pinned into the panel mid-scroll)
  * without waiting for the gesture to settle.
+ * Sidebar-fade fix (operator follow-up to the transcript-only context gate
+ * above) layers on top of it, unchanged design elsewhere: shouldFadeSlot only
+ * stops a panel/studio-context SLOT from resolving faded — it does nothing
+ * about the TRIGGER. handleScroll is a single capture-phase `window`
+ * listener (see the scroll-lag fix above for why), so it fired for every
+ * nested scroll pane on the page, including the sidebar's `.rail-scroll` —
+ * scrolling the rail built the same streak and called applyFadeState(true) a
+ * real transcript flick would, fading transcript-context embeds for a
+ * gesture that never moved them (syncPositions already keeps every hoist
+ * correctly positioned regardless of which pane scrolled, so there was never
+ * any lag for a non-transcript scroll to mask). handleScroll now reads the
+ * triggering scroll event's own `target` and only builds the streak /
+ * engages the fade when it's (or is nested inside) the transcript's own
+ * `.thread-viewport` — syncPositions itself keeps running unconditionally on
+ * every scroll event first, exactly as before this fix, since repositioning
+ * must still track any pane's scroll.
  */
 
 const GRACE_MS = 250;
@@ -1417,8 +1433,23 @@ export function AppFrameLayer() {
     // slow scrolls (never crosses SCROLL_FADE_MIN_STREAK) and for the
     // final settle snap (see below), so position tracking never stops just
     // because the fade is engaged.
-    function handleScroll() {
+    function handleScroll(event: Event) {
       syncPositions();
+
+      // Sidebar-fade fix (see module doc comment): this listener is a single
+      // capture-phase `window` listener, so `event` here is whichever nested
+      // pane actually scrolled — `.thread-viewport`, the sidebar's
+      // `.rail-scroll`, a studio/panel body, any future scroller. Only a
+      // transcript-originated scroll may build the streak or engage the
+      // fade; everything else still gets its unconditional syncPositions()
+      // reposition above and nothing more. Same `.thread-viewport` selector
+      // syncPositions/tick() key their own pane-clip ancestor lookup off, so
+      // "which pane fired this scroll" can never disagree with "which pane
+      // clips a slot".
+      const target = event.target;
+      const fromTranscript = target instanceof Element && target.closest('.thread-viewport') !== null;
+      if (!fromTranscript) return;
+
       const now = performance.now();
       scrollStreakRef.current = nextScrollStreak(scrollStreakRef.current, now, SCROLL_SETTLE_MS);
       // Re-applied on EVERY qualifying scroll event, not just the rising
