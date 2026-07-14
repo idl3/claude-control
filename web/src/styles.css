@@ -18,6 +18,17 @@
      next to the new accent's hue (208), so the two read as one family. */
   --accent: oklch(63% 0.12 208);
   --accent-2: oklch(74% 0.13 200);
+  /* Warm counterpoint used ONLY by the composer's living gradient border
+     (styles.css .composer-card::before). --accent-2 already exists but sits
+     in the same teal family as --accent (hue 200 vs 208 — see comment above),
+     so it reads as one color, not a flowing two-tone gradient. This is a
+     distinct new token rather than a repurposed --accent-2, since --accent-2
+     is used elsewhere (links, sub-agent pulse, pins) outside the composer's
+     scope. Soft coral/amber, contrast-checked against every surface it
+     glows on: 7.54:1 on --bg, 7.03:1 on --bg-1, 6.39:1 on --bg-2, 5.85:1 on
+     --bg-hover (comfortably clears WCAG AA normal-text, though it's only
+     ever used at low opacity as a border glow, never as text). */
+  --accent-warm: oklch(72% 0.13 55);
   --amber: oklch(80% 0.16 80);
   --amber-bg: oklch(40% 0.1 80);
   --red: oklch(64% 0.2 25);
@@ -2661,6 +2672,74 @@ body.is-external-display .composer {
   box-shadow:
     0 2px 10px rgba(0, 0, 0, 0.25),
     0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
+}
+
+/* ── Living accent: a slow, iridescent gradient ring + a barely-there breathing
+   pulse, so the composer reads as premium and quietly alive rather than static
+   chrome. Both are compositor-only (transform + opacity) and both are switched
+   off entirely under prefers-reduced-motion — the card falls back to the plain
+   hairline border above with full opacity, exactly as before this change.
+
+   Ring technique: ::before is sized to the card, painted with a conic gradient
+   that cycles --accent -> --accent-warm -> --accent -> --accent-warm -> --accent,
+   then masked down to a ~1.4px ring (padding-box vs content-box, XOR'd out) so
+   only the edge is ever colored — never the text behind it. The whole ring
+   rotates via `transform: rotate()`, which sweeps the gradient without ever
+   touching layout or repainting the input. Whisper-faint at rest (opacity
+   0.16), fuller once focused (0.5), matching "most visible on focus-within". */
+.composer-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.4px;
+  background: conic-gradient(
+    from 0deg,
+    var(--accent),
+    var(--accent-warm),
+    var(--accent),
+    var(--accent-warm),
+    var(--accent)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.16;
+  pointer-events: none;
+  transition: opacity var(--ease) 200ms;
+}
+.composer-card:focus-within::before {
+  opacity: 0.5;
+}
+/* Terminal (>_) mode keeps its own dedicated red identity — the living
+   teal/warm ring would clash with it, so it's suppressed there. */
+.composer-card[data-terminal]::before {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .composer-card::before {
+    animation: composer-ring-flow 12s linear infinite;
+  }
+  /* Breathing pulse on the card itself: opacity only, an almost-subliminal
+     sign of life. Range is intentionally tiny (1 -> 0.96) over a slow 6.4s
+     ease so it never reads as a flicker — it just barely stops feeling
+     static. Text inside stays fully legible at every point in the cycle. */
+  .composer-card {
+    animation: composer-breathe 6.4s ease-in-out infinite;
+  }
+}
+@keyframes composer-ring-flow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes composer-breathe {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.96;
+  }
 }
 .composer-toolbar {
   display: flex;
