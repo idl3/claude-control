@@ -8499,13 +8499,59 @@ select.config-input {
 }
 .studio-toolbar {
   display: flex;
-  align-items: center;
+  /* Toolbar polish, issues 4+5: `flex-start` (not `center`) so the pinned
+     hide/show toggle sits flush with the FIRST control row once
+     `.studio-toolbar-controls` wraps to two rows below — centering across
+     the combined two-row height would float it awkwardly mid-stack. */
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-4);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
   background: var(--surface-1);
+}
+/* Toolbar polish, issues 3+4: the device picker and the zoom+capture cluster
+   each keep their own natural (icon-only-on-mobile) width — `flex: 0 0 auto`,
+   no shrinking — and wrap onto their own row when they don't both fit beside
+   each other, instead of every control being squeezed/clipped onto one
+   cramped line. */
+.studio-toolbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio-toolbar-controls > .studio-device-picker,
+.studio-toolbar-controls > .studio-toolbar-right {
+  flex: 0 0 auto;
+}
+/* Toolbar polish, issue 5: collapse/expand affordance for the mobile band.
+   `.studio-icon-btn`'s base rules give it the 36px square target, hover, and
+   focus-visible ring for free; this just pins it to the row's right edge
+   (matching its expanded position) when `.studio-toolbar-controls` isn't
+   rendered at all. */
+.studio-toolbar-collapsed {
+  justify-content: flex-end;
+}
+/* Chevron communicates the affordance, accordion-style: expanded (default,
+   no modifier class) rotates the chevron 180deg to point up ("tap to
+   collapse what's shown"); collapsed resets it to its natural down-pointing
+   orientation ("tap to expand"). `transform` only — compositor-friendly,
+   reduced-motion gated below. */
+.studio-toolbar-toggle-ico {
+  transition: transform 0.16s var(--ease);
+  transform: rotate(180deg);
+}
+.studio-toolbar-collapsed .studio-toolbar-toggle-ico {
+  transform: rotate(0deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-toolbar-toggle-ico {
+    transition: none;
+  }
 }
 /* Fixed 16px leading glyph shared across the studio's icon-led controls. */
 .studio-tool-ico {
@@ -8567,6 +8613,19 @@ select.config-input {
 .studio-device-segmented {
   flex: 0 1 auto;
   min-width: 0;
+}
+/* Toolbar polish, issue 1: the base `.studio-segment` rule uses `flex: 1 1 0`
+   so every segment in the track shares equal width — fine for prop-editor
+   enums with similar-length labels, but here "Phone"/"Tablet"/"Desktop" are
+   different lengths, so centering each inside an equal-width slot produces
+   visibly UNEQUAL padding (short labels float in generous whitespace, the
+   longest label's icon nearly touches its slot's edge). Scoped to the device
+   picker only (mirrors the `.studio-prop-segmented .studio-segment` override
+   above) so each segment instead hugs its own content — every segment then
+   gets the exact same `padding: 0 var(--s-3)` around its own icon+label,
+   which is what "even padding" actually means for unequal-length labels. */
+.studio-device-segmented .studio-segment {
+  flex: 0 0 auto;
 }
 /* Feature 1: category segmented control + device <select> + orientation
    toggle, grouped as one cluster in the toolbar's left slot. */
@@ -9856,6 +9915,22 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
     touch-action: none;
   }
   .studio-device-segment .studio-btn-label {
+    display: none;
+  }
+  /* Toolbar polish, issue 3: defensive wrap insurance inside the device
+     picker itself — even icon-only, the segmented track + `<select>` + rotate
+     button can still slightly overrun a very narrow phone (≤360px); let the
+     picker's own row wrap rather than clip if that ever happens. */
+  .studio-device-picker {
+    flex-wrap: wrap;
+    row-gap: var(--s-2);
+  }
+  /* Toolbar polish, issue 6: Screenshot collapses to icon-only, same
+     treatment as the device-category segments above. The button's own
+     `aria-label` (set in StudioModal.tsx) carries the accessible name — it
+     wins over the (now visually hidden) text content per the ARIA
+     accessible-name computation, so it's stable across both layouts. */
+  .studio-capture-btn .studio-btn-label {
     display: none;
   }
   /* While the sheet is expanded, drop the studio hoist below the overlay so

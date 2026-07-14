@@ -54,6 +54,7 @@ import {
   EllipsisIcon,
   GripHandleIcon,
   BracesIcon,
+  ChevronDownIcon,
 } from './icons';
 
 // Phase C, C3: coalesces rapid prop edits into one cc-props-set postMessage,
@@ -1093,9 +1094,15 @@ function StudioCapture({ url, name }: { url: string; name: string }) {
         className="studio-capture-btn"
         onClick={startCapture}
         disabled={stage.kind === 'capturing'}
+        aria-label={stage.kind === 'capturing' ? 'Capturing…' : 'Screenshot'}
       >
         <CameraIcon className="studio-tool-ico" />
-        {stage.kind === 'capturing' ? 'Capturing…' : 'Screenshot'}
+        {/* Mobile toolbar polish, issue 6: label collapses to icon-only under
+            719px (see .studio-capture-btn .studio-btn-label in styles.css),
+            mirroring the existing .studio-device-segment treatment. The
+            button's own aria-label (above) keeps the accessible name stable
+            across both layouts and matches the tests' getByRole queries. */}
+        <span className="studio-btn-label">{stage.kind === 'capturing' ? 'Capturing…' : 'Screenshot'}</span>
       </button>
       {stage.kind === 'error' && (
         <span className="studio-capture-error-chip" role="alert">
@@ -1215,6 +1222,13 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
   const [orientation, setOrientation] = useState<Orientation>(() =>
     category === 'desktop' ? 'landscape' : 'portrait',
   );
+
+  // Mobile toolbar polish, issue 5: transient (not persisted) collapse state
+  // for the mobile `.studio-toolbar` band — starts expanded (matches every
+  // existing test's assumption that the device/zoom/capture controls are
+  // reachable immediately on open) so the operator opts INTO hiding it, not
+  // out of showing it. columnMode-only; irrelevant on desktop.
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
 
   const device = findDevice(deviceId) ?? findDevice(DEFAULT_DEVICE_BY_CATEGORY[category])!;
   const dims = orientedDims(device, orientation);
@@ -1598,9 +1612,22 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
         </div>
 
         {columnMode && (
-          <div className="studio-toolbar">
-            {devicePicker}
-            {zoomAndCapture}
+          <div className={`studio-toolbar${toolbarCollapsed ? ' studio-toolbar-collapsed' : ''}`}>
+            {!toolbarCollapsed && (
+              <div className="studio-toolbar-controls">
+                {devicePicker}
+                {zoomAndCapture}
+              </div>
+            )}
+            <button
+              type="button"
+              className="studio-icon-btn studio-toolbar-toggle"
+              aria-expanded={!toolbarCollapsed}
+              aria-label={toolbarCollapsed ? 'Show toolbar' : 'Hide toolbar'}
+              onClick={() => setToolbarCollapsed((v) => !v)}
+            >
+              <ChevronDownIcon className="studio-tool-ico studio-toolbar-toggle-ico" />
+            </button>
           </div>
         )}
 
