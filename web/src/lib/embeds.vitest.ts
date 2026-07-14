@@ -98,12 +98,14 @@ describe('parseEmbedAppAttrs', () => {
     expect(parseEmbedAppAttrs(' url="apps/counter.html" height="380" ')).toEqual({
       url: 'apps/counter.html',
       height: 380,
+      width: 'default',
     });
   });
   it('defaults a missing height to APP_HEIGHT_DEFAULT', () => {
     expect(parseEmbedAppAttrs(' url="apps/counter.html" ')).toEqual({
       url: 'apps/counter.html',
       height: APP_HEIGHT_DEFAULT,
+      width: 'default',
     });
   });
   it('clamps an out-of-range height to [APP_HEIGHT_MIN, APP_HEIGHT_MAX]', () => {
@@ -116,6 +118,16 @@ describe('parseEmbedAppAttrs', () => {
   });
   it('returns null without a url', () => {
     expect(parseEmbedAppAttrs(' height="380" ')).toBeNull();
+  });
+  it('parses width="wide"', () => {
+    expect(parseEmbedAppAttrs(' url="apps/deck.html" width="wide" ')?.width).toBe('wide');
+  });
+  it('defaults a missing width to "default"', () => {
+    expect(parseEmbedAppAttrs(' url="apps/counter.html" ')?.width).toBe('default');
+  });
+  it('falls back to "default" for an unrecognized width value', () => {
+    expect(parseEmbedAppAttrs(' url="a.html" width="huge" ')?.width).toBe('default');
+    expect(parseEmbedAppAttrs(' url="a.html" width="100%" ')?.width).toBe('default');
   });
 });
 
@@ -131,15 +143,26 @@ describe('embedNodesFromHtml (tag parsing → node props)', () => {
       },
     });
   });
-  it('turns an app tag into an image node carrying data-embed=app/data-height/data-url', () => {
+  it('turns an app tag into an image node carrying data-embed=app/data-height/data-width/data-url', () => {
     const nodes = embedNodesFromHtml('<embedded-app url="apps/counter.html" height="380" />');
     expect(nodes).toHaveLength(1);
     expect(nodes![0]).toMatchObject({
       type: 'image',
       url: 'apps/counter.html',
       data: {
-        hProperties: { dataEmbed: 'app', dataHeight: '380', dataUrl: 'apps/counter.html' },
+        hProperties: {
+          dataEmbed: 'app',
+          dataHeight: '380',
+          dataWidth: 'default',
+          dataUrl: 'apps/counter.html',
+        },
       },
+    });
+  });
+  it('carries dataWidth=wide through for a width="wide" app tag', () => {
+    const nodes = embedNodesFromHtml('<embedded-app url="apps/deck.html" width="wide" />');
+    expect(nodes![0]).toMatchObject({
+      data: { hProperties: { dataWidth: 'wide' } },
     });
   });
   it('keeps text around tags and returns null when no tag is present', () => {
@@ -202,6 +225,17 @@ describe('markdown pipeline → element props', () => {
     expect(html).toContain('data-embed-app-height="420"');
     expect(html).not.toContain('class="embed-media-skeleton"'); // AppFrameLayer renders the skeleton now
     expect(html).not.toContain('<iframe'); // AppFrameLayer renders the live iframe now
+  });
+
+  it('adds the embed-app-frame--wide modifier class for width="wide", omits it by default', () => {
+    const wide = render('<embedded-app url="apps/deck.html" height="420" width="wide" />');
+    expect(wide).toContain('class="embed-media-frame embed-app-frame embed-app-frame--wide"');
+    expect(wide).toContain('data-embed-app-width="wide"');
+
+    const narrow = render('<embedded-app url="apps/counter.html" height="420" />');
+    expect(narrow).toContain('class="embed-media-frame embed-app-frame"');
+    expect(narrow).not.toContain('embed-app-frame--wide');
+    expect(narrow).not.toContain('data-embed-app-width');
   });
 
   it('clamps and defaults embedded-app height in the reserved frame', () => {

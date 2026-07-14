@@ -5234,6 +5234,38 @@ select.config-input {
   border: 0;
 }
 
+/* Reserved-box width cap for transcript-context app-embed placeholders
+   (EmbeddedApp.tsx's frameStyle sets width/height only — this is the sole
+   source of the max-width now). Default matches the pre-existing 640px
+   APP_FRAME_MAX_WIDTH cap (lib/embeds.ts) at every breakpoint.
+
+   Wide presentation embeds (`<embedded-app width="wide">` — the
+   create-artifact skill's html/react lanes emit this for slide decks,
+   webpages, and dashboards; see lib/embeds.ts's EmbedAppWidth /
+   parseEmbedAppAttrs) opt into `.embed-app-frame--wide`, which widens the
+   cap to 90% of the transcript column (up to a 1400px ceiling) on
+   desktop/iPad only (>=720px, same convention breakpoint used elsewhere in
+   this file for iPad/desktop layout, e.g. the toolbar reflow rules below).
+   Below 720px the base 640px cap above still applies — mobile keeps today's
+   narrow rendering unchanged for every embed. AppFrameLayer needs no
+   change for this: it hoists the live iframe sized off this placeholder's
+   own getBoundingClientRect(), so widening the box here auto-widens the
+   iframe.
+
+   `.artifact-app-slot .embed-app-frame` (panel/studio context, below)
+   pre-dates this and keeps winning regardless — two-selector specificity
+   beats both rules here. */
+.embed-app-frame {
+  max-width: 640px;
+}
+@media (min-width: 720px) {
+  .embed-app-frame--wide {
+    max-width: min(90%, 1400px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
 /* ── Delivery-payload cards (remarkDelivery, lib/delivery.ts) ──────────────
    Agents emit a one-line {"type":"delivery",...} JSON blob to report a run's
    outcome; remarkDelivery rewrites it to a `div[data-delivery]` node
