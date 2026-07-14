@@ -90,11 +90,32 @@ export interface AppManifestProp {
   example?: unknown;
 }
 
+// B1: Phase A's `/create-artifact` producer writes `artifactKind` into every
+// new manifest — 'prototype' for the original component+props form, and
+// 'markdown'|'html'|'react' for the presentation kinds (no component/props
+// at all). Pre-Phase-A manifests carry no `artifactKind` field; those, and
+// any unrecognized value, normalize to 'prototype' (normalizeArtifactKind
+// below) so every pre-existing prototype keeps behaving exactly as before.
+export type ArtifactKind = 'prototype' | 'markdown' | 'html' | 'react';
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['prototype', 'markdown', 'html', 'react'];
+
+export function normalizeArtifactKind(v: unknown): ArtifactKind {
+  return typeof v === 'string' && (ARTIFACT_KINDS as readonly string[]).includes(v) ? (v as ArtifactKind) : 'prototype';
+}
+
 export interface AppManifest {
   'schema-version': 1;
-  component: string;
-  props: AppManifestProp[];
+  /** Always set post-normalization by fetchAppManifest — absent-in-JSON defaults to 'prototype'. */
+  artifactKind: ArtifactKind;
+  /** prototype-only. Presentation-kind manifests (markdown|html|react) carry neither this nor `props`. */
+  component?: string;
+  /** prototype-only. */
+  props?: AppManifestProp[];
 }
+
+/** Raw shape isValidAppManifestShape actually guarantees — `artifactKind` is
+ * injected afterward by normalization (fetchAppManifest), not asserted here. */
+type RawAppManifest = Omit<AppManifest, 'artifactKind'>;
 
 /**
  * Shape check on fetched JSON — deliberately loose (only the fields the
@@ -102,16 +123,22 @@ export interface AppManifest {
  * block on anything unexpected" philosophy: an oddly-shaped `props` entry
  * degrades to raw-JSON-only editing in the UI rather than being rejected
  * outright by this check.
+ *
+ * B1: `component`/`props` are no longer required — a presentation-kind
+ * manifest (markdown|html|react) is valid with neither. When `props` IS
+ * present it must still be an array of `{name: string, ...}` entries.
  */
-export function isValidAppManifestShape(data: unknown): data is AppManifest {
+export function isValidAppManifestShape(data: unknown): data is RawAppManifest {
   if (typeof data !== 'object' || data === null) return false;
   const rec = data as Record<string, unknown>;
   if (rec['schema-version'] !== 1) return false;
-  if (typeof rec.component !== 'string') return false;
-  if (!Array.isArray(rec.props)) return false;
-  return rec.props.every(
-    (p) => typeof p === 'object' && p !== null && typeof (p as { name?: unknown }).name === 'string',
-  );
+  if (rec.props !== undefined) {
+    if (!Array.isArray(rec.props)) return false;
+    if (!rec.props.every((p) => typeof p === 'object' && p !== null && typeof (p as { name?: unknown }).name === 'string')) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -143,7 +170,10 @@ export async function fetchAppManifest(url: string): Promise<AppManifest | null>
     const res = await authFetch(resolution.fetchUrl, { cache: 'reload' });
     if (!res.ok) return null;
     const data: unknown = await res.json();
-    return isValidAppManifestShape(data) ? data : null;
+    if (!isValidAppManifestShape(data)) return null;
+    // B1: inject the normalized artifactKind — absent/unknown → 'prototype',
+    // matching every pre-Phase-A manifest's implicit kind.
+    return { ...data, artifactKind: normalizeArtifactKind((data as Record<string, unknown>).artifactKind) };
   } catch {
     return null;
   }

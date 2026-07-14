@@ -617,6 +617,77 @@ describe('StudioModal — C3: props panel manifest states', () => {
   });
 });
 
+// --- Phase B, B2: kind-gating -----------------------------------------
+// A confirmed presentation kind (markdown|html|react) hides the whole
+// Props/Inspector side panel; loading (undefined) and no-manifest (null —
+// degrade path or pre-Phase-A prototype) both keep it, matching every
+// prototype's existing behavior exactly.
+describe('StudioModal — B2: Props/Inspector gated by artifactKind', () => {
+  it('hides the Props tab and the whole side panel for a presentation-kind (markdown) artifact, but keeps the stage', async () => {
+    mockManifestFetch({ 'schema-version': 1, artifactKind: 'markdown' });
+    render(createElement(StudioModal));
+    openStudio('apps/notes.html');
+
+    // The stage (device frame) is present immediately regardless of manifest state.
+    expect(document.querySelector('.studio-frame')).toBeTruthy();
+
+    await waitFor(() => expect(document.querySelector('.studio-side-panel')).toBeNull());
+    expect(document.getElementById('studio-tab-props')).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Inspector' })).toBeNull();
+  });
+
+  it('hides the side panel for html and react artifactKinds too', async () => {
+    mockManifestFetch({ 'schema-version': 1, artifactKind: 'html' });
+    render(createElement(StudioModal));
+    openStudio('apps/page.html');
+    await waitFor(() => expect(document.querySelector('.studio-side-panel')).toBeNull());
+
+    cleanup();
+    mockManifestFetch({ 'schema-version': 1, artifactKind: 'react' });
+    render(createElement(StudioModal));
+    openStudio('apps/widget.html');
+    await waitFor(() => expect(document.querySelector('.studio-side-panel')).toBeNull());
+  });
+
+  it('keeps the Props tab present for a prototype-kind artifact (explicit artifactKind)', async () => {
+    mockManifestFetch({ ...FIXTURE_MANIFEST, artifactKind: 'prototype' });
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    await screen.findByLabelText('label');
+    expect(document.getElementById('studio-tab-props')).toBeTruthy();
+    expect(document.querySelector('.studio-side-panel')).toBeTruthy();
+  });
+
+  it('keeps the Props tab present for a manifest with no artifactKind at all (pre-Phase-A back-compat)', async () => {
+    mockManifestFetch(FIXTURE_MANIFEST); // no artifactKind field
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+
+    await screen.findByLabelText('label');
+    expect(document.getElementById('studio-tab-props')).toBeTruthy();
+  });
+
+  it('keeps the Props tab present while the manifest is still loading, and for a null (404) manifest', async () => {
+    // Loading: never resolves during this assertion window.
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation(() => new Promise(() => {}));
+    render(createElement(StudioModal));
+    openStudio('apps/counter.html');
+    expect(document.getElementById('studio-tab-props')).toBeTruthy();
+    expect(document.querySelector('.studio-side-panel')).toBeTruthy();
+    cleanup();
+
+    // Null manifest (404 / degrade path).
+    mockManifestFetch(null);
+    render(createElement(StudioModal));
+    openStudio('apps/old-counter.html');
+    await screen.findByText(/rebuild with a component entry/);
+    expect(document.getElementById('studio-tab-props')).toBeTruthy();
+    expect(document.querySelector('.studio-side-panel')).toBeTruthy();
+  });
+});
+
 // Graphite Inspector redesign, Finding 9: the props dock is a bottom sheet on
 // mobile — pure `expanded` state, no AppFrameLayer/bridge needed to exercise
 // it, same as the C3 manifest-states block above.
