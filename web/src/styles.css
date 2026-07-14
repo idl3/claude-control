@@ -5062,6 +5062,104 @@ select.config-input {
   border: 0;
 }
 
+/* ── Delivery-payload cards (remarkDelivery, lib/delivery.ts) ──────────────
+   Agents emit a one-line {"type":"delivery",...} JSON blob to report a run's
+   outcome; remarkDelivery rewrites it to a `div[data-delivery]` node
+   (DeliveryCard.tsx renders it) instead of raw JSON / an autolink-mangled
+   PR url. Uses the Graphite Inspector token set (--s-*/--r-*/--surface-*)
+   like the rest of the redesign, plus the tone colors (--green/--red/
+   --text-dim) already used for send-status above. */
+.delivery-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 6px 0;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.delivery-card-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.delivery-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--s-2);
+  border-radius: var(--r-pill);
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+.delivery-badge-success {
+  color: var(--green);
+  background: color-mix(in oklch, var(--green) 16%, transparent);
+  border-color: color-mix(in oklch, var(--green) 35%, transparent);
+}
+.delivery-badge-danger {
+  color: var(--red);
+  background: color-mix(in oklch, var(--red) 16%, transparent);
+  border-color: color-mix(in oklch, var(--red) 35%, transparent);
+}
+.delivery-badge-neutral {
+  color: var(--text-dim);
+  background: color-mix(in oklch, var(--text-dim) 14%, transparent);
+  border-color: var(--line);
+}
+.delivery-branch {
+  padding: 1px var(--s-2);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-0);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-dim);
+}
+.delivery-pr-link {
+  color: var(--accent);
+  font-size: calc(12.5px * var(--ui-scale));
+  text-decoration: none;
+  width: fit-content;
+}
+.delivery-pr-link:hover,
+.delivery-pr-link:focus-visible {
+  text-decoration: underline;
+}
+.delivery-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-scale));
+  color: var(--text-dim);
+}
+.delivery-extra-row {
+  display: flex;
+  gap: var(--s-2);
+}
+.delivery-extra-row dt {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  color: var(--text-faint);
+}
+.delivery-extra-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.delivery-fallback {
+  display: block;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: calc(12px * var(--ui-scale));
+  overflow-wrap: anywhere;
+}
+
 /* A3 audit follow-up (CP3-A, FIX 1): explicit stacking for the hoisted,
    position:fixed portal layer (AppFrameLayer.tsx) — kept below chrome that
    lives outside the scroll pane (.detail-head, .composer both claim
