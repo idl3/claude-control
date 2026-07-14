@@ -298,14 +298,15 @@ export function BracesIcon(p: IconProps) {
   );
 }
 
-// Prototype Studio — device-orientation toggle. A phone/tablet outline with a
-// short curved arrow, reading as "rotate this" beside the category picker.
+// Prototype Studio — device-orientation toggle. A single rotate-cw arc + arrowhead
+// (lucide "rotate-cw"), reading as "rotate this" beside the category picker. The
+// prior version overlaid a device-outline rect on the arc and rendered mangled at
+// 16px — this is a clean glyph, distinct from RefreshIcon's double-arrow reload.
 export function RotateIcon(p: IconProps) {
   return (
     <Svg {...p}>
-      <rect width="14" height="18" x="5" y="3" rx="2" />
-      <path d="M20 13a8 8 0 0 1-13.9 5.4" />
-      <path d="M20 18v-5h-5" />
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
     </Svg>
   );
 }
@@ -329,6 +330,17 @@ export function Trash2Icon(p: IconProps) {
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       <line x1="10" x2="10" y1="11" y2="17" />
       <line x1="14" x2="14" y1="11" y2="17" />
+    </Svg>
+  );
+}
+
+// Prototype Studio mobile toolbar — collapse/expand affordance (lucide
+// "chevron-down"). CSS rotates it 180deg for the expanded/"tap to collapse"
+// state rather than shipping a mirrored second icon.
+export function ChevronDownIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m6 9 6 6 6-6" />
     </Svg>
   );
 }
