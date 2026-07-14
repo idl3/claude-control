@@ -2657,7 +2657,16 @@ body.is-external-display .composer {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   transition: border-color var(--ease) 150ms, box-shadow var(--ease) 150ms;
   /* Establishes the containing block for absolutely-positioned content layers
-     during the voice morph transition (prevents jump by overlapping layers). */
+     during the voice morph transition (prevents jump by overlapping layers),
+     and for the living-ring ::before below. Deliberately left at z-index:auto
+     (no explicit stacking context here): per CSS2.1 painting order, a
+     stacking-context ROOT paints its own background (step 1) *before* its
+     negative-z-index children (step 2) — so a z-index:-1 child would paint
+     ON TOP of this element's own background if this rule pinned a z-index.
+     Leaving it auto lets the ::before's negative z-index resolve in the
+     nearest ancestor stacking context instead, where this card's own
+     background+content (having no explicit stack level of its own) paint
+     together and correctly cover the ring except its oversized rim. */
   position: relative;
   /* Floor: matches the single-row composer resting height (96px). Prevents the
      card from collapsing to near-zero during a voice-morph height tween if the
@@ -2676,34 +2685,65 @@ body.is-external-display .composer {
 
 /* ── Living accent: a slow, iridescent gradient ring + a barely-there breathing
    pulse, so the composer reads as premium and quietly alive rather than static
-   chrome. Both are compositor-only (transform + opacity) and both are switched
-   off entirely under prefers-reduced-motion — the card falls back to the plain
-   hairline border above with full opacity, exactly as before this change.
+   chrome. Both animations are switched off entirely under
+   prefers-reduced-motion (composer-ring-flow and composer-breathe are gated
+   inside the `no-preference` media block below, so neither is ever declared
+   under `reduce`): the gradient ring is still painted (it's decoration, not
+   motion — a colored border, just frozen at its 0deg resting angle) but never
+   animates, and the card sits at a constant opacity: 1 rather than pulsing.
+   Nothing moves under reduced motion. */
 
-   Ring technique: ::before is sized to the card, painted with a conic gradient
-   that cycles --accent -> --accent-warm -> --accent -> --accent-warm -> --accent,
-   then masked down to a ~1.4px ring (padding-box vs content-box, XOR'd out) so
-   only the edge is ever colored — never the text behind it. The whole ring
-   rotates via `transform: rotate()`, which sweeps the gradient without ever
-   touching layout or repainting the input. Whisper-faint at rest (opacity
-   0.16), fuller once focused (0.5), matching "most visible on focus-within". */
+   Ring technique: ::before is sized 1.4px larger than the card on every edge,
+   painted with a conic gradient that cycles --accent -> --accent-warm ->
+   --accent -> --accent-warm -> --accent. .composer-card itself is left at
+   z-index:auto (no explicit stack level) so the card's own opaque
+   `background: var(--bg-1)` (above) and the ::before rim paint together as
+   ordinary stacking-context content, with DOM order deciding within that:
+   the pseudo comes before the card's real children, so it's naturally
+   UNDER them, and the card's own background paints as part of the SAME
+   layer rather than a separate stacking-context floor — leaving only the
+   1.4px rim visible around the edge. (An earlier attempt pinned
+   `z-index: -1` on the pseudo *and* `z-index: 0` on .composer-card itself,
+   which made .composer-card its own stacking-context root — per CSS2.1
+   painting order a stacking-context root paints its own background
+   *before* its negative-z-index children, so the ring painted OVER the
+   card instead of under it. Removing the explicit z-index on both sides
+   fixed that.)
+
+   The gradient "flows" by animating its own start angle via a registered
+   custom property (--composer-ring-angle, 0deg -> 360deg), NOT by rotating
+   the element with `transform: rotate()`. Rotating the ::before box itself
+   was the first approach tried, and it produced a much worse bug: the ring
+   box is an elongated rectangle (card-width x card-height, not square), so
+   rotating it swings its corners far outside the card's own footprint at
+   the diagonal (verified: the rotated box's visible extent reached well
+   into the toolbar above and buttons below, painting a large diagonal
+   band across neighboring UI, since nothing clips an absolutely
+   positioned, transform-rotated layer to the card's bounds). Animating the
+   conic-gradient's angle instead keeps the box's geometry completely
+   static (only ever `inset: -1.4px`, never transformed), so there is no
+   growth to leak beyond the card — the visual "rotation" comes entirely
+   from repainting the gradient's colors, not from moving the box. Whisper-
+   faint at rest (opacity 0.16), fuller once focused (0.5), matching "most
+   visible on focus-within". */
+@property --composer-ring-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
 .composer-card::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -1.4px;
   border-radius: inherit;
-  padding: 1.4px;
   background: conic-gradient(
-    from 0deg,
+    from var(--composer-ring-angle),
     var(--accent),
     var(--accent-warm),
     var(--accent),
     var(--accent-warm),
     var(--accent)
   );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
   opacity: 0.16;
   pointer-events: none;
   transition: opacity var(--ease) 200ms;
@@ -2730,7 +2770,7 @@ body.is-external-display .composer {
 }
 @keyframes composer-ring-flow {
   to {
-    transform: rotate(360deg);
+    --composer-ring-angle: 360deg;
   }
 }
 @keyframes composer-breathe {
