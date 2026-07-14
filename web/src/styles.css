@@ -2653,7 +2653,14 @@ body.is-external-display .composer {
      so it reads as a subtle seam rather than a hard outline. */
   border: 1px solid color-mix(in oklch, var(--line) 65%, var(--bg-1));
   border-radius: 16px;
-  background: var(--bg-1);
+  /* Quieted from a flat --bg-1 fill: blended toward the page's own --bg so
+     the card recedes slightly into the backdrop instead of reading as its
+     own bright plate. Still fully opaque (required — it has to cover the
+     ::before ring below except its 1.4px rim, see the comment above the
+     ring block) and still a touch lighter than --bg so it stays legible as
+     a distinct input surface; the animated ring border is now the thing
+     that's meant to draw the eye, not the card body. */
+  background: color-mix(in oklch, var(--bg-1) 55%, var(--bg));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   transition: border-color var(--ease) 150ms, box-shadow var(--ease) 150ms;
   /* Establishes the containing block for absolutely-positioned content layers
@@ -2683,21 +2690,28 @@ body.is-external-display .composer {
     0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 
-/* ── Living accent: a slow, iridescent gradient ring + a barely-there breathing
-   pulse, so the composer reads as premium and quietly alive rather than static
-   chrome. Both animations are switched off entirely under
-   prefers-reduced-motion (composer-ring-flow and composer-breathe are gated
-   inside the `no-preference` media block below, so neither is ever declared
-   under `reduce`): the gradient ring is still painted (it's decoration, not
-   motion — a colored border, just frozen at its 0deg resting angle) but never
-   animates, and the card sits at a constant opacity: 1 rather than pulsing.
+/* ── Living accent: a slow, iridescent gradient ring on the BORDER only — the
+   card body itself never moves. Operator feedback on the first pass (PR
+   #221) was explicit: the "living" treatment read as the whole window
+   breathing, which was too loud; the animation belongs on the edge, not the
+   surface. So this now layers two effects entirely on `.composer-card::before`
+   (the ring pseudo): the existing 12s conic color flow (--accent <->
+   --accent-warm), plus a second, independent opacity breathe on the ring
+   itself (composer-ring-pulse, ~0.7x-1x multiplier over 6s) so the edge
+   feels alive without the card's fill ever changing. Both are switched off
+   entirely under prefers-reduced-motion (composer-ring-flow and
+   composer-ring-pulse are gated inside the `no-preference` media block
+   below, so neither is ever declared under `reduce`): the gradient ring is
+   still painted (it's decoration, not motion — a colored border, just
+   frozen at its 0deg resting angle, constant opacity) but never animates.
    Nothing moves under reduced motion.
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
    --accent -> --accent-warm -> --accent. .composer-card itself is left at
    z-index:auto (no explicit stack level) so the card's own opaque
-   `background: var(--bg-1)` (above) and the ::before rim paint together as
+   `background` (above — still fully opaque, only its color was quietened)
+   and the ::before rim paint together as
    ordinary stacking-context content, with DOM order deciding within that:
    the pseudo comes before the card's real children, so it's naturally
    UNDER them, and the card's own background paints as part of the SAME
@@ -2725,11 +2739,30 @@ body.is-external-display .composer {
    growth to leak beyond the card — the visual "rotation" comes entirely
    from repainting the gradient's colors, not from moving the box. Whisper-
    faint at rest (opacity 0.16), fuller once focused (0.5), matching "most
-   visible on focus-within". */
+   visible on focus-within".
+
+   Ring-pulse: a SECOND registered custom property (--composer-ring-pulse,
+   a unitless multiplier, 1 -> 0.7 -> 1) that the ring's resting opacity is
+   multiplied against via calc(), so the edge gently breathes independently
+   of the color flow. It's registered via @property (not a plain custom
+   property) for the same reason --composer-ring-angle is: unregistered
+   custom properties animate with discrete (jump-cut) interpolation, not a
+   smooth tween, so the multiplier would step instead of ease. Deliberately
+   NOT applied to the focus-within rule below — `:focus-within::before` sets
+   a flat, literal `opacity: 0.5` that wins on specificity over the resting
+   calc() expression, so focusing the composer locks the ring to its
+   brightest, steadiest state (focus is already the strongest "alive"
+   signal; the ambient pulse settles until you click away, rather than
+   fighting the focus glow or drifting under someone's typing cursor). */
 @property --composer-ring-angle {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
+}
+@property --composer-ring-pulse {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
 }
 .composer-card::before {
   content: '';
@@ -2744,7 +2777,7 @@ body.is-external-display .composer {
     var(--accent-warm),
     var(--accent)
   );
-  opacity: 0.16;
+  opacity: calc(0.16 * var(--composer-ring-pulse));
   pointer-events: none;
   transition: opacity var(--ease) 200ms;
 }
@@ -2758,14 +2791,13 @@ body.is-external-display .composer {
 }
 @media (prefers-reduced-motion: no-preference) {
   .composer-card::before {
-    animation: composer-ring-flow 12s linear infinite;
-  }
-  /* Breathing pulse on the card itself: opacity only, an almost-subliminal
-     sign of life. Range is intentionally tiny (1 -> 0.96) over a slow 6.4s
-     ease so it never reads as a flicker — it just barely stops feeling
-     static. Text inside stays fully legible at every point in the cycle. */
-  .composer-card {
-    animation: composer-breathe 6.4s ease-in-out infinite;
+    /* Two independent animations on the same pseudo: the 12s conic color
+       flow (angle) and a separate ~6s ring-pulse (opacity multiplier).
+       They run concurrently and don't fight — one drives
+       --composer-ring-angle, the other drives --composer-ring-pulse. */
+    animation:
+      composer-ring-flow 12s linear infinite,
+      composer-ring-pulse 6s ease-in-out infinite;
   }
 }
 @keyframes composer-ring-flow {
@@ -2773,12 +2805,17 @@ body.is-external-display .composer {
     --composer-ring-angle: 360deg;
   }
 }
-@keyframes composer-breathe {
+/* Resting-state ring breathe: opacity multiplier only (never the card's own
+   fill — see the block comment above for why that moved off the window).
+   Range is intentionally shallow (1 -> 0.7, i.e. the resting 0.16 opacity
+   ring dips to ~0.11) over a slow 6s ease so it reads as a living edge, not
+   a strobe. */
+@keyframes composer-ring-pulse {
   0%, 100% {
-    opacity: 1;
+    --composer-ring-pulse: 1;
   }
   50% {
-    opacity: 0.96;
+    --composer-ring-pulse: 0.7;
   }
 }
 .composer-toolbar {
