@@ -162,6 +162,8 @@ export interface SubAgent {
   description: string | null;
   status: 'running' | 'done';
   messages: Msg[];
+  /** False for historical summaries until their bounded transcript is requested. */
+  messagesLoaded?: boolean;
   createdAt?: number | null;
   /** Model string extracted from the agent's own transcript records. */
   model?: string | null;
@@ -267,6 +269,7 @@ export type ClientMessage =
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
+  | { type: 'subagent-load'; id: string; agentId: string }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }
   | { type: 'promptselect'; id: string; labels: string[] }

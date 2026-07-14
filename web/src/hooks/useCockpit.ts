@@ -24,6 +24,13 @@ export interface ResourcePoint {
 }
 const RESOURCE_WINDOW_MS = 10 * 60_000; // keep the last 10 minutes
 const RAW_EVENT_CAP = 200;
+const SESSION_CACHE_GRACE_MS = 5 * 60_000;
+
+function pruneRecord<T>(record: Record<string, T>, liveIds: Set<string>): Record<string, T> {
+  const keys = Object.keys(record);
+  if (keys.every((id) => liveIds.has(id))) return record;
+  return Object.fromEntries(keys.filter((id) => liveIds.has(id)).map((id) => [id, record[id]]));
+}
 
 export interface CockpitStore {
   sessions: Session[];
@@ -78,6 +85,7 @@ export interface CockpitStore {
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
+  requestSubagent: (agentId: string) => boolean;
   requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
   /** Interactive terminal panes: relay a literal char / control key to the selected pane. */
@@ -140,13 +148,14 @@ export function useCockpit(): CockpitStore {
   selectedRef.current = selectedId;
   // sessions in a ref so shell ops can resolve the selected session's cwd.
   const sessionsRef = useRef<Session[]>([]);
+  const sessionSeenRef = useRef<Record<string, number>>({});
   sessionsRef.current = sessions;
 
   useEffect(() => {
     const offState = socket.onState(setConn);
     const offMsg = socket.onMessage((msg) => {
       switch (msg.type) {
-        case 'sessions':
+        case 'sessions': {
           // Carry forward the last-known model / ctxPct when a refresh omits
           // them: the pane/transcript parse intermittently returns null mid-
           // generation, which would drop the meta row and make the card's height
@@ -164,7 +173,24 @@ export function useCockpit(): CockpitStore {
               };
             });
           });
+          const now = Date.now();
+          const liveIds = new Set((msg.sessions ?? []).map((s) => s.id));
+          for (const id of liveIds) sessionSeenRef.current[id] = now;
+          const retainedIds = new Set(liveIds);
+          for (const [id, lastSeen] of Object.entries(sessionSeenRef.current)) {
+            if (now - lastSeen <= SESSION_CACHE_GRACE_MS) retainedIds.add(id);
+            else delete sessionSeenRef.current[id];
+          }
+          setMessagesById((prev) => pruneRecord(prev, retainedIds));
+          setDegradedById((prev) => pruneRecord(prev, retainedIds));
+          setReadyById((prev) => pruneRecord(prev, retainedIds));
+          setPendingById((prev) => pruneRecord(prev, retainedIds));
+          setSubagentsById((prev) => pruneRecord(prev, retainedIds));
+          setRawEventsById((prev) => pruneRecord(prev, retainedIds));
+          setPromptById((prev) => pruneRecord(prev, retainedIds));
+          setPickerOpenById((prev) => pruneRecord(prev, retainedIds));
           break;
+        }
         case 'messages':
           // MERGE, don't replace: the server re-sends a snapshot of its bounded
           // (and periodically trimmed) tail on every (re)subscribe. Replacing
@@ -179,7 +205,7 @@ export function useCockpit(): CockpitStore {
         case 'append':
           setMessagesById((prev) => ({
             ...prev,
-            [msg.id]: [...(prev[msg.id] ?? []), ...(msg.messages ?? [])],
+            [msg.id]: mergeMessages(prev[msg.id], msg.messages ?? []),
           }));
           break;
         case 'olam-degraded':
@@ -337,6 +363,15 @@ export function useCockpit(): CockpitStore {
       const id = selectedRef.current;
       if (!id) return false;
       return socket.send({ type: 'answer', id, toolUseId, selections });
+    },
+    [socket],
+  );
+
+  const requestSubagent = useCallback(
+    (agentId: string): boolean => {
+      const id = selectedRef.current;
+      if (!id || !agentId) return false;
+      return socket.send({ type: 'subagent-load', id, agentId });
     },
     [socket],
   );
@@ -503,6 +538,7 @@ export function useCockpit(): CockpitStore {
     sendPromptKey,
     sendPromptSelect,
     sendAnswer,
+    requestSubagent,
     requestCapture,
     clearCapture,
     sendPaneText,
