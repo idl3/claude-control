@@ -2691,7 +2691,7 @@ body.is-external-display .composer {
    under `reduce`): the gradient ring is still painted (it's decoration, not
    motion — a colored border, just frozen at its 0deg resting angle) but never
    animates, and the card sits at a constant opacity: 1 rather than pulsing.
-   Nothing moves under reduced motion. */
+   Nothing moves under reduced motion.
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
