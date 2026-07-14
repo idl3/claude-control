@@ -77,6 +77,26 @@
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
 
+  /* ── Cosmic backdrop system — tune intensity HERE (single source) ─────── */
+  --space-base:   oklch(12% 0.02 265);   /* near-black deep-space base */
+  --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
+  --space-edge:   oklch(8%  0.015 265);  /* darkest, viewport edges */
+  --star:         oklch(92% 0.02 250);   /* soft blue-white star */
+  --star-near:    0.80;                   /* brightest star-layer opacity */
+  --star-mid:     0.45;
+  --star-far:     0.28;
+  --nebula-1:     oklch(55% 0.10 285);   /* desaturated indigo/violet */
+  --nebula-2:     oklch(58% 0.08 200);   /* desaturated teal (echoes --accent) */
+  --nebula-alpha: 0.05;                   /* VERY low — the wash must recede */
+  --star-drift:   90s;                    /* ultra-slow; OFF under reduced-motion */
+
+  /* Glass tiers — dark translucency so text stays legible over the cosmos */
+  --glass-blur:         14px;
+  --glass-chrome:       oklch(20% 0.014 260 / 0.55);  /* chrome (no long text) */
+  --glass-panel:        oklch(18% 0.014 260 / 0.70);  /* text-bearing panels */
+  --glass-panel-strong: oklch(16% 0.014 260 / 0.82);  /* dense text / floating popovers */
+  --glass-border:       oklch(100% 0 0 / 0.06);       /* hairline top edge */
+
   color-scheme: dark;
 }
 
@@ -122,7 +142,7 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: var(--space-base);
   color: var(--text);
   font-family:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -135,7 +155,59 @@ body {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  position: relative;
 }
+
+/* ── Cosmic backdrop — deep-space base + ultra-low-alpha nebula wash + sparse
+   drifting starfield, painted BEHIND the entire app (z-index:-1 relative to
+   .app's own stacking context) but ABOVE body's flat --space-base fill.
+   Deliberately static except one compositor-only transform (the star drift):
+   no per-frame JS, no layout-affecting properties. Every intensity value
+   lives in the --space-, --star- and --nebula- tokens above so tuning is a
+   one-file, one-block edit. */
+.cosmos-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;               /* behind ALL app content, above body's base fill */
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(125% 90% at 50% -8%,
+    var(--space-lift) 0%, var(--space-base) 46%, var(--space-edge) 100%);
+}
+/* nebula wash — two large ultra-low-alpha desaturated clouds, off-center */
+.cosmos-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(42% 38% at 22% 18%, var(--nebula-1) 0%, transparent 70%),
+    radial-gradient(48% 42% at 82% 74%, var(--nebula-2) 0%, transparent 72%);
+  opacity: var(--nebula-alpha);
+  filter: blur(34px);
+}
+/* starfield — sparse; 3 depth sizes, per-layer background-size so no visible grid */
+.cosmos-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: -40px;              /* bleed so drift never reveals an edge */
+  background-image:
+    radial-gradient(1px 1px at 30px 40px,   var(--star), transparent),
+    radial-gradient(1px 1px at 120px 150px, var(--star), transparent),
+    radial-gradient(1px 1px at 200px 80px,  var(--star), transparent),
+    radial-gradient(1.5px 1.5px at 70px 200px, var(--star), transparent),
+    radial-gradient(1px 1px at 250px 240px, var(--star), transparent),
+    radial-gradient(1px 1px at 160px 30px,  var(--star), transparent),
+    radial-gradient(1.5px 1.5px at 300px 160px, var(--star), transparent),
+    radial-gradient(1px 1px at 90px 300px,  var(--star), transparent);
+  background-repeat: repeat;
+  background-size: 320px 320px, 320px 320px, 270px 270px, 270px 270px, 400px 400px, 400px 400px, 220px 220px, 220px 220px;
+  opacity: var(--star-mid);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cosmos-backdrop::after { animation: cosmos-drift var(--star-drift) linear infinite alternate; }
+}
+@keyframes cosmos-drift { to { transform: translate3d(0, -16px, 0); } }
 
 /* ── Resource HUD ─────────────────────────────────────────────── */
 .hud {
@@ -145,7 +217,9 @@ body {
   height: var(--hud-h);
   padding: 0 12px;
   padding-top: var(--safe-top);
-  background: var(--bg-1);
+  background: var(--glass-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--line);
   font-size: var(--txt-meta);
   color: var(--text-dim);
@@ -214,7 +288,9 @@ body {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--glass-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 /* Scrollable middle: session list grows; header + foot bar stay pinned. */
 .rail-scroll {
@@ -2660,20 +2736,15 @@ body.is-external-display .composer {
      ring block) and still a touch lighter than --bg so it stays legible as
      a distinct input surface; the animated ring border is now the thing
      that's meant to draw the eye, not the card body. */
-  background: color-mix(in oklch, var(--bg-1) 55%, var(--bg));
+  background: color-mix(in oklch, var(--bg-1) 45%, var(--space-base));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   transition: border-color var(--ease) 150ms, box-shadow var(--ease) 150ms;
   /* Establishes the containing block for absolutely-positioned content layers
      during the voice morph transition (prevents jump by overlapping layers),
-     and for the living-ring ::before below. Deliberately left at z-index:auto
-     (no explicit stacking context here): per CSS2.1 painting order, a
-     stacking-context ROOT paints its own background (step 1) *before* its
-     negative-z-index children (step 2) — so a z-index:-1 child would paint
-     ON TOP of this element's own background if this rule pinned a z-index.
-     Leaving it auto lets the ::before's negative z-index resolve in the
-     nearest ancestor stacking context instead, where this card's own
-     background+content (having no explicit stack level of its own) paint
-     together and correctly cover the ring except its oversized rim. */
+     and for the living-ring ::before below. Left at z-index:auto — the ring
+     is confined to a rim by masking its own pixels (see the ::before block),
+     not by any z-index/stacking arrangement here, so this rule has no
+     bearing on the ring's containment. */
   position: relative;
   /* Floor: matches the single-row composer resting height (96px). Prevents the
      card from collapsing to near-zero during a voice-morph height tween if the
@@ -2708,21 +2779,30 @@ body.is-external-display .composer {
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
-   --accent -> --accent-warm -> --accent. .composer-card itself is left at
-   z-index:auto (no explicit stack level) so the card's own opaque
-   `background` (above — still fully opaque, only its color was quietened)
-   and the ::before rim paint together as
-   ordinary stacking-context content, with DOM order deciding within that:
-   the pseudo comes before the card's real children, so it's naturally
-   UNDER them, and the card's own background paints as part of the SAME
-   layer rather than a separate stacking-context floor — leaving only the
-   1.4px rim visible around the edge. (An earlier attempt pinned
-   `z-index: -1` on the pseudo *and* `z-index: 0` on .composer-card itself,
-   which made .composer-card its own stacking-context root — per CSS2.1
-   painting order a stacking-context root paints its own background
-   *before* its negative-z-index children, so the ring painted OVER the
-   card instead of under it. Removing the explicit z-index on both sides
-   fixed that.)
+   --accent -> --accent-warm -> --accent, then MASKED down to a thin frame
+   via `mask`/`-webkit-mask` (content-box XOR border-box) so the pseudo has
+   no interior pixels at all — only a slim band around its own edge is ever
+   painted. This is deliberate and load-bearing, not cosmetic: a box's own
+   `background` is *always* painted before its own pseudo-elements (CSS2.1
+   painting order — step 1 "background of the element" happens before step
+   2/6 "positioned descendants", and a pseudo-element counts as a
+   descendant for this purpose no matter its z-index). That means there is
+   NO z-index, stacking-context, or DOM-order arrangement under which
+   `.composer-card`'s own fill can occlude this ring — it will always paint
+   on top of the card's own background. An earlier version of this comment
+   claimed DOM order made the card's background cover the ring "except its
+   rim"; that was wrong, and the bug it hid was real: at `:focus-within`
+   (ring opacity 0.5, no animation involved — a static, easily reproduced
+   case) the conic gradient visibly washed across the entire card interior,
+   over the textarea, toolbar, and buttons, because those children have
+   transparent backgrounds and there was nothing actually confining the
+   gradient to a rim. (A still-earlier attempt pinned `z-index: -1` on the
+   pseudo *and* `z-index: 0` on .composer-card itself, hoping to push the
+   ring behind the card — that doesn't work either, for the same reason:
+   negative-z-index children still paint *after* their stacking context's
+   own step-1 background, never before it. Removing that z-index only
+   traded one non-rim-only failure mode for another; masking is the fix
+   that actually guarantees rim-only, independent of paint order.)
 
    The gradient "flows" by animating its own start angle via a registered
    custom property (--composer-ring-angle, 0deg -> 360deg), NOT by rotating
@@ -2777,6 +2857,15 @@ body.is-external-display .composer {
     var(--accent-warm),
     var(--accent)
   );
+  /* Confine the gradient to a rim by masking its own interior away — see the
+     block comment above for why this (not z-index/DOM order) is the only
+     thing that actually prevents the ring from bleeding into the card. The
+     content-box layer carves out everything but a `padding`-wide band. */
+  padding: 2px;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
   opacity: calc(0.16 * var(--composer-ring-pulse));
   pointer-events: none;
   transition: opacity var(--ease) 200ms;
@@ -3431,7 +3520,9 @@ body.is-external-display .composer {
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: var(--bg-2);
+  background: var(--glass-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   color: var(--text);
   cursor: pointer;
   font: inherit;
@@ -3440,7 +3531,7 @@ body.is-external-display .composer {
     background var(--ease) 0.15s;
 }
 .option-btn:hover {
-  background: var(--bg-hover);
+  background: oklch(22% 0.016 260 / 0.72);
 }
 .option-btn:focus-visible {
   outline: 2px solid var(--accent);
@@ -3448,7 +3539,7 @@ body.is-external-display .composer {
 }
 .option-btn[data-on='true'] {
   border-color: var(--accent);
-  background: var(--bg);
+  background: oklch(20% 0.02 260 / 0.75);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 /* Submission feedback: chosen option highlights + shows a spinner; the rest dim. */
@@ -5290,7 +5381,9 @@ select.config-input {
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--surface-2);
+  background: var(--glass-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 .delivery-card-row {
   display: flex;
@@ -5938,8 +6031,11 @@ select.config-input {
   flex-direction: column;
   max-width: min(320px, calc(100% - 28px));
   max-height: min(60vh, 420px);
-  background: var(--bg-1);
+  background: var(--glass-panel-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--line);
+  border-top: 1px solid var(--glass-border);
   border-radius: var(--r-md);
   box-shadow: 0 4px 16px oklch(0% 0 0 / 0.4);
   overflow: hidden;
@@ -6858,7 +6954,9 @@ select.config-input {
   position: sticky;
   bottom: 0;
   padding: 8px 0 2px;
-  background: var(--bg-1);
+  background: var(--glass-chrome);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-top: 1px solid var(--line);
 }
 /* Free-text textarea inside the inline body. */
@@ -8680,19 +8778,27 @@ select.config-input {
   padding: var(--s-5);
   background:
     radial-gradient(90% 60% at 50% 8%, color-mix(in oklch, var(--accent) 5%, transparent) 0%, transparent 70%),
-    radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--bg) 92%, black) 0%, color-mix(in oklch, var(--bg) 72%, black) 100%);
+    radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--space-base) 92%, black) 0%, color-mix(in oklch, var(--space-edge) 72%, black) 100%);
 }
 /* The stage is the hero: it fills all remaining space and centers the device.
-   A faint dot-grid gives the void texture + depth (Finding 8). */
+   A sparse cosmic starfield gives the void texture + depth (Finding 8) —
+   the device now reads as floating in space, matching the app-shell backdrop. */
 .studio-stage {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   border-radius: var(--r-md);
-  background-image: radial-gradient(currentColor 0.8px, transparent 0.8px);
-  background-size: 22px 22px;
-  color: color-mix(in oklch, var(--text) 8%, transparent);
+  background-color: var(--space-base);
+  background-image:
+    radial-gradient(120% 80% at 50% 0%, var(--space-lift) 0%, var(--space-base) 55%, var(--space-edge) 100%),
+    radial-gradient(1px 1px at 40px 60px, var(--star), transparent),
+    radial-gradient(1px 1px at 180px 120px, var(--star), transparent),
+    radial-gradient(1.5px 1.5px at 260px 200px, var(--star), transparent),
+    radial-gradient(1px 1px at 120px 260px, var(--star), transparent),
+    radial-gradient(1px 1px at 300px 90px, var(--star), transparent);
+  background-repeat: no-repeat, repeat, repeat, repeat, repeat, repeat;
+  background-size: cover, 300px 300px, 300px 300px, 360px 360px, 360px 360px, 240px 240px;
 }
 /* Canvas pan affordance: while zoomed (data-zoomed), the empty stage shows a
    grab cursor and claims touch so a one-/two-finger drag pans instead of
@@ -8781,7 +8887,9 @@ select.config-input {
   height: 30px;
   padding: 3px;
   border-radius: var(--r-md);
-  background: var(--surface-2);
+  background: var(--glass-chrome);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--line);
 }
 .studio-zoom-btn,
@@ -8858,8 +8966,11 @@ select.config-input {
   align-self: stretch;
   overflow: hidden;
   border: 1px solid var(--line-strong);
+  border-top: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
-  background: var(--surface-1);
+  background: var(--glass-panel);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
