@@ -2434,8 +2434,13 @@ async function handleClientMessage(ws, msg) {
     }
     case 'subagent-load': {
       const sub = subscriptions.get(msg.id);
-      if (!sub?.subagents) throw new Error('session is not subscribed');
+      if (!sub?.subagents || !sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
       const entry = await sub.subagents.load(String(msg.agentId ?? ''));
+      if (!sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
       if (!entry) throw new Error('unknown sub-agent');
       return send(ws, { type: 'subagent', id: msg.id, subagent: entry });
     }

@@ -393,3 +393,92 @@ test('historical agents stay summary-only and load one bounded transcript on dem
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('large historical discovery defers transcript, nested, and definition enrichment', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const old = new Date(Date.now() - 120_000);
+  for (let i = 0; i < 400; i++) {
+    const id = `archived-${i}`;
+    writeAgentFiles(subDir, id, { jsonlContent: '{}\n' });
+    fs.utimesSync(path.join(subDir, `agent-${id}.jsonl`), old, old);
+  }
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  let modelReads = 0;
+  let nestedReads = 0;
+  watcher._readLatestModel = () => { modelReads++; return null; };
+  watcher._readNested = () => { nestedReads++; return []; };
+  watcher.poll();
+
+  const snapshot = watcher.snapshot();
+  assert.equal(snapshot.length, 400);
+  assert.equal(modelReads, 0, 'summary discovery must not read transcript tails');
+  assert.equal(nestedReads, 0, 'summary discovery must not scan nested directories');
+  assert.equal(snapshot.every((agent) => agent.model === null && agent.def === null), true);
+  assert.equal([...watcher._agents.values()].filter((agent) => agent.tailer).length, 0);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('historical transcript loads are globally limited to four at a time', async () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const old = new Date(Date.now() - 120_000);
+  for (let i = 0; i < 12; i++) {
+    const id = `queued-${i}`;
+    writeAgentFiles(subDir, id, { jsonlContent: '{}\n' });
+    fs.utimesSync(path.join(subDir, `agent-${id}.jsonl`), old, old);
+  }
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+  let active = 0;
+  let peak = 0;
+  watcher._loadSnapshot = async (agent) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active--;
+    return watcher._entry(agent);
+  };
+
+  await Promise.all([...watcher._agents.keys()].map((id) => watcher.load(id)));
+  assert.equal(peak, 4);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('poll discovers nested agents created after a live parent was tracked', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'parent-agent';
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{}\n' });
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+  assert.deepEqual(watcher.snapshot()[0].nested, []);
+
+  const nestedDir = path.join(subDir, agentId, 'subagents');
+  fs.mkdirSync(nestedDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(nestedDir, 'agent-child.meta.json'),
+    JSON.stringify({ agentType: 'reviewer' }),
+  );
+  watcher.poll();
+
+  assert.deepEqual(watcher.snapshot()[0].nested, [
+    { agentId: 'child', agentType: 'reviewer', model: null },
+  ]);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
