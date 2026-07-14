@@ -5082,7 +5082,7 @@ select.config-input {
    Agents emit a one-line {"type":"delivery",...} JSON blob to report a run's
    outcome; remarkDelivery rewrites it to a `div[data-delivery]` node
    (DeliveryCard.tsx renders it) instead of raw JSON / an autolink-mangled
-   PR url. Uses the Graphite Inspector token set (--s-*/--r-*/--surface-*)
+   PR url. Uses the Graphite Inspector token set (--s-N, --r-N, --surface-N)
    like the rest of the redesign, plus the tone colors (--green/--red/
    --text-dim) already used for send-status above. */
 .delivery-card {
