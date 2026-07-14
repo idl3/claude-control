@@ -2736,20 +2736,15 @@ body.is-external-display .composer {
      ring block) and still a touch lighter than --bg so it stays legible as
      a distinct input surface; the animated ring border is now the thing
      that's meant to draw the eye, not the card body. */
-  background: color-mix(in oklch, var(--bg-1) 55%, var(--bg));
+  background: color-mix(in oklch, var(--bg-1) 45%, var(--space-base));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   transition: border-color var(--ease) 150ms, box-shadow var(--ease) 150ms;
   /* Establishes the containing block for absolutely-positioned content layers
      during the voice morph transition (prevents jump by overlapping layers),
-     and for the living-ring ::before below. Deliberately left at z-index:auto
-     (no explicit stacking context here): per CSS2.1 painting order, a
-     stacking-context ROOT paints its own background (step 1) *before* its
-     negative-z-index children (step 2) — so a z-index:-1 child would paint
-     ON TOP of this element's own background if this rule pinned a z-index.
-     Leaving it auto lets the ::before's negative z-index resolve in the
-     nearest ancestor stacking context instead, where this card's own
-     background+content (having no explicit stack level of its own) paint
-     together and correctly cover the ring except its oversized rim. */
+     and for the living-ring ::before below. Left at z-index:auto — the ring
+     is confined to a rim by masking its own pixels (see the ::before block),
+     not by any z-index/stacking arrangement here, so this rule has no
+     bearing on the ring's containment. */
   position: relative;
   /* Floor: matches the single-row composer resting height (96px). Prevents the
      card from collapsing to near-zero during a voice-morph height tween if the
@@ -2784,21 +2779,30 @@ body.is-external-display .composer {
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
-   --accent -> --accent-warm -> --accent. .composer-card itself is left at
-   z-index:auto (no explicit stack level) so the card's own opaque
-   `background` (above — still fully opaque, only its color was quietened)
-   and the ::before rim paint together as
-   ordinary stacking-context content, with DOM order deciding within that:
-   the pseudo comes before the card's real children, so it's naturally
-   UNDER them, and the card's own background paints as part of the SAME
-   layer rather than a separate stacking-context floor — leaving only the
-   1.4px rim visible around the edge. (An earlier attempt pinned
-   `z-index: -1` on the pseudo *and* `z-index: 0` on .composer-card itself,
-   which made .composer-card its own stacking-context root — per CSS2.1
-   painting order a stacking-context root paints its own background
-   *before* its negative-z-index children, so the ring painted OVER the
-   card instead of under it. Removing the explicit z-index on both sides
-   fixed that.)
+   --accent -> --accent-warm -> --accent, then MASKED down to a thin frame
+   via `mask`/`-webkit-mask` (content-box XOR border-box) so the pseudo has
+   no interior pixels at all — only a slim band around its own edge is ever
+   painted. This is deliberate and load-bearing, not cosmetic: a box's own
+   `background` is *always* painted before its own pseudo-elements (CSS2.1
+   painting order — step 1 "background of the element" happens before step
+   2/6 "positioned descendants", and a pseudo-element counts as a
+   descendant for this purpose no matter its z-index). That means there is
+   NO z-index, stacking-context, or DOM-order arrangement under which
+   `.composer-card`'s own fill can occlude this ring — it will always paint
+   on top of the card's own background. An earlier version of this comment
+   claimed DOM order made the card's background cover the ring "except its
+   rim"; that was wrong, and the bug it hid was real: at `:focus-within`
+   (ring opacity 0.5, no animation involved — a static, easily reproduced
+   case) the conic gradient visibly washed across the entire card interior,
+   over the textarea, toolbar, and buttons, because those children have
+   transparent backgrounds and there was nothing actually confining the
+   gradient to a rim. (A still-earlier attempt pinned `z-index: -1` on the
+   pseudo *and* `z-index: 0` on .composer-card itself, hoping to push the
+   ring behind the card — that doesn't work either, for the same reason:
+   negative-z-index children still paint *after* their stacking context's
+   own step-1 background, never before it. Removing that z-index only
+   traded one non-rim-only failure mode for another; masking is the fix
+   that actually guarantees rim-only, independent of paint order.)
 
    The gradient "flows" by animating its own start angle via a registered
    custom property (--composer-ring-angle, 0deg -> 360deg), NOT by rotating
@@ -2853,6 +2857,15 @@ body.is-external-display .composer {
     var(--accent-warm),
     var(--accent)
   );
+  /* Confine the gradient to a rim by masking its own interior away — see the
+     block comment above for why this (not z-index/DOM order) is the only
+     thing that actually prevents the ring from bleeding into the card. The
+     content-box layer carves out everything but a `padding`-wide band. */
+  padding: 2px;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
   opacity: calc(0.16 * var(--composer-ring-pulse));
   pointer-events: none;
   transition: opacity var(--ease) 200ms;
