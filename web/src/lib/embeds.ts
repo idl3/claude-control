@@ -39,7 +39,7 @@ export const APP_HEIGHT_DEFAULT = 360;
 // wide enough for a real widget without blowing out the transcript bubble.
 export const APP_FRAME_MAX_WIDTH = '640px';
 
-const TAG_RE = /<embedded-(image|video|app)\b([^<>]*?)\/>/g;
+export const TAG_RE = /<embedded-(image|video|app)\b([^<>]*?)\/>/g;
 
 // Minimal mdast shape — enough to walk and rewrite without pulling in @types/mdast.
 interface MdNode {

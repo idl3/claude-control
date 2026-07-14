@@ -29,6 +29,7 @@ import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
+import { ArtifactGallery } from './components/ArtifactGallery';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -1643,6 +1644,18 @@ function AppInner() {
     return m;
   }, [addressableClaude]);
 
+  // ArtifactGallery (Phase C): flatten every text block across the selected
+  // session's transcript into one string so it can be scanned for
+  // <embedded-app> tags. Text-only — thinking/tool_use/tool_result blocks
+  // never carry embed tags, so they're excluded on purpose.
+  const transcriptText = useMemo(
+    () =>
+      cockpit.messages
+        .flatMap((m) => (m.blocks ?? []).filter((b) => b.kind === 'text').map((b) => b.text ?? ''))
+        .join('\n'),
+    [cockpit.messages],
+  );
+
   // ⌘/Ctrl+1‑9 jumps to the Nth addressable Claude session. Skipped while the
   // command palette is open — it uses ⌘N for its own quick-select.
   useEffect(() => {
@@ -2394,6 +2407,7 @@ function AppInner() {
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ArtifactPanel />
+                <ArtifactGallery transcriptText={transcriptText} />
                 {rawOpen ? (
                   <RawEventPanel
                     events={cockpit.rawEvents}

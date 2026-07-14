@@ -484,7 +484,7 @@ const StudioPropsPanel = forwardRef<StudioPropsHandle, { url: string; manifest: 
 
   return (
     <div className="studio-props-panel" aria-label="Props">
-      {manifest.props.map((prop) => (
+      {(manifest.props ?? []).map((prop) => (
         <StudioPropField
           key={prop.name}
           prop={prop}
@@ -540,7 +540,7 @@ function StudioSidePanel({ url, manifest }: { url: string; manifest: AppManifest
   const [tab, setTab] = useState<SidePanelTab>('props');
   const [expanded, setExpanded] = useState(false);
   const propsRef = useRef<StudioPropsHandle | null>(null);
-  const propCount = manifest && typeof manifest === 'object' ? manifest.props.length : null;
+  const propCount = manifest && typeof manifest === 'object' ? (manifest.props ?? []).length : null;
 
   // Refinement #4 (mobile polish pass): a single sliding underline — instead
   // of each tab carrying its own static `border-bottom-color` — replaces the
@@ -1181,6 +1181,14 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
     };
   }, [url]);
 
+  // B2: the Props/Inspector side panel only makes sense for a prototype
+  // artifact (component + props to edit/inspect). `manifest === undefined`
+  // (still loading) and `manifest === null` (no manifest at all — either the
+  // degrade path or a pre-Phase-A artifact) both KEEP the panel, matching
+  // every prototype's existing behavior; only a confirmed presentation kind
+  // (markdown|html|react) hides it.
+  const showSidePanel = !manifest || manifest.artifactKind === 'prototype';
+
   // Feature 1 (device presets + orientation): category/device/orientation
   // state replaces the old fixed 3-mode DEVICE_MODES bar + fitsById gating —
   // every preset is always selectable (one that doesn't fit at 1:1 scales
@@ -1627,7 +1635,7 @@ function StudioPanel({ url, onClose: rawClose }: { url: string; onClose: () => v
               </div>
             </div>
           </div>
-          <StudioSidePanel url={url} manifest={manifest} />
+          {showSidePanel && <StudioSidePanel url={url} manifest={manifest} />}
         </div>
       </div>
     </div>
