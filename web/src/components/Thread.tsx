@@ -225,7 +225,10 @@ export function Thread({
               </span>
             </span>
           </div>
-          <SubAgentThread messages={viewingAgent.messages} />
+          <SubAgentThread
+            messages={viewingAgent.messages}
+            loading={viewingAgent.messagesLoaded === false}
+          />
         </div>
       ) : (
         /* SESSION TRANSCRIPT */

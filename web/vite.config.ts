@@ -35,5 +35,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.vitest.ts', 'scratch/**/*.vitest.ts'],
+    // The suite is broad enough that Vitest's CPU-count default can spawn a
+    // dozen Vite/esbuild workers, amplifying memory pressure on the same host
+    // that runs the cockpit and agent sessions. Two workers proved faster and
+    // substantially leaner under load.
+    minWorkers: 1,
+    maxWorkers: 2,
   },
 });

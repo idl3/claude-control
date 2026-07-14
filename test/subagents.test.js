@@ -365,3 +365,31 @@ test('meta-late upgrade: toolUseId/agentType null on first poll, populated after
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('historical agents stay summary-only and load one bounded transcript on demand', async () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const old = new Date(Date.now() - 120_000);
+  for (let i = 0; i < 80; i++) {
+    const id = `historical-${i}`;
+    writeAgentFiles(subDir, id, {
+      jsonlContent: `${JSON.stringify({ type: 'assistant', uuid: id, message: { content: 'done' } })}\n`,
+    });
+    fs.utimesSync(path.join(subDir, `agent-${id}.jsonl`), old, old);
+  }
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+  assert.equal([...watcher._agents.values()].filter((a) => a.tailer).length, 0);
+  assert.equal(watcher.snapshot().every((a) => a.messagesLoaded === false), true);
+
+  const loaded = await watcher.load('historical-40');
+  assert.equal(loaded.messagesLoaded, true);
+  assert.equal(loaded.messages.length, 1);
+  assert.equal([...watcher._agents.values()].filter((a) => a.tailer).length, 0);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

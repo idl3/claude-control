@@ -17,6 +17,7 @@ const messageComponents = {
 
 interface SubAgentThreadProps {
   messages: SubAgent['messages'];
+  loading?: boolean;
 }
 
 /**
@@ -26,7 +27,7 @@ interface SubAgentThreadProps {
  *
  * Used in both SubAgentPanel (side drawer) and the inline agent view in Thread.
  */
-export function SubAgentThread({ messages }: SubAgentThreadProps) {
+export function SubAgentThread({ messages, loading = false }: SubAgentThreadProps) {
   const converted = useMemo<ThreadMessageLike[]>(
     () => convertMessages(messages),
     [messages],
@@ -42,7 +43,7 @@ export function SubAgentThread({ messages }: SubAgentThreadProps) {
       <ThreadPrimitive.Root className="sa-thread-root">
         <ThreadPrimitive.Viewport className="sa-thread-viewport" autoScroll>
           <ThreadPrimitive.Empty>
-            <div className="thread-empty">no output yet…</div>
+            <div className="thread-empty">{loading ? 'loading transcript…' : 'no output yet…'}</div>
           </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages components={messageComponents} />
         </ThreadPrimitive.Viewport>

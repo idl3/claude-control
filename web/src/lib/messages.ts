@@ -4,7 +4,7 @@ import type { Msg } from './types';
 // tail window (~1 MB ≈ tens–low-hundreds of messages) and the render cap, so it
 // never causes the "disappearing" symptom in practice — it only stops a
 // multi-hour session from growing the in-memory array without limit.
-export const MAX_RETAINED_MESSAGES = 2000;
+export const MAX_RETAINED_MESSAGES = 4000;
 
 /**
  * Merge a server transcript snapshot into the client's accumulated history.
