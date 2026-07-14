@@ -5252,6 +5252,15 @@ select.config-input {
    own getBoundingClientRect(), so widening the box here auto-widens the
    iframe.
 
+   The outer `max(640px, ...)` floor (verified empirically via a Playwright
+   harness — web/scratch/wide-embeds-harness): on an iPad with the session
+   rail open, the detail column is only ~420px wide (rail reserves
+   min(46vw, 375px) — see .rail above), so a bare `min(90%, 1400px)` would
+   compute ~378px — NARROWER than the 640px default cap, inverting the
+   entire point of opting into "wide". The floor guarantees wide never
+   renders smaller than default; it only ever widens, same as the ceiling
+   guarantees it never dwarfs the viewport.
+
    `.artifact-app-slot .embed-app-frame` (panel/studio context, below)
    pre-dates this and keeps winning regardless — two-selector specificity
    beats both rules here. */
@@ -5260,7 +5269,7 @@ select.config-input {
 }
 @media (min-width: 720px) {
   .embed-app-frame--wide {
-    max-width: min(90%, 1400px);
+    max-width: max(640px, min(90%, 1400px));
     margin-left: auto;
     margin-right: auto;
   }

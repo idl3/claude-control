@@ -1,0 +1,6 @@
+@import '../../src/styles.css';
+html, body { margin: 0; height: 100%; background: var(--bg); }
+#root { height: 100vh; }
+.app { height: 100vh; }
+.stage { padding: 20px; overflow: auto; color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.proto-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.55; margin: 16px 0 8px; }
