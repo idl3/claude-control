@@ -66,3 +66,39 @@ export function parsePendingKey(id: string): number | null {
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
 }
+
+// localStorage key for the optimistic pending-sends queue. Owned here (not
+// App.tsx) so removePendingSend below can persist without a second literal
+// drifting out of sync — App.tsx's loadPendingSends/persist-effect import
+// this same constant.
+export const PENDING_SENDS_LS_KEY = 'cc:pendingSends';
+
+/**
+ * Force-remove a single pending send by key — used by the "Discard" action on
+ * a failed send AND by the dismiss control on a still-queued/sent bubble that
+ * never got its transcript echo (e.g. the TUI's focus was elsewhere and the
+ * keystrokes never reached Claude, so no echo will EVER arrive — see the
+ * PENDING_SEND_TTL_MS comment in App.tsx for why that case can otherwise
+ * linger for up to 30 minutes).
+ *
+ * Returns the pruned array (the caller feeds this straight into
+ * setPendingSends) and, when an entry was actually removed, persists the
+ * pruned array to localStorage so the removed bubble does not rehydrate on
+ * the next reload. Guarded in try/catch per the codebase's localStorage idiom
+ * (quota / private-mode failures are non-fatal — the in-memory state, and the
+ * caller's own setPendingSends effect, still reflect the removal).
+ */
+export function removePendingSend<T extends { key: number }>(
+  pending: readonly T[],
+  key: number,
+): T[] {
+  const pruned = pending.filter((e) => e.key !== key);
+  if (pruned.length !== pending.length) {
+    try {
+      localStorage.setItem(PENDING_SENDS_LS_KEY, JSON.stringify(pruned));
+    } catch {
+      /* quota / private mode — non-fatal, in-memory state still works */
+    }
+  }
+  return pruned;
+}

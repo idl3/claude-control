@@ -122,6 +122,9 @@ describe('parseEmbedAppAttrs', () => {
   it('parses width="wide"', () => {
     expect(parseEmbedAppAttrs(' url="apps/deck.html" width="wide" ')?.width).toBe('wide');
   });
+  it('parses width="medium"', () => {
+    expect(parseEmbedAppAttrs(' url="apps/deck.html" width="medium" ')?.width).toBe('medium');
+  });
   it('defaults a missing width to "default"', () => {
     expect(parseEmbedAppAttrs(' url="apps/counter.html" ')?.width).toBe('default');
   });
@@ -163,6 +166,12 @@ describe('embedNodesFromHtml (tag parsing → node props)', () => {
     const nodes = embedNodesFromHtml('<embedded-app url="apps/deck.html" width="wide" />');
     expect(nodes![0]).toMatchObject({
       data: { hProperties: { dataWidth: 'wide' } },
+    });
+  });
+  it('carries dataWidth=medium through for a width="medium" app tag', () => {
+    const nodes = embedNodesFromHtml('<embedded-app url="apps/deck.html" width="medium" />');
+    expect(nodes![0]).toMatchObject({
+      data: { hProperties: { dataWidth: 'medium' } },
     });
   });
   it('keeps text around tags and returns null when no tag is present', () => {
@@ -236,6 +245,13 @@ describe('markdown pipeline → element props', () => {
     expect(narrow).toContain('class="embed-media-frame embed-app-frame"');
     expect(narrow).not.toContain('embed-app-frame--wide');
     expect(narrow).not.toContain('data-embed-app-width');
+  });
+
+  it('adds the embed-app-frame--medium modifier class for width="medium"', () => {
+    const medium = render('<embedded-app url="apps/deck.html" height="420" width="medium" />');
+    expect(medium).toContain('class="embed-media-frame embed-app-frame embed-app-frame--medium"');
+    expect(medium).toContain('data-embed-app-width="medium"');
+    expect(medium).not.toContain('embed-app-frame--wide');
   });
 
   it('clamps and defaults embedded-app height in the reserved frame', () => {

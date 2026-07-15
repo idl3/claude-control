@@ -19,12 +19,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { createElement } from 'react';
-import type { SubAgent } from '../lib/types';
+import type { NestedSubAgent, SubAgent } from '../lib/types';
 import { SubAgentStrip } from './SubAgentStrip';
 
 afterEach(cleanup);
 
-function makeAgent(agentId: string, status: 'running' | 'done', agentType = 'coder'): SubAgent {
+function makeAgent(
+  agentId: string,
+  status: 'running' | 'done',
+  agentType = 'coder',
+  nested?: NestedSubAgent[],
+): SubAgent {
   return {
     agentId,
     toolUseId: null,
@@ -32,6 +37,7 @@ function makeAgent(agentId: string, status: 'running' | 'done', agentType = 'cod
     description: null,
     status,
     messages: [],
+    ...(nested ? { nested } : {}),
   };
 }
 
@@ -128,5 +134,117 @@ describe('SubAgentStrip', () => {
     const pills = container.querySelectorAll<HTMLElement>('.subagent-pill');
     expect(pills).toHaveLength(1);
     expect(pills[0].getAttribute('data-status')).toBe('running');
+  });
+
+  // ── SYNC / persist: `working` keeps a finished agent visible until the
+  // parent turn itself ends, not just until nothing is running. ──────────
+  it('keeps a finished agent visible while working=true, then clears once working=false and nothing is running', () => {
+    const { container, rerender } = render(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'running')],
+        onOpenAgent: () => {},
+        working: true,
+      }),
+    );
+    expect(container.querySelector('.subagent-strip')).not.toBeNull();
+
+    // a1 finishes, but the parent turn (`working`) is still active.
+    rerender(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'done')],
+        onOpenAgent: () => {},
+        working: true,
+      }),
+    );
+    const pill = container.querySelector<HTMLElement>('.subagent-pill');
+    expect(pill).not.toBeNull();
+    expect(pill!.getAttribute('data-status')).toBe('done');
+    expect(pill!.querySelector('.sa-dot')?.getAttribute('data-status')).toBe('done');
+    expect(container.querySelector('.subagent-strip')).not.toBeNull();
+
+    // The parent turn ends and nothing is running — now it clears.
+    rerender(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'done')],
+        onOpenAgent: () => {},
+        working: false,
+      }),
+    );
+    expect(container.querySelector('.subagent-strip')).toBeNull();
+  });
+
+  it('existing (no `working` prop) callers keep clearing the instant nothing is running', () => {
+    const { container, rerender } = render(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'running')],
+        onOpenAgent: () => {},
+      }),
+    );
+    expect(container.querySelector('.subagent-strip')).not.toBeNull();
+
+    rerender(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'done')],
+        onOpenAgent: () => {},
+      }),
+    );
+    expect(container.querySelector('.subagent-strip')).toBeNull();
+  });
+
+  // ── NESTED: a nested-agent row renders above the parent row. ───────────
+  it('renders a nested-agent row that precedes the parent .subagent-pills row in DOM order', () => {
+    const { container } = render(
+      createElement(SubAgentStrip, {
+        subagents: [
+          makeAgent('a1', 'running', 'coder', [{ agentId: 'c1', agentType: 'reviewer', model: null }]),
+        ],
+        onOpenAgent: () => {},
+      }),
+    );
+
+    const strip = container.querySelector('.subagent-strip');
+    expect(strip).not.toBeNull();
+
+    const nestedRow = strip!.querySelector('.subagent-pills-nested');
+    expect(nestedRow).not.toBeNull();
+    expect(nestedRow!.querySelector('.subagent-pill-nested')?.textContent).toContain('reviewer');
+
+    const pillsRows = strip!.querySelectorAll(':scope > .subagent-pills');
+    expect(pillsRows).toHaveLength(2);
+    expect(pillsRows[0]).toBe(nestedRow);
+    expect(pillsRows[0].classList.contains('subagent-pills-nested')).toBe(true);
+    expect(pillsRows[1].classList.contains('subagent-pills-nested')).toBe(false);
+  });
+
+  it('does not render a nested row when no visible agent has nested children', () => {
+    const { container } = render(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'running')],
+        onOpenAgent: () => {},
+      }),
+    );
+    expect(container.querySelector('.subagent-pills-nested')).toBeNull();
+  });
+
+  // ── DONE-DOT: the testable contract for the done pill's dot. ────────────
+  it('carries data-status="done" on both the pill and its .sa-dot when finished', () => {
+    const { container, rerender } = render(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'running', 'coder'), makeAgent('a2', 'running', 'reviewer')],
+        onOpenAgent: () => {},
+      }),
+    );
+
+    rerender(
+      createElement(SubAgentStrip, {
+        subagents: [makeAgent('a1', 'done', 'coder'), makeAgent('a2', 'running', 'reviewer')],
+        onOpenAgent: () => {},
+      }),
+    );
+
+    const pills = container.querySelectorAll<HTMLElement>('.subagent-pill');
+    const donePill = [...pills].find((p) => p.textContent?.includes('coder'));
+    expect(donePill?.getAttribute('data-status')).toBe('done');
+    expect(donePill?.querySelector('.sa-dot')?.getAttribute('data-status')).toBe('done');
   });
 });

@@ -988,6 +988,19 @@ body.is-external-display .rail {
     padding-left: 0;
     justify-content: flex-end;
   }
+  /* The artifacts toggle is hoisted onto the title row (outside the
+     collapsible bar) specifically so it stays reachable on mobile — give it
+     a real ≥44px tap target there instead of the 30px shared by every other
+     .detail-action icon. Compound selector (.detail-action AND
+     .detail-action--artifacts, not just the latter alone) — same trick as
+     `.detail-head .detail-actions` above: a bare single-class selector here
+     ties in specificity with the base `.detail-action { min-width: 30px }`
+     rule declared later in this file, and loses the cascade on source order. */
+  .detail-action.detail-action--artifacts {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
 }
 /* Desktop: the ⋯ toggle is mobile-only clutter — there's room for the action
    bar to just always be there. Hide the toggle and force .detail-actions
@@ -995,7 +1008,12 @@ body.is-external-display .rail {
    (data-collapsed can't strand the bar hidden with no way to reopen it once
    the toggle that reopens it is itself hidden). */
 @media (min-width: 760px) {
-  .detail-actions-toggle {
+  /* Compound selector (.detail-action.detail-actions-toggle) so this beats the
+     later `.detail-action { display: inline-flex }` base rule — a bare
+     `.detail-actions-toggle` ties specificity (0,1,0) and LOSES on source order,
+     which is why the ⋯ was still showing on desktop. With it gone, the hoisted
+     artifacts button sits immediately beside the rename button. */
+  .detail-action.detail-actions-toggle {
     display: none;
   }
   .detail-actions[data-collapsed='true'] {
@@ -1373,6 +1391,10 @@ body.is-external-display .rail {
   gap: calc(16px * var(--ui-scale)); /* more breathing room between turns; scales with font */
   -webkit-overflow-scrolling: touch;
 }
+/* Extra bottom room while the sub-agent strip / Working indicator shows, so the
+   last transcript line clears the overhanging pills at max scroll (Thread adds
+   `.has-subagents` only when agents are present — no phantom padding otherwise). */
+.thread-viewport.has-subagents { padding-bottom: 64px; }
 .thread-empty {
   margin: auto;
   color: var(--text-faint);
@@ -1694,6 +1716,21 @@ body.is-external-display .rail {
    discoverable-but-deliberate rather than an accidental click target. */
 .act-btn-danger:hover,
 .act-btn-danger:focus-visible {
+  background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
+  color: var(--danger, #e5484d);
+}
+/* Force-dismiss on a still-queued/sent bubble: icon-only, deliberately
+   quieter than .act-btn-danger at rest since most queued sends resolve in
+   well under a second — it should read as an escape hatch for the rare stuck
+   case, not compete with the normal "Queued" status. Sharpens to the same
+   danger tint on hover/focus, matching Discard's affordance. */
+.act-btn-dismiss {
+  padding: 2px 5px;
+  opacity: 0.55;
+}
+.act-btn-dismiss:hover,
+.act-btn-dismiss:focus-visible {
+  opacity: 1;
   background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
   color: var(--danger, #e5484d);
 }
@@ -2708,6 +2745,9 @@ body.is-external-display .composer {
   position: relative;
   z-index: 1;
 }
+/* Only the topmost pill row overhangs into the transcript; when a nested row is
+   present it is the top row, and the parent row below it sits at normal flow. */
+.subagent-strip > .subagent-pills:not(:first-child) { margin-top: 0; }
 .subagent-pill { flex: 0 0 auto; }
 /* Individual pill */
 .subagent-pill {
@@ -2786,6 +2826,15 @@ body.is-external-display .composer {
 .subagent-pill[data-status='done'] {
   border-color: color-mix(in oklch, var(--green) 60%, var(--line));
 }
+/* Nested (child) sub-agents — a lighter, non-interactive pill row above their
+   parent. No animated ring (liveness isn't confirmed for nested children). */
+.subagent-pill-nested {
+  font-size: calc(var(--txt-meta) - 1px);
+  padding: 3px 8px 3px 7px;
+  cursor: default;
+  opacity: 0.9;
+}
+.subagent-pill-nested::before { content: none; }
 /* Agent name label */
 .subagent-pill-name {
   letter-spacing: -0.01em;
@@ -5783,6 +5832,16 @@ select.config-input {
     margin-left: auto;
     margin-right: auto;
   }
+  /* Task 4: `width="medium"` — same idea as --wide above, narrower ceiling
+     for single-panel/narrower presentation content that still wants more
+     room than the 640px default but shouldn't go full wide. Same
+     max(640px, ...) floor rationale (see --wide's comment above) so medium
+     never renders narrower than the default cap either. */
+  .embed-app-frame--medium {
+    max-width: max(640px, min(70%, 1100px));
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 /* ── Delivery-payload cards (remarkDelivery, lib/delivery.ts) ──────────────
@@ -6042,6 +6101,75 @@ select.config-input {
 .embed-app-pin-btn-active {
   opacity: 1;
   color: var(--accent);
+}
+
+/* Task 1: "cover transcript" fullscreen affordance — mirrors
+   .embed-app-pin-btn's quiet-corner idiom exactly, next slot over
+   (top:6/left:34 vs pin's top:6/left:6) so the two never overlap in any
+   chrome state, same relationship .embed-app-fullscreen-btn already has to
+   .embed-app-reload-btn on the opposite side. */
+.embed-app-expand-btn {
+  position: absolute;
+  top: 6px;
+  left: 34px; /* corner slot next to the pin button (left: 6px) */
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-1) 82%, transparent);
+  color: var(--text-faint);
+  opacity: 0.55;
+  transition:
+    opacity var(--ease) 0.15s,
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s;
+}
+.embed-app-expand-btn:hover,
+.embed-app-expand-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-1);
+  color: var(--text);
+}
+.embed-app-expand-btn-labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.embed-app-expand-btn-active {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Task 1: bottom-right drag-resize grip for a healthy, non-expanded,
+   inline-transcript app embed (AppFrameLayer.tsx's beginResize/
+   AppResizeHandle) — an L-shaped corner mark, quiet at rest like the
+   reload/pin/fullscreen trio above, matching the never-remount seam: this
+   only ever repositions the placeholder + hoisted iframe via direct style
+   writes, never a React remount. */
+.embed-app-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 2;
+  opacity: 0.5;
+  border-right: 2px solid var(--text-faint);
+  border-bottom: 2px solid var(--text-faint);
+  border-radius: 0 0 4px 0;
+  transition: opacity var(--ease) 0.15s;
+}
+.embed-app-resize-handle:hover {
+  opacity: 1;
+  border-color: var(--text);
+}
+
+/* Task 1: an expanded (fullscreen-over-transcript) hoist is a full-viewport
+   overlay with nothing behind it but the rest of the page — give it an
+   opaque background so it reads as a real cover layer instead of a
+   transparent iframe box floating over whatever happened to be underneath. */
+.embed-app-hoist[data-embed-app-fullscreen='true'] {
+  background: var(--bg-1);
 }
 
 /* Phase C, C2: the "active in panel ↗" chip — replaces a non-host (shadow)
@@ -6499,6 +6627,29 @@ select.config-input {
   overflow-y: auto;
   min-height: 0;
 }
+/* Task 3: onboarding explainer for an open-but-empty gallery — same padding
+   rhythm as .artifact-gallery-list (var(--s-1) outer via the parent's flex
+   column) but centered prose instead of a row list, so "nothing here yet"
+   reads as an intentional empty state, not a broken popover. */
+.artifact-gallery-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-4) var(--s-3);
+  text-align: center;
+}
+.artifact-gallery-empty-title {
+  margin: 0;
+  font-size: var(--txt-transcript);
+  font-weight: 600;
+  color: var(--text);
+}
+.artifact-gallery-empty-body {
+  margin: 0;
+  font-size: var(--txt-meta);
+  color: var(--text-dim);
+  line-height: 1.45;
+}
 .artifact-gallery-row {
   display: flex;
   align-items: center;
@@ -6746,6 +6897,21 @@ select.config-input {
 .artifact-close-all:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* Mobile fix: the sheet now opens full-screen by default (see
+   SNAP_MOBILE_OPEN in ArtifactPanel.tsx), so the close button is the primary
+   obvious way out — give it a real ≥44px tap target and a visible pill
+   background instead of the quiet 30px icon-only desktop treatment. */
+.artifact-panel[data-mode='sheet'] .artifact-close-all {
+  height: 44px;
+  min-width: 44px;
+  background: var(--bg-hover);
+  border-color: var(--line);
+}
+.artifact-panel[data-mode='sheet'] .artifact-close-all:hover,
+.artifact-panel[data-mode='sheet'] .artifact-close-all:active {
+  background: color-mix(in oklch, var(--accent) 14%, var(--bg-hover));
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
 }
 
 /* D4: per-tab app version picker — a quiet inline select in the panel head,

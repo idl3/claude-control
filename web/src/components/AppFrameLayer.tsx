@@ -5,8 +5,9 @@ import { isValidAppErrorBeacon } from '../lib/appBeacon';
 import { resolveMediaUrl } from '../lib/mediaUrl';
 import { appNameFromUrl } from '../lib/appVersion';
 import { appArtifactId, useArtifactPanel } from './ArtifactContext';
-import { AppReloadButton, AppPinButton, AppFullscreenButton } from './EmbeddedApp';
+import { AppReloadButton, AppPinButton, AppFullscreenButton, AppExpandButton, AppResizeHandle } from './EmbeddedApp';
 import { useIsNarrow } from '../hooks/useIsNarrow';
+import { clampAppSize, saveAppSize } from '../lib/appSize';
 
 /** Phase C, C3: title for a freshly-pinned app artifact — last path segment
  * of its url, falling back to the full url for a bare filename or a
@@ -332,18 +333,33 @@ export function shouldElevateHoist(
 // (899/900) and `.lightbox` (1000).
 const STUDIO_HOIST_Z_INDEX = 310;
 
+// Task 1 (resize/fullscreen overhaul): a slot the user expanded to cover the
+// transcript (AppExpandButton, expandedRef below — a SEPARATE control from
+// the studio-open fullscreen above, see the module doc comment) must paint
+// above EVERYTHING studio/panel can, including an open Studio overlay itself
+// (310) — expanding while Studio happens to be open should still win, and a
+// transcript-context slot never elevates otherwise (shouldElevateHoist), so
+// this is the only way a transcript embed ever reaches this stacking tier.
+// 320 clears STUDIO_HOIST_Z_INDEX with headroom while staying well below
+// `.sa-backdrop`/`.sa-panel` (899/900) and `.lightbox` (1000) — same envelope
+// every other tier in this file respects.
+const FULLSCREEN_HOIST_Z_INDEX = 320;
+
 /**
- * Combines shouldElevateHoist's panel-sheet gate (210) with the studio case
- * (310, unconditional) into the single zIndex value the render below needs.
- * Studio is checked first and short-circuits: a studio host must never fail
- * to clear its own overlay, so it can't be subject to shouldElevateHoist's
- * panel-only guard.
+ * Combines shouldElevateHoist's panel-sheet gate (210), the studio case (310,
+ * unconditional), and the Task 1 expanded-fullscreen case (320, unconditional,
+ * checked FIRST) into the single zIndex value the render below needs.
+ * `fullscreen` defaults to false so every existing 3-arg call site (tests
+ * included) is unaffected. Fullscreen short-circuits ahead of studio: an
+ * expanded slot must never fail to clear a concurrently-open Studio overlay.
  */
 export function hoistZIndex(
   context: 'panel' | 'transcript' | 'studio',
   narrow: boolean,
   elevate: boolean,
+  fullscreen = false,
 ): number | undefined {
+  if (fullscreen) return FULLSCREEN_HOIST_Z_INDEX;
   if (context === 'studio') return STUDIO_HOIST_Z_INDEX;
   return shouldElevateHoist(context, narrow, elevate) ? PANEL_SHEET_HOIST_Z_INDEX : undefined;
 }
@@ -414,6 +430,11 @@ const RELOAD_CORNER_OFFSET = 6;
 // button's own (already-clip-clamped) corner inset, so the two never
 // overlap at any clip state.
 const FULLSCREEN_CORNER_EXTRA_RIGHT = 34 - RELOAD_CORNER_OFFSET;
+// Task 1: mirrors FULLSCREEN_CORNER_EXTRA_RIGHT on the opposite (pin) side —
+// matches .embed-app-expand-btn's CSS `left: 34px` (the slot next to the pin
+// button's own `left: 6px`), so the expand ("cover transcript") button never
+// overlaps the pin button at any clip state.
+const EXPAND_CORNER_EXTRA_LEFT = 34 - RELOAD_CORNER_OFFSET;
 
 type ChromeClamp = {
   cornerTop: number;
@@ -590,7 +611,10 @@ function clipEquals(a: ClipInsets | null, b: ClipInsets | null): boolean {
   return a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
 }
 
-function viewportRect(): RectLike {
+// Exported (Task 1) so the render body and syncPositions() can source an
+// expanded slot's rect from the same place as the fallback ancestor rect
+// tick() already uses for an unhosted/off-pane placeholder.
+export function viewportRect(): RectLike {
   return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
 }
 
@@ -905,9 +929,73 @@ export function AppFrameLayer() {
   const scrollStreakRef = useRef<ScrollStreak>({ count: 0, lastT: 0 });
   const scrollFadedRef = useRef(false);
   const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Task 1: urls currently expanded to cover the transcript. A ref (not
+  // state) for the same reason every other imperative-DOM-sync value in this
+  // file is a ref — read live inside the mount-once effect's closures
+  // (syncPositions, the Escape-key listener) without a closure trap (invariant
+  // B) — but ALSO read directly in the render body below (a plain ref read,
+  // not a subscription, so it only reflects the latest value as of whichever
+  // render happens to run; toggleExpand forces one explicitly via
+  // forceRender, same idiom tick() already uses for its own ref-backed state).
+  const expandedRef = useRef<Set<string>>(new Set());
   const { setActive, open, artifacts } = useArtifactPanel();
   // Mobile-sheet fix: see PANEL_SHEET_HOIST_Z_INDEX's doc comment.
   const narrow = useIsNarrow();
+
+  // Task 1: toggle one url's expanded (fullscreen-over-transcript) state.
+  // Pure ref mutation + a forced re-render — no CustomEvent needed (unlike
+  // resize below) since the toggle target lives in this same component and
+  // both the trigger (AppExpandButton's onClick) and the consumer (the render
+  // body + syncPositions()) are wired directly here.
+  function toggleExpand(url: string) {
+    if (expandedRef.current.has(url)) expandedRef.current.delete(url);
+    else expandedRef.current.add(url);
+    forceRender((n) => n + 1);
+  }
+
+  // Task 1: drag-resize a transcript embed's reserved box. Reads the
+  // placeholder DOM node straight off the slot (same node syncPositions()
+  // measures every frame) and writes to it directly — the existing tick()/
+  // syncPositions() loop then naturally re-measures it on its next pass, so
+  // no new geometry/positioning logic is needed for the hoisted iframe
+  // itself. rAF-throttled so a fast drag doesn't fire a React state update
+  // (via the cockpit:app-resize listener in EmbeddedApp.tsx) on every single
+  // pointermove. EmbeddedApp.tsx's placeholder is the one thing that does NOT
+  // get this direct write for free — its own `style` prop would otherwise
+  // stomp it back on the next unrelated re-render, hence the event.
+  function beginResize(url: string, start: React.PointerEvent<HTMLSpanElement>) {
+    start.preventDefault();
+    start.stopPropagation();
+    const hostEl = slotsRef.current.get(url)?.hostEl;
+    if (!hostEl) return;
+    const startRect = hostEl.getBoundingClientRect();
+    const startX = start.clientX;
+    const startY = start.clientY;
+    let raf = 0;
+    let latest = clampAppSize(startRect.width, startRect.height);
+
+    function apply() {
+      raf = 0;
+      hostEl!.style.width = `${latest.width}px`;
+      hostEl!.style.height = `${latest.height}px`;
+      window.dispatchEvent(
+        new CustomEvent('cockpit:app-resize', { detail: { url, width: latest.width, height: latest.height } }),
+      );
+    }
+    function onMove(ev: PointerEvent) {
+      latest = clampAppSize(startRect.width + (ev.clientX - startX), startRect.height + (ev.clientY - startY));
+      if (!raf) raf = requestAnimationFrame(apply);
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (raf) cancelAnimationFrame(raf);
+      apply();
+      saveAppSize(url, latest);
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  }
 
   // Phase C, C3: pin-to-panel — always an idempotent open({..., pinned:
   // true}), never a toggle-to-unpin (see AppPinButton's doc comment). `open`
@@ -1284,6 +1372,11 @@ export function AppFrameLayer() {
         if (presentUrls.has(url)) continue;
         if (now - slot.lastSeen > GRACE_MS) {
           slotsRef.current.delete(url);
+          // Task 1: tidy up an expanded slot that's genuinely gone (session
+          // switch, transcript unmount) rather than leaking its url in
+          // expandedRef forever — bounded (a handful of strings) either way,
+          // this is just hygiene.
+          expandedRef.current.delete(url);
           changed = true;
         } else if (slot.rect !== null) {
           slot.rect = null; // hide until it reappears or the grace window drops it
@@ -1347,6 +1440,25 @@ export function AppFrameLayer() {
     // present," exactly as before this fix.
     function syncPositions() {
       for (const [url, slot] of slotsRef.current) {
+        // Task 1: an expanded (fullscreen-over-transcript) slot ignores its
+        // placeholder's rect entirely and pins to the viewport instead — a
+        // window resize is the only thing that needs to re-sync it (a
+        // transcript scroll underneath must NOT move it). `continue` before
+        // touching slot.rect/paneHidden/clip so the pre-expand placeholder
+        // geometry is exactly what's still there when the user exits.
+        if (expandedRef.current.has(url)) {
+          const el = hoistElsRef.current.get(url);
+          if (el) {
+            const vr = viewportRect();
+            el.style.transform = hoistTransform(vr, 1);
+            el.style.width = `${vr.width}px`;
+            el.style.height = `${vr.height}px`;
+            el.style.visibility = 'visible';
+            el.style.pointerEvents = 'auto';
+            el.style.removeProperty('clip-path');
+          }
+          continue;
+        }
         const hostEl = slot.hostEl;
         if (!hostEl || !hostEl.isConnected) continue;
         const rect = hostEl.getBoundingClientRect();
@@ -1558,6 +1670,20 @@ export function AppFrameLayer() {
     }
     window.addEventListener('message', onMessage);
 
+    // Task 1: Escape exits every expanded (fullscreen-over-transcript) slot
+    // at once — mirrors the platform convention (video/image fullscreen,
+    // Studio's own overlay) rather than requiring a click back on the
+    // expand button. Global window listener (not per-slot) since only one
+    // thing should ever "own" Escape at a time and expandedRef is itself a
+    // single shared set.
+    function onKeyDown(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape') return;
+      if (expandedRef.current.size === 0) return;
+      expandedRef.current.clear();
+      forceRender((n) => n + 1);
+    }
+    window.addEventListener('keydown', onKeyDown);
+
     // Cheap initial guess (raw match, not the hidden-ancestor-filtered
     // "present" count tick() computes) — good enough to decide whether to
     // schedule the first tick at all; tick() re-evaluates precisely and
@@ -1572,6 +1698,7 @@ export function AppFrameLayer() {
       window.removeEventListener('cockpit:app-reload', onAppReload);
       window.removeEventListener('cockpit:media-app-changed', onMediaAppChanged);
       window.removeEventListener('message', onMessage);
+      window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('scroll', handleScroll, { capture: true });
       window.removeEventListener('resize', syncPositions);
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -1616,21 +1743,41 @@ export function AppFrameLayer() {
         </button>
       ))}
       {slots.map(([url, slot]) => {
-        const r = slot.rect;
+        // Task 1: an expanded slot covers the viewport regardless of where
+        // its placeholder actually is (or whether it's currently scrolled
+        // out of view) — everything below sources its geometry from
+        // viewportRect() instead of the placeholder rect while expanded,
+        // exactly mirroring syncPositions()'s own expanded special-case so
+        // the imperative (scroll/resize) and declarative (render) paths
+        // never disagree about where an expanded slot sits.
+        const isExpanded = expandedRef.current.has(url);
+        const r = isExpanded ? viewportRect() : slot.rect;
         // FIX 1: hidden whenever the placeholder isn't currently found
         // (pre-existing grace-hide behavior) OR it's found but scrolled
         // fully outside its pane (paneHidden) — either way, no eviction.
-        const hidden = !r || slot.paneHidden;
+        // An expanded slot is never hidden — it owns the whole viewport.
+        const hidden = isExpanded ? false : !r || slot.paneHidden;
         // Mobile-UX fix #3: the logical hoist size + display scale for this
         // slot — see hoistGeometry's doc comment. `{ width: 1, height: 1,
         // scale: 1 }` when there's no rect yet mirrors the pre-fix-3
-        // `r ? r.width : 1` fallback below exactly.
-        const geom = r ? hoistGeometry(r, slot.logicalWidth, slot.logicalHeight) : { width: 1, height: 1, scale: 1 };
-        const clipPath = hoistClipPath(r, slot.paneHidden, slot.clip, geom.scale);
+        // `r ? r.width : 1` fallback below exactly. Expanded always renders
+        // at native 1:1 scale filling the viewport rect — logicalWidth/
+        // logicalHeight (StudioModal device-preset scaling) never apply
+        // here, there is no "device box" to scale down to.
+        const geom = isExpanded && r
+          ? { width: r.width, height: r.height, scale: 1 }
+          : r
+            ? hoistGeometry(r, slot.logicalWidth, slot.logicalHeight)
+            : { width: 1, height: 1, scale: 1 };
+        // No clip while expanded — an expanded slot is never inside a
+        // scrollable pane, it's a full-viewport overlay.
+        const clipPath = isExpanded ? undefined : hoistClipPath(r, slot.paneHidden, slot.clip, geom.scale);
         // B audit follow-up (CP3-B, FIX 1): see clampChromeInsets' doc
         // comment — clamps the corner reload button and the crashed strip
         // into the visible slice of a partially-clipped placeholder.
-        const chrome = clampChromeInsets(slot.clip);
+        // clampChromeInsets(null) while expanded → identity insets, since
+        // there's no clip to account for.
+        const chrome = clampChromeInsets(isExpanded ? null : slot.clip);
         // Phase C, C3: whether this url is already pinned — drives the pin
         // button's filled-icon/aria-pressed visual only (see AppPinButton's
         // doc comment for why the click handler itself never toggles).
@@ -1651,6 +1798,13 @@ export function AppFrameLayer() {
         // both are still redundant/self-referential in-studio regardless of
         // crash state.
         const isStudioHost = slot.context === 'studio';
+        // Task 1: "cover transcript" fullscreen and resize both only make
+        // sense for a slot actually hosted inline in the transcript flow — a
+        // panel-hosted slot already fills its own sheet (there's no
+        // transcript visible behind it to cover), and studio is already its
+        // own fullscreen-ish modal. Matches EmbeddedApp.tsx's own
+        // `context !== 'transcript'` gate on the resize-follow effect.
+        const canExpand = slot.context === 'transcript';
         return (
           <span
             key={url}
@@ -1660,6 +1814,7 @@ export function AppFrameLayer() {
             }}
             className="embed-app-hoist"
             data-embed-app-context={slot.context}
+            data-embed-app-fullscreen={isExpanded ? 'true' : undefined}
             style={{
               position: 'fixed',
               // Scroll-lag fix: fixed at 0/0, set once — every reposition
@@ -1676,7 +1831,7 @@ export function AppFrameLayer() {
               visibility: hidden ? 'hidden' : 'visible',
               pointerEvents: hidden ? 'none' : 'auto',
               clipPath,
-              zIndex: hoistZIndex(slot.context, narrow, slot.elevate),
+              zIndex: hoistZIndex(slot.context, narrow, slot.elevate, isExpanded),
             }}
           >
             {slot.crashed ? (
@@ -1711,6 +1866,9 @@ export function AppFrameLayer() {
                       onClick={() => onPinClick(url, slot.height)}
                     />
                     <AppFullscreenButton url={url} quiet={false} />
+                    {canExpand && (
+                      <AppExpandButton expanded={isExpanded} quiet={false} onClick={() => toggleExpand(url)} />
+                    )}
                   </>
                 )}
               </div>
@@ -1735,6 +1893,14 @@ export function AppFrameLayer() {
                       quiet={false}
                       style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
                     />
+                    {canExpand && (
+                      <AppExpandButton
+                        expanded={isExpanded}
+                        quiet={false}
+                        onClick={() => toggleExpand(url)}
+                        style={{ top: chrome.cornerTop, left: chrome.cornerLeft + EXPAND_CORNER_EXTRA_LEFT }}
+                      />
+                    )}
                   </>
                 )}
               </>
@@ -1762,7 +1928,20 @@ export function AppFrameLayer() {
                       url={url}
                       style={{ top: chrome.cornerTop, right: chrome.cornerRight + FULLSCREEN_CORNER_EXTRA_RIGHT }}
                     />
+                    {canExpand && (
+                      <AppExpandButton
+                        expanded={isExpanded}
+                        onClick={() => toggleExpand(url)}
+                        style={{ top: chrome.cornerTop, left: chrome.cornerLeft + EXPAND_CORNER_EXTRA_LEFT }}
+                      />
+                    )}
                   </>
+                )}
+                {/* Task 1: resize only makes sense for a healthy, non-expanded,
+                    inline-transcript embed — an expanded (fullscreen) slot
+                    already fills the viewport, nothing to drag. */}
+                {canExpand && !isExpanded && (
+                  <AppResizeHandle onPointerDown={(ev) => beginResize(url, ev)} />
                 )}
               </>
             ) : (
