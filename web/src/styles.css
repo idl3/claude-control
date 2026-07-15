@@ -8984,7 +8984,7 @@ select.config-input {
 
 /* --- olam archived (collapsed) section — item 3 --- */
 .remote-archived-toggle {
-  display: flex; align-items: center; gap: 6px; width: 100%;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 4px 10px 4px 24px; font-size: 11px; color: var(--muted, #888);
   background: none; border: none; cursor: pointer; text-align: left;
 }
@@ -8993,7 +8993,7 @@ select.config-input {
 
 /* --- olam degraded (log-tail-only) streaming banner --- */
 .olam-degraded-banner {
-  padding: 6px 12px;
+  padding: 8px;
   font-size: 12px;
   color: #ff9500;
   background: rgba(255, 149, 0, 0.10);
@@ -9006,8 +9006,8 @@ select.config-input {
 .olam-resume-banner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 8px;
   font-size: 12px;
   color: #ff9500;
   background: rgba(255, 149, 0, 0.10);
@@ -9095,7 +9095,7 @@ select.config-input {
 }
 .olam-terminal-panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 10px; font-size: 11px; color: var(--muted, #888);
+  padding: 4px 8px; font-size: 11px; color: var(--muted, #888);
   border-bottom: 1px solid rgba(127, 127, 127, 0.14);
   flex: 0 0 auto;
 }
