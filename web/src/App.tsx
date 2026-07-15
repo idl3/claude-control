@@ -1124,6 +1124,30 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
+  // Subtle cosmic parallax: the transcript scroll nudges the starfield's
+  // background-position via --cosmos-shift. Shifting a repeating tile never
+  // reveals an edge and leaves the drift transform free to animate. One
+  // capture-phase listener catches whichever .thread-viewport is mounted, so
+  // it survives session switches. Reduced-motion → no listener at all.
+  const cosmosRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    let raf = 0;
+    const onScroll = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t?.classList?.contains('thread-viewport') || raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        cosmosRef.current?.style.setProperty('--cosmos-shift', `${-t.scrollTop * 0.06}px`);
+      });
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('scroll', onScroll, { capture: true });
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
   // streaming, OR reflowing message scrolls to the latest — no Ctrl+. needed.
   // `pinned` is simply "are we at the bottom?", recomputed on every scroll: a
@@ -1940,7 +1964,9 @@ function AppInner() {
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
-        <div className="cosmos-backdrop" aria-hidden="true" />
+        <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
+          <i className="cosmos-twinkle" />
+        </div>
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
         {pull > 0 || refreshing ? (
