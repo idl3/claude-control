@@ -2577,16 +2577,27 @@ body.is-external-display .composer {
 /* Pill row — wraps when many agents are running */
 .subagent-pills {
   display: flex;
-  flex-wrap: wrap;
+  /* Overflow scrolls horizontally instead of wrapping onto stacked rows — many
+     concurrent agents stay on one swipeable line. */
+  flex-wrap: nowrap;
   gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
 }
+.subagent-pill { flex: 0 0 auto; }
 /* Individual pill */
 .subagent-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 5px 10px 5px 8px;
-  background: color-mix(in oklch, var(--accent) 8%, var(--bg-1));
+  /* Half-submerged: the fill is transparent for the top half so transcript
+     text flows through behind the pill, then only occludes from the midline
+     down — the agent reads as half-hovering up into the thread. Border + label
+     stay opaque (they aren't `background`). */
+  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 8%, var(--bg-1)) 70%);
   border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--line));
   border-radius: 999px;
   cursor: pointer;
@@ -2598,7 +2609,7 @@ body.is-external-display .composer {
     box-shadow var(--ease) 0.13s;
 }
 .subagent-pill:hover {
-  background: color-mix(in oklch, var(--accent) 16%, var(--bg-1));
+  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 16%, var(--bg-1)) 70%);
   border-color: color-mix(in oklch, var(--accent) 50%, var(--line));
 }
 .subagent-pill:focus-visible {
@@ -2607,7 +2618,7 @@ body.is-external-display .composer {
 }
 /* Active pill — currently viewed agent */
 .subagent-pill[data-active='true'] {
-  background: color-mix(in oklch, var(--accent) 20%, var(--bg-1));
+  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 20%, var(--bg-1)) 70%);
   border-color: color-mix(in oklch, var(--accent) 70%, var(--line));
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 25%, transparent);
 }
