@@ -4005,7 +4005,7 @@ body.is-external-display .composer {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   background: var(--bg);
   border: 1px solid var(--line);
