@@ -51,12 +51,14 @@ const FIXTURE_CONFIG: ControlConfig = {
   externalFontSize: 0,
   projectDirs: [],
   restartSupported: false,
+  skipPermissions: true,
 };
 
 const FIXTURE_MODELS: ModelsInfo = {
   machine: { ramGB: 32, arch: 'arm64', platform: 'darwin', appleSilicon: true },
   mlxModels: [{ id: 'qwen-7b', label: 'Qwen 7B', sizeGB: 4, minRamGB: 8, installed: true }],
   claudeModels: [{ id: 'claude-sonnet', label: 'Sonnet' }],
+  codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }],
   recommendedMlxModel: 'qwen-7b',
   recommendedClaudeModel: 'claude-sonnet',
 };
@@ -188,6 +190,7 @@ describe('ConfigModal — Save persists the full payload regardless of active se
         'transcriptFontSize',
         'externalFontSize',
         'projectDirs',
+        'skipPermissions',
       ].sort(),
     );
     expect(body.defaultCwd).toBe('/Users/dev/other-project'); // the edit survived the section switch
@@ -210,6 +213,38 @@ describe('ConfigModal — General section: live preview', () => {
 
     fireEvent.change(select, { target: { value: '0' } });
     expect(previewMsg.style.fontSize).toBe('');
+  });
+});
+
+describe('ConfigModal — Harness section: skip permission prompts toggle', () => {
+  it('defaults to checked (ON) when the server config omits skipPermissions', async () => {
+    mockApi({ ...FIXTURE_CONFIG, skipPermissions: undefined as unknown as boolean });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Harness/ }));
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: /Skip permission prompts/,
+    }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
+
+  it('reflects skipPermissions: false from the server, and saving after unchecking sends false', async () => {
+    mockApi({ ...FIXTURE_CONFIG, skipPermissions: false });
+    const { onToast } = await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Harness/ }));
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: /Skip permission prompts/,
+    }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onToast).toHaveBeenCalledWith('Config saved', 'ok'));
+    const body = saveConfigMock.mock.calls[0][0] as Partial<ControlConfig>;
+    expect(body.skipPermissions).toBe(true);
   });
 });
 

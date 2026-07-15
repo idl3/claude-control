@@ -24,7 +24,7 @@ import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods 
 import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
-import { StopIcon } from './icons';
+import { StopIcon, BotIcon } from './icons';
 import { AskInline, type ActivePrompt } from './AskInline';
 import { composerHighlightSegments } from '../lib/composerHighlight';
 
@@ -2190,6 +2190,24 @@ export function Composer({
               />
               <span className="composer-subagent-label">Dispatch task in sub-agent</span>
             </label>
+          ) : null}
+          {/* Mobile alternative to the checkbox+label toggle above: a compact
+              icon-only button, breakpoint-gated in CSS (only one of the two
+              is visible at a given viewport width — see .composer-subagent-btn
+              in styles.css). Same subAgentMode state, same ⌘D hotkey. */}
+          {!terminal && !voice ? (
+            <button
+              type="button"
+              className={`composer-subagent-btn${subAgentMode ? ' composer-subagent-btn--on' : ''}`}
+              aria-label="Dispatch task in sub-agent"
+              aria-pressed={!!subAgentMode}
+              data-hotkey="⌘D"
+              title={subAgentMode ? 'Sub-agent on — tap to disable (⌘D)' : 'Sub-agent off — tap to enable (⌘D)'}
+              disabled={disabled}
+              onClick={() => onSubAgentModeChange?.(!subAgentMode)}
+            >
+              <BotIcon size={16} />
+            </button>
           ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal && !voice ? (
