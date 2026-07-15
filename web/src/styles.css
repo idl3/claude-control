@@ -6019,9 +6019,14 @@ select.config-input {
 
 /* ── Artifact gallery ─────────────────────────────────────────────
    Floating tray of the session's distinct embedded micro-apps, derived
-   from the transcript (no persistence). Absolutely positioned within
-   .detail-split like .transcript-search, so it overlays the thread
-   instead of competing with .thread-root/.artifact-panel for flex width. */
+   from the transcript (no persistence for the row data itself). Absolutely
+   positioned within .detail-split like .transcript-search, so it overlays
+   the thread instead of competing with .thread-root/.artifact-panel for
+   flex width — which is exactly why the row list is collapsed by default
+   behind a head toggle button: a compact tap affordance that never covers
+   the transcript or composer unless the user opts in, especially on
+   mobile. Open/closed state is a best-effort localStorage persistence
+   (see ArtifactGallery.tsx). */
 .artifact-gallery {
   position: absolute;
   top: 10px;
@@ -6041,14 +6046,59 @@ select.config-input {
   overflow: hidden;
 }
 .artifact-gallery-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   flex: 0 0 auto;
+  width: 100%;
   padding: var(--s-2) var(--s-3);
+  font: inherit;
   font-size: var(--txt-meta);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s var(--ease), color 0.12s var(--ease);
+}
+.artifact-gallery-head:hover {
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+.artifact-gallery-head:active {
+  background: var(--surface-3);
+}
+.artifact-gallery-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.artifact-gallery-head[aria-expanded='true'] {
+  color: var(--text-dim);
   border-bottom: 1px solid var(--line);
+}
+.artifact-gallery-head-label {
+  flex: 1 1 auto;
+}
+.artifact-gallery-head-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.artifact-gallery-chevron {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  transition: transform 0.16s var(--ease);
+}
+.artifact-gallery-chevron[data-expanded='true'] {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .artifact-gallery-chevron {
+    transition: none;
+  }
 }
 .artifact-gallery-list {
   list-style: none;
