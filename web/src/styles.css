@@ -249,9 +249,9 @@ body {
 .hud {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   height: var(--hud-h);
-  padding: 0 12px;
+  padding: 0 14px;
   padding-top: var(--safe-top);
   background: var(--glass-panel);
   backdrop-filter: blur(var(--glass-blur));
@@ -856,6 +856,32 @@ body.is-external-display .rail {
   padding: 2px 8px;
   cursor: pointer;
   flex: 0 0 auto;
+}
+/* Desktop-only stand-in for .rail-collapse-toggle when the rail is collapsed
+   (see App.tsx) — same visual treatment as that toggle so it reads as its
+   twin rather than a new control. */
+.rail-restore-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 6px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+}
+.rail-restore-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.rail-restore-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .detail-title {
   display: flex;
@@ -4134,8 +4160,8 @@ body.is-external-display .composer {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;

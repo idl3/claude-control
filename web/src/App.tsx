@@ -1619,6 +1619,24 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // ⌘/Ctrl+N opens the New Session draft — same action as clicking the rail's
+  // "+ New session" button — instead of letting the browser open a new
+  // window/tab. Note: a plain browser tab may not let JS preventDefault ⌘N (some
+  // browsers reserve it outright), but this works in the installed/standalone
+  // PWA and any focused window that lets the keydown through, so the handler is
+  // wired regardless.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'n') return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog owns the keys
+      e.preventDefault();
+      openDraft();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openDraft]);
+
   // Detail-head shortcuts (these mirror the header icon buttons + their reveal
   // badges): ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar. (Rename has
   // NO shortcut — ⌘/Ctrl+E is left free; Ctrl+E is end-of-line in the shell.)
@@ -2082,6 +2100,23 @@ function AppInner() {
               >
                 ‹
               </button>
+              {/* Desktop-only: when focus mode (⌘B) has collapsed the rail to 0-width,
+                  its own .rail-collapse-toggle collapses along with it, stranding the
+                  user with only the hotkey to bring it back. Mirror that toggle here so
+                  there's always a visible way back. */}
+              {railCollapsed && !narrow ? (
+                <button
+                  type="button"
+                  className="rail-restore-btn"
+                  aria-label="Show sidebar"
+                  title="Show sidebar (⌘B)"
+                  data-hotkey="⌘B"
+                  data-hotkey-dir="down"
+                  onClick={() => setRailCollapsed(false)}
+                >
+                  <PanelLeftIcon />
+                </button>
+              ) : null}
               <div className="detail-title">
                 {renaming !== null ? (
                   <input
