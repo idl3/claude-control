@@ -4248,7 +4248,17 @@ body.is-external-display .composer {
    a plain border-radius on a padded, inset button would leave a square
    background notch beyond the curve. Inner corners (top, and the two
    touching in the middle) stay at the base 8px — only the true device-edge
-   corner is pronounced. */
+   corner is pronounced.
+   Bottom clearance uses max(), not +: the real home-indicator inset
+   (~34px on a notched phone) already clears the gesture area on its own, so
+   adding a flat cushion on TOP of it (the previous `10px + safe-bottom`)
+   just inflated the pill with dead space below the icon/label. max() picks
+   whichever is larger — the 14px floor only kicks in on non-notched phones
+   that report 0 inset. Both buttons set every padding side explicitly here
+   (rather than leaning on the desktop `.rail-filter`/`.rail-new` shorthand
+   for whichever side isn't overridden) so the touching middle edge lines up
+   at a matching 14px on both sides instead of leaking the desktop 8px/10px
+   asymmetry through. */
 @media (max-width: 759px) {
   .rail-foot {
     align-items: stretch;
@@ -4258,16 +4268,22 @@ body.is-external-display .composer {
   .rail-foot .rail-filter,
   .rail-foot .rail-new {
     height: auto;
-    padding-top: 10px;
-    padding-bottom: calc(10px + var(--safe-bottom));
+    padding-top: 14px;
+    padding-bottom: max(14px, var(--safe-bottom));
   }
   .rail-foot .rail-filter {
     padding-left: 16px;
+    padding-right: 14px;
     border-bottom-left-radius: 24px;
   }
   .rail-foot .rail-new {
+    padding-left: 14px;
     padding-right: 16px;
     border-bottom-right-radius: 24px;
+    /* Hairline seam at the touching edge: a deliberate divider between the
+       two actions instead of two mismatched paddings butting together with
+       no definition. */
+    border-left: 1px solid var(--line);
   }
 }
 /* Sidebar-collapse toggle (⌘B) — desktop-only (mobile swaps the whole rail
