@@ -337,6 +337,17 @@ body {
 }
 .rail {
   width: 100%;
+  /* Explicit height, not just inherited flex stretch: .rail carries its own
+     backdrop-filter below, which promotes it to its own compositing layer.
+     Safari has a known class of bug where a flex item on its own compositing
+     layer (backdrop-filter/transform/will-change) fails to resolve
+     `align-items: stretch` correctly and collapses to content height instead
+     of the parent's cross-size — leaving .rail-foot (this element's last
+     flex child) floating above the true bottom of .app's 100dvh, with a dead
+     band of .app's background showing beneath it. height:100% resolves
+     against .app-body's definite height (a flex-grow child of .app's
+     100dvh) and sidesteps the stretch computation entirely. */
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
