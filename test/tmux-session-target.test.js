@@ -24,16 +24,77 @@ test('listSessions parses name + window count from list-sessions -F output', asy
   const calls = [];
   async function _run(args) {
     calls.push([...args]);
+    // Old-format mock: only the original 2 fields, no group fields at all —
+    // proves the tolerant parse still treats these as standalone sessions.
     return { stdout: 'work\x1f3\nclaude-control\x1f1\n', stderr: '' };
   }
 
   const sessions = await listSessions({ _run });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], ['list-sessions', '-F', '#{session_name}\x1f#{session_windows}']);
+  assert.deepEqual(calls[0], [
+    'list-sessions',
+    '-F',
+    '#{session_name}\x1f#{session_windows}\x1f#{session_group}\x1f#{session_grouped}\x1f#{session_group_size}\x1f#{session_attached}',
+  ]);
   assert.deepEqual(sessions, [
     { name: 'work', windows: 3 },
     { name: 'claude-control', windows: 1 },
+  ]);
+});
+
+test('listSessions collapses a tmux session GROUP into one representative entry', async () => {
+  // Mirrors the real-world bug: 4 linked sessions (session_group="0",
+  // session_grouped=1, session_group_size=4) sharing the same 20 windows,
+  // plus 2 standalone sessions (session_group="", session_grouped=0).
+  const rows = [
+    ['0', '20', '0', '1', '4', '0'],
+    ['_mobile', '20', '0', '1', '4', '0'],
+    // Attached member is NOT alphabetically first — proves attached wins
+    // over the alphabetical tie-break, not just "first in output".
+    ['claude-control & olam', '20', '0', '1', '4', '1'],
+    ['claude-control + olam-agent', '20', '0', '1', '4', '0'],
+    ['cc_14517', '2', '', '0', '1', '0'],
+    ['codex-audit', '2', '', '0', '1', '0'],
+  ];
+  const stdout = rows.map((r) => r.join('\x1f')).join('\n') + '\n';
+  async function _run() {
+    return { stdout, stderr: '' };
+  }
+
+  const sessions = await listSessions({ _run });
+
+  assert.equal(sessions.length, 3);
+  assert.deepEqual(sessions[0], {
+    name: 'claude-control & olam',
+    windows: 20,
+    grouped: true,
+    groupSize: 4,
+  });
+  assert.deepEqual(sessions[1], { name: 'cc_14517', windows: 2 });
+  assert.deepEqual(sessions[2], { name: 'codex-audit', windows: 2 });
+  assert.ok(!sessions[1].grouped);
+  assert.ok(!sessions[2].grouped);
+});
+
+test('listSessions passes through unchanged when every row is ungrouped (full-format tolerant path)', async () => {
+  // Guards the tolerant-parse path with the NEW, full-width format string
+  // (all group fields present but every row reports grouped=0) — must
+  // produce plain { name, windows } entries, no extra keys.
+  const rows = [
+    ['alpha', '5', '', '0', '1', '1'],
+    ['beta', '1', '', '0', '1', '0'],
+  ];
+  const stdout = rows.map((r) => r.join('\x1f')).join('\n') + '\n';
+  async function _run() {
+    return { stdout, stderr: '' };
+  }
+
+  const sessions = await listSessions({ _run });
+
+  assert.deepEqual(sessions, [
+    { name: 'alpha', windows: 5 },
+    { name: 'beta', windows: 1 },
   ]);
 });
 

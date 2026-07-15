@@ -352,6 +352,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             {tmuxSessions.map((s) => (
               <option key={s.name} value={s.name}>
                 {s.name} ({s.windows} window{s.windows === 1 ? '' : 's'})
+                {s.grouped ? ` · shared (${s.groupSize} linked)` : ''}
               </option>
             ))}
             <option value={NEW_TMUX_SESSION}>New tmux session…</option>
