@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, getConfig } from '../lib/api';
-import type { CreateSessionResult, SpawnAgentInfo } from '../lib/api';
+import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig } from '../lib/api';
+import type { CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
 import {
   defaultAgentForFilter,
   defaultName,
@@ -31,6 +31,9 @@ const MODEL_OPTIONS: { id: ClaudeModel; label: string }[] = [
   { id: 'haiku', label: 'Haiku' },
 ];
 
+/** Sentinel value for the tmux-session <select>'s "New tmux session…" option. */
+const NEW_TMUX_SESSION = '__new__';
+
 /**
  * New-chat draft screen, shown in the main content area in place of the
  * transcript. Carries the same agent/transport/name/cwd pickers the old
@@ -56,11 +59,17 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   // defaultCwd, or the sentinel 'custom' to show the free-text input.
   const [cwdChoice, setCwdChoice] = useState('');
   const [cwdCustom, setCwdCustom] = useState('');
+  // Selected value in the tmux-session dropdown: an existing session name, or
+  // '' to use today's default (first existing session / bootstrap), or the
+  // NEW_TMUX_SESSION sentinel to show the new-session-name input.
+  const [tmuxChoice, setTmuxChoice] = useState('');
+  const [newTmuxSessionName, setNewTmuxSessionName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
+  const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionSummary[]>([]);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -84,6 +93,11 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
       .catch(() => {
         // Non-fatal: placeholder falls back to '~'.
       });
+    fetchTmuxSessions()
+      .then((sessions) => setTmuxSessions(sessions))
+      .catch(() => {
+        // Non-fatal: the picker still offers "(default)" + "New tmux session…".
+      });
     promptRef.current?.focus();
   }, []);
 
@@ -98,6 +112,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
       cwdChoice === 'custom'
         ? cwdCustom.trim() || undefined
         : cwdChoice || undefined;
+    // tmux target: '' = today's default (send neither field); an existing
+    // session name = host in that session; NEW_TMUX_SESSION sentinel = create
+    // a fresh session with the typed name.
+    const resolvedTmuxSession =
+      tmuxChoice && tmuxChoice !== NEW_TMUX_SESSION ? tmuxChoice : undefined;
+    const resolvedNewTmuxSession =
+      tmuxChoice === NEW_TMUX_SESSION ? newTmuxSessionName.trim() || undefined : undefined;
     onToast('Creating session…');
     try {
       const result = await createSession({
@@ -108,6 +129,8 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
         codexTransport: agent === 'codex' ? codexTransport : undefined,
         model: agent === 'claude' && model !== 'default' ? model : undefined,
         prompt: prompt.trim() || undefined,
+        tmuxSession: resolvedTmuxSession,
+        newTmuxSession: resolvedNewTmuxSession,
       });
       onToast(`Session created → ${result.name}`, 'ok');
       onCreated(result);
@@ -118,7 +141,22 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     } finally {
       setCreating(false);
     }
-  }, [creating, agent, claudeTransport, codexTransport, model, prompt, name, cwdChoice, cwdCustom, placeholder, onToast, onCreated]);
+  }, [
+    creating,
+    agent,
+    claudeTransport,
+    codexTransport,
+    model,
+    prompt,
+    name,
+    cwdChoice,
+    cwdCustom,
+    tmuxChoice,
+    newTmuxSessionName,
+    placeholder,
+    onToast,
+    onCreated,
+  ]);
 
   // Helper: look up availability for an agent id.
   function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
@@ -294,6 +332,39 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               disabled={creating}
               onChange={(e) => setCwdCustom(e.target.value)}
               aria-label="Custom working directory"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          ) : null}
+
+          {/* tmux session target: host the new window in an existing tmux
+              session, or spin up a brand-new one. '' preserves today's
+              default behavior (first existing session, or bootstrap). */}
+          <select
+            className="rail-new-cwd"
+            value={tmuxChoice}
+            disabled={creating}
+            onChange={(e) => setTmuxChoice(e.target.value)}
+            aria-label="Tmux session"
+          >
+            <option value="">(default) — existing session, or new if none</option>
+            {tmuxSessions.map((s) => (
+              <option key={s.name} value={s.name}>
+                {s.name} ({s.windows} window{s.windows === 1 ? '' : 's'})
+              </option>
+            ))}
+            <option value={NEW_TMUX_SESSION}>New tmux session…</option>
+          </select>
+          {tmuxChoice === NEW_TMUX_SESSION ? (
+            <input
+              className="rail-new-cwd"
+              type="text"
+              value={newTmuxSessionName}
+              placeholder="my-new-session"
+              disabled={creating}
+              onChange={(e) => setNewTmuxSessionName(e.target.value)}
+              aria-label="New tmux session name"
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}

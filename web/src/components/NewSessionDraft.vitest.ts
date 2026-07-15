@@ -31,14 +31,22 @@ function stubApi({
   claudeAvailable = true,
   codexAvailable = true,
   createResponse,
+  tmuxSessions,
 }: {
   claudeAvailable?: boolean;
   codexAvailable?: boolean;
   createResponse?: (body: Record<string, unknown>) => Response;
+  tmuxSessions?: { name: string; windows: number }[];
 } = {}) {
   const createCalls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith('/api/tmux/sessions')) {
+      return new Response(JSON.stringify({ sessions: tmuxSessions ?? [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     if (url.endsWith('/api/spawn-agents')) {
       return new Response(JSON.stringify({
         agents: [
@@ -244,6 +252,126 @@ describe('NewSessionDraft submit payload', () => {
     expect(onCreated).not.toHaveBeenCalled();
     // The prompt text must survive the failed submit.
     expect((textarea as HTMLTextAreaElement).value).toBe('do not lose me');
+  });
+});
+
+describe('NewSessionDraft tmux target picker', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lists fetched tmux sessions in the dropdown alongside default + New tmux session…', async () => {
+    stubApi({ tmuxSessions: [{ name: 'work', windows: 3 }, { name: 'claude-control', windows: 1 }] });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'work (3 windows)' })).toBeTruthy();
+    });
+    expect(screen.getByRole('option', { name: 'claude-control (1 window)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'New tmux session…' })).toBeTruthy();
+    // Default selection preserves today's behavior (neither field sent).
+    expect(select.value).toBe('');
+  });
+
+  it('selecting "New tmux session…" reveals the name input; picking an existing session hides it', async () => {
+    stubApi({ tmuxSessions: [{ name: 'work', windows: 1 }] });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
+    expect(screen.queryByLabelText('New tmux session name')).toBeNull();
+
+    fireEvent.change(select, { target: { value: '__new__' } });
+    expect(await screen.findByLabelText('New tmux session name')).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'work' } });
+    expect(screen.queryByLabelText('New tmux session name')).toBeNull();
+  });
+
+  it('default selection sends neither tmuxSession nor newTmuxSession (today\'s behavior, unchanged)', async () => {
+    const { createCalls } = stubApi({ tmuxSessions: [{ name: 'work', windows: 1 }] });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+    await screen.findByLabelText('Tmux session');
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].tmuxSession).toBeUndefined();
+    expect(createCalls[0].newTmuxSession).toBeUndefined();
+  });
+
+  it('selecting an existing session sends tmuxSession, not newTmuxSession', async () => {
+    const { createCalls } = stubApi({ tmuxSessions: [{ name: 'work', windows: 1 }] });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+    const select = await screen.findByLabelText('Tmux session');
+    fireEvent.change(select, { target: { value: 'work' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].tmuxSession).toBe('work');
+    expect(createCalls[0].newTmuxSession).toBeUndefined();
+  });
+
+  it('typing a new-session name sends newTmuxSession, not tmuxSession', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+    const select = await screen.findByLabelText('Tmux session');
+    fireEvent.change(select, { target: { value: '__new__' } });
+    const nameInput = await screen.findByLabelText('New tmux session name');
+    fireEvent.change(nameInput, { target: { value: 'my-feature' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].newTmuxSession).toBe('my-feature');
+    expect(createCalls[0].tmuxSession).toBeUndefined();
+  });
+
+  it('a fetchTmuxSessions failure is non-fatal — the picker still offers default + New tmux session…', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/tmux/sessions')) return new Response('', { status: 500 });
+      if (url.endsWith('/api/spawn-agents')) {
+        return new Response(JSON.stringify({ agents: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config')) {
+        return new Response(JSON.stringify({ defaultCwd: '/workspace', projectDirs: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 404 });
+    }));
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(screen.getByRole('option', { name: 'New tmux session…' })).toBeTruthy();
   });
 });
 

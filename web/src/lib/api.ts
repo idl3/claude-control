@@ -482,6 +482,16 @@ export async function createSession(opts?: {
   model?: 'opus' | 'sonnet' | 'haiku';
   /** Initial prompt, submitted atomically with session creation. */
   prompt?: string;
+  /**
+   * Host the new window in this EXISTING tmux session (by name). Omit for
+   * today's default: the server reuses the first existing session, or
+   * bootstraps "claude-control" if no tmux server is running yet. Mutually
+   * exclusive with `newTmuxSession` — the server prefers `newTmuxSession` if
+   * both are sent.
+   */
+  tmuxSession?: string;
+  /** Create a brand-new tmux session with this name to host the new window. */
+  newTmuxSession?: string;
 }): Promise<CreateSessionResult> {
   const res = await authFetch('/api/session/new', {
     method: 'POST',
@@ -524,6 +534,30 @@ export async function fetchSpawnAgents(): Promise<SpawnAgentInfo[]> {
     throw new Error(err);
   }
   return json.agents;
+}
+
+/** One tmux session entry from GET /api/tmux/sessions. */
+export interface TmuxSessionSummary {
+  name: string;
+  windows: number;
+}
+
+/**
+ * Fetch existing tmux sessions (name + window count) for the New Session
+ * tmux-target picker — the dropdown that lets the user pick which session
+ * hosts the new window, or fall through to "New tmux session…".
+ * GET /api/tmux/sessions.
+ */
+export async function fetchTmuxSessions(): Promise<TmuxSessionSummary[]> {
+  const res = await authFetch('/api/tmux/sessions');
+  const json = (await res.json().catch(() => ({}))) as
+    | { sessions: TmuxSessionSummary[] }
+    | { error?: string };
+  if (!res.ok || !('sessions' in json)) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+  return json.sessions;
 }
 
 /**
