@@ -2539,8 +2539,10 @@ details.block-tool[open] > summary .tool-arrow,
   display: flex;
   flex-direction: column;
   /* Seamless with the transcript: no top border, no bar background — the card
-     floats on the same surface as the messages. */
-  padding: 0 12px 8px;
+     floats on the same surface as the messages. Consistent 8px on every
+     side (was 12px horizontal, an unexplained mismatch vs the 8px
+     bottom/top rhythm used everywhere else around the composer card). */
+  padding: 0 8px 8px;
   /* Use the REAL bottom inset here (not the iPad-zeroed --safe-bottom): the
      sidebar + everything else sit flush to the screen bottom, but the composer
      keeps a home-indicator clearance so the input/send isn't under it. env() is
