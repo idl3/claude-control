@@ -8235,7 +8235,7 @@ select.config-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
 }
 .proc-graph {
@@ -8282,7 +8282,7 @@ select.config-input {
   grid-template-columns: 56px 44px 52px 1fr 64px;
   align-items: center;
   gap: 8px;
-  padding: 5px 12px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--line);
 }
 .proc-head {
@@ -8491,8 +8491,8 @@ select.config-input {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid var(--line);
   background: var(--bg-1);
 }
