@@ -1250,10 +1250,14 @@ body.is-external-display .rail {
 /* Fixed scrim pinned to the very top of the viewport, covering the status-bar
    safe area. Mobile only: when the composer is focused iOS scrolls the app up
    (nav bars leave, content reaches the status bar), so this fades that content
-   into the background. Hidden on desktop where there's no keyboard scroll. */
+   into the background. Hidden on desktop where there's no keyboard scroll.
+   `top` tracks --vv-top (App.tsx's visualViewport effect), not a bare 0 —
+   `position: fixed` anchors to the LAYOUT viewport, but iOS Safari scrolls the
+   VISUAL viewport when the keyboard opens, so a bare `top: 0` drifts out of
+   alignment with the actual visible top edge. */
 .app-top-fade {
   position: fixed;
-  top: 0;
+  top: var(--vv-top, 0px);
   left: 0;
   right: 0;
   height: calc(var(--safe-top) + 52px);
