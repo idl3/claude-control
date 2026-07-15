@@ -8717,7 +8717,7 @@ select.config-input {
   flex-direction: column;
   gap: 8px;
   margin: 4px 0;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg-1);
@@ -8745,7 +8745,7 @@ select.config-input {
 .ask-answered-a {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   font-size: calc(13.5px * var(--ui-scale));
   font-weight: 600;
   color: var(--text);
@@ -8868,9 +8868,9 @@ select.config-input {
 .error-boundary-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin: 16px;
-  padding: 14px 16px;
+  padding: 8px;
   border: 1px solid var(--danger, #e5484d);
   border-radius: 10px;
   background: color-mix(in oklch, var(--danger, #e5484d) 10%, transparent);
