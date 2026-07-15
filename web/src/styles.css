@@ -54,7 +54,12 @@
   --control-radius: 8px;
   --control-pad: 7px 10px;
 
-  --hud-h: 37px;
+  /* Total bar height incl. the ~3px top/bottom breathing room added below —
+     37px content + 6px fixed vertical padding. Kept as one token since
+     .ptr-indicator / .toast position off `safe-top + hud-h` and .rail-gear
+     sizes itself off hud-h directly; bumping it here keeps all three in
+     sync with the taller bar instead of drifting out from under it. */
+  --hud-h: 43px;
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -258,10 +263,13 @@ body {
 .hud {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: var(--hud-h);
-  padding: 0 14px;
-  padding-top: var(--safe-top);
+  gap: 8px;
+  /* Content height only — the fixed 3px top/bottom padding below is what
+     brings the rendered bar to the full --hud-h (see token comment). */
+  height: calc(var(--hud-h) - 6px);
+  padding: 0 8px;
+  padding-top: calc(var(--safe-top) + 3px);
+  padding-bottom: 3px;
   background: var(--glass-panel);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -281,7 +289,7 @@ body {
 .hud-brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.02em;
@@ -392,7 +400,7 @@ body.is-external-display .rail {
 .session-list {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -408,7 +416,7 @@ body.is-external-display .rail {
 .session-group-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: calc(11px * var(--ui-scale));
@@ -416,7 +424,7 @@ body.is-external-display .rail {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted, #8a8f98);
-  padding: 6px 8px;
+  padding: 8px;
   background: none;
   border: none;
   border-radius: 6px;
@@ -431,7 +439,7 @@ body.is-external-display .rail {
 .session-group-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
   font: inherit;
@@ -510,7 +518,7 @@ body.is-external-display .rail {
 .session-window-head {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   padding: 4px 6px 2px;
   font-size: calc(12px * var(--ui-scale));
 }
@@ -717,7 +725,7 @@ body.is-external-display .rail {
    Overrides the 48dvh "hug" cap that suits the floating composer overlay. */
 .terminal-pane-root {
   min-height: 0;
-  padding: 8px 8px 10px;
+  padding: 8px;
   gap: 8px;
 }
 .terminal-pane-root .terminal-view {
@@ -823,7 +831,7 @@ body.is-external-display .rail {
 .session-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
   font-size: var(--txt-meta);
   color: var(--text-dim);
@@ -894,7 +902,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px;
   min-height: 48px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--line);
@@ -969,7 +977,7 @@ body.is-external-display .rail {
 @media (max-width: 759px) {
   .detail-head {
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: 8px;
   }
   .detail-title {
     flex-direction: column;
@@ -1037,7 +1045,7 @@ body.is-external-display .rail {
 .detail-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
   /* No margin-left:auto — the title's flex-grow right-aligns the cluster. An auto
      margin would instead absorb the free space and strand the ⋯ toggle on the
@@ -1149,7 +1157,7 @@ body.is-external-display .rail {
 .detail-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .rename-btn {
@@ -1188,7 +1196,7 @@ body.is-external-display .rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 12px 12px 6px;
+  padding: 8px;
 }
 .live-pane-head {
   flex: 0 0 auto;
@@ -1199,7 +1207,7 @@ body.is-external-display .rail {
 .live-pane-body {
   flex: 1 1 auto;
   margin: 0;
-  padding: 10px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
