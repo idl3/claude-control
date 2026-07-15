@@ -4397,20 +4397,12 @@ body.is-external-display .composer {
 .rail-new-name:disabled {
   opacity: 0.6;
 }
-.rail-new-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-.rail-new-cancel,
-.rail-new-create {
+.rail-new-cancel {
   border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   padding: 6px 12px;
   cursor: pointer;
-}
-.rail-new-cancel {
   background: transparent;
   color: var(--text-dim);
   border: 1px solid var(--line);
@@ -4418,16 +4410,7 @@ body.is-external-display .composer {
 .rail-new-cancel:hover:not(:disabled) {
   color: var(--text);
 }
-.rail-new-create {
-  background: var(--accent);
-  color: var(--bg);
-  border: 0;
-}
-.rail-new-create:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.rail-new-cancel:disabled,
-.rail-new-create:disabled {
+.rail-new-cancel:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -4597,10 +4580,15 @@ select.rail-new-cwd {
   color: var(--text);
   letter-spacing: -0.02em;
 }
-.new-session-draft-composer {
-  margin-top: 4px;
+/* Wraps the heading + agent/mode/model/name/cwd/tmux pickers, sitting above
+   the composer card. Same 12px field-to-field rhythm .new-session-draft-body
+   used before Create/Cancel moved into the composer's own toolbar. */
+.new-session-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.new-session-draft-actions {
+.new-session-draft-composer {
   margin-top: 4px;
 }
 

@@ -197,6 +197,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             void submit();
           }}
         >
+        <div className="new-session-setup">
           <h1 className="new-session-draft-heading">New session</h1>
 
           {/* Agent-type segmented control */}
@@ -412,34 +413,35 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               spellCheck={false}
             />
           ) : null}
+        </div>
 
-          {/* Composer-styled initial prompt. Plain controlled textarea — NOT
-              ComposerPrimitive.Input, which is wired to a live assistant-ui
-              runtime this draft doesn't have. Styled with the same CSS classes
-              as the real composer so it reads as the same surface. */}
-          <div className="composer-card new-session-draft-composer">
-            <div className="composer-input-wrap">
-              <textarea
-                ref={promptRef}
-                className="composer-input"
-                value={prompt}
-                disabled={creating}
-                placeholder="Message to start the session with (optional)…"
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  // ⌘/Ctrl+Enter submits, same convention as the real composer's
-                  // send shortcut. Plain Enter inserts a newline (textarea default).
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-                aria-label="Initial prompt"
-              />
-            </div>
+        {/* Composer-styled initial prompt. Plain controlled textarea — NOT
+            ComposerPrimitive.Input, which is wired to a live assistant-ui
+            runtime this draft doesn't have. Styled with the same CSS classes
+            as the real composer so it reads as the same surface. Cancel/Create
+            live in an in-card toolbar, mirroring the real composer's
+            attach/send row (.composer-toolbar + .composer-toolbar-spacer). */}
+        <div className="composer-card new-session-draft-composer">
+          <div className="composer-input-wrap">
+            <textarea
+              ref={promptRef}
+              className="composer-input"
+              value={prompt}
+              disabled={creating}
+              placeholder="Message to start the session with (optional)…"
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                // ⌘/Ctrl+Enter submits, same convention as the real composer's
+                // send shortcut. Plain Enter inserts a newline (textarea default).
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              aria-label="Initial prompt"
+            />
           </div>
-
-          <div className="rail-new-actions new-session-draft-actions">
+          <div className="composer-toolbar">
             <button
               type="button"
               className="rail-new-cancel"
@@ -448,12 +450,34 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             >
               Cancel
             </button>
-            <button type="submit" className="rail-new-create" disabled={creating}>
-              {creating ? 'Creating…' : 'Create'}
+            <span className="composer-toolbar-spacer" />
+            <button
+              type="submit"
+              className="composer-send"
+              disabled={creating}
+              aria-label={creating ? 'Creating session…' : 'Create session'}
+              title="Create session (⌘/Ctrl+↵)"
+            >
+              {creating ? <span className="composer-enhance-spinner" aria-hidden="true" /> : <ArrowUpIcon />}
             </button>
           </div>
+        </div>
         </form>
       </div>
     </div>
+  );
+}
+
+function ArrowUpIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 19V5M6 11l6-6 6 6"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
