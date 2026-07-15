@@ -434,8 +434,6 @@ function PaneRow({
       data-selected={selected ? 'true' : 'false'}
       data-kind={s.kind ?? 'claude'}
       data-pending={s.pending ? 'true' : undefined}
-      data-hotkey={hotkey}
-      data-hotkey-dir={hotkey ? 'right' : undefined}
       onClick={() => onSelect(s.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
