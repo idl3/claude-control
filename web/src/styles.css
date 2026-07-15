@@ -1636,6 +1636,21 @@ body.is-external-display .rail {
   background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
   color: var(--danger, #e5484d);
 }
+/* Force-dismiss on a still-queued/sent bubble: icon-only, deliberately
+   quieter than .act-btn-danger at rest since most queued sends resolve in
+   well under a second — it should read as an escape hatch for the rare stuck
+   case, not compete with the normal "Queued" status. Sharpens to the same
+   danger tint on hover/focus, matching Discard's affordance. */
+.act-btn-dismiss {
+  padding: 2px 5px;
+  opacity: 0.55;
+}
+.act-btn-dismiss:hover,
+.act-btn-dismiss:focus-visible {
+  opacity: 1;
+  background: color-mix(in oklch, var(--danger, #e5484d) 14%, transparent);
+  color: var(--danger, #e5484d);
+}
 /* Toggle copy ↔ copied via the data-copied attribute assistant-ui sets. */
 .act-copy-idle {
   display: flex;

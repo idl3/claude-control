@@ -72,6 +72,16 @@ function TrashIcon() {
     </svg>
   );
 }
+// Plain × — the dismiss control on a still-queued/sent bubble (not yet failed,
+// not yet reconciled). Distinct from TrashIcon (the "Discard" action on an
+// already-FAILED bubble) so the two affordances read differently at a glance.
+function CloseIcon() {
+  return (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 // Always-visible copy bar at the END of a message (per product decision: not a
 // hover overlay). Copies the message's text; the button flips to a check via
@@ -341,7 +351,24 @@ export function UserMessage() {
                 <TrashIcon /> Discard
               </button>
             </>
-          ) : null}
+          ) : (
+            // Force-remove for a bubble that's stuck QUEUED/sent (e.g. the TUI's
+            // focus wasn't on the composer, so the keystrokes never reached
+            // Claude and no transcript echo will ever arrive to reconcile it
+            // away). Same event as "Discard" above — App.tsx's removePendingSend
+            // handles both — deliberately icon-only + subtle at rest (most
+            // queued sends resolve in well under a second) so it doesn't compete
+            // visually with the normal, expected "Queued" state.
+            <button
+              type="button"
+              className="act-btn act-btn-dismiss"
+              aria-label="Remove this queued message"
+              title="Stuck? Remove this queued message"
+              onClick={() => dispatchPendingAction('cockpit:pending-discard')}
+            >
+              <CloseIcon />
+            </button>
+          )}
         </div>
       ) : (
         <MessageActions />
