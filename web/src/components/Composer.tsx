@@ -2168,10 +2168,10 @@ export function Composer({
               <TerminalIcon />
             </button>
           ) : null}
-          <span className="composer-toolbar-spacer" />
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
-              with "Using a sub-agent." Sits to the LEFT of the raw-dispatch
-              button so the raw button reads as the right-most secondary action.
+              with "Using a sub-agent." Sits in the LEFT toolbar cluster,
+              beside attach/mic/terminal — deliberately far from the Send
+              button on the right so toggling it can't misclick-fire a send.
               Only shown in non-terminal, non-voice mode. */}
           {!terminal && !voice ? (
             <label
@@ -2209,6 +2209,7 @@ export function Composer({
               <BotIcon size={16} />
             </button>
           ) : null}
+          <span className="composer-toolbar-spacer" />
           {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal && !voice ? (
             <button

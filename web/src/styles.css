@@ -7415,10 +7415,11 @@ select.config-input {
   background: var(--bg-hover);
 }
 
-/* ── Sub-agent toggle (right cluster, pill button) ────────────── */
+/* ── Sub-agent toggle (left cluster, pill button) ────────────── */
 /* ── Sub-agent checkbox label ──────────────────────────────────── */
-/* The outer <label> acts as the hit target; it sits in the right toolbar
-   cluster and wraps the real <input type="checkbox"> + the text. */
+/* The outer <label> acts as the hit target; it sits in the LEFT toolbar
+   cluster (beside attach/mic/terminal) and wraps the real
+   <input type="checkbox"> + the text -- deliberately far from Send. */
 .composer-subagent-toggle {
   flex: 0 0 auto;
   display: inline-flex;
@@ -7434,8 +7435,8 @@ select.config-input {
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  /* Allow the label to wrap onto 2 compact lines so the toggle parks tightly
-     beside the raw-send button instead of running as one long single line. */
+  /* Allow the label to wrap onto 2 compact lines so the toggle stays compact
+     in the left cluster instead of running as one long single line. */
   white-space: normal;
   user-select: none;
   transition: color var(--ease) 0.15s;
@@ -7502,12 +7503,12 @@ select.config-input {
   text-align: right;
   min-width: 0;
 }
-/* Mobile: keep the toggle INLINE beside the send buttons (no own row); instead
+/* Mobile: keep the toggle INLINE in the left cluster (no own row); instead
    wrap the LABEL onto 2 compact lines so it stays narrow and the row height grows
    by one line rather than the toggle taking a whole new row. */
 @media (max-width: 760px) {
   .composer-subagent-toggle {
-    flex: 0 1 auto; /* may shrink to share the row with the send buttons */
+    flex: 0 1 auto; /* may shrink to share the row with the other left-cluster controls */
   }
   .composer-subagent-label {
     white-space: normal;
