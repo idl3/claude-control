@@ -577,6 +577,15 @@ const _handler = (req, res) => {
       });
     }).catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
   }
+  // GET /api/tmux/sessions — existing tmux sessions (name + window count), for
+  // the New Session tmux-target picker ("host in an existing session" vs.
+  // "New tmux session…"). Token-gated + localhost, same as other GET endpoints.
+  if (u.pathname === '/api/tmux/sessions') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return tmux.listSessions()
+      .then((sessions) => endJson(res, 200, { sessions }))
+      .catch((err) => endJson(res, 500, { error: String(err?.message || err) }));
+  }
   if (u.pathname === '/api/session/new') {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -1202,11 +1211,47 @@ async function handleSessionNew(req, res) {
     }
   }
 
+  // (iii) tmux target: which session hosts the new window. Neither field set
+  //       (the common case) = today's behavior, unchanged — createWindow picks
+  //       the first existing session, or bootstraps "claude-control" if no
+  //       server is running yet. `tmuxSession` hosts the window in an EXISTING
+  //       session (validated below); `newTmuxSession` creates a fresh session
+  //       first. Mutually exclusive — `newTmuxSession` wins if both are sent.
+  //       Validated BEFORE createWindow/createTmuxSession/createWindowInSession,
+  //       so a bad tmux target request creates NO window (same discipline as (ii)).
+  const rawTmuxSession = typeof body.tmuxSession === 'string' ? body.tmuxSession.trim() : '';
+  let newTmuxSessionName = '';
+  if (typeof body.newTmuxSession === 'string' && body.newTmuxSession.trim()) {
+    newTmuxSessionName = tmux.sanitizeName(body.newTmuxSession);
+    if (!newTmuxSessionName) {
+      return endJson(res, 400, { error: 'newTmuxSession must contain a usable name' });
+    }
+    // Session names flow into "name:" target strings elsewhere in this codebase
+    // (createWindow's disambiguation, tmux.isValidTarget); a literal ':' in the
+    // name would make that construction ambiguous, so reject it up front.
+    if (newTmuxSessionName.includes(':')) {
+      return endJson(res, 400, { error: 'newTmuxSession name must not contain ":"' });
+    }
+  }
+  if (rawTmuxSession || newTmuxSessionName) {
+    const existingTmuxSessions = await tmux.listSessions();
+    if (rawTmuxSession && !existingTmuxSessions.some((s) => s.name === rawTmuxSession)) {
+      return endJson(res, 400, { error: `tmux session not found: ${rawTmuxSession}` });
+    }
+    if (newTmuxSessionName && existingTmuxSessions.some((s) => s.name === newTmuxSessionName)) {
+      return endJson(res, 400, { error: `tmux session already exists: ${newTmuxSessionName}` });
+    }
+  }
+
   try {
     // (1) Reliable named path: the tmux window name. createWindow sets it via
     //     `new-window -n` and the `-c cwd` flag — cwd flows through tmux's own
     //     working-directory flag, never a shell `cd`.
-    const target = await tmux.createWindow({ cwd, name });
+    const target = newTmuxSessionName
+      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd })
+      : rawTmuxSession
+        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name })
+        : await tmux.createWindow({ cwd, name });
 
     let launch;
     let codexRpcEndpoint = null;
