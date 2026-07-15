@@ -45,6 +45,15 @@
   --txt-meta: calc(11px * var(--ui-scale));
   --txt-composer: max(16px, calc(16px * var(--ui-scale))); /* >=16px: stops iOS auto-zoom */
 
+  /* Shared text-input/select chrome — single source for New Session's fields
+     (.rail-new-name, .rail-new-cwd) and the config modal's (.config-input),
+     which had drifted to three slightly different font-sizes/paddings.
+     Font-size aliases --txt-composer (>=16px) so every text control clears
+     the iOS auto-zoom-on-focus threshold, not just the composer itself. */
+  --control-font: var(--txt-composer);
+  --control-radius: 8px;
+  --control-pad: 7px 10px;
+
   --hud-h: 34px;
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
@@ -4374,9 +4383,9 @@ body.is-external-display .composer {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: var(--txt-composer);
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .rail-new-name:focus {
@@ -4426,9 +4435,9 @@ body.is-external-display .composer {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 13px;
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   width: 100%;
   box-sizing: border-box;
@@ -4959,12 +4968,15 @@ html.lightbox-open body {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 9px;
-  font-size: 13px;
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+/* Dropdown variant uses system font so labels read naturally — same
+   convention as select.rail-new-cwd below. */
 select.config-input {
+  font-family: inherit;
   appearance: none;
   cursor: pointer;
   /* caret */
