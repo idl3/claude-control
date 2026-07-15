@@ -6225,36 +6225,62 @@ select.config-input {
   background: var(--line);
 }
 
-/* Panel header: tab strip + close button */
+/* Panel header: tab strip + close button.
+   Restyled to match the .detail-action chrome language (dark cosmic
+   glass toolbar, pill-shaped active state, no raw border dividers) instead
+   of the old bare browser-tab look (border-right cell dividers, a stray
+   2px border-bottom "active" bar). */
 .artifact-panel-head {
   display: flex;
-  align-items: stretch;
-  gap: 0;
-  background: var(--bg-1);
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--glass-chrome);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
   overflow-x: auto;
-  min-height: 38px;
+  min-height: 46px;
+  box-sizing: border-box;
 }
 .artifact-tablist {
   display: flex;
+  align-items: center;
   flex: 1 1 auto;
   overflow-x: auto;
-  gap: 0;
+  gap: 4px;
+  min-width: 0;
 }
+/* Each tab is a cohesive rounded pill (tab button + close button together),
+   not a bordered cell — dividers between tabs come from `gap`, not a
+   border-right hairline. */
 .artifact-tab-wrap {
   display: inline-flex;
-  align-items: stretch;
-  border-right: 1px solid var(--line);
+  align-items: center;
+  gap: 1px;
   flex: 0 0 auto;
   max-width: 200px;
   min-width: 0;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  transition: background var(--ease) 0.15s, border-color var(--ease) 0.15s;
+}
+/* Active state lives on the wrap (via :has), so the tab label AND its close
+   button read as one selected pill — a soft accent-tinted glass fill +
+   border, matching .detail-action[data-on='true'] rather than a stray
+   border-bottom bar. */
+.artifact-tab-wrap:has(.artifact-tab[aria-selected='true']) {
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
 }
 .artifact-tab {
   flex: 1 1 auto;
   min-width: 0;
   background: none;
   border: none;
+  border-radius: var(--r-sm);
   color: var(--text-dim);
   font-size: 11.5px;
   font-family: inherit;
@@ -6272,41 +6298,62 @@ select.config-input {
   background: var(--bg-hover);
 }
 .artifact-tab[aria-selected='true'] {
-  color: var(--text);
-  background: var(--bg);
-  border-bottom: 2px solid var(--accent);
+  color: var(--accent);
 }
+.artifact-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* A proper small round icon-button (a mini .detail-action), not a cramped
+   10px glyph — larger tap target, quiet by default, lights up on hover. */
 .artifact-tab-close {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   background: none;
   border: none;
+  border-radius: var(--r-sm);
   color: var(--text-faint);
   cursor: pointer;
-  padding: 2px 6px;
-  font-size: 10px;
-  line-height: 1;
-  border-radius: 4px;
-  margin: auto 4px auto 0;
   transition: color var(--ease) 0.15s, background var(--ease) 0.15s;
 }
 .artifact-tab-close:hover {
   color: var(--text);
   background: var(--bg-hover);
 }
+.artifact-tab-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Close-the-whole-panel action, styled as a direct .detail-action twin
+   (same 30px/7px-radius/transparent-border shape) so it reads as part of
+   the same chrome family as the header's icon buttons. */
 .artifact-close-all {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  min-width: 30px;
+  margin-left: 4px;
+  padding: 0 6px;
   background: none;
-  border: none;
-  border-left: 1px solid var(--line);
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--text-dim);
   cursor: pointer;
-  padding: 0 12px;
-  font-size: 18px;
-  line-height: 1;
-  transition: color var(--ease) 0.15s;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s, border-color var(--ease) 0.15s;
 }
 .artifact-close-all:hover {
   color: var(--text);
+  background: var(--bg-hover);
+}
+.artifact-close-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* D4: per-tab app version picker — a quiet inline select in the panel head,
