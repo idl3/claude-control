@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { PendingAskCard } from './MessageParts';
@@ -172,7 +172,7 @@ function WelcomeChips() {
   );
 }
 
-export function Thread({
+function ThreadImpl({
   hasSelection,
   agentName = 'Claude',
   loading = false,
@@ -338,3 +338,8 @@ export function Thread({
     </ThreadPrimitive.Root>
   );
 }
+
+// Memoized: Thread's props are stabilized at the App call site (stable cockpit
+// action refs, memoized derived props), so a WS frame for another session or the
+// 5s resources tick no longer re-renders the transcript + composer subtree.
+export const Thread = memo(ThreadImpl);
