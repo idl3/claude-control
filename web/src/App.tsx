@@ -1663,13 +1663,18 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedSession, cockpit.subagents.length, toggleRail, toggleTerminal]);
 
-  // Claude panes ⌘1-9 can address: VISIBLE ones only — filter must allow Claude
-  // (not 'terminal') and the session group must be expanded — in rail order. The
-  // rail's badges read from the same list, so badge ⌘N always selects row N.
+  // Claude panes ⌘1-9 can address: VISIBLE, LOCAL RUNNING sessions only — filter
+  // must allow Claude (not 'terminal'), exclude remote/olam cloud sessions (they
+  // aren't local panes to jump into), and the session group must be expanded —
+  // in rail order. The rail's badges read from the same list, so badge ⌘N always
+  // selects row N.
   const addressableClaude = useMemo(() => {
     if (sessionFilter === 'terminal') return [];
     return cockpit.sessions
-      .filter((s) => s.kind !== 'terminal' && !collapsedSessions.has(s.sessionName ?? '?'))
+      .filter(
+        (s) =>
+          s.kind !== 'terminal' && s.kind !== 'remote' && !collapsedSessions.has(s.sessionName ?? '?'),
+      )
       .sort(
         (a, b) =>
           (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
