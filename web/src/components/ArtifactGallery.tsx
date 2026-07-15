@@ -78,7 +78,13 @@ export function ArtifactGallery({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [namesKey]);
 
-  if (artifacts.length === 0 || !open) return null;
+  // Task 3: an open gallery with zero artifacts now renders a friendly
+  // onboarding explainer instead of returning null (the header's own
+  // always-visible toggle button — App.tsx — is what let the user get here
+  // in the first place; an empty "nothing rendered" result reads as broken,
+  // not "nothing to show yet"). A *closed* gallery still returns null
+  // exactly as before — this only changes the open+empty case.
+  if (!open) return null;
 
   function onOpen(a: SessionArtifact) {
     if (a.artifactKind === 'prototype') {
@@ -98,17 +104,26 @@ export function ArtifactGallery({
 
   return (
     <div className="artifact-gallery" role="region" aria-label="Session artifacts">
-      <ul className="artifact-gallery-list">
-        {artifacts.map((a) => (
-          <li key={a.name}>
-            <button type="button" className="artifact-gallery-row" onClick={() => onOpen(a)}>
-              <span className="artifact-gallery-name">{a.name}</span>
-              <span className="artifact-gallery-version">{a.latestVersion}</span>
-              <KindBadge kind={a.artifactKind} />
-            </button>
-          </li>
-        ))}
-      </ul>
+      {artifacts.length === 0 ? (
+        <div className="artifact-gallery-empty">
+          <p className="artifact-gallery-empty-title">No artifacts yet</p>
+          <p className="artifact-gallery-empty-body">
+            Ask for a prototype, webpage, or dashboard — it'll show up here once the agent builds it.
+          </p>
+        </div>
+      ) : (
+        <ul className="artifact-gallery-list">
+          {artifacts.map((a) => (
+            <li key={a.name}>
+              <button type="button" className="artifact-gallery-row" onClick={() => onOpen(a)}>
+                <span className="artifact-gallery-name">{a.name}</span>
+                <span className="artifact-gallery-version">{a.latestVersion}</span>
+                <KindBadge kind={a.artifactKind} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

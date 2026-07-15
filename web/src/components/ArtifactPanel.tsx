@@ -38,6 +38,11 @@ const SNAP_FULL = 90;
 const SNAP_DISMISS = 25; // dvh below this → close
 const CLAMP_MIN = 15;
 const CLAMP_MAX = 95;
+// Mobile fix: the sheet now OPENS full-screen (not the cramped 40dvh peek) so
+// the first thing an operator sees is the actual artifact, not a sliver of
+// it. Only the open-default changes — drag/snap/dismiss still target
+// SNAP_PEEK/SNAP_FULL exactly as before once the operator starts dragging.
+const SNAP_MOBILE_OPEN = 100;
 
 // ── Escape html for plain pre rendering ─────────────────────────────────────
 function escapeHtml(s: string): string {
@@ -559,10 +564,15 @@ export function ArtifactPanel() {
   const activeAppName = activeArtifact?.kind === 'app' ? appNameFromUrl(activeArtifact.appUrl ?? '') : null;
   const activeMode = activeArtifact ? versionModeFor(activeArtifact.id) : { kind: 'latest' as const };
 
-  // Reset sheet height to peek when a new artifact opens.
+  // Reset sheet height when a new artifact opens: full-screen on mobile
+  // (SNAP_MOBILE_OPEN) so it reads as a real dismissible full-screen view,
+  // the existing peek on desktop's split layout (where sheetH is unused —
+  // desktop renders the branch below at line ~667 regardless of this value,
+  // so gating on `narrow` here is just documentation of intent, not a
+  // functional requirement).
   useEffect(() => {
-    if (isOpen) setSheetH(SNAP_PEEK);
-  }, [isOpen]);
+    if (isOpen) setSheetH(narrow ? SNAP_MOBILE_OPEN : SNAP_PEEK);
+  }, [isOpen, narrow]);
 
   // Focus management: when panel opens, focus the active tab or the panel itself.
   const prevOpenRef = useRef(false);
