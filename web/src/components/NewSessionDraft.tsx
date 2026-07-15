@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels } from '../lib/api';
 import type { ClaudeModelInfo, CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
+import { ClaudeRobotIcon } from './ClaudeRobotIcon';
+import { CodexIcon } from './CodexIcon';
 import {
   defaultAgentForFilter,
   defaultName,
@@ -215,6 +217,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
                   aria-pressed={isActive}
                   onClick={() => setAgent(id)}
                 >
+                  {id === 'codex' ? <CodexIcon size={15} /> : <ClaudeRobotIcon size={17} />}
                   <span className="rail-new-agent-seg-label">
                     {id === 'claude' ? 'Claude' : 'Codex'}
                   </span>
