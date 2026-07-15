@@ -71,6 +71,7 @@ import { deriveProjectsRoots } from './lib/projects-roots.js';
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
 import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
 import { pruneDeadClients } from './lib/ws-heartbeat.js';
+import { createWsPollGate } from './lib/ws-poll-gate.js';
 import { encodeWsMessage, sendWsMessage, websocketBackpressureLimitBytes } from './lib/ws-backpressure.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -212,6 +213,11 @@ const VIDEO_MIME = {
 const registry = new SessionRegistry({ projectsRoots: CONFIG.projectsRoots, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
 const collab = new Collab(); // session-to-session collaboration rooms (lib/collab.js)
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
+// R8: registry.start()/resources.start() run unconditionally at boot (main(),
+// below) and stay armed forever even with zero browser tabs open. This gate
+// pauses both on the last WS disconnect and resumes + fires an immediate tick
+// on the next connect — see lib/ws-poll-gate.js for the full rationale.
+const wsPollGate = createWsPollGate(registry, resources);
 const codexRpc = new CodexRpcManager();
 const claudePrint = new ClaudePrintManager();
 
@@ -2517,6 +2523,10 @@ wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
+  // R8: resume registry/resources polling if this is the first client after
+  // a zero-client pause (no-op otherwise — see lib/ws-poll-gate.js).
+  wsPollGate.onConnect();
+
   send(ws, { type: 'sessions', sessions: registry.getSessions() });
   send(ws, { type: 'resources', snapshot: resources.snapshot() });
   ws._subs = new Set();
@@ -2536,6 +2546,11 @@ wss.on('connection', (ws) => {
       const sub = subscriptions.get(id);
       if (sub) { sub.clients.delete(ws); maybeTeardown(id); }
     }
+    // R8: this runs AFTER the `ws` library's own internal close listener has
+    // already removed `ws` from wss.clients (registered before 'connection'
+    // ever fires), so wss.clients.size here already reflects this socket's
+    // removal — pauses on the last disconnect, no-ops otherwise.
+    wsPollGate.onDisconnect(wss.clients.size);
   });
 });
 
