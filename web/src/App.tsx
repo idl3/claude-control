@@ -2150,6 +2150,30 @@ function AppInner() {
                   </>
                 )}
               </div>
+              {/* Artifacts toggle: hoisted OUTSIDE .detail-actions for the same
+                  reason as the ⋯ toggle just below — it must stay visible even
+                  when the action bar is collapsed. Renders unconditionally
+                  (no more artifactCount > 0 gate): now that Task 3 gave the
+                  gallery a friendly empty state, gating the toggle itself on a
+                  nonzero count made it vanish entirely before the first
+                  artifact existed, which is exactly the "invisible on mobile"
+                  bug — there's no other way to discover the gallery there. */}
+              {selectedSession && renaming === null ? (
+                <button
+                  type="button"
+                  className="detail-action detail-action--artifacts"
+                  aria-pressed={galleryOpen}
+                  data-on={galleryOpen ? 'true' : undefined}
+                  aria-label="Toggle artifacts"
+                  title="Artifacts"
+                  onClick={() => setGalleryOpen((v) => !v)}
+                >
+                  <GalleryIcon />
+                  {artifactCount > 0 ? (
+                    <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
+                  ) : null}
+                </button>
+              ) : null}
               {/* ⋯ toggle: show/hide the action bar. Lives OUTSIDE .detail-actions
                   (which collapses) so it stays visible to bring the bar back. */}
               {selectedSession && renaming === null ? (
@@ -2177,20 +2201,6 @@ function AppInner() {
                       onClick={() => setRenaming(selectedSession.name ?? selectedSession.id)}
                     >
                       <PencilIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-action detail-action--count"
-                      aria-pressed={galleryOpen}
-                      data-on={galleryOpen ? 'true' : undefined}
-                      aria-label="Toggle artifacts"
-                      title="Artifacts"
-                      onClick={() => setGalleryOpen((v) => !v)}
-                    >
-                      <GalleryIcon />
-                      {artifactCount > 0 ? (
-                        <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
-                      ) : null}
                     </button>
                     <button
                       type="button"

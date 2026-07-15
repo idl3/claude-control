@@ -927,6 +927,19 @@ body.is-external-display .rail {
     padding-left: 0;
     justify-content: flex-end;
   }
+  /* The artifacts toggle is hoisted onto the title row (outside the
+     collapsible bar) specifically so it stays reachable on mobile — give it
+     a real ≥44px tap target there instead of the 30px shared by every other
+     .detail-action icon. Compound selector (.detail-action AND
+     .detail-action--artifacts, not just the latter alone) — same trick as
+     `.detail-head .detail-actions` above: a bare single-class selector here
+     ties in specificity with the base `.detail-action { min-width: 30px }`
+     rule declared later in this file, and loses the cascade on source order. */
+  .detail-action.detail-action--artifacts {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
 }
 /* Desktop: the ⋯ toggle is mobile-only clutter — there's room for the action
    bar to just always be there. Hide the toggle and force .detail-actions
@@ -6827,6 +6840,21 @@ select.config-input {
 .artifact-close-all:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* Mobile fix: the sheet now opens full-screen by default (see
+   SNAP_MOBILE_OPEN in ArtifactPanel.tsx), so the close button is the primary
+   obvious way out — give it a real ≥44px tap target and a visible pill
+   background instead of the quiet 30px icon-only desktop treatment. */
+.artifact-panel[data-mode='sheet'] .artifact-close-all {
+  height: 44px;
+  min-width: 44px;
+  background: var(--bg-hover);
+  border-color: var(--line);
+}
+.artifact-panel[data-mode='sheet'] .artifact-close-all:hover,
+.artifact-panel[data-mode='sheet'] .artifact-close-all:active {
+  background: color-mix(in oklch, var(--accent) 14%, var(--bg-hover));
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
 }
 
 /* D4: per-tab app version picker — a quiet inline select in the panel head,
