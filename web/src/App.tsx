@@ -2098,6 +2098,7 @@ function AppInner() {
                 workingOverrideId={agentWorking ? cockpit.selectedId : null}
                 runningSubagentCountById={cockpit.runningSubagentCountById}
                 onToast={showToast}
+                cmdHeld={cmdHeld}
               />
             </div>
             {/* Bottom bar, pinned below .rail-scroll (never scrolls with the list):

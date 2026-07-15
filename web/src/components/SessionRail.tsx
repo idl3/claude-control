@@ -37,6 +37,11 @@ interface SessionRailProps {
    *  same shape as App's showToast. Optional so existing/test call sites
    *  don't need to wire it; failures are silently logged when absent. */
   onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
+  /** App's `cmdHeld` (useModifierHeld(500)) — same signal that drives the ⌘N
+   *  hotkey badge via `.app[data-cmd-held]`. Threaded down as a prop (rather
+   *  than a second listener in here) so each row's right-hand meta slot can
+   *  swap to the tmux pane name in JS, not just CSS visibility. */
+  cmdHeld?: boolean;
 }
 
 /**
@@ -73,7 +78,6 @@ function basename(cwd?: string): string {
 
 interface WindowGroup {
   windowIndex: number;
-  windowName: string;
   panes: Session[];
 }
 interface SessionGroup {
@@ -118,7 +122,6 @@ function groupByTmux(sessions: Session[]): SessionGroup[] {
         .sort(([a], [b]) => a - b)
         .map(([windowIndex, panes]) => ({
           windowIndex,
-          windowName: panes[0]?.tmuxName || `window ${windowIndex}`,
           panes: [...panes].sort((x, y) => (x.paneIndex ?? 0) - (y.paneIndex ?? 0)),
         })),
     }));
@@ -365,6 +368,57 @@ function RemoteOrgSection({
   );
 }
 
+/**
+ * ONE shared 10s interval for the whole rail — every row's right-hand meta
+ * slot reads the same tick, so they all swap in lockstep instead of each
+ * row running its own timer. Returns a monotonically incrementing counter
+ * (not just a boolean) so a row with N available fields can rotate through
+ * all of them via `fields[tick % fields.length]` (see paneMetaFields).
+ */
+function useMetaCyclePhase(periodMs = 10_000): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), periodMs);
+    return () => clearInterval(timer);
+  }, [periodMs]);
+  return tick;
+}
+
+/** One field the row's right-hand meta slot can show, in cycle order. */
+interface MetaField {
+  key: 'model' | 'ctx' | 'usage' | 'cwd';
+  text: string;
+  className: string;
+}
+
+/**
+ * Available meta fields for a row's right-hand slot, in cycle order —
+ * model → context → (Codex-only) usage for Claude/Codex rows, or just the
+ * cwd basename for terminals (a single "field" so it renders steady, never
+ * blank). The shared `metaTick` (SessionRail-level, one interval for every
+ * row) selects `fields[metaTick % fields.length]`, which reduces to a plain
+ * model ⟷ context alternation for the common 2-field case and folds Codex's
+ * extra rate-limit field into the same rotation instead of dropping it.
+ */
+function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {
+  if (isTerminal) {
+    return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
+  }
+  const fields: MetaField[] = [];
+  if (s.model) fields.push({ key: 'model', text: s.model, className: 'meta-model' });
+  if (s.ctxPct != null) {
+    fields.push({ key: 'ctx', text: `ctx:${Math.round(s.ctxPct)}%`, className: 'meta-ctx' });
+  }
+  if (isCodex && s.usagePct != null) {
+    fields.push({
+      key: 'usage',
+      text: `${formatUsageWindow(s.usageWindowMin)}:${Math.round(s.usagePct)}%`,
+      className: 'meta-usage',
+    });
+  }
+  return fields;
+}
+
 function PaneRow({
   s,
   selected,
@@ -372,6 +426,8 @@ function PaneRow({
   hotkey,
   workingOverrideId,
   hasRunningSubagents,
+  cmdHeld,
+  metaTick,
 }: {
   s: Session;
   selected: boolean;
@@ -383,6 +439,12 @@ function PaneRow({
   workingOverrideId?: string | null;
   /** True when this session has ≥1 running sub-agent — triggers "cloning" icon state. */
   hasRunningSubagents?: boolean;
+  /** See SessionRailProps.cmdHeld — while true, the right-hand meta slot shows
+   *  the tmux pane name (s.tmuxName) instead of cycling model/context. */
+  cmdHeld?: boolean;
+  /** Shared cycle phase (see paneMetaFields) — one counter for the whole rail,
+   *  ticking every 10s, so every row's meta slot swaps in lockstep. */
+  metaTick: number;
 }) {
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
@@ -422,6 +484,29 @@ function PaneRow({
     }
     prevPending.current = s.pending;
   }, [s.pending]);
+
+  // Right-hand meta slot: tmux pane name while ⌘ is held (overrides the
+  // cycle), else the current phase of the shared model/context(/usage) cycle.
+  // A stable `key` per swap lets the mount-only meta-swap-in CSS keyframe
+  // replay on every change (React remounts the node instead of diffing text).
+  const paneName = s.tmuxName;
+  const showPaneName = Boolean(cmdHeld && paneName);
+  const metaFields = paneMetaFields(s, isTerminal, isCodex);
+  const activeField = metaFields.length > 0 ? metaFields[metaTick % metaFields.length] : null;
+  const rightSlot =
+    showPaneName || activeField ? (
+      <span className="session-row-meta" title={showPaneName ? paneName : activeField?.text}>
+        {showPaneName ? (
+          <span key="pane" className="session-row-meta-pane">
+            {paneName}
+          </span>
+        ) : activeField ? (
+          <span key={activeField.key} className={activeField.className}>
+            {activeField.text}
+          </span>
+        ) : null}
+      </span>
+    ) : null;
 
   return (
     <li
@@ -504,25 +589,14 @@ function PaneRow({
             ASK
           </span>
         ) : null}
-        {/* Terminals are a single lean line: cwd sits right-aligned beside the
-            name, no second meta row. */}
-        {isTerminal && s.cwd ? (
-          <span className="meta-cwd meta-cwd-inline">{basename(s.cwd)}</span>
-        ) : null}
+        {/* Single right-hand meta slot, same real estate for every row kind —
+            cycles model ⟷ context (⟷ Codex usage) every 10s (see metaTick /
+            paneMetaFields), or shows the tmux pane name while ⌘ is held
+            (overrides the cycle; the standalone "N <pane-name>" sub-label
+            that used to sit above each window's panes is gone — this is
+            the one place that name shows now). */}
+        {rightSlot}
       </div>
-      {!isTerminal && (s.model || s.ctxPct != null || (isCodex && s.usagePct != null)) ? (
-        <div className="session-meta">
-          {s.model ? <span className="meta-model">{s.model}</span> : null}
-          {s.ctxPct != null ? (
-            <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
-          ) : null}
-          {isCodex && s.usagePct != null ? (
-            <span className="meta-usage">
-              {formatUsageWindow(s.usageWindowMin)}:{Math.round(s.usagePct)}%
-            </span>
-          ) : null}
-        </div>
-      ) : null}
     </li>
   );
 }
@@ -538,7 +612,12 @@ export function SessionRail({
   workingOverrideId,
   runningSubagentCountById,
   onToast,
+  cmdHeld,
 }: SessionRailProps) {
+  // Shared cycle phase for every row's right-hand meta slot — see
+  // useMetaCyclePhase / paneMetaFields.
+  const metaTick = useMetaCyclePhase();
+
   // Inline tmux-session rename (the group header, e.g. "0") — double-click the
   // name or use the hover-reveal pencil button. Only one group can be renaming
   // at a time; null when nothing is being edited. The rail picks up the new
@@ -680,10 +759,6 @@ export function SessionRail({
               ? null
               : g.windows.map((w) => (
                   <div key={w.windowIndex} className="session-window">
-                    <div className="session-window-head">
-                      <span className="window-idx">{w.windowIndex}</span>
-                      <span className="window-name">{w.windowName}</span>
-                    </div>
                     <ul className="session-pane-list">
                       {w.panes.map((s) => (
                         <PaneRow
@@ -697,6 +772,8 @@ export function SessionRail({
                             runningSubagentCountById != null &&
                             (runningSubagentCountById[s.id] ?? 0) > 0
                           }
+                          cmdHeld={cmdHeld}
+                          metaTick={metaTick}
                         />
                       ))}
                     </ul>

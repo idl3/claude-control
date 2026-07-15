@@ -409,6 +409,7 @@ body.is-external-display .rail {
 .session-group {
   display: flex;
   flex-direction: column;
+  gap: 4px;
   margin-bottom: 10px;
 }
 /* Accordion header (a plain flex row, shared with the static .remote-group-head):
@@ -514,25 +515,6 @@ body.is-external-display .rail {
   margin-left: 4px;
   padding-left: 6px;
   border-left: 1px solid var(--line);
-}
-.session-window-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 6px 2px;
-  font-size: calc(12px * var(--ui-scale));
-}
-.session-window-head .window-idx {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-weight: 700;
-  color: var(--accent);
-  opacity: 0.85;
-}
-.session-window-head .window-name {
-  color: var(--text-1, inherit);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .session-pane-list {
   list-style: none;
@@ -710,16 +692,6 @@ body.is-external-display .rail {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   opacity: 0.7;
 }
-.meta-cwd-inline {
-  margin-left: auto;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding-left: 8px;
-  font-size: var(--txt-meta);
-}
 /* Full-pane terminal (a selected terminal pane, not the composer >_ overlay):
    the view FILLS the main area like the transcript, with the input pinned below.
    Overrides the 48dvh "hug" cap that suits the floating composer overlay. */
@@ -843,10 +815,14 @@ body.is-external-display .rail {
 }
 
 /* ── Cmd-hold overview ────────────────────────────────────────────────────
-   While ⌘ is held, condense every session to its first row (name + state icon +
-   badge — drop model/ctx) and hide shell rows entirely, for a clean glanceable
-   list. Hotkey badges fade in (sequentially) only AFTER this settles — see
-   HotkeyHints. */
+   While ⌘ is held: local (Claude/Codex/terminal) rows are already a single
+   line (session-row-meta below swaps model/context/usage → tmux pane name
+   in JS, see SessionRail.tsx PaneRow — no CSS collapse needed there any
+   more). Remote (olam) rows still carry their own second .session-meta line
+   (model/ctx); it condenses away here so ⌘-hold still reads as one clean
+   glanceable overview across every row kind. Shell rows collapse entirely
+   (terminals aren't ⌘-addressable). Hotkey badges fade in (sequentially)
+   only AFTER this settles — see HotkeyHints. */
 .app[data-cmd-held='true'] .session-meta {
   max-height: 0;
   opacity: 0;
@@ -863,6 +839,7 @@ body.is-external-display .rail {
 }
 @media (prefers-reduced-motion: reduce) {
   .session-item, .session-meta { transition: none; }
+  .session-row-meta > * { animation: none; }
 }
 .meta-model {
   font-size: var(--txt-meta);
@@ -889,6 +866,47 @@ body.is-external-display .rail {
   color: var(--text-faint);
   margin-left: auto; /* right-align within the meta row */
   opacity: 0.85;
+}
+/* ── Session row right-hand meta slot (local rows only) ──────────────────
+   One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
+   cycle every 10s (SessionRail.tsx useMetaCyclePhase/paneMetaFields), or the
+   tmux pane name while ⌘ is held (overrides the cycle — see PaneRow). The
+   `key`-per-swap in PaneRow remounts the child span on every change so this
+   mount-only keyframe replays as a subtle crossfade instead of a hard cut. */
+.session-row-meta {
+  flex: 0 0 auto;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--txt-meta);
+}
+.session-row-meta > * {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  animation: meta-swap-in 0.28s var(--ease);
+}
+/* Local single-slot usage isn't flex-wrapped like RemoteRow's multi-chip
+   .session-meta row, so it can use the slot's full reserved width instead
+   of the 60% tuned for that layout. */
+.session-row-meta .meta-model {
+  max-width: 100%;
+}
+.session-row-meta-pane {
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+}
+@keyframes meta-swap-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .session-empty {
   list-style: none;
