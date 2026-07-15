@@ -1,8 +1,8 @@
 // Tests for the tmux-target picker's server-side helpers: listSessions,
-// createTmuxSession ("New tmux session…"), and createWindowInSession (host in
-// an existing session). Same hermetic pattern as create-session.test.js: a
-// stub _run/_listPanes records argv without shelling out to tmux, so these
-// pass with NO tmux installed.
+// createTmuxSession ("New tmux session…"), createWindowInSession (host in
+// an existing session), and renameTmuxSession (sidebar session-group rename).
+// Same hermetic pattern as create-session.test.js: a stub _run/_listPanes
+// records argv without shelling out to tmux, so these pass with NO tmux installed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile as _execFile } from 'node:child_process';
@@ -13,6 +13,7 @@ import {
   listSessions,
   createTmuxSession,
   createWindowInSession,
+  renameTmuxSession,
   resolveTmuxBin,
 } from '../lib/tmux.js';
 
@@ -266,6 +267,94 @@ test('createWindowInSession rejects nonexistent cwd without calling tmux', async
   assert.equal(calls.length, 0);
 });
 
+// ── renameTmuxSession ────────────────────────────────────────────────────
+
+test('renameTmuxSession emits rename-session -t <old> -- <new> when the session exists', async () => {
+  const calls = [];
+  async function _run(args) {
+    calls.push([...args]);
+    return { stdout: '', stderr: '' };
+  }
+  async function _listSessions() {
+    return [{ name: 'work', windows: 2 }, { name: '0', windows: 1 }];
+  }
+
+  await renameTmuxSession('0', 'scratch', { _run, _listSessions });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], ['rename-session', '-t', '0', '--', 'scratch']);
+});
+
+test('renameTmuxSession rejects an oldName that is not an existing session, without calling tmux', async () => {
+  const calls = [];
+  async function _run(args) {
+    calls.push([...args]);
+    return { stdout: '', stderr: '' };
+  }
+  async function _listSessions() {
+    return [{ name: 'work', windows: 2 }];
+  }
+
+  await assert.rejects(
+    () => renameTmuxSession('nope', 'scratch', { _run, _listSessions }),
+    /no such tmux session/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('renameTmuxSession rejects a newName that sanitizes to empty, without calling tmux', async () => {
+  const calls = [];
+  async function _run(args) {
+    calls.push([...args]);
+    return { stdout: '', stderr: '' };
+  }
+  async function _listSessions() {
+    return [{ name: 'work', windows: 2 }];
+  }
+
+  await assert.rejects(
+    () => renameTmuxSession('work', '   ', { _run, _listSessions }),
+    /newName is required/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('renameTmuxSession rejects a missing oldName without calling tmux or listSessions', async () => {
+  const runCalls = [];
+  const listCalls = [];
+  async function _run(args) {
+    runCalls.push([...args]);
+    return { stdout: '', stderr: '' };
+  }
+  async function _listSessions() {
+    listCalls.push(true);
+    return [];
+  }
+
+  await assert.rejects(
+    () => renameTmuxSession('', 'scratch', { _run, _listSessions }),
+    /oldName is required/,
+  );
+  assert.equal(runCalls.length, 0);
+});
+
+test('renameTmuxSession sanitizes newName before passing it to tmux (send-keys / injection safety)', async () => {
+  const calls = [];
+  async function _run(args) {
+    calls.push([...args]);
+    return { stdout: '', stderr: '' };
+  }
+  async function _listSessions() {
+    return [{ name: 'work', windows: 2 }];
+  }
+
+  await renameTmuxSession('work', 'bad\nname', { _run, _listSessions });
+
+  const [, , , , passedName] = calls[0];
+  assert.ok(!passedName.includes('\n'));
+  assert.equal(passedName, 'bad name');
+});
+
 // ── Real-tmux smoke case — gated on production resolveTmuxBin, isolated socket
 //
 // Proves listSessions / createTmuxSession / createWindowInSession work against
@@ -308,6 +397,42 @@ test('listSessions + createTmuxSession + createWindowInSession round-trip on a r
     const afterSessions = await listSessions({ _run });
     assert.equal(afterSessions.length, 1, 'still one session');
     assert.equal(afterSessions[0].windows, 2, 'now hosts two windows');
+  } finally {
+    // Tear down the WHOLE isolated server — never touches the operator's tmux.
+    await execFile(bin, [...L, 'kill-server']).catch(() => {});
+  }
+});
+
+test('renameTmuxSession renames a session on a real, isolated tmux server (sidebar session-group rename)', async (t) => {
+  if (process.env.CI) {
+    return t.skip('real-tmux smoke skipped in CI (hermetic stub tests above cover argv)');
+  }
+  let bin;
+  try {
+    bin = await resolveTmuxBin();
+  } catch {
+    return t.skip('tmux not available (resolveTmuxBin threw)');
+  }
+
+  const socket = `cc-test-${process.pid}-${Date.now().toString(36)}-rs`;
+  const L = ['-L', socket];
+  const before = `cc-throwaway-${process.pid}-${Date.now().toString(36)}`;
+  const after = `cc-renamed-${process.pid}-${Date.now().toString(36)}`;
+  // _run seam that shells out on the isolated socket instead of the default one.
+  const _run = async (args) => execFile(bin, [...L, ...args]);
+
+  try {
+    await createTmuxSession({ name: before, cwd: os.tmpdir() }, { _run });
+
+    // renameTmuxSession validates oldName against listSessions() internally —
+    // must also point that lookup at the isolated socket, or it silently falls
+    // back to the production listSessions() (default socket) and 404s.
+    await renameTmuxSession(before, after, { _run, _listSessions: () => listSessions({ _run }) });
+
+    const sessions = await listSessions({ _run });
+    assert.equal(sessions.length, 1, 'still exactly one session — rename, not a duplicate');
+    assert.equal(sessions[0].name, after, 'the session now answers to the new name');
+    assert.ok(!sessions.some((s) => s.name === before), 'the old name no longer resolves');
   } finally {
     // Tear down the WHOLE isolated server — never touches the operator's tmux.
     await execFile(bin, [...L, 'kill-server']).catch(() => {});
