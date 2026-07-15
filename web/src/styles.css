@@ -2755,6 +2755,16 @@ body.is-external-display .composer {
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+  /* Per the CSS overflow spec, `overflow-x: auto` with no `overflow-y` set
+     forces overflow-y's computed value to `auto` too (a `visible` axis can't
+     coexist with a non-visible one on the same box) — so this row clips
+     vertically as a side effect of wanting horizontal scroll only. The
+     running-state rim (`.subagent-pill[data-status='running']::before`,
+     `inset: -1.4px`) and the active-tab box-shadow ring (`0 0 0 2px`) both
+     draw outside the pill's own border box; padding-top/bottom give that
+     overflow a buffer so the forced auto-clip lands on empty padding, not the
+     rim itself. Without padding-top this clipped the rim's top arc flat. */
+  padding-top: 2px;
   padding-bottom: 2px;
   margin-top: -30px;
   position: relative;
