@@ -273,33 +273,31 @@ test('renameTmuxSession emits rename-session -t <old> -- <new> when the session 
   const calls = [];
   async function _run(args) {
     calls.push([...args]);
+    // Raw session-name list includes the grouped member "0" — listSessions()
+    // would have deduped it away, which is exactly the bug this guards against.
+    if (args[0] === 'list-sessions') return { stdout: 'work\n0\n', stderr: '' };
     return { stdout: '', stderr: '' };
   }
-  async function _listSessions() {
-    return [{ name: 'work', windows: 2 }, { name: '0', windows: 1 }];
-  }
 
-  await renameTmuxSession('0', 'scratch', { _run, _listSessions });
+  await renameTmuxSession('0', 'scratch', { _run });
 
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], ['rename-session', '-t', '0', '--', 'scratch']);
+  const rename = calls.find((c) => c[0] === 'rename-session');
+  assert.deepEqual(rename, ['rename-session', '-t', '0', '--', 'scratch']);
 });
 
 test('renameTmuxSession rejects an oldName that is not an existing session, without calling tmux', async () => {
   const calls = [];
   async function _run(args) {
     calls.push([...args]);
+    if (args[0] === 'list-sessions') return { stdout: 'work\n', stderr: '' };
     return { stdout: '', stderr: '' };
-  }
-  async function _listSessions() {
-    return [{ name: 'work', windows: 2 }];
   }
 
   await assert.rejects(
-    () => renameTmuxSession('nope', 'scratch', { _run, _listSessions }),
+    () => renameTmuxSession('nope', 'scratch', { _run }),
     /no such tmux session/,
   );
-  assert.equal(calls.length, 0);
+  assert.ok(!calls.some((c) => c[0] === 'rename-session'));
 });
 
 test('renameTmuxSession rejects a newName that sanitizes to empty, without calling tmux', async () => {
@@ -342,15 +340,14 @@ test('renameTmuxSession sanitizes newName before passing it to tmux (send-keys /
   const calls = [];
   async function _run(args) {
     calls.push([...args]);
+    if (args[0] === 'list-sessions') return { stdout: 'work\n', stderr: '' };
     return { stdout: '', stderr: '' };
   }
-  async function _listSessions() {
-    return [{ name: 'work', windows: 2 }];
-  }
 
-  await renameTmuxSession('work', 'bad\nname', { _run, _listSessions });
+  await renameTmuxSession('work', 'bad\nname', { _run });
 
-  const [, , , , passedName] = calls[0];
+  const rename = calls.find((c) => c[0] === 'rename-session');
+  const passedName = rename[4];
   assert.ok(!passedName.includes('\n'));
   assert.equal(passedName, 'bad name');
 });
