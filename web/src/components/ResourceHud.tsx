@@ -4,12 +4,17 @@ import type { PushController } from '../hooks/usePushNotifications';
 import { NotifyBell } from './NotifyBell';
 import { FullscreenButton } from './FullscreenButton';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { BatteryIcon } from './icons';
+import { BatteryIcon, SettingsIcon, ActivityIcon } from './icons';
 
 interface ResourceHudProps {
   resources: ResourceState;
   conn: ConnState;
   push: PushController;
+  /** Reload/Settings/Processes — compressed here from the old rail-foot bar,
+      rendered as a compact icon cluster beside the fullscreen toggle. */
+  onReload: () => void;
+  onOpenSettings: () => void;
+  onOpenProcesses: () => void;
 }
 
 function fmt(n: number | undefined, suffix = ''): string {
@@ -17,7 +22,14 @@ function fmt(n: number | undefined, suffix = ''): string {
 }
 
 // Slim top bar: self cpu/rss + system load/mem, warning-tinted when over limit.
-export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
+export function ResourceHud({
+  resources,
+  conn,
+  push,
+  onReload,
+  onOpenSettings,
+  onOpenProcesses,
+}: ResourceHudProps) {
   const snap = resources.snapshot;
   const self = snap?.self ?? {};
   const sys = snap?.system ?? {};
@@ -65,6 +77,36 @@ export function ResourceHud({ resources, conn, push }: ResourceHudProps) {
         <span className="hud-warn-text">{resources.warning || 'over limit'}</span>
       ) : null}
       <span className="hud-spacer" />
+      {/* Reload/Settings/Processes — compressed from the old rail-foot bar into a
+          compact icon cluster beside fullscreen. Settings is icon-only here (the
+          rail-foot text label is gone). */}
+      <button
+        type="button"
+        className="notify-bell hud-reload"
+        aria-label="Reload app"
+        title="Reload app"
+        onClick={onReload}
+      >
+        <span className="hud-reload-glyph" aria-hidden="true">↻</span>
+      </button>
+      <button
+        type="button"
+        className="notify-bell hud-settings"
+        aria-label="Settings"
+        title="Settings"
+        onClick={onOpenSettings}
+      >
+        <SettingsIcon size={16} />
+      </button>
+      <button
+        type="button"
+        className="notify-bell hud-processes"
+        aria-label="Processes & system"
+        title="Processes & system"
+        onClick={onOpenProcesses}
+      >
+        <ActivityIcon size={16} />
+      </button>
       <FullscreenButton />
       <NotifyBell push={push} />
     </div>

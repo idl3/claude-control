@@ -56,7 +56,6 @@ import {
   BotIcon,
   PanelLeftIcon,
   EllipsisIcon,
-  SettingsIcon,
   ActivityIcon,
   SearchIcon,
   RefreshIcon,
@@ -1014,9 +1013,13 @@ function AppInner() {
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>(() => {
     try {
       const v = localStorage.getItem('cc:sessionFilter');
-      return v === 'claude' || v === 'codex' || v === 'terminal' ? v : 'all';
+      // Default is 'agents' (Claude + Codex) — a persisted choice (including an
+      // explicit 'all') always wins over that default on reload.
+      return v === 'all' || v === 'agents' || v === 'claude' || v === 'codex' || v === 'terminal'
+        ? v
+        : 'agents';
     } catch {
-      return 'all';
+      return 'agents';
     }
   });
   const cycleFilter = useCallback(() => {
@@ -1660,13 +1663,18 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedSession, cockpit.subagents.length, toggleRail, toggleTerminal]);
 
-  // Claude panes ⌘1-9 can address: VISIBLE ones only — filter must allow Claude
-  // (not 'terminal') and the session group must be expanded — in rail order. The
-  // rail's badges read from the same list, so badge ⌘N always selects row N.
+  // Claude panes ⌘1-9 can address: VISIBLE, LOCAL RUNNING sessions only — filter
+  // must allow Claude (not 'terminal'), exclude remote/olam cloud sessions (they
+  // aren't local panes to jump into), and the session group must be expanded —
+  // in rail order. The rail's badges read from the same list, so badge ⌘N always
+  // selects row N.
   const addressableClaude = useMemo(() => {
     if (sessionFilter === 'terminal') return [];
     return cockpit.sessions
-      .filter((s) => s.kind !== 'terminal' && !collapsedSessions.has(s.sessionName ?? '?'))
+      .filter(
+        (s) =>
+          s.kind !== 'terminal' && s.kind !== 'remote' && !collapsedSessions.has(s.sessionName ?? '?'),
+      )
       .sort(
         (a, b) =>
           (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
@@ -1989,6 +1997,9 @@ function AppInner() {
           resources={cockpit.resources}
           conn={cockpit.conn}
           push={push}
+          onReload={() => window.location.reload()}
+          onOpenSettings={() => setConfigOpen(true)}
+          onOpenProcesses={() => setProcessOpen(true)}
         />
         <UpdateBanner />
         <PermissionBanner show={cockpit.sessions.some((s) => s.permIssue)} />
@@ -2001,7 +2012,24 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
+            <div className="rail-head-row">
+              <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
+              {/* Sidebar-minimise toggle (⌘B), beside the filter funnel — desktop-only
+                  focus mode (mobile swaps the whole rail for the detail pane instead). */}
+              <button
+                type="button"
+                className="rail-collapse-toggle"
+                aria-pressed={railCollapsed}
+                data-on={railCollapsed ? 'true' : undefined}
+                aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
+                data-hotkey="⌘B"
+                data-hotkey-dir="down"
+                onClick={toggleRail}
+              >
+                <PanelLeftIcon />
+              </button>
+            </div>
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
@@ -2014,38 +2042,6 @@ function AppInner() {
                 workingOverrideId={agentWorking ? cockpit.selectedId : null}
                 runningSubagentCountById={cockpit.runningSubagentCountById}
               />
-            </div>
-            {/* Bottom bar: reload + settings + process monitor, all on one level
-                at the sidebar foot. */}
-            <div className="rail-foot">
-              <button
-                type="button"
-                className="rail-foot-btn rail-foot-icon reload-foot"
-                aria-label="Reload app"
-                title="Reload app"
-                onClick={() => window.location.reload()}
-              >
-                <span className="reload-glyph" aria-hidden="true">↻</span>
-              </button>
-              <button
-                type="button"
-                className="rail-foot-btn"
-                aria-label="Settings"
-                title="Settings"
-                onClick={() => setConfigOpen(true)}
-              >
-                <SettingsIcon size={16} />
-                <span>Settings</span>
-              </button>
-              <button
-                type="button"
-                className="rail-foot-btn rail-foot-icon"
-                aria-label="Processes & system"
-                title="Processes & system"
-                onClick={() => setProcessOpen(true)}
-              >
-                <ActivityIcon size={16} />
-              </button>
             </div>
           </aside>
 
@@ -2129,20 +2125,20 @@ function AppInner() {
                     >
                       <PencilIcon />
                     </button>
-                    {artifactCount > 0 ? (
-                      <button
-                        type="button"
-                        className="detail-action detail-action--count"
-                        aria-pressed={galleryOpen}
-                        data-on={galleryOpen ? 'true' : undefined}
-                        aria-label="Toggle artifacts"
-                        title="Artifacts"
-                        onClick={() => setGalleryOpen((v) => !v)}
-                      >
-                        <GalleryIcon />
+                    <button
+                      type="button"
+                      className="detail-action detail-action--count"
+                      aria-pressed={galleryOpen}
+                      data-on={galleryOpen ? 'true' : undefined}
+                      aria-label="Toggle artifacts"
+                      title="Artifacts"
+                      onClick={() => setGalleryOpen((v) => !v)}
+                    >
+                      <GalleryIcon />
+                      {artifactCount > 0 ? (
                         <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
-                      </button>
-                    ) : null}
+                      ) : null}
+                    </button>
                     <button
                       type="button"
                       className="detail-action"
@@ -2304,18 +2300,6 @@ function AppInner() {
                     ) : null}
                   </>
                 ) : null}
-                <button
-                  type="button"
-                  className="detail-action focus-toggle"
-                  aria-pressed={railCollapsed}
-                  aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-                  title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
-                  data-hotkey="⌘B"
-                  data-hotkey-dir="down"
-                  onClick={toggleRail}
-                >
-                  <PanelLeftIcon />
-                </button>
               </div>
             </header>
 
