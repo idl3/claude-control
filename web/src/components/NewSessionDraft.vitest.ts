@@ -36,7 +36,7 @@ function stubApi({
   claudeAvailable?: boolean;
   codexAvailable?: boolean;
   createResponse?: (body: Record<string, unknown>) => Response;
-  tmuxSessions?: { name: string; windows: number }[];
+  tmuxSessions?: { name: string; windows: number; grouped?: boolean; groupSize?: number }[];
 } = {}) {
   const createCalls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -277,6 +277,29 @@ describe('NewSessionDraft tmux target picker', () => {
     expect(screen.getByRole('option', { name: 'New tmux session…' })).toBeTruthy();
     // Default selection preserves today's behavior (neither field sent).
     expect(select.value).toBe('');
+  });
+
+  it('appends a "shared (N linked)" hint for a collapsed session GROUP entry', async () => {
+    stubApi({
+      tmuxSessions: [
+        { name: 'claude-control & olam', windows: 20, grouped: true, groupSize: 4 },
+        { name: 'cc_14517', windows: 2 },
+      ],
+    });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('option', { name: 'claude-control & olam (20 windows) · shared (4 linked)' }),
+      ).toBeTruthy();
+    });
+    // Non-grouped entries render exactly as before, no hint appended.
+    expect(screen.getByRole('option', { name: 'cc_14517 (2 windows)' })).toBeTruthy();
   });
 
   it('selecting "New tmux session…" reveals the name input; picking an existing session hides it', async () => {
