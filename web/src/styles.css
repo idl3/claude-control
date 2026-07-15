@@ -7166,6 +7166,50 @@ select.config-input {
   }
 }
 
+/* Mobile alternative: an icon-only toggle button, same size/shape as the
+   other toolbar icon buttons (.composer-attach/.composer-mic), added
+   alongside the checkbox+label toggle above rather than replacing it — CSS
+   swaps which one is visible per breakpoint so there's exactly one hit
+   target at any given width. */
+.composer-subagent-btn {
+  display: none;
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+}
+.composer-subagent-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.composer-subagent-btn--on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 15%, transparent);
+}
+.composer-subagent-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+@media (max-width: 760px) {
+  .composer-subagent-toggle {
+    display: none;
+  }
+  .composer-subagent-btn {
+    display: inline-flex;
+  }
+}
+
 /* ── Voice recording — inline mode ────────────────────────────── */
 /* Shared primitives (dot, wave) used by the inline composer body. */
 .voice-status {
