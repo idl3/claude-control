@@ -2545,16 +2545,23 @@ details.block-tool[open] > summary .tool-arrow,
      matching comment above for the full invariant. */
   z-index: 2;
 }
-/* Mobile: keep ONLY the system home-indicator inset (0 in a browser tab) —
-   and keep it CONSTANT. A previous :focus-within override dropped it to 0
-   while typing (keyboard covers the home bar), but on iOS tapping any
-   composer button (mic, +) does not focus it, so leaving the textarea
-   blurred the composer and the padding snapped 0→inset — a visible jump.
-   A stable inset costs a small gap above the keyboard while typing;
-   stability wins (operator decision). */
+/* Mobile: keep the system home-indicator inset at rest (0 in a browser tab).
+   A previous :focus-within override dropped it to 0 while typing (keyboard
+   covers the home bar), but on iOS tapping any composer button (mic, +)
+   does not focus it, so leaving the textarea blurred the composer and the
+   padding snapped 0→inset — a visible jump. Now driven by visualViewport
+   instead (App.tsx effect): the keyboard-up boolean comes from viewport
+   height, which doesn't move on a same-field blur/refocus, so toggling
+   `body.kbd-up` is stable across button taps — unlike :focus-within. When
+   the keyboard is actually up, the safe-area inset is dead space floating
+   above it, so we tighten (not zero) the padding there instead. */
 @media (max-width: 760px) {
   .composer {
     padding-bottom: env(safe-area-inset-bottom);
+    transition: padding-bottom 120ms ease;
+  }
+  body.kbd-up .composer {
+    padding-bottom: max(4px, calc(env(safe-area-inset-bottom) - 8px));
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the

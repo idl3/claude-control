@@ -540,6 +540,13 @@ export async function fetchSpawnAgents(): Promise<SpawnAgentInfo[]> {
 export interface TmuxSessionSummary {
   name: string;
   windows: number;
+  /** True when this entry represents a collapsed tmux session GROUP (multiple
+   * linked sessions sharing one window set) rather than a single standalone
+   * session. */
+  grouped?: boolean;
+  /** Number of linked sessions collapsed into this entry. Only present when
+   * `grouped` is true. */
+  groupSize?: number;
 }
 
 /**

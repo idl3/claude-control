@@ -38,6 +38,7 @@ import { isValidAppName, listVersions } from './lib/media-apps.js';
 import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic, sweepCaptures } from './lib/media-captures.js';
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
+import { createPushTrigger } from './lib/push-trigger.js';
 import { readConfig, writeConfig } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
@@ -3103,44 +3104,10 @@ async function handleClientMessage(ws, msg) {
 }
 
 // --- wiring -----------------------------------------------------------------
-// Edge-detect AskUserQuestion pending per session so a phone gets exactly one
-// push when a question opens (re-arms once it's answered). id -> last pending.
-const lastPending = new Map();
-// Skip the very first 'change' so already-pending sessions present at startup
-// don't all fire a push when the server boots.
-let pushPrimed = false;
-
-function firePushForChange(sessions) {
-  try {
-    if (!pushPrimed) {
-      for (const s of sessions) lastPending.set(s.id, !!s.pending);
-      pushPrimed = true;
-      return;
-    }
-    const seen = new Set();
-    for (const s of sessions) {
-      seen.add(s.id);
-      const was = lastPending.get(s.id) ?? false;
-      if (s.pending && !was) {
-        push
-          .sendToAll({
-            title: s.name || s.id,
-            body: s.pendingQuestion || 'is asking a question',
-            data: { id: s.id },
-          })
-          .catch((err) => console.error('push: sendToAll failed:', err?.message || err));
-      }
-      lastPending.set(s.id, !!s.pending);
-    }
-    // Forget sessions that disappeared so a returning id re-arms cleanly.
-    for (const id of [...lastPending.keys()]) {
-      if (!seen.has(id)) lastPending.delete(id);
-    }
-  } catch (err) {
-    // Never let push logic break the session broadcast.
-    console.error('push: firePushForChange error:', err?.message || err);
-  }
-}
+// Edge-detects AskUserQuestion pending ("ask" push) and active→idle settle
+// ("done"/"stopped" push) per session — see lib/push-trigger.js for the
+// algorithm and the settle-timer rationale.
+const pushTrigger = createPushTrigger();
 
 registry.on('change', (sessions) => {
   const liveIds = sessions.map((s) => s.id);
@@ -3151,7 +3118,7 @@ registry.on('change', (sessions) => {
     if (!liveSet.has(id)) rawEventsById.delete(id);
   }
   for (const s of sessions) upgradeSubscriptionIfTranscriptReady(s.id);
-  firePushForChange(sessions);
+  pushTrigger.onChange(sessions);
   broadcast({ type: 'sessions', sessions });
 });
 resources.on('sample', (snapshot) => broadcast({ type: 'resources', snapshot }));
