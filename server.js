@@ -70,6 +70,7 @@ import { deriveProjectsRoots } from './lib/projects-roots.js';
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
 import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
 import { pruneDeadClients } from './lib/ws-heartbeat.js';
+import { encodeWsMessage, sendWsMessage, websocketBackpressureLimitBytes } from './lib/ws-backpressure.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Prefer the built assistant-ui app (web/dist) when present; otherwise fall back
@@ -135,6 +136,7 @@ const CONFIG = {
   // scrollback. Shares the CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript.
   maxBuffer: Number(env('MAX_BUFFER')) || 4000,
   maxUploadMB: Number(env('MAX_UPLOAD_MB')) || 25,
+  wsBufferLimitBytes: websocketBackpressureLimitBytes(process.env),
   uploadsDir:
     env('UPLOADS') || path.join(os.homedir(), '.claude-control', 'uploads'),
   // Media root for transcript inline embeds (<embedded-image|video …/>).
@@ -1753,12 +1755,23 @@ function serveStatic(pathname, res) {
     const ext = path.extname(full).toLowerCase();
     res.writeHead(200, {
       'content-type': MIME[ext] || 'application/octet-stream',
-      // Personal tool under active iteration: never let a phone serve a stale
-      // UI. Always revalidate so CSS/JS fixes show up on the next load.
-      'cache-control': 'no-store, must-revalidate',
+      'cache-control': staticCacheControl(rel),
     });
     res.end(data);
   });
+}
+
+function staticCacheControl(rel) {
+  // Vite emits content-hashed files under assets/. Keep index.html no-store so a
+  // reload still discovers the newest bundle filenames after a build/restart.
+  if (
+    PUBLIC_DIR === DIST_DIR &&
+    rel.startsWith('assets/') &&
+    /-[A-Za-z0-9_-]{8,}\.[^.]+(?:\.map)?$/.test(path.basename(rel))
+  ) {
+    return 'public, max-age=31536000, immutable';
+  }
+  return 'no-store, must-revalidate';
 }
 
 function servePresent(pathname, res) {
@@ -1929,17 +1942,17 @@ async function relayTerminalUpgrade(req, socket, head) {
 }
 
 function send(ws, obj) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
+  sendWsMessage(ws, encodeWsMessage(obj), { limitBytes: CONFIG.wsBufferLimitBytes });
 }
 function broadcast(obj) {
-  const msg = JSON.stringify(obj);
-  for (const ws of wss.clients) if (ws.readyState === ws.OPEN) ws.send(msg);
+  const msg = encodeWsMessage(obj);
+  for (const ws of wss.clients) sendWsMessage(ws, msg, { limitBytes: CONFIG.wsBufferLimitBytes });
 }
 function broadcastTo(id, obj) {
   const sub = subscriptions.get(id);
   if (!sub) return;
-  const msg = JSON.stringify(obj);
-  for (const ws of sub.clients) if (ws.readyState === ws.OPEN) ws.send(msg);
+  const msg = encodeWsMessage(obj);
+  for (const ws of sub.clients) sendWsMessage(ws, msg, { limitBytes: CONFIG.wsBufferLimitBytes });
 }
 
 function rawSummary(value, max = 240) {
