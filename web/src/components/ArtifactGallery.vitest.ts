@@ -7,9 +7,13 @@
 // mounting a full ArtifactPanelProvider tree — this file is testing
 // ArtifactGallery's own dispatch logic, not the panel's rendering).
 //
-// Phase C3: the row list is now a disclosure behind a head toggle button,
-// collapsed by default so it never covers the transcript. Every test that
-// asserts on rows must expandGallery() first.
+// Phase D: the component is now FULLY CONTROLLED — no internal head button
+// or expand/collapse state. `open` decides whether the row list renders at
+// all, and `onCountChange` is how the resolved artifact count is reported
+// upward (the header owns the toggle button + count badge now). Persistence
+// of the open/closed choice moved to lib/sessionArtifacts.ts
+// (loadGalleryOpen/saveGalleryOpen), tested directly in
+// sessionArtifacts.vitest.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement } from 'react';
 import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -32,43 +36,8 @@ vi.mock('./ArtifactContext', async (importOriginal) => {
   return { ...actual, useArtifactPanel: () => ({ open: openMock }) };
 });
 
-// D4/session-scoping note (see ArtifactContext.vitest.ts's identical stub):
-// the Node/vitest/jsdom combo this repo runs on shadows jsdom's
-// `localStorage` with Node's own experimental global, which implements
-// neither getItem nor setItem — so persistence round-trips need a real,
-// in-memory Storage stub.
-class FakeLocalStorage {
-  private store = new Map<string, string>();
-  getItem(key: string): string | null {
-    return this.store.has(key) ? this.store.get(key)! : null;
-  }
-  setItem(key: string, value: string): void {
-    this.store.set(key, String(value));
-  }
-  removeItem(key: string): void {
-    this.store.delete(key);
-  }
-  clear(): void {
-    this.store.clear();
-  }
-  key(i: number): string | null {
-    return Array.from(this.store.keys())[i] ?? null;
-  }
-  get length(): number {
-    return this.store.size;
-  }
-}
-
 function transcriptWith(...names: string[]): string {
   return names.map((n) => `<embedded-app url="apps/${n}.html" height="300" />`).join('\n');
-}
-
-function galleryHead(): HTMLElement {
-  return screen.getByRole('button', { name: /^Artifacts/ });
-}
-
-async function expandGallery(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: /^Artifacts/ }));
 }
 
 const PROTOTYPE: SessionArtifact = {
@@ -91,73 +60,80 @@ const REACT: SessionArtifact = {
 };
 
 let dispatchSpy: ReturnType<typeof vi.fn>;
+let onCountChange: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   resolveSessionArtifactsMock.mockReset();
   openMock.mockReset();
+  onCountChange = vi.fn();
   dispatchSpy = vi.fn(window.dispatchEvent.bind(window));
   window.dispatchEvent = dispatchSpy as unknown as typeof window.dispatchEvent;
-  vi.stubGlobal('localStorage', new FakeLocalStorage());
 });
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
 });
 
 describe('ArtifactGallery', () => {
-  it('renders nothing for a transcript with no embedded-app tags (never calls resolveSessionArtifacts)', () => {
-    render(createElement(ArtifactGallery, { transcriptText: 'just some prose, no tags here' }));
+  it('renders nothing for a transcript with no embedded-app tags (never calls resolveSessionArtifacts), reports count 0', () => {
+    render(
+      createElement(ArtifactGallery, {
+        transcriptText: 'just some prose, no tags here',
+        open: true,
+        onCountChange,
+      }),
+    );
     expect(resolveSessionArtifactsMock).not.toHaveBeenCalled();
     expect(screen.queryByRole('region', { name: 'Session artifacts' })).toBeNull();
+    expect(onCountChange).toHaveBeenCalledWith(0);
   });
 
-  it('is collapsed by default: the head button renders with aria-expanded=false and the row list is not in the DOM', async () => {
+  it('open={false}: resolves artifacts + reports the count, but the list is not in the DOM', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
+    render(
+      createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: false, onCountChange }),
+    );
 
-    const head = await screen.findByRole('button', { name: /^Artifacts/ });
-    expect(head.getAttribute('aria-expanded')).toBe('false');
-    expect(head.getAttribute('aria-controls')).toBeTruthy();
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+    expect(screen.queryByRole('region', { name: 'Session artifacts' })).toBeNull();
     expect(screen.queryByText('counter')).toBeNull();
-    expect(screen.getByText('(1)')).toBeTruthy();
   });
 
-  it('clicking the head toggles the list open, sets aria-expanded=true, and the <ul> id matches aria-controls', async () => {
+  it('open={true}: renders the list once artifacts resolve', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
+    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: true, onCountChange }));
 
-    const head = await screen.findByRole('button', { name: /^Artifacts/ });
-    const controlsId = head.getAttribute('aria-controls');
-    fireEvent.click(head);
-
-    expect(head.getAttribute('aria-expanded')).toBe('true');
-    const rowText = await screen.findByText('counter');
-    expect(rowText.closest('ul')?.id).toBe(controlsId);
-
-    // Click again to collapse.
-    fireEvent.click(head);
-    expect(head.getAttribute('aria-expanded')).toBe('false');
-    await waitFor(() => expect(screen.queryByText('counter')).toBeNull());
-  });
-
-  it('persists the expanded state to localStorage and restores it on the next mount', async () => {
-    resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    const { unmount } = render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
-    await expandGallery();
-    expect(galleryHead().getAttribute('aria-expanded')).toBe('true');
-    expect(localStorage.getItem('cc:artifact-gallery-open')).toBe('1');
-    unmount();
-
-    resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
-    expect((await screen.findByRole('button', { name: /^Artifacts/ })).getAttribute('aria-expanded')).toBe('true');
     expect(await screen.findByText('counter')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Session artifacts' })).toBeTruthy();
+    expect(onCountChange).toHaveBeenCalledWith(1);
   });
 
-  it('lists all three artifacts with correct names, versions, and kind badges once resolved and expanded', async () => {
+  it('toggling the open prop (rerender) mounts/unmounts the list without re-resolving', async () => {
+    resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
+    const { rerender } = render(
+      createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: false, onCountChange }),
+    );
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+    expect(screen.queryByText('counter')).toBeNull();
+
+    rerender(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: true, onCountChange }));
+    expect(await screen.findByText('counter')).toBeTruthy();
+
+    rerender(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: false, onCountChange }));
+    await waitFor(() => expect(screen.queryByText('counter')).toBeNull());
+
+    // Only ever resolved once — toggling `open` is pure render-level, no re-fetch.
+    expect(resolveSessionArtifactsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists all three artifacts with correct names, versions, and kind badges once resolved', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE, MARKDOWN, REACT]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter', 'notes', 'widget') }));
-    await expandGallery();
+    render(
+      createElement(ArtifactGallery, {
+        transcriptText: transcriptWith('counter', 'notes', 'widget'),
+        open: true,
+        onCountChange,
+      }),
+    );
 
     await screen.findByText('counter');
     expect(screen.getByText('notes')).toBeTruthy();
@@ -169,12 +145,12 @@ describe('ArtifactGallery', () => {
     expect(screen.getByLabelText('Markdown artifact')).toBeTruthy();
     expect(screen.getByLabelText('React artifact')).toBeTruthy();
     expect(resolveSessionArtifactsMock).toHaveBeenCalledWith(['counter', 'notes', 'widget']);
+    expect(onCountChange).toHaveBeenCalledWith(3);
   });
 
   it('clicking a prototype row dispatches cockpit:studio-open with its url, never calls open()', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
-    await expandGallery();
+    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: true, onCountChange }));
     const row = (await screen.findByText('counter')).closest('button')!;
 
     fireEvent.click(row);
@@ -187,8 +163,7 @@ describe('ArtifactGallery', () => {
 
   it('clicking a markdown row opens it inline via useArtifactPanel().open with kind "app" and the right appUrl', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([MARKDOWN]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('notes') }));
-    await expandGallery();
+    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('notes'), open: true, onCountChange }));
     const row = (await screen.findByText('notes')).closest('button')!;
 
     fireEvent.click(row);
@@ -200,8 +175,7 @@ describe('ArtifactGallery', () => {
 
   it('clicking a react row also opens it inline via open() (same presentation-kind path as markdown)', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([REACT]);
-    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('widget') }));
-    await expandGallery();
+    render(createElement(ArtifactGallery, { transcriptText: transcriptWith('widget'), open: true, onCountChange }));
     const row = (await screen.findByText('widget')).closest('button')!;
 
     fireEvent.click(row);
@@ -210,26 +184,41 @@ describe('ArtifactGallery', () => {
     expect(dispatchSpy.mock.calls.some(([e]) => (e as CustomEvent).type === 'cockpit:studio-open')).toBe(false);
   });
 
-  it('clears to empty when the transcript no longer has any embed tags (e.g. session switch)', async () => {
+  it('clears to empty (onCountChange(0), list gone) when the transcript no longer has any embed tags (e.g. session switch)', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    const { rerender } = render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
-    await expandGallery();
+    const { rerender } = render(
+      createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: true, onCountChange }),
+    );
     await screen.findByText('counter');
 
-    rerender(createElement(ArtifactGallery, { transcriptText: 'no embeds in this transcript anymore' }));
+    rerender(
+      createElement(ArtifactGallery, {
+        transcriptText: 'no embeds in this transcript anymore',
+        open: true,
+        onCountChange,
+      }),
+    );
 
     await waitFor(() => expect(screen.queryByText('counter')).toBeNull());
+    expect(onCountChange).toHaveBeenCalledWith(0);
   });
 
   it('does not re-resolve when transcript text changes but the derived name set does not', async () => {
     resolveSessionArtifactsMock.mockResolvedValue([PROTOTYPE]);
-    const { rerender } = render(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') }));
-    await expandGallery();
+    const { rerender } = render(
+      createElement(ArtifactGallery, { transcriptText: transcriptWith('counter'), open: true, onCountChange }),
+    );
     await screen.findByText('counter');
     expect(resolveSessionArtifactsMock).toHaveBeenCalledTimes(1);
 
     // Same embedded name, extra prose appended (simulates streaming tokens) — must not re-fetch.
-    rerender(createElement(ArtifactGallery, { transcriptText: transcriptWith('counter') + '\nmore streamed prose' }));
+    rerender(
+      createElement(ArtifactGallery, {
+        transcriptText: transcriptWith('counter') + '\nmore streamed prose',
+        open: true,
+        onCountChange,
+      }),
+    );
 
     await waitFor(() => expect(screen.getByText('counter')).toBeTruthy());
     expect(resolveSessionArtifactsMock).toHaveBeenCalledTimes(1);
