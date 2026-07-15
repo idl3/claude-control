@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SlotText } from 'slot-text/react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
@@ -487,24 +488,26 @@ function PaneRow({
 
   // Right-hand meta slot: tmux pane name while ⌘ is held (overrides the
   // cycle), else the current phase of the shared model/context(/usage) cycle.
-  // A stable `key` per swap lets the mount-only meta-swap-in CSS keyframe
-  // replay on every change (React remounts the node instead of diffing text).
+  // The text TRANSITION is rendered by slot-text's <SlotText> (CSS text-roll,
+  // see styles.css .session-row-meta) — ONE persistent SlotText instance
+  // spans every state (no per-field `key`, unlike the old crossfade), so its
+  // internal effect sees `text` change and plays the roll instead of a
+  // React remount (which would skip the animation — see slot-text/react's
+  // firstTextEffectRef, only animates on update, not on mount).
   const paneName = s.tmuxName;
   const showPaneName = Boolean(cmdHeld && paneName);
   const metaFields = paneMetaFields(s, isTerminal, isCodex);
   const activeField = metaFields.length > 0 ? metaFields[metaTick % metaFields.length] : null;
+  const metaText = showPaneName ? (paneName ?? '') : activeField ? activeField.text : '';
+  const metaClassName = showPaneName ? 'session-row-meta-pane' : (activeField?.className ?? '');
   const rightSlot =
     showPaneName || activeField ? (
       <span className="session-row-meta" title={showPaneName ? paneName : activeField?.text}>
-        {showPaneName ? (
-          <span key="pane" className="session-row-meta-pane">
-            {paneName}
-          </span>
-        ) : activeField ? (
-          <span key={activeField.key} className={activeField.className}>
-            {activeField.text}
-          </span>
-        ) : null}
+        <SlotText
+          text={metaText}
+          className={metaClassName}
+          options={{ direction: 'up', skipUnchanged: true, duration: 300 }}
+        />
       </span>
     ) : null;
 
