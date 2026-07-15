@@ -5001,6 +5001,29 @@ select.config-input {
   padding: 0 4px;
   border-radius: 4px;
 }
+/* Checkbox field: a full-width row (native checkbox + label text), same
+   visual language as .config-field's label/hint pair. Used for boolean
+   toggles like Harness's "skip permission prompts". */
+.config-checkbox-field {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.config-checkbox-field input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.config-checkbox-field .config-checkbox-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.config-checkbox-field .config-label {
+  cursor: pointer;
+}
 /* Agent group: a labelled sub-block that spans the full grid and lays out its
    own fields inside a nested 2-column grid. */
 .config-agent-group {

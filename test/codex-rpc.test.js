@@ -139,6 +139,99 @@ test('CodexRpcManager.attach forwards model into the CodexRpcClient it construct
     });
 });
 
+// ── Task 10: skipPermissions toggle (default ON) — Codex RPC transport ──────
+// approvalPolicy/sandbox are only meaningful on a fresh thread/start (mirrors
+// the model field's fresh-thread-only exclusion from thread/resume above).
+
+test('CodexRpcClient _openThread includes approvalPolicy+sandbox in thread/start params when constructed with skipPermissions', async () => {
+  const calls = [];
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+    skipPermissions: true,
+  });
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { thread: { id: 'thread-1', path: '/tmp/rollout.jsonl' } };
+  };
+
+  await client._openThread();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'thread/start');
+  assert.deepEqual(calls[0].params, {
+    cwd: '/workspace',
+    ephemeral: false,
+    threadSource: 'user',
+    sessionStartSource: 'startup',
+    approvalPolicy: 'never',
+    sandbox: 'danger-full-access',
+  });
+});
+
+test('CodexRpcClient _openThread omits approvalPolicy+sandbox from thread/start when skipPermissions is false (regression: byte-identical to unset shape)', async () => {
+  const calls = [];
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+    skipPermissions: false,
+  });
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { thread: { id: 'thread-1', path: '/tmp/rollout.jsonl' } };
+  };
+
+  await client._openThread();
+
+  assert.deepEqual(calls[0].params, {
+    cwd: '/workspace',
+    ephemeral: false,
+    threadSource: 'user',
+    sessionStartSource: 'startup',
+  });
+});
+
+test('CodexRpcClient _openThread never carries approvalPolicy+sandbox on thread/resume even when constructed with skipPermissions (fresh-thread-only)', async () => {
+  const calls = [];
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+    resumeThreadId: 'thread-1',
+    transcriptPath: '/tmp/rollout.jsonl',
+    skipPermissions: true,
+  });
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { thread: { id: 'thread-1', path: '/tmp/rollout.jsonl' } };
+  };
+
+  await client._openThread();
+
+  assert.equal(calls[0].method, 'thread/resume');
+  assert.ok(!('approvalPolicy' in calls[0].params), 'thread/resume must not carry approvalPolicy');
+  assert.ok(!('sandbox' in calls[0].params), 'thread/resume must not carry sandbox');
+});
+
+test('CodexRpcManager.attach forwards skipPermissions into the CodexRpcClient it constructs', () => {
+  const manager = new CodexRpcManager();
+  const originalConnect = CodexRpcClient.prototype.connect;
+  let captured;
+  CodexRpcClient.prototype.connect = async function connect() {
+    captured = this.skipPermissions;
+    throw new Error('stop before real connect');
+  };
+  return manager
+    .attach({ target: 's:0.0', endpoint: 'ws://127.0.0.1:1', cwd: '/workspace', skipPermissions: true })
+    .catch(() => {})
+    .finally(() => {
+      CodexRpcClient.prototype.connect = originalConnect;
+      assert.equal(captured, true);
+    });
+});
+
 test('CodexRpcClient _openThread resumes by thread id and rollout path', async () => {
   const calls = [];
   const client = new CodexRpcClient({

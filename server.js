@@ -1153,6 +1153,9 @@ async function handleSessionNew(req, res) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }
   const config = readConfig();
+  // Default ON (readConfig already resolves an absent stored value to true) —
+  // the explicit !== false guard is defense-in-depth at the point of use.
+  const skipPermissions = config.skipPermissions !== false;
   const rawCwd =
     typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
   // Expand a leading ~ to the home directory so projectDirs paths like
@@ -1287,7 +1290,7 @@ async function handleSessionNew(req, res) {
         // dash-prefixed positional as an unknown option without it — same
         // hazard verified against `claude -p`; codex's own parser is clap-based
         // and `--` is standard clap behavior).
-        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand, model: codexModel || undefined });
+        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand, model: codexModel || undefined, skipPermissions });
         const argv = args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a));
         if (prompt) argv.push('--', tmux.shellQuoteName(prompt));
         launch = `${bin} ${argv.join(' ')}`;
@@ -1308,7 +1311,14 @@ async function handleSessionNew(req, res) {
         claudeBin,
         name,
         model: model || undefined,
-        permissionMode: 'bypassPermissions',
+        // 'manual' asks for each action, same as claude's own interactive
+        // default — the closest --permission-mode literal to "prompt
+        // normally" (there is no literal "default" in its enum). Note:
+        // print/-p mode has no interactive channel to answer a prompt at
+        // all, so with skipPermissions off this transport will effectively
+        // auto-deny un-preapproved tools — a pre-existing architectural
+        // constraint of print mode, not something this toggle introduces.
+        permissionMode: skipPermissions ? 'bypassPermissions' : 'manual',
         quote: tmux.shellQuoteName,
       });
     } else {
@@ -1324,6 +1334,12 @@ async function handleSessionNew(req, res) {
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
       if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
+      // Explicit, idempotent bypass flag — harmless if config.launchCommand
+      // is a shell alias that already carries it. Appending it here (rather
+      // than relying solely on the alias) is the robust fix: an alias may
+      // not expand in this non-interactive tmux send context, or its own
+      // flag could be shadowed by the --name/--model/-- we append after it.
+      if (skipPermissions) launch += ' --dangerously-skip-permissions';
       // Positional prompt goes last (`claude [options] [command] [prompt]`),
       // preceded by `--` to end option parsing. Verified on-host this is load-
       // bearing: `claude -p --model haiku "-x reply with just ok"` errors with
@@ -1356,7 +1372,7 @@ async function handleSessionNew(req, res) {
       }
     }
     if (agent === 'codex' && codexRpcEndpoint) {
-      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd, model: codexModel || undefined });
+      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd, model: codexModel || undefined, skipPermissions });
       if (prompt) {
         try {
           await codexRpc.submit(target, prompt, { cwd });

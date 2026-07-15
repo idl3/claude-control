@@ -215,6 +215,8 @@ interface HarnessSectionProps {
   setCodexLaunchCommand: (s: string) => void;
   codexBin: string;
   setCodexBin: (s: string) => void;
+  skipPermissions: boolean;
+  setSkipPermissions: (b: boolean) => void;
   loading: boolean;
 }
 
@@ -228,12 +230,31 @@ function HarnessSection({
   setCodexLaunchCommand,
   codexBin,
   setCodexBin,
+  skipPermissions,
+  setSkipPermissions,
   loading,
 }: HarnessSectionProps) {
   return (
     <>
       <h2 className="config-section-heading">Harness</h2>
       <div className="config-body">
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={skipPermissions}
+            disabled={loading}
+            onChange={(e) => setSkipPermissions(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Skip permission prompts (launch with full permissions)</span>
+            <span className="config-hint">
+              New sessions launch with approval prompting bypassed (Claude:{' '}
+              <code>--dangerously-skip-permissions</code>; Codex:{' '}
+              <code>--dangerously-bypass-approvals-and-sandbox</code>). Turn off to get prompted
+              per action.
+            </span>
+          </span>
+        </label>
         <div className="config-agent-group">
           <span className="config-agent-group-title">Claude Code</span>
           <label className="config-field">
@@ -580,6 +601,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
+  const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -633,6 +655,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setTranscriptFontSize(loadFontSize('transcript') ?? c.transcriptFontSize ?? 0);
         setExternalFontSize(loadFontSize('external') ?? c.externalFontSize ?? 0);
         setProjectDirs(c.projectDirs ?? []);
+        setSkipPermissions(c.skipPermissions ?? true);
         setRestartSupported(c.restartSupported ?? false);
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
@@ -705,6 +728,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         transcriptFontSize,
         externalFontSize,
         projectDirs,
+        skipPermissions,
       });
       setLaunchCommand(saved.launchCommand);
       setClaudeBin(saved.claudeBin ?? '');
@@ -717,6 +741,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       setTranscriptFontSize(saved.transcriptFontSize ?? 0);
       setExternalFontSize(saved.externalFontSize ?? 0);
       setProjectDirs(saved.projectDirs ?? []);
+      setSkipPermissions(saved.skipPermissions ?? true);
       // Server write above is the cross-device fallback default; this device's
       // own preference lives in localStorage so it survives independent of
       // what other devices later save (see lib/fontSizePrefs.ts).
@@ -850,6 +875,8 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setCodexLaunchCommand={setCodexLaunchCommand}
                 codexBin={codexBin}
                 setCodexBin={setCodexBin}
+                skipPermissions={skipPermissions}
+                setSkipPermissions={setSkipPermissions}
                 loading={loading}
               />
             ) : null}

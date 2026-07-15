@@ -337,6 +337,12 @@ export interface ControlConfig {
   /** Preconfigured project directories for the New Session dropdown. */
   projectDirs: { label: string; path: string }[];
   /**
+   * New sessions launch with permission prompting bypassed (Claude:
+   * `--dangerously-skip-permissions`; Codex: `--dangerously-bypass-approvals-
+   * and-sandbox` / RPC approvalPolicy+sandbox) when true. Defaults to true.
+   */
+  skipPermissions: boolean;
+  /**
    * True when the running process is supervised (launchd KeepAlive / pm2 /
    * systemd) and can safely self-restart. False for a bare `node server.js`
    * dev process, where exiting would not respawn.

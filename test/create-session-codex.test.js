@@ -24,8 +24,8 @@ import { buildBridgeCommand } from '../lib/claude-print.js';
 // arg is shell-quoted because the command is typed into an interactive shell.
 // Keeping this in lockstep with the server guards against the prior bug where
 // buildSpawnCommand's result was discarded (`void`) and the string hand-rolled.
-function launchFor(config, cwd, { prompt = '', model = undefined } = {}) {
-  const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand, model });
+function launchFor(config, cwd, { prompt = '', model = undefined, skipPermissions = false } = {}) {
+  const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand, model, skipPermissions });
   const argv = args.map((a) => (a === cwd ? shellQuoteName(cwd) : a));
   // `--` ends option parsing before the positional prompt — verified on-host
   // that codex's clap-based parser (like claude's) treats a dash-prefixed
@@ -35,10 +35,12 @@ function launchFor(config, cwd, { prompt = '', model = undefined } = {}) {
 }
 
 // Mirror of server.js handleSessionNew's Claude tmux launch construction
-// EXACTLY, including the new --model flag and positional initial prompt.
-function claudeLaunchFor(config, name, { model = null, prompt = '' } = {}) {
+// EXACTLY, including the --model flag, the skipPermissions bypass flag, and
+// the positional initial prompt.
+function claudeLaunchFor(config, name, { model = null, prompt = '', skipPermissions = false } = {}) {
   let launch = `${config.launchCommand} --name ${shellQuoteName(name)}`;
   if (model) launch += ` --model ${shellQuoteName(model)}`;
+  if (skipPermissions) launch += ' --dangerously-skip-permissions';
   // `--` ends option parsing before the positional prompt — verified on-host:
   // `claude -p --model haiku "-x reply with just ok"` errors as an unknown
   // option without it; `claude -p --model haiku -- "-x ..."` works.
@@ -167,6 +169,61 @@ describe('handleSessionNew codex launch string — --model flag (tmux/TUI transp
   test('is byte-identical to the no-model shape when model is unset (regression)', () => {
     const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace');
     assert.equal(launch, `codex -C '/workspace'`);
+  });
+});
+
+// ── Task 10: skipPermissions toggle (default ON) — Codex tmux/TUI transport ──
+// buildSpawnCommand appends the exact flag the installed codex CLI documents
+// for a full approval/sandbox bypass (`codex --help`).
+
+describe('buildSpawnCommand — Codex skipPermissions flag', () => {
+  test('appends --dangerously-bypass-approvals-and-sandbox when skipPermissions is true', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex', skipPermissions: true });
+    assert.deepEqual(result, {
+      bin: 'codex',
+      args: ['-C', '/workspace', '--dangerously-bypass-approvals-and-sandbox'],
+    });
+  });
+
+  test('omits the bypass flag when skipPermissions is false (regression: byte-identical to unset shape)', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex', skipPermissions: false });
+    assert.deepEqual(result, { bin: 'codex', args: ['-C', '/workspace'] });
+  });
+
+  test('omits the bypass flag when skipPermissions is absent (regression)', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex' });
+    assert.deepEqual(result, { bin: 'codex', args: ['-C', '/workspace'] });
+  });
+
+  test('model and skipPermissions compose: --model precedes the bypass flag', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex', model: 'gpt-5.5', skipPermissions: true });
+    assert.deepEqual(result, {
+      bin: 'codex',
+      args: ['-C', '/workspace', '--model', 'gpt-5.5', '--dangerously-bypass-approvals-and-sandbox'],
+    });
+  });
+});
+
+describe('handleSessionNew codex launch string — skipPermissions (tmux/TUI transport)', () => {
+  test('codex launch string carries the bypass flag when skipPermissions is on', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { skipPermissions: true });
+    assert.equal(launch, `codex -C '/workspace' --dangerously-bypass-approvals-and-sandbox`);
+  });
+
+  test('codex launch string omits the bypass flag when skipPermissions is off (regression)', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { skipPermissions: false });
+    assert.equal(launch, `codex -C '/workspace'`);
+  });
+
+  test('bypass flag precedes the -- guard and positional prompt when both are set', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', {
+      skipPermissions: true,
+      prompt: 'fix the failing test',
+    });
+    assert.equal(
+      launch,
+      `codex -C '/workspace' --dangerously-bypass-approvals-and-sandbox -- 'fix the failing test'`,
+    );
   });
 });
 
@@ -338,6 +395,86 @@ describe('handleSessionNew claude launch string — --model and initial prompt',
   test('a dash-prefixed prompt with no model still gets the -- guard after --name', () => {
     const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { prompt: '- fix the bug' });
     assert.equal(launch, `claude --name 'my session' -- '- fix the bug'`);
+  });
+});
+
+// ── Task 10: skipPermissions toggle (default ON) — Claude tmux transport ────
+// The explicit --dangerously-skip-permissions flag is appended by
+// handleSessionNew itself (idempotent even if config.launchCommand is an
+// alias that already carries it), independent of --model/prompt.
+
+describe('handleSessionNew claude launch string — skipPermissions', () => {
+  test('appends --dangerously-skip-permissions when skipPermissions is on', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { skipPermissions: true });
+    assert.equal(launch, `claude --name 'my session' --dangerously-skip-permissions`);
+  });
+
+  test('omits the flag when skipPermissions is off (regression: byte-identical to the pre-Task-10 shape)', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', { skipPermissions: false });
+    assert.equal(launch, `claude --name 'my session'`);
+  });
+
+  test('omits the flag when skipPermissions is absent (regression)', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session');
+    assert.equal(launch, `claude --name 'my session'`);
+  });
+
+  test('bypass flag sits between --model and the -- guard when model, skipPermissions, and prompt are all set', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'claude' }, 'my session', {
+      model: 'opus',
+      skipPermissions: true,
+      prompt: 'fix the failing test',
+    });
+    assert.equal(
+      launch,
+      `claude --name 'my session' --model 'opus' --dangerously-skip-permissions -- 'fix the failing test'`,
+    );
+  });
+
+  test('works with a custom launchCommand (yolo alias) — flag is appended regardless of alias contents', () => {
+    const launch = claudeLaunchFor({ launchCommand: 'yolo' }, 'feat', { skipPermissions: true });
+    assert.equal(launch, `yolo --name 'feat' --dangerously-skip-permissions`);
+  });
+});
+
+// ── Task 10: skipPermissions toggle — Claude print/bridge transport ─────────
+// buildBridgeCommand's permissionMode param is gated by handleSessionNew:
+// skipPermissions on → 'bypassPermissions' (unchanged from before Task 10);
+// skipPermissions off → 'manual' (asks for each action — the closest
+// --permission-mode literal to "prompt normally"; confirmed via `claude
+// --help`, whose --permission-mode enum has no literal "default").
+
+describe('handleSessionNew claude print bridge — skipPermissions gates permissionMode', () => {
+  function bridgePermissionModeFor(skipPermissions) {
+    return skipPermissions ? 'bypassPermissions' : 'manual';
+  }
+
+  test('skipPermissions on resolves to bypassPermissions (unchanged pre-Task-10 default)', () => {
+    const launch = buildBridgeCommand({
+      nodeBin: '/usr/local/bin/node',
+      bridgePath: '/app/bin/claude-print-bridge.mjs',
+      socketPath: '/tmp/cc.sock',
+      cwd: '/workspace',
+      claudeBin: '/usr/local/bin/claude',
+      name: 'my session',
+      permissionMode: bridgePermissionModeFor(true),
+      quote: shellQuoteName,
+    });
+    assert.ok(launch.includes("--permission-mode 'bypassPermissions'"));
+  });
+
+  test('skipPermissions off resolves to manual', () => {
+    const launch = buildBridgeCommand({
+      nodeBin: '/usr/local/bin/node',
+      bridgePath: '/app/bin/claude-print-bridge.mjs',
+      socketPath: '/tmp/cc.sock',
+      cwd: '/workspace',
+      claudeBin: '/usr/local/bin/claude',
+      name: 'my session',
+      permissionMode: bridgePermissionModeFor(false),
+      quote: shellQuoteName,
+    });
+    assert.ok(launch.includes("--permission-mode 'manual'"));
   });
 });
 
