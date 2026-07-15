@@ -5017,6 +5017,10 @@ html.lightbox-open body {
 .config-modal {
   width: 100%;
   max-width: 900px;
+  /* Fixed height so switching sections never resizes the modal — the body
+     panes scroll internally (see .config-nav / .config-content overflow-y)
+     instead of the shell growing/shrinking with content. */
+  height: min(80vh, 720px);
   max-height: 90dvh;
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -5030,7 +5034,7 @@ html.lightbox-open body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -5046,7 +5050,7 @@ html.lightbox-open body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 8px;
+  padding: 8px;
   overflow-y: auto;
   border-right: 1px solid var(--line);
   background: var(--bg-2);
@@ -5055,7 +5059,7 @@ html.lightbox-open body {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 10px;
+  padding: 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
@@ -5101,7 +5105,7 @@ html.lightbox-open body {
 .config-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 14px;
+  gap: 8px;
   align-content: start;
 }
 /* Fields that hold long values (paths, model ids) span the full width. */
@@ -5210,8 +5214,8 @@ select.config-input {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 14px;
-  padding: 8px 10px 10px;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-2);
@@ -5252,7 +5256,7 @@ select.config-input {
 /* Live font-size preview: a small mock transcript that resizes instantly. */
 .config-preview {
   margin-top: 4px;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-2);
@@ -5260,12 +5264,12 @@ select.config-input {
 .config-preview-msg {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .config-preview-row {
   align-self: flex-start;
   max-width: 90%;
-  padding: 6px 10px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg-hover);
   color: var(--text);
@@ -5282,7 +5286,7 @@ select.config-input {
 .config-icon-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .config-icon-preview {
   border-radius: 10px;
@@ -5294,13 +5298,13 @@ select.config-input {
 .config-proj-dirs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
 }
 .config-proj-dir-row {
   display: grid;
   grid-template-columns: 100px 1fr 28px;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
 }
 .config-proj-dir-label {
@@ -5348,15 +5352,15 @@ select.config-input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 11px 16px;
+  padding: 8px 16px;
   border-top: 1px solid var(--line);
 }
 .config-version {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   max-width: min(100%, 620px);
   font-size: 11px;
@@ -5426,6 +5430,9 @@ select.config-input {
   }
   .config-modal {
     max-width: 100%;
+    /* Near-full-height sheet on mobile, still fixed (not content-driven) so
+       switching sections doesn't resize the sheet. */
+    height: 92dvh;
     max-height: 92dvh;
     border-radius: var(--radius) var(--radius) 0 0;
   }
@@ -5435,8 +5442,8 @@ select.config-input {
   .config-nav {
     flex: 0 0 auto;
     flex-direction: row;
-    gap: 6px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 8px;
     overflow-x: auto;
     overflow-y: hidden;
     border-right: 0;
