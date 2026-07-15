@@ -74,11 +74,29 @@ afterEach(() => {
 });
 
 describe('ArtifactGallery', () => {
-  it('renders nothing for a transcript with no embedded-app tags (never calls resolveSessionArtifacts), reports count 0', () => {
+  // Task 3: open + zero-artifacts now renders the onboarding explainer
+  // (never null) — see the two tests immediately below. This replaces the
+  // old "renders nothing ... open={true}" expectation, which pre-dates the
+  // empty-state change.
+  it('open + no embedded-app tags: renders the region with the onboarding explainer (never calls resolveSessionArtifacts), reports count 0', () => {
     render(
       createElement(ArtifactGallery, {
         transcriptText: 'just some prose, no tags here',
         open: true,
+        onCountChange,
+      }),
+    );
+    expect(resolveSessionArtifactsMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Session artifacts' })).toBeTruthy();
+    expect(screen.getByText('No artifacts yet')).toBeTruthy();
+    expect(onCountChange).toHaveBeenCalledWith(0);
+  });
+
+  it('closed + no embedded-app tags: still renders nothing (the !open early return is untouched by the empty-state change)', () => {
+    render(
+      createElement(ArtifactGallery, {
+        transcriptText: 'just some prose, no tags here',
+        open: false,
         onCountChange,
       }),
     );
