@@ -10085,7 +10085,7 @@ select.studio-prop-control {
 }
 .studio-inspector-truncated-notice {
   margin: 0 0 10px;
-  padding: 6px 8px;
+  padding: 8px;
   font-size: 11px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -10111,7 +10111,7 @@ select.studio-prop-control {
 .studio-inspector-node-label {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
 }
 .studio-inspector-node-tag {
@@ -10242,7 +10242,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-review {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   max-width: 100%;
   max-height: 100%;
 }
@@ -10285,7 +10285,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-saved-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--green);
   font-weight: 600;
   font-size: 13px;
@@ -10294,13 +10294,13 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-saved {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
   color: var(--text);
   font-size: 13px;
 }
 .studio-capture-tag {
-  padding: 8px 12px;
+  padding: 8px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -10321,7 +10321,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-annotate-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .studio-annotate-tool-btn {
   display: inline-flex;
