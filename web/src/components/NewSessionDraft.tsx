@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig } from '../lib/api';
-import type { CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
+import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels } from '../lib/api';
+import type { ClaudeModelInfo, CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
 import {
   defaultAgentForFilter,
   defaultName,
@@ -11,8 +11,9 @@ import {
 } from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
 
-/** Claude model picker value. 'default' omits --model (agent's own default). */
-export type ClaudeModel = 'default' | 'opus' | 'sonnet' | 'haiku';
+/** Claude model picker value: 'default' (omit --model) or a full model id
+ *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
+export type ClaudeModel = 'default' | string;
 
 interface NewSessionDraftProps {
   /** Rail filter at the time the draft was opened — seeds the default agent. */
@@ -24,12 +25,7 @@ interface NewSessionDraftProps {
   onCreated: (result: CreateSessionResult) => void;
 }
 
-const MODEL_OPTIONS: { id: ClaudeModel; label: string }[] = [
-  { id: 'default', label: 'Default' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
-];
+const DEFAULT_MODEL_OPTION: ClaudeModelInfo = { id: 'default', label: 'Default' };
 
 /** Sentinel value for the tmux-session <select>'s "New tmux session…" option. */
 const NEW_TMUX_SESSION = '__new__';
@@ -67,6 +63,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
+  const [claudeModels, setClaudeModels] = useState<ClaudeModelInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionSummary[]>([]);
@@ -97,6 +94,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
       .then((sessions) => setTmuxSessions(sessions))
       .catch(() => {
         // Non-fatal: the picker still offers "(default)" + "New tmux session…".
+      });
+    getModels()
+      .then((info) => {
+        setClaudeModels(info.claudeModels ?? []);
+      })
+      .catch(() => {
+        // Non-fatal: model picker falls back to just "Default".
       });
     promptRef.current?.focus();
   }, []);
@@ -265,10 +269,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             </div>
           ) : null}
 
-          {/* Model picker — Claude only; Codex has no model flag wired here. */}
+          {/* Model picker — Claude only. Sourced from /api/models (via
+              getModels()) so lib/models.js stays the single source of truth
+              for the exact model ids the CLI accepts, rather than a
+              hand-duplicated list here. */}
           {agent === 'claude' ? (
             <div className="rail-new-mode-seg" role="group" aria-label="Model">
-              {MODEL_OPTIONS.map(({ id, label }) => {
+              {[DEFAULT_MODEL_OPTION, ...claudeModels].map(({ id, label }) => {
                 const isActive = model === id;
                 return (
                   <button

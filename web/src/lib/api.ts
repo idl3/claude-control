@@ -478,8 +478,9 @@ export async function createSession(opts?: {
   claudeTransport?: 'tmux' | 'print';
   /** Codex-only transport. Defaults to the server's configured transport. */
   codexTransport?: 'tmux' | 'rpc';
-  /** Claude-only model override. Omitted/'default' → agent's own default. */
-  model?: 'opus' | 'sonnet' | 'haiku';
+  /** Claude-only model override — a full model id from ClaudeModelInfo.id
+   *  (e.g. 'claude-opus-4-8'). Omitted/'default' → agent's own default. */
+  model?: string;
   /** Initial prompt, submitted atomically with session creation. */
   prompt?: string;
   /**

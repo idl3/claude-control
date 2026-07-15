@@ -27,6 +27,15 @@ describe('SpawnAgentInfo type contract', () => {
   });
 });
 
+/** Mirrors lib/models.js CLAUDE_MODELS — kept in sync by the model-id
+ *  assertion test below (asserts the real ids, not this fixture). */
+const FIXTURE_CLAUDE_MODELS = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+];
+
 function stubApi({
   claudeAvailable = true,
   codexAvailable = true,
@@ -46,6 +55,16 @@ function stubApi({
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
+    }
+    if (url.endsWith('/api/models')) {
+      return new Response(JSON.stringify({
+        machine: { ramGB: 32, arch: 'arm64', platform: 'darwin', appleSilicon: true },
+        mlxModels: [],
+        claudeModels: FIXTURE_CLAUDE_MODELS,
+        codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }, { id: 'gpt-5.4', label: 'GPT-5.4' }],
+        recommendedMlxModel: '',
+        recommendedClaudeModel: 'claude-haiku-4-5-20251001',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.endsWith('/api/spawn-agents')) {
       return new Response(JSON.stringify({
@@ -114,12 +133,16 @@ describe('NewSessionDraft agent, mode, and model controls', () => {
       expect(screen.getByRole('group', { name: 'Claude mode' })).toBeTruthy();
       expect(screen.getByRole('group', { name: 'Model' })).toBeTruthy();
     });
-    // Model picker shows all four options, default active.
+    // Model picker shows Default + all fetched models (exact ids/labels
+    // asserted separately below), default active.
     const defaultBtn = screen.getByRole('button', { name: 'Default' }) as HTMLButtonElement;
     expect(defaultBtn.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Opus' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Sonnet' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Haiku' })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Opus 4.8' })).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'Sonnet 5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fable 5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Haiku 4.5' })).toBeTruthy();
 
     fireEvent.click(codexButton);
 
@@ -139,10 +162,24 @@ describe('NewSessionDraft agent, mode, and model controls', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const opusBtn = await screen.findByRole('button', { name: 'Opus' });
+    const opusBtn = await screen.findByRole('button', { name: 'Opus 4.8' });
     fireEvent.click(opusBtn);
     expect(opusBtn.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Default' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers the exact Claude model ids from /api/models, including Fable 5', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fable 5' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].model).toBe('claude-fable-5');
   });
 });
 
@@ -161,13 +198,13 @@ describe('NewSessionDraft submit payload', () => {
       onCreated,
     }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Sonnet' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sonnet 5' }));
     const textarea = screen.getByLabelText('Initial prompt');
     fireEvent.change(textarea, { target: { value: 'fix the failing test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
-    expect(createCalls[0].model).toBe('sonnet');
+    expect(createCalls[0].model).toBe('claude-sonnet-5');
     expect(createCalls[0].prompt).toBe('fix the failing test');
     expect(createCalls[0].agent).toBe('claude');
 
@@ -217,7 +254,7 @@ describe('NewSessionDraft submit payload', () => {
       onCreated: () => {},
     }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Opus' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Opus 4.8' }));
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 

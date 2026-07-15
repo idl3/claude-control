@@ -1113,8 +1113,10 @@ async function resolvePaneTarget(target) {
 
 // Claude model flag values the draft-composer UI may request. 'default'
 // (or anything else unrecognized) omits --model entirely — silent fallback,
-// same pattern as claudeTransport/codexTransport below, not a 400.
-const ALLOWED_CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+// same pattern as claudeTransport/codexTransport below, not a 400. Derived
+// from CLAUDE_MODELS (lib/models.js) — single source of truth, not a
+// hand-duplicated list of shorthand ids.
+const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
