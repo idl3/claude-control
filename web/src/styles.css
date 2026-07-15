@@ -54,7 +54,12 @@
   --control-radius: 8px;
   --control-pad: 7px 10px;
 
-  --hud-h: 37px;
+  /* Total bar height incl. the ~3px top/bottom breathing room added below —
+     37px content + 6px fixed vertical padding. Kept as one token since
+     .ptr-indicator / .toast position off `safe-top + hud-h` and .rail-gear
+     sizes itself off hud-h directly; bumping it here keeps all three in
+     sync with the taller bar instead of drifting out from under it. */
+  --hud-h: 43px;
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -258,10 +263,13 @@ body {
 .hud {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: var(--hud-h);
-  padding: 0 14px;
-  padding-top: var(--safe-top);
+  gap: 8px;
+  /* Content height only — the fixed 3px top/bottom padding below is what
+     brings the rendered bar to the full --hud-h (see token comment). */
+  height: calc(var(--hud-h) - 6px);
+  padding: 0 8px;
+  padding-top: calc(var(--safe-top) + 3px);
+  padding-bottom: 3px;
   background: var(--glass-panel);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -281,7 +289,7 @@ body {
 .hud-brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.02em;
@@ -392,7 +400,7 @@ body.is-external-display .rail {
 .session-list {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -408,7 +416,7 @@ body.is-external-display .rail {
 .session-group-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: calc(11px * var(--ui-scale));
@@ -416,7 +424,7 @@ body.is-external-display .rail {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted, #8a8f98);
-  padding: 6px 8px;
+  padding: 8px;
   background: none;
   border: none;
   border-radius: 6px;
@@ -431,7 +439,7 @@ body.is-external-display .rail {
 .session-group-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
   font: inherit;
@@ -510,7 +518,7 @@ body.is-external-display .rail {
 .session-window-head {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   padding: 4px 6px 2px;
   font-size: calc(12px * var(--ui-scale));
 }
@@ -717,7 +725,7 @@ body.is-external-display .rail {
    Overrides the 48dvh "hug" cap that suits the floating composer overlay. */
 .terminal-pane-root {
   min-height: 0;
-  padding: 8px 8px 10px;
+  padding: 8px;
   gap: 8px;
 }
 .terminal-pane-root .terminal-view {
@@ -823,7 +831,7 @@ body.is-external-display .rail {
 .session-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
   font-size: var(--txt-meta);
   color: var(--text-dim);
@@ -894,7 +902,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px;
   min-height: 48px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--line);
@@ -969,7 +977,7 @@ body.is-external-display .rail {
 @media (max-width: 759px) {
   .detail-head {
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: 8px;
   }
   .detail-title {
     flex-direction: column;
@@ -1037,7 +1045,7 @@ body.is-external-display .rail {
 .detail-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
   /* No margin-left:auto — the title's flex-grow right-aligns the cluster. An auto
      margin would instead absorb the free space and strand the ⋯ toggle on the
@@ -1149,7 +1157,7 @@ body.is-external-display .rail {
 .detail-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .rename-btn {
@@ -1188,7 +1196,7 @@ body.is-external-display .rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 12px 12px 6px;
+  padding: 8px;
 }
 .live-pane-head {
   flex: 0 0 auto;
@@ -1199,7 +1207,7 @@ body.is-external-display .rail {
 .live-pane-body {
   flex: 1 1 auto;
   margin: 0;
-  padding: 10px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -1239,7 +1247,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: var(--txt-meta);
@@ -1262,7 +1270,7 @@ body.is-external-display .rail {
   flex: 1 1 auto;
   min-height: 0; /* allow the flex child to shrink so it scrolls when capped */
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px;
   /* True terminal surface — near-black so the ANSI palette reads correctly. */
   background: #0b0d10;
   color: #c0caf5;
@@ -1292,7 +1300,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 8px;
   border-top: 1px solid var(--line);
   background: #0b0d10;
   overflow-x: auto;
@@ -1509,7 +1517,7 @@ body.is-external-display .rail {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   opacity: 0.5;
 }
 .thread-loading-spinner {
@@ -1632,13 +1640,13 @@ body.is-external-display .rail {
      now that the role label is gone). */
   border: 1px solid transparent;
   border-left: 2px solid var(--accent);
-  padding: 8px 10px;
+  padding: 8px;
 }
 .msg-row[data-role='system'] .msg-body {
   background: transparent;
   border: 1px dashed var(--line);
   color: var(--text-dim);
-  padding: 8px 10px;
+  padding: 8px;
 }
 /* Optimistic (un-echoed) send. State comes from the server ack via data-send:
    queued = awaiting ack (pulsing), sent = ack'd/awaiting echo, failed = never landed. */
@@ -1827,7 +1835,7 @@ body.is-external-display .rail {
 .login-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   width: min(340px, 88vw);
 }
 .login-title {
@@ -1879,15 +1887,15 @@ body.is-external-display .rail {
 }
 
 /* ── Pin transcript modal ─────────────────────────────────────── */
-.pin-modal { display: flex; flex-direction: column; gap: 10px; max-height: 80vh; }
+.pin-modal { display: flex; flex-direction: column; gap: 8px; max-height: 80vh; }
 .pin-search {
   width: 100%; box-sizing: border-box;
-  padding: 10px 12px; border-radius: 8px;
+  padding: 8px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text);
   font-size: 14px;
 }
 .pin-unpin {
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  padding: 8px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text-dim);
   font-size: 12px;
 }
@@ -1895,7 +1903,7 @@ body.is-external-display .rail {
 .pin-empty { color: var(--text-faint); font-size: 12px; padding: 16px; text-align: center; }
 .pin-row {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  padding: 8px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text);
 }
 .pin-row:hover { border-color: var(--accent, #3b82f6); }
@@ -1931,7 +1939,7 @@ body.is-external-display .rail {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 5px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -1996,8 +2004,8 @@ body.is-external-display .rail {
   gap: 8px;
   /* Clear the iOS status bar (clock/5G/battery): the panel is fixed at top:0,
      so the head needs the top safe-area inset or its title + close button sit
-     under the notch cluster. On desktop the inset is 0 → unchanged 10px. */
-  padding: calc(10px + var(--safe-top)) 12px 10px;
+     under the notch cluster. On desktop the inset is 0 → unchanged 8px. */
+  padding: calc(8px + var(--safe-top)) 8px 8px;
   border-bottom: 1px solid var(--line);
 }
 .sa-panel-title {
@@ -2043,8 +2051,8 @@ body.is-external-display .rail {
 /* Tabs: Active / Completed / All */
 .sa-tabs {
   display: flex;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
 }
 .sa-tab {
@@ -2052,8 +2060,8 @@ body.is-external-display .rail {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 7px 8px;
+  gap: 8px;
+  padding: 8px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--bg-1);
@@ -2077,7 +2085,7 @@ body.is-external-display .rail {
   gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 12px;
+  padding: 8px;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
@@ -2124,7 +2132,7 @@ body.is-external-display .rail {
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   /* Mirror .thread-viewport centering: 800 px column with a 12 px gutter on
      mobile. Keeps the inline agent transcript aligned with the main chat. */
   padding: 12px max(12px, calc((100% - 800px * var(--ui-scale)) / 2)) 20px;
@@ -2139,7 +2147,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 11px 12px;
+  padding: 8px;
   cursor: pointer;
   font-size: calc(12px * var(--ui-scale));
   line-height: 1.4;
@@ -2194,7 +2202,7 @@ body.is-external-display .rail {
   }
 }
 .sa-transcript {
-  padding: 6px 10px 10px;
+  padding: 8px;
   border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -2355,7 +2363,7 @@ body.is-external-display .rail {
   font-size: calc(11.5px * var(--ui-scale));
   line-height: 1.5;
   color: var(--text);
-  padding: 8px 10px;
+  padding: 8px;
   overflow-x: auto;
   white-space: pre;
   -webkit-overflow-scrolling: touch;
@@ -2423,7 +2431,7 @@ body.is-external-display .rail {
   list-style: none;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .block-cot > summary::-webkit-details-marker {
@@ -2575,7 +2583,7 @@ body.is-external-display .rail {
 .block-tool-use {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: calc(11.5px * var(--ui-scale));
@@ -2641,7 +2649,7 @@ details.block-tool[open] > summary .tool-arrow,
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 8px;
   white-space: pre;
   overflow-x: auto;
   max-height: 220px;
@@ -2751,7 +2759,7 @@ body.is-external-display .composer {
   /* Overflow scrolls horizontally instead of wrapping onto stacked rows — many
      concurrent agents stay on one swipeable line. */
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
@@ -2778,7 +2786,7 @@ body.is-external-display .composer {
 .subagent-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 5px 10px 5px 8px;
   background: color-mix(in oklch, var(--accent) 8%, var(--bg-1));
   border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--line));
@@ -2892,8 +2900,8 @@ body.is-external-display .composer {
 .agent-inline-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
+  gap: 8px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-0);
   flex: 0 0 auto;
@@ -2926,7 +2934,7 @@ body.is-external-display .composer {
 .agent-inline-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -2973,7 +2981,7 @@ body.is-external-display .composer {
   background: transparent;
   border: none;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 8px;
   cursor: pointer;
   font: inherit;
   color: var(--text);
@@ -3047,7 +3055,7 @@ body.is-external-display .composer {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px;
   /* Sleeker resting border: same 1px hairline, but blended toward the card's
      own background instead of the full-strength --line used by chips/panes,
      so it reads as a subtle seam rather than a hard outline. */
@@ -3244,7 +3252,7 @@ body.is-external-display .composer {
 .composer-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .composer-attachments:empty {
   display: none;
@@ -3252,7 +3260,7 @@ body.is-external-display .composer {
 .attach-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 220px;
   padding: 4px 4px 4px 8px;
   border-radius: 8px;
@@ -3572,7 +3580,7 @@ body.is-external-display .composer {
 .composer-hint-keys {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 /* Match the cap height/text to the hint's font size so nothing looks oversized. */
 .composer-hint .kbd {
@@ -3632,7 +3640,7 @@ body.is-external-display .composer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
 }
 .modal-title {
@@ -3648,7 +3656,7 @@ body.is-external-display .composer {
   padding: 4px 8px;
 }
 .modal-body {
-  padding: 14px;
+  padding: 8px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -3672,7 +3680,7 @@ body.is-external-display .composer {
   align-items: center;
   gap: 8px;
   min-height: 38px;
-  padding: 8px 10px 8px 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
@@ -3723,7 +3731,7 @@ body.is-external-display .composer {
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
-  padding: 12px;
+  padding: 8px;
   overscroll-behavior: contain;
 }
 .raw-empty {
@@ -3734,8 +3742,8 @@ body.is-external-display .composer {
 .raw-event {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-2);
@@ -3744,7 +3752,7 @@ body.is-external-display .composer {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .raw-time {
@@ -3778,7 +3786,7 @@ body.is-external-display .composer {
   max-height: 360px;
   overflow: auto;
   margin: 0;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
@@ -3814,7 +3822,7 @@ body.is-external-display .composer {
 .question {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .q-header {
   font-size: var(--txt-meta);
@@ -3841,7 +3849,7 @@ body.is-external-display .composer {
   flex-direction: column;
   gap: 2px;
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px;
   border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--glass-panel);
@@ -3879,7 +3887,7 @@ body.is-external-display .composer {
 .option-sending {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-left: 8px;
   font-size: var(--txt-meta);
   font-weight: 400;
@@ -3903,14 +3911,14 @@ body.is-external-display .composer {
 .ask-split {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin-top: 4px;
 }
 @media (min-width: 760px) {
   .ask-split {
     flex-direction: row;
     align-items: stretch;
-    gap: 12px;
+    gap: 8px;
     min-height: 0;
   }
 }
@@ -3936,7 +3944,7 @@ body.is-external-display .composer {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 8px;
   border-radius: 9px;
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -3997,7 +4005,7 @@ body.is-external-display .composer {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -4011,7 +4019,7 @@ body.is-external-display .composer {
 }
 
 .ask-preview-label {
-  padding: 8px 12px 0;
+  padding: 8px 8px 0;
   font-size: var(--txt-meta);
   font-weight: 700;
   color: var(--accent-2);
@@ -4022,7 +4030,7 @@ body.is-external-display .composer {
 
 .ask-preview-content {
   margin: 0;
-  padding: 6px 12px 12px;
+  padding: 8px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: calc(12px * var(--ui-scale));
   line-height: 1.5;
@@ -4035,7 +4043,7 @@ body.is-external-display .composer {
 }
 
 .ask-preview-empty {
-  padding: 18px 12px;
+  padding: 18px 8px;
   color: var(--text-faint);
   font-size: var(--txt-meta);
   font-style: italic;
@@ -4051,7 +4059,7 @@ body.is-external-display .composer {
 
 .capture-output {
   margin: 0;
-  padding: 10px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -4067,8 +4075,8 @@ body.is-external-display .composer {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
-  padding-bottom: calc(12px + var(--safe-bottom));
+  padding: 8px;
+  padding-bottom: calc(8px + var(--safe-bottom));
   border-top: 1px solid var(--line);
 }
 .modal-foot-spacer {
@@ -4142,7 +4150,7 @@ body.is-external-display .composer {
   background: var(--bg-2);
   border: 1px solid var(--line);
   color: var(--text);
-  padding: 8px 14px;
+  padding: 8px;
   border-radius: 10px;
   font-size: 12px;
   opacity: 0;
@@ -4196,7 +4204,7 @@ body.is-external-display .composer {
   align-items: center;
   gap: 8px;
   margin: 2px 2px 6px;
-  padding: 7px 10px;
+  padding: 8px;
   border: 1px solid var(--accent);
   border-radius: 8px;
   background: color-mix(in oklch, var(--accent) 12%, transparent);
@@ -4212,7 +4220,7 @@ body.is-external-display .composer {
   align-items: center;
   gap: 8px;
   margin: 2px 2px 6px;
-  padding: 7px 10px;
+  padding: 8px;
   border: 1px solid var(--accent-2, var(--accent));
   border-radius: 8px;
   background: color-mix(in oklch, var(--accent-2, var(--accent)) 12%, transparent);
@@ -4224,9 +4232,9 @@ body.is-external-display .composer {
 .composer-errored {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin: 2px 2px 6px;
-  padding: 7px 10px;
+  padding: 8px;
   border: 1px solid oklch(55% 0.16 25);
   border-radius: 8px;
   background: oklch(40% 0.12 25 / 0.18);
@@ -4290,8 +4298,8 @@ body.is-external-display .composer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 8px;
   background: var(--amber-bg);
   color: var(--amber);
   border-bottom: 1px solid var(--line);
@@ -4331,7 +4339,7 @@ body.is-external-display .composer {
 .update-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: none;
 }
 .update-now {
@@ -4387,7 +4395,7 @@ body.is-external-display .composer {
 
 /* One-line iOS "add to home screen" push hint */
 .ios-push-hint {
-  padding: 8px 12px;
+  padding: 8px;
   font-size: var(--txt-meta);
   line-height: 1.4;
   color: var(--text);
@@ -4414,7 +4422,7 @@ body.is-external-display .composer {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px;
   padding-bottom: calc(8px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
@@ -4710,7 +4718,7 @@ select.rail-new-cwd {
 
 /* Codex no-name note — dim, low-height placeholder row instead of an input */
 .rail-new-name-note {
-  padding: 6px 10px;
+  padding: 8px;
   font-size: 11px;
   color: var(--text-faint);
   font-style: italic;
@@ -4741,7 +4749,7 @@ select.rail-new-cwd {
 .new-session-draft-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   max-width: calc(640px * var(--ui-scale));
   margin-inline: auto;
@@ -4757,12 +4765,12 @@ select.rail-new-cwd {
   letter-spacing: -0.02em;
 }
 /* Wraps the heading + agent/mode/model/name/cwd/tmux pickers, sitting above
-   the composer card. Same 12px field-to-field rhythm .new-session-draft-body
+   the composer card. Same 8px field-to-field rhythm .new-session-draft-body
    used before Create/Cancel moved into the composer's own toolbar. */
 .new-session-setup {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 .new-session-draft-composer {
   margin-top: 4px;
@@ -4776,7 +4784,7 @@ select.rail-new-cwd {
 .transcript-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 6px;
 }
 
@@ -5009,6 +5017,10 @@ html.lightbox-open body {
 .config-modal {
   width: 100%;
   max-width: 900px;
+  /* Fixed height so switching sections never resizes the modal — the body
+     panes scroll internally (see .config-nav / .config-content overflow-y)
+     instead of the shell growing/shrinking with content. */
+  height: min(80vh, 720px);
   max-height: 90dvh;
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -5022,7 +5034,7 @@ html.lightbox-open body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -5038,7 +5050,7 @@ html.lightbox-open body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 8px;
+  padding: 8px;
   overflow-y: auto;
   border-right: 1px solid var(--line);
   background: var(--bg-2);
@@ -5047,7 +5059,7 @@ html.lightbox-open body {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 10px;
+  padding: 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
@@ -5093,7 +5105,7 @@ html.lightbox-open body {
 .config-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 14px;
+  gap: 8px;
   align-content: start;
 }
 /* Fields that hold long values (paths, model ids) span the full width. */
@@ -5202,8 +5214,8 @@ select.config-input {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 14px;
-  padding: 8px 10px 10px;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-2);
@@ -5244,7 +5256,7 @@ select.config-input {
 /* Live font-size preview: a small mock transcript that resizes instantly. */
 .config-preview {
   margin-top: 4px;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-2);
@@ -5252,12 +5264,12 @@ select.config-input {
 .config-preview-msg {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .config-preview-row {
   align-self: flex-start;
   max-width: 90%;
-  padding: 6px 10px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg-hover);
   color: var(--text);
@@ -5274,7 +5286,7 @@ select.config-input {
 .config-icon-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .config-icon-preview {
   border-radius: 10px;
@@ -5286,13 +5298,13 @@ select.config-input {
 .config-proj-dirs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
 }
 .config-proj-dir-row {
   display: grid;
   grid-template-columns: 100px 1fr 28px;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
 }
 .config-proj-dir-label {
@@ -5340,15 +5352,15 @@ select.config-input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 11px 16px;
+  padding: 8px 16px;
   border-top: 1px solid var(--line);
 }
 .config-version {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   max-width: min(100%, 620px);
   font-size: 11px;
@@ -5418,6 +5430,9 @@ select.config-input {
   }
   .config-modal {
     max-width: 100%;
+    /* Near-full-height sheet on mobile, still fixed (not content-driven) so
+       switching sections doesn't resize the sheet. */
+    height: 92dvh;
     max-height: 92dvh;
     border-radius: var(--radius) var(--radius) 0 0;
   }
@@ -5427,8 +5442,8 @@ select.config-input {
   .config-nav {
     flex: 0 0 auto;
     flex-direction: row;
-    gap: 6px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 8px;
     overflow-x: auto;
     overflow-y: hidden;
     border-right: 0;
@@ -5496,7 +5511,7 @@ select.config-input {
   justify-content: space-between;
   gap: 8px;
   /* Same fixed-at-top status-bar clearance as .sa-panel-head. */
-  padding: calc(8px + var(--safe-top)) 12px 8px;
+  padding: calc(8px + var(--safe-top)) 8px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
@@ -5513,7 +5528,7 @@ select.config-input {
 .term-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
 }
 .term-newtab {
@@ -5575,8 +5590,8 @@ select.config-input {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px calc(8px + var(--safe-bottom, 0px));
+  gap: 8px;
+  padding: 8px 8px calc(8px + var(--safe-bottom, 0px));
   border-top: 1px solid var(--line);
   background: var(--bg-1);
 }
@@ -5625,7 +5640,7 @@ select.config-input {
 .gate-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   max-width: 320px;
   padding: 24px;
@@ -5641,14 +5656,14 @@ select.config-input {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--text-dim);
 }
 
 .gate-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
@@ -6246,7 +6261,7 @@ select.config-input {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 16px;
   text-align: center;
   background: color-mix(in oklch, var(--red) 8%, var(--bg-2));
@@ -6376,8 +6391,8 @@ select.config-input {
 .skill-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 8px 16px;
   height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -6385,7 +6400,7 @@ select.config-input {
 .skill-legend-source-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .skill-legend-source-badge {
   display: inline-flex;
@@ -6435,19 +6450,19 @@ select.config-input {
   /* Accent colour matching other modal titles but cooler than amber. */
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--accent);
 }
 /* The modal body for skill detail: flex column, scrollable. */
 .skill-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   /* Remove the default .modal-body bottom padding so the body content touches
      the scroll edge cleanly; the outer overflow handles the rest. */
-  padding: 14px;
+  padding: 8px;
 }
 
 /* ── Front-matter definition list ────────────────────────────────
@@ -6455,9 +6470,9 @@ select.config-input {
 .skill-fm {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
+  gap: 4px 8px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -6816,7 +6831,7 @@ select.config-input {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 8px;
   background: var(--glass-chrome);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -6991,7 +7006,7 @@ select.config-input {
 }
 .artifact-pre {
   margin: 0;
-  padding: 12px 14px;
+  padding: 8px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
@@ -7011,7 +7026,7 @@ select.config-input {
 }
 .artifact-large-note {
   margin: 0;
-  padding: 6px 14px;
+  padding: 8px;
   font-size: var(--txt-meta);
   color: var(--text-faint);
   background: var(--bg-2);
@@ -7110,7 +7125,7 @@ select.config-input {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   font-size: var(--txt-meta);
@@ -7161,7 +7176,7 @@ select.config-input {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   font-size: var(--txt-meta);
@@ -7177,7 +7192,7 @@ select.config-input {
 .agent-nested-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -7273,7 +7288,7 @@ select.config-input {
 .optimize-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .optimize-section-label {
   font-size: var(--txt-meta);
@@ -7288,7 +7303,7 @@ select.config-input {
   width: 100%;
   box-sizing: border-box;
   min-height: 120px;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg);
@@ -7307,7 +7322,7 @@ select.config-input {
 
 /* Diff view */
 .optimize-diff {
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg);
@@ -7633,10 +7648,10 @@ select.config-input {
 .ask-min-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 9px 12px;
+  padding: 8px;
   border: 1px solid var(--amber);
   border-radius: 10px;
   background: var(--amber-bg);
@@ -7701,7 +7716,7 @@ select.config-input {
 .ask-inline-freetext {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 /* The chosen option, restyled from a button into a header above the textarea. */
 .ask-freetext-chosen {
@@ -7875,7 +7890,7 @@ select.config-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px 10px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -7889,7 +7904,7 @@ select.config-input {
 
 /* Search input row */
 .skill-browser-search {
-  padding: 10px 12px;
+  padding: 8px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
 }
@@ -7920,14 +7935,14 @@ select.config-input {
 .skill-browser-list {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 6px 8px 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .skill-browser-empty {
-  padding: 24px 12px;
+  padding: 24px 8px;
   text-align: center;
   color: var(--text-faint);
   font-size: 13px;
@@ -7941,10 +7956,10 @@ select.config-input {
   border: none;
   cursor: pointer;
   border-radius: 7px;
-  padding: 7px 10px;
+  padding: 8px;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   transition: background var(--ease) 0.12s;
   /* Prevent horizontal overflow from long descriptions */
   min-width: 0;
@@ -8220,7 +8235,7 @@ select.config-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
 }
 .proc-graph {
@@ -8267,7 +8282,7 @@ select.config-input {
   grid-template-columns: 56px 44px 52px 1fr 64px;
   align-items: center;
   gap: 8px;
-  padding: 5px 12px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--line);
 }
 .proc-head {
@@ -8476,8 +8491,8 @@ select.config-input {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid var(--line);
   background: var(--bg-1);
 }
@@ -8702,7 +8717,7 @@ select.config-input {
   flex-direction: column;
   gap: 8px;
   margin: 4px 0;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg-1);
@@ -8730,7 +8745,7 @@ select.config-input {
 .ask-answered-a {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   font-size: calc(13.5px * var(--ui-scale));
   font-weight: 600;
   color: var(--text);
@@ -8853,9 +8868,9 @@ select.config-input {
 .error-boundary-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin: 16px;
-  padding: 14px 16px;
+  padding: 8px;
   border: 1px solid var(--danger, #e5484d);
   border-radius: 10px;
   background: color-mix(in oklch, var(--danger, #e5484d) 10%, transparent);
@@ -8969,7 +8984,7 @@ select.config-input {
 
 /* --- olam archived (collapsed) section — item 3 --- */
 .remote-archived-toggle {
-  display: flex; align-items: center; gap: 6px; width: 100%;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 4px 10px 4px 24px; font-size: 11px; color: var(--muted, #888);
   background: none; border: none; cursor: pointer; text-align: left;
 }
@@ -8978,7 +8993,7 @@ select.config-input {
 
 /* --- olam degraded (log-tail-only) streaming banner --- */
 .olam-degraded-banner {
-  padding: 6px 12px;
+  padding: 8px;
   font-size: 12px;
   color: #ff9500;
   background: rgba(255, 149, 0, 0.10);
@@ -8991,8 +9006,8 @@ select.config-input {
 .olam-resume-banner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 8px;
   font-size: 12px;
   color: #ff9500;
   background: rgba(255, 149, 0, 0.10);
@@ -9080,7 +9095,7 @@ select.config-input {
 }
 .olam-terminal-panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 10px; font-size: 11px; color: var(--muted, #888);
+  padding: 4px 8px; font-size: 11px; color: var(--muted, #888);
   border-bottom: 1px solid rgba(127, 127, 127, 0.14);
   flex: 0 0 auto;
 }
@@ -10086,7 +10101,7 @@ select.studio-prop-control {
 }
 .studio-inspector-truncated-notice {
   margin: 0 0 10px;
-  padding: 6px 8px;
+  padding: 8px;
   font-size: 11px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -10112,7 +10127,7 @@ select.studio-prop-control {
 .studio-inspector-node-label {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
 }
 .studio-inspector-node-tag {
@@ -10243,7 +10258,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-review {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   max-width: 100%;
   max-height: 100%;
 }
@@ -10286,7 +10301,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-saved-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--green);
   font-weight: 600;
   font-size: 13px;
@@ -10295,13 +10310,13 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-capture-saved {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
   color: var(--text);
   font-size: 13px;
 }
 .studio-capture-tag {
-  padding: 8px 12px;
+  padding: 8px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -10322,7 +10337,7 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .studio-annotate-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .studio-annotate-tool-btn {
   display: inline-flex;
