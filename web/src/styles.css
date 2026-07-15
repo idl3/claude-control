@@ -1312,6 +1312,10 @@ body.is-external-display .rail {
   gap: calc(16px * var(--ui-scale)); /* more breathing room between turns; scales with font */
   -webkit-overflow-scrolling: touch;
 }
+/* Extra bottom room while the sub-agent strip / Working indicator shows, so the
+   last transcript line clears the overhanging pills at max scroll (Thread adds
+   `.has-subagents` only when agents are present — no phantom padding otherwise). */
+.thread-viewport.has-subagents { padding-bottom: 64px; }
 .thread-empty {
   margin: auto;
   color: var(--text-faint);
@@ -2647,6 +2651,9 @@ body.is-external-display .composer {
   position: relative;
   z-index: 1;
 }
+/* Only the topmost pill row overhangs into the transcript; when a nested row is
+   present it is the top row, and the parent row below it sits at normal flow. */
+.subagent-strip > .subagent-pills:not(:first-child) { margin-top: 0; }
 .subagent-pill { flex: 0 0 auto; }
 /* Individual pill */
 .subagent-pill {
@@ -2725,6 +2732,15 @@ body.is-external-display .composer {
 .subagent-pill[data-status='done'] {
   border-color: color-mix(in oklch, var(--green) 60%, var(--line));
 }
+/* Nested (child) sub-agents — a lighter, non-interactive pill row above their
+   parent. No animated ring (liveness isn't confirmed for nested children). */
+.subagent-pill-nested {
+  font-size: calc(var(--txt-meta) - 1px);
+  padding: 3px 8px 3px 7px;
+  cursor: default;
+  opacity: 0.9;
+}
+.subagent-pill-nested::before { content: none; }
 /* Agent name label */
 .subagent-pill-name {
   letter-spacing: -0.01em;
