@@ -96,3 +96,49 @@ describe('UserMessage — Retry/Discard on a "Not delivered" bubble', () => {
     expect((onDiscard.mock.calls[0][0] as CustomEvent).detail).toEqual({ key: 99 });
   });
 });
+
+// A stuck queued/sent bubble never gets a "Not delivered" ack (the TUI's
+// focus was elsewhere, so tmux never even rejected it) — it just sits
+// "Queued" forever with no echo. The force-remove control below is the
+// operator's only way out of that, so it must render on exactly the
+// queued/sent bubbles and nowhere else (not on failed, not on a reconciled
+// real message).
+describe('UserMessage — force-remove control on a stuck queued/sent bubble', () => {
+  it('shows the Remove control while queued', () => {
+    setMessage('queued');
+    render(createElement(UserMessage));
+    expect(screen.getByText('Queued')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove this queued message' })).toBeTruthy();
+  });
+
+  it('shows the Remove control while sent (ack confirmed, still awaiting echo)', () => {
+    setMessage('sent');
+    render(createElement(UserMessage));
+    expect(screen.getByRole('button', { name: 'Remove this queued message' })).toBeTruthy();
+  });
+
+  it('does NOT show the Remove control on a failed bubble (Retry/Discard cover it instead)', () => {
+    setMessage('failed');
+    render(createElement(UserMessage));
+    expect(screen.queryByRole('button', { name: 'Remove this queued message' })).toBeNull();
+  });
+
+  it('does NOT show the Remove control on a reconciled (non-optimistic) message', () => {
+    currentMessage = { id: 'msg-abc', metadata: { custom: {} } };
+    render(createElement(UserMessage));
+    expect(screen.queryByRole('button', { name: 'Remove this queued message' })).toBeNull();
+    // The reconciled path renders the normal Copy action bar instead.
+    expect(screen.getByRole('button', { name: 'Copy message' })).toBeTruthy();
+  });
+
+  it('clicking Remove dispatches cockpit:pending-discard with the parsed key', () => {
+    setMessage('queued', 'queued-17');
+    render(createElement(UserMessage));
+    const onDiscard = vi.fn();
+    window.addEventListener('cockpit:pending-discard', onDiscard);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove this queued message' }));
+    window.removeEventListener('cockpit:pending-discard', onDiscard);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+    expect((onDiscard.mock.calls[0][0] as CustomEvent).detail).toEqual({ key: 17 });
+  });
+});

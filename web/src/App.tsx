@@ -67,7 +67,14 @@ import {
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Pending, ServerMessage } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
-import { echoMatches, hasDeliveredEcho, msgText, toMs } from './lib/pendingSend';
+import {
+  echoMatches,
+  hasDeliveredEcho,
+  msgText,
+  PENDING_SENDS_LS_KEY,
+  removePendingSend,
+  toMs,
+} from './lib/pendingSend';
 import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
@@ -93,9 +100,10 @@ const PENDING_SEND_TTL_MS = 1_800_000;
 // before assuming the ack was lost (dropped connection, etc.) and re-enabling
 // the composer for a retry.
 const RESUME_TIMEOUT_MS = 150_000;
-// Optimistic sends are persisted here so a page reload doesn't drop an un-echoed
-// message — on load they rehydrate and the transcript reconcile resolves them.
-const PENDING_SENDS_LS_KEY = 'cc:pendingSends';
+// Optimistic sends are persisted (key: PENDING_SENDS_LS_KEY, imported from
+// lib/pendingSend so removePendingSend's own persistence stays in sync) so a
+// page reload doesn't drop an un-echoed message — on load they rehydrate and
+// the transcript reconcile resolves them.
 
 type PendingSend = {
   key: number;
@@ -576,12 +584,19 @@ function AppInner() {
     return () => clearInterval(t);
   }, [pendingSends.length]);
 
-  // Retry / Discard actions on a stale "Not delivered" bubble (dispatched by
-  // UserMessage in Messages.tsx, keyed by the PendingSend's `key`, parsed from
-  // the optimistic bubble's `queued-<key>` message id).
+  // Retry / Discard actions on a stale "Not delivered" bubble, AND the plain
+  // dismiss (×) control on any still-queued/sent bubble that hasn't reconciled
+  // (e.g. the TUI's focus wasn't on the composer so the keystrokes never
+  // landed — no echo will EVER arrive, and the bubble would otherwise sit
+  // until the 30-min TTL backstop). Both dispatch the SAME event (dispatched
+  // by UserMessage in Messages.tsx, keyed by the PendingSend's `key`, parsed
+  // from the optimistic bubble's `queued-<key>` message id) — Messages.tsx
+  // only ever signals intent, App.tsx owns the queue.
   //
-  // Discard: just drop the entry — localStorage persistence follows automatically
-  // via the effect above that mirrors pendingSends there on every change.
+  // Discard/dismiss: removePendingSend (lib/pendingSend.ts) drops the entry
+  // AND persists the pruned list to localStorage — this useEffect's own
+  // persistence (which mirrors pendingSends on every change) then no-ops on
+  // the same already-pruned value.
   //
   // Retry is reconcile-first: it's possible the send actually landed (a stale/
   // false-negative ack, or the echo arrived AFTER the ack was marked failed) —
@@ -600,7 +615,7 @@ function AppInner() {
     const onDiscard = (ev: Event) => {
       const key = keyFromEvent(ev);
       if (key == null) return;
-      setPendingSends((q) => q.filter((e) => e.key !== key));
+      setPendingSends((q) => removePendingSend(q, key));
     };
     const onRetry = (ev: Event) => {
       const key = keyFromEvent(ev);
@@ -617,7 +632,7 @@ function AppInner() {
           return q;
         }
         if (hasDeliveredEcho(entry, cockpit.messages)) {
-          return q.filter((e) => e.key !== key); // promote: the real bubble already exists
+          return removePendingSend(q, key); // promote: the real bubble already exists
         }
         const reqId = cockpit.sendReply(entry.text, entry.attachments ?? 0, false, false);
         if (!reqId) {

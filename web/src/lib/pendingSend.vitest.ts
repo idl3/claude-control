@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { echoMatches, hasDeliveredEcho, msgText, parsePendingKey, toMs } from './pendingSend';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  echoMatches,
+  hasDeliveredEcho,
+  msgText,
+  parsePendingKey,
+  PENDING_SENDS_LS_KEY,
+  removePendingSend,
+  toMs,
+} from './pendingSend';
 import type { Msg } from './types';
 
 // ── msgText ──────────────────────────────────────────────────────────────────
@@ -151,5 +159,90 @@ describe('parsePendingKey', () => {
     expect(parsePendingKey('queued-')).toBeNull();
     expect(parsePendingKey('queued-abc')).toBeNull();
     expect(parsePendingKey('optimistic-working')).toBeNull();
+  });
+});
+
+// ── removePendingSend (force-remove a stuck queued/failed bubble) ────────────
+// Backs both the existing "Discard" action on a FAILED bubble and the new
+// dismiss (×) control on a still-queued/sent bubble whose transcript echo will
+// never arrive (see App.tsx's onDiscard / the Messages.tsx dismiss button).
+// Node's own experimental global `localStorage` implements neither getItem
+// nor setItem (see ArtifactPanel.vitest.ts's D4 note) — stub a minimal real
+// Storage in-memory so the persistence half of removePendingSend is actually
+// exercised, not silently swallowed by its own try/catch.
+class FakeLocalStorage {
+  private store = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  key(i: number): string | null {
+    return Array.from(this.store.keys())[i] ?? null;
+  }
+  get length(): number {
+    return this.store.size;
+  }
+}
+
+describe('removePendingSend', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', new FakeLocalStorage());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const pending = [
+    { key: 1, label: 'first' },
+    { key: 2, label: 'stuck one' },
+    { key: 3, label: 'third' },
+  ];
+
+  it('drops exactly the matching entry, leaving the rest (and their order) untouched', () => {
+    const out = removePendingSend(pending, 2);
+    expect(out).toEqual([
+      { key: 1, label: 'first' },
+      { key: 3, label: 'third' },
+    ]);
+  });
+
+  it('persists the pruned array to localStorage under PENDING_SENDS_LS_KEY', () => {
+    const out = removePendingSend(pending, 2);
+    const persisted = JSON.parse(localStorage.getItem(PENDING_SENDS_LS_KEY) ?? 'null');
+    expect(persisted).toEqual(out);
+  });
+
+  it('is a no-op (and does not touch localStorage) when the key is not present', () => {
+    const out = removePendingSend(pending, 999);
+    expect(out).toEqual(pending);
+    expect(localStorage.getItem(PENDING_SENDS_LS_KEY)).toBeNull();
+  });
+
+  it('does not mutate the input array', () => {
+    const copy = pending.map((e) => ({ ...e }));
+    removePendingSend(pending, 1);
+    expect(pending).toEqual(copy);
+  });
+
+  it('survives a localStorage write failure (quota / private mode) without throwing', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+    });
+    expect(() => removePendingSend(pending, 2)).not.toThrow();
+    expect(removePendingSend(pending, 2)).toEqual([
+      { key: 1, label: 'first' },
+      { key: 3, label: 'third' },
+    ]);
   });
 });
