@@ -1761,11 +1761,11 @@ function serveStatic(pathname, res) {
   });
 }
 
-function staticCacheControl(rel) {
+function staticCacheControl(rel, { viteDist = PUBLIC_DIR === DIST_DIR } = {}) {
   // Vite emits content-hashed files under assets/. Keep index.html no-store so a
   // reload still discovers the newest bundle filenames after a build/restart.
   if (
-    PUBLIC_DIR === DIST_DIR &&
+    viteDist &&
     rel.startsWith('assets/') &&
     /-[A-Za-z0-9_-]{8,}\.[^.]+(?:\.map)?$/.test(path.basename(rel))
   ) {
@@ -3349,4 +3349,4 @@ const _isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resol
 if (_isMain) main();
 
 // Exported for unit testing only — not part of the public API.
-export { endJson, _handler, runSerial };
+export { endJson, _handler, runSerial, staticCacheControl };
