@@ -11,6 +11,7 @@ import {
   type OptimizeBackend,
   type ModelsInfo,
 } from '../lib/api';
+import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
 import { TypeIcon, TerminalSquareIcon } from './icons';
 
 interface ConfigModalProps {
@@ -626,8 +627,11 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setOptimizeModel(c.optimizeModel ?? '');
         setOptimizeBackend(c.optimizeBackend ?? 'mlx');
         setMlxModel(c.mlxModel ?? '');
-        setTranscriptFontSize(c.transcriptFontSize ?? 0);
-        setExternalFontSize(c.externalFontSize ?? 0);
+        // This device's localStorage override wins over the shared server
+        // value, so Settings shows (and Save round-trips) what's actually
+        // applied here — see lib/fontSizePrefs.ts.
+        setTranscriptFontSize(loadFontSize('transcript') ?? c.transcriptFontSize ?? 0);
+        setExternalFontSize(loadFontSize('external') ?? c.externalFontSize ?? 0);
         setProjectDirs(c.projectDirs ?? []);
         setRestartSupported(c.restartSupported ?? false);
       })
@@ -713,6 +717,11 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       setTranscriptFontSize(saved.transcriptFontSize ?? 0);
       setExternalFontSize(saved.externalFontSize ?? 0);
       setProjectDirs(saved.projectDirs ?? []);
+      // Server write above is the cross-device fallback default; this device's
+      // own preference lives in localStorage so it survives independent of
+      // what other devices later save (see lib/fontSizePrefs.ts).
+      saveFontSize('transcript', saved.transcriptFontSize ?? 0);
+      saveFontSize('external', saved.externalFontSize ?? 0);
       // Apply the new font size LIVE (no reload): App's font effect listens.
       window.dispatchEvent(
         new CustomEvent('cockpit:fontsize', {

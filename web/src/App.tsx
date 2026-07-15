@@ -32,6 +32,7 @@ import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
+import { loadFontSize } from './lib/fontSizePrefs';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -264,8 +265,12 @@ function AppInner() {
     getConfig()
       .then((c) => {
         if (!alive) return;
-        basePx = c.transcriptFontSize ?? 0;
-        extPx = c.externalFontSize ?? 0;
+        // This device's localStorage override wins; the server value is only
+        // the fallback (see lib/fontSizePrefs.ts) — that's what makes the
+        // size per-device rather than shared across every browser hitting
+        // this server.
+        basePx = loadFontSize('transcript') ?? c.transcriptFontSize ?? 0;
+        extPx = loadFontSize('external') ?? c.externalFontSize ?? 0;
         apply();
       })
       .catch(() => { /* non-fatal — keep CSS defaults */ });
