@@ -2017,6 +2017,10 @@ body.is-external-display .rail {
 .sa-dot[data-status='running'] {
   background: var(--accent, #3b82f6);
 }
+/* Finished, awaiting parent to respond/clear — muted green, no pulse. */
+.sa-dot[data-status='done'] {
+  background: color-mix(in oklch, var(--green) 70%, var(--text-faint));
+}
 .sa-type {
   font-weight: 600;
   /* Desktop: agent type stays on one line (never breaks "100x-officer"). */
@@ -2581,7 +2585,28 @@ body.is-external-display .composer {
   max-width: calc(880px * var(--ui-scale));
   margin: 0 auto 8px;
 }
-/* Pill row — wraps when many agents are running */
+/* Pill row — wraps when many agents are running.
+   Overhang: pulled up over the tail of the transcript above it (negative
+   margin-top shrinks the flow gap before this row) with `position: relative`
+   + `z-index: 1` so it paints on top of that overlapped text by stacking
+   order — the strip reads as half-hovering INTO the thread rather than
+   sitting flush below it. (An earlier attempt got this half-hover effect by
+   making the pill fill itself top-transparent so text showed through the
+   pill's own body — reverted: it made the pills look broken/unfinished up
+   close. The overhang here instead moves the whole row, and each pill stays
+   a normal, fully opaque pill that simply occludes whatever transcript line
+   it now overlaps.)
+   -30px, not the -8 to -12px that first looks "right" on paper: `.thread-root`
+   is a column flex container, so margins never collapse across its children —
+   a flex item's negative margin only lifts it out of its OWN box, it can't
+   also pull `.subagent-strip` itself closer to `.thread-viewport`. That
+   viewport already reserves 20px of its own padding-bottom as breathing room
+   above the composer (".thread-viewport { padding: ... 20px }"), so anything
+   ≤20px here only eats that padding back — pills still land in clear space,
+   no actual glyphs underneath. -30px clears that 20px floor with margin to
+   spare, landing pills over roughly the lower half of the transcript's last
+   line, which is what "occludes the transcript" needs to mean to be visible
+   at all. */
 .subagent-pills {
   display: flex;
   /* Overflow scrolls horizontally instead of wrapping onto stacked rows — many
@@ -2592,6 +2617,9 @@ body.is-external-display .composer {
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
   padding-bottom: 2px;
+  margin-top: -30px;
+  position: relative;
+  z-index: 1;
 }
 .subagent-pill { flex: 0 0 auto; }
 /* Individual pill */
@@ -2600,11 +2628,7 @@ body.is-external-display .composer {
   align-items: center;
   gap: 6px;
   padding: 5px 10px 5px 8px;
-  /* Half-submerged: the fill is transparent for the top half so transcript
-     text flows through behind the pill, then only occludes from the midline
-     down — the agent reads as half-hovering up into the thread. Border + label
-     stay opaque (they aren't `background`). */
-  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 8%, var(--bg-1)) 70%);
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg-1));
   border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--line));
   border-radius: 999px;
   cursor: pointer;
@@ -2612,11 +2636,13 @@ body.is-external-display .composer {
   font-weight: 600;
   color: var(--accent);
   white-space: nowrap;
+  /* Containing block for the running-state ::before ring below. */
+  position: relative;
   transition: background var(--ease) 0.13s, border-color var(--ease) 0.13s,
     box-shadow var(--ease) 0.13s;
 }
 .subagent-pill:hover {
-  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 16%, var(--bg-1)) 70%);
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg-1));
   border-color: color-mix(in oklch, var(--accent) 50%, var(--line));
 }
 .subagent-pill:focus-visible {
@@ -2625,13 +2651,53 @@ body.is-external-display .composer {
 }
 /* Active pill — currently viewed agent */
 .subagent-pill[data-active='true'] {
-  background: linear-gradient(to bottom, transparent 50%, color-mix(in oklch, var(--accent) 20%, var(--bg-1)) 70%);
+  background: color-mix(in oklch, var(--accent) 20%, var(--bg-1));
   border-color: color-mix(in oklch, var(--accent) 70%, var(--line));
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 25%, transparent);
 }
-/* Running dot inside pill */
-.subagent-pill .sa-dot {
+/* Running dot inside pill — steady for 'done', pulsing only while running. */
+.subagent-pill .sa-dot[data-status='running'] {
   animation: pulse 1.4s var(--ease) infinite;
+}
+/* Working — reuses the composer's living animated rim (registered
+   `--composer-ring-angle` custom property + `composer-ring-flow` keyframes +
+   the conic-gradient/mask rim technique, see the block comment near
+   `.composer-card::before` below for why masking — not z-index — is what
+   confines this to a rim). Sized to the pill's own 999px radius via
+   `border-radius: inherit`; each pill gets its own independent
+   `--composer-ring-angle` instance (the property is registered
+   `inherits: false`, so per-element, not shared/synced across pills or with
+   the composer). */
+.subagent-pill[data-status='running']::before {
+  content: '';
+  position: absolute;
+  inset: -1.4px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--composer-ring-angle),
+    var(--accent),
+    var(--accent-warm),
+    var(--accent),
+    var(--accent-warm),
+    var(--accent)
+  );
+  padding: 1.4px;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .subagent-pill[data-status='running']::before {
+    animation: composer-ring-flow 12s linear infinite;
+  }
+}
+/* Done, waiting on the parent to respond/clear — steady muted green border,
+   no animation (steady reads as "waiting", not "working"). Replaces the
+   resting accent border for this state; no ::before ring is painted. */
+.subagent-pill[data-status='done'] {
+  border-color: color-mix(in oklch, var(--green) 60%, var(--line));
 }
 /* Agent name label */
 .subagent-pill-name {
