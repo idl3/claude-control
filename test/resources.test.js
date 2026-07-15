@@ -250,6 +250,59 @@ test('_tick: guard prevents overlap — second tick skips when first in-flight',
   monitor.stop();
 });
 
+// ── refreshNow() (R8: on-demand tick for WS-reconnect resume) ───────────────
+
+test('refreshNow(): delegates to _tick(), updates snapshot, respects the same _ticking guard', async () => {
+  const monitor = new ResourceMonitor({ intervalMs: 60000 });
+
+  let tickCalls = 0;
+  const originalTick = monitor._tick.bind(monitor);
+  monitor._tick = async function () {
+    tickCalls++;
+    return originalTick();
+  };
+
+  const before = monitor.snapshot();
+  await monitor.refreshNow();
+
+  assert.equal(tickCalls, 1, 'refreshNow() must call _tick() exactly once');
+  const after = monitor.snapshot();
+  assert.ok(after.ts >= before.ts, 'snapshot must be refreshed (new or equal timestamp)');
+  assert.equal(monitor._ticking, false, 'guard must be released after refreshNow() settles');
+
+  monitor.stop();
+});
+
+test('refreshNow(): a concurrent real tick still wins the guard — refreshNow does not run a second overlapping tick', async () => {
+  const monitor = new ResourceMonitor({ intervalMs: 60000 });
+
+  const log = [];
+  let resolveSlow;
+  const slow = new Promise((res) => { resolveSlow = res; });
+
+  monitor._tick = async function () {
+    if (this._ticking) { log.push('skipped'); return; }
+    this._ticking = true;
+    try {
+      log.push('started');
+      await slow;
+      log.push('finished');
+    } finally {
+      this._ticking = false;
+    }
+  };
+
+  const inFlight = monitor._tick(); // simulates the timer firing first
+  const viaRefreshNow = monitor.refreshNow(); // reconnect fires while the timer tick is still in flight
+
+  resolveSlow();
+  await Promise.all([inFlight, viaRefreshNow]);
+
+  assert.deepEqual(log, ['started', 'skipped', 'finished'], 'refreshNow() must respect the in-flight guard, not run a second overlapping tick');
+
+  monitor.stop();
+});
+
 test('overlimit pressure relief repeats after cooldown while RSS stays high', () => {
   const monitor = new ResourceMonitor({
     intervalMs: 60000,
