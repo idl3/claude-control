@@ -902,6 +902,23 @@ body.is-external-display .rail {
     justify-content: flex-end;
   }
 }
+/* Desktop: the ⋯ toggle is mobile-only clutter — there's room for the action
+   bar to just always be there. Hide the toggle and force .detail-actions
+   visible even if a mobile session left actionsOpen=false in localStorage
+   (data-collapsed can't strand the bar hidden with no way to reopen it once
+   the toggle that reopens it is itself hidden). */
+@media (min-width: 760px) {
+  .detail-actions-toggle {
+    display: none;
+  }
+  .detail-actions[data-collapsed='true'] {
+    max-height: 88px;
+    opacity: 1;
+    transform: none;
+    padding-left: 18px;
+    pointer-events: auto;
+  }
+}
 /* Right-aligned action cluster: uniform small icon buttons. */
 .detail-actions {
   display: flex;
