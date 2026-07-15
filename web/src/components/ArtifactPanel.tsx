@@ -22,6 +22,7 @@ import { EmbeddedApp } from './EmbeddedApp';
 import { APP_HEIGHT_DEFAULT } from '../lib/embeds';
 import { authFetch } from '../lib/api';
 import { appNameFromUrl, flatAppUrl, versionedAppUrl, type AppVersionListing } from '../lib/appVersion';
+import { XIcon } from './icons';
 
 // ── Size cap for highlighting ────────────────────────────────────────────────
 const HIGHLIGHT_SIZE_CAP = 256 * 1024; // 256 KB
@@ -706,7 +707,7 @@ export function ArtifactPanel() {
                       close(a.id);
                     }}
                   >
-                    ✕
+                    <XIcon size={13} />
                   </button>
                 </div>
               );
@@ -724,7 +725,7 @@ export function ArtifactPanel() {
             aria-label="Close artifact panel"
             onClick={() => activeId && close(activeId)}
           >
-            ×
+            <XIcon size={16} />
           </button>
         </div>
 
@@ -816,7 +817,7 @@ export function ArtifactPanel() {
                     close(a.id);
                   }}
                 >
-                  ✕
+                  <XIcon size={13} />
                 </button>
               </div>
             );
@@ -834,7 +835,7 @@ export function ArtifactPanel() {
           aria-label="Close artifact panel"
           onClick={() => activeId && close(activeId)}
         >
-          ×
+          <XIcon size={16} />
         </button>
       </div>
 

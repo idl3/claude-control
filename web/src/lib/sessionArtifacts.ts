@@ -17,6 +17,32 @@ export interface SessionArtifact {
   latestVersion: string;
 }
 
+// Phase C3→D: the gallery open/closed state used to live inside
+// ArtifactGallery.tsx as an internal disclosure; it's now controlled from
+// App.tsx (the toggle lives in the header, beside Rename), so the
+// persistence helpers move here — the shared home for gallery-derived state.
+// Best-effort persistence: read/write wrapped in try/catch, never throws,
+// defaults to collapsed on any failure (missing key, quota, privacy mode, or
+// the broken dev-harness localStorage shadow stub — see the FakeLocalStorage
+// note in ArtifactGallery.vitest.ts).
+const GALLERY_OPEN_KEY = 'cc:artifact-gallery-open';
+
+export function loadGalleryOpen(): boolean {
+  try {
+    return localStorage.getItem(GALLERY_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveGalleryOpen(value: boolean): void {
+  try {
+    localStorage.setItem(GALLERY_OPEN_KEY, value ? '1' : '0');
+  } catch {
+    /* localStorage unavailable/full — the toggle just doesn't survive reload. */
+  }
+}
+
 /**
  * Pure, sync: distinct app names embedded anywhere in `text`, first-seen
  * order. Iterates a PRIVATE copy of embeds.ts's shared TAG_RE (`new RegExp`,

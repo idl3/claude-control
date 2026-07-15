@@ -30,6 +30,7 @@ import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
+import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -61,6 +62,7 @@ import {
   RefreshIcon,
   SteeringWheelIcon,
   ExternalLinkIcon,
+  GalleryIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
 import type { Pending, ServerMessage } from './lib/types';
@@ -896,6 +898,16 @@ function AppInner() {
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  // Session artifact gallery (Phase D): the disclosure toggle lives in the
+  // header beside Rename; ArtifactGallery itself is now a controlled lens
+  // (open/onCountChange props) rather than owning its own head button.
+  // Persisted the same way as actionsOpen above — best-effort localStorage
+  // round-trip via lib/sessionArtifacts.ts's loadGalleryOpen/saveGalleryOpen.
+  const [galleryOpen, setGalleryOpen] = useState(() => loadGalleryOpen());
+  const [artifactCount, setArtifactCount] = useState(0);
+  useEffect(() => {
+    saveGalleryOpen(galleryOpen);
+  }, [galleryOpen]);
   // Show/hide the header action-button bar (rename/reset/terminal/search/…),
   // toggled by the ⋯ button in the title row. Persisted so the choice sticks.
   const [actionsOpen, setActionsOpen] = useState(() => {
@@ -2091,6 +2103,20 @@ function AppInner() {
                     >
                       <PencilIcon />
                     </button>
+                    {artifactCount > 0 ? (
+                      <button
+                        type="button"
+                        className="detail-action detail-action--count"
+                        aria-pressed={galleryOpen}
+                        data-on={galleryOpen ? 'true' : undefined}
+                        aria-label="Toggle artifacts"
+                        title="Artifacts"
+                        onClick={() => setGalleryOpen((v) => !v)}
+                      >
+                        <GalleryIcon />
+                        <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="detail-action"
@@ -2408,7 +2434,7 @@ function AppInner() {
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ArtifactPanel />
-                <ArtifactGallery transcriptText={transcriptText} />
+                <ArtifactGallery transcriptText={transcriptText} open={galleryOpen} onCountChange={setArtifactCount} />
                 {rawOpen ? (
                   <RawEventPanel
                     events={cockpit.rawEvents}
