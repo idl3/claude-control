@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon, CloudIcon } from './icons';
+import { TerminalSquareIcon, CloudIcon, PencilIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
+import { renameTmuxSession } from '../lib/api';
 
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
@@ -32,6 +33,25 @@ interface SessionRailProps {
    * of "sleeping". Priority: ask > cloning > working > sleeping.
    */
   runningSubagentCountById?: Record<string, number>;
+  /** Success/error feedback for the tmux-session rename affordance below —
+   *  same shape as App's showToast. Optional so existing/test call sites
+   *  don't need to wire it; failures are silently logged when absent. */
+  onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
+}
+
+/**
+ * Sanitize a user-typed tmux SESSION name client-side before it ever reaches
+ * the network — same rule as lib/tmux.js's sanitizeName (which re-applies it
+ * server-side too, so this is defense-in-depth, not the source of truth):
+ * strip ASCII control chars/newlines, collapse whitespace, trim, cap length.
+ * Exported for direct unit testing.
+ */
+export function sanitizeGroupName(name: string): string {
+  return String(name ?? '')
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
 }
 
 /** A Claude pane reads as "working" while actively generating OR with very recent
@@ -519,7 +539,46 @@ export function SessionRail({
   hotkeyById,
   workingOverrideId,
   runningSubagentCountById,
+  onToast,
 }: SessionRailProps) {
+  // Inline tmux-session rename (the group header, e.g. "0") — double-click the
+  // name or use the hover-reveal pencil button. Only one group can be renaming
+  // at a time; null when nothing is being edited. The rail picks up the new
+  // name on the next registry refresh (same poll-driven convention as the
+  // per-window rename in App.tsx — no forced refetch needed).
+  const [renamingSession, setRenamingSession] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const renameSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    if (renamingSession !== null) renameInputRef.current?.select();
+  }, [renamingSession]);
+
+  const startRenameSession = (name: string) => {
+    setRenamingSession(name);
+    setRenameDraft(name);
+  };
+  const cancelRenameSession = () => {
+    setRenamingSession(null);
+    setRenameDraft('');
+  };
+  const submitRenameSession = async () => {
+    if (renameSubmittingRef.current) return;
+    const oldName = renamingSession;
+    const draft = sanitizeGroupName(renameDraft);
+    cancelRenameSession(); // close immediately, mirrors App.tsx's submitRename
+    if (!oldName || !draft || draft === oldName) return;
+    renameSubmittingRef.current = true;
+    try {
+      await renameTmuxSession(oldName, draft);
+      onToast?.(`Renamed session → ${draft}`, 'ok');
+    } catch (err) {
+      onToast?.(`rename failed: ${err instanceof Error ? err.message : 'error'}`, 'error');
+    } finally {
+      renameSubmittingRef.current = false;
+    }
+  };
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
   const groups = useMemo(() => {
     const visible = sessions.filter((s) => {
@@ -555,20 +614,70 @@ export function SessionRail({
       {groups.map((g) => {
         const isCollapsed = collapsed.has(g.sessionName);
         const paneCount = g.windows.reduce((n, w) => n + w.panes.length, 0);
+        const isRenamingThis = renamingSession === g.sessionName;
         return (
           <section key={g.sessionName} className="session-group" data-collapsed={isCollapsed ? 'true' : undefined}>
-            <button
-              type="button"
+            <div
               className="session-group-head"
-              aria-expanded={!isCollapsed}
-              onClick={() => onToggleCollapse(g.sessionName)}
+              data-renaming={isRenamingThis ? 'true' : undefined}
             >
-              <span className="session-group-chevron" aria-hidden="true">
-                {isCollapsed ? '▸' : '▾'}
-              </span>
-              <span className="session-group-name">{g.sessionName}</span>
+              <button
+                type="button"
+                className="session-group-toggle"
+                aria-expanded={!isCollapsed}
+                onClick={() => onToggleCollapse(g.sessionName)}
+              >
+                <span className="session-group-chevron" aria-hidden="true">
+                  {isCollapsed ? '▸' : '▾'}
+                </span>
+                {isRenamingThis ? null : (
+                  <span
+                    className="session-group-name"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      startRenameSession(g.sessionName);
+                    }}
+                  >
+                    {g.sessionName}
+                  </span>
+                )}
+              </button>
+              {isRenamingThis ? (
+                <input
+                  ref={renameInputRef}
+                  className="session-group-rename-input"
+                  type="text"
+                  value={renameDraft}
+                  aria-label={`Rename tmux session ${g.sessionName}`}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void submitRenameSession();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelRenameSession();
+                    }
+                  }}
+                  onBlur={() => void submitRenameSession()}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="session-group-rename-btn"
+                  aria-label={`Rename tmux session ${g.sessionName}`}
+                  title="Rename session"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startRenameSession(g.sessionName);
+                  }}
+                >
+                  <PencilIcon size={12} />
+                </button>
+              )}
               {isCollapsed ? <span className="session-group-count">{paneCount}</span> : null}
-            </button>
+            </div>
             {isCollapsed
               ? null
               : g.windows.map((w) => (

@@ -588,6 +588,27 @@ export async function renameSession(id: string, name: string): Promise<void> {
 }
 
 /**
+ * Rename a tmux SESSION (not a window) — e.g. the sidebar's deduped
+ * tmux-session group header. POST /api/tmux/rename-session. Distinct from
+ * `renameSession` above, which renames a single window/pane's display name.
+ * Throws on a non-OK response.
+ */
+export async function renameTmuxSession(oldName: string, newName: string): Promise<void> {
+  const res = await authFetch('/api/tmux/rename-session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ oldName, newName }),
+  });
+  const json = (await res.json().catch(() => ({}))) as
+    | { ok: true }
+    | { error?: string };
+  if (!res.ok || !('ok' in json) || !json.ok) {
+    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+}
+
+/**
  * Build the token-gated URL for serving an uploaded file by basename.
  * Used by the transcript preview renderer to fetch thumbnails. Image GETs go
  * through a plain <img src>, which can't send an Authorization header — but the

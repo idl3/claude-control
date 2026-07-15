@@ -597,6 +597,14 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionRename(req, res);
   }
+  // POST /api/tmux/rename-session — rename the tmux SESSION itself (the
+  // sidebar's deduped session-group header), distinct from the per-window
+  // rename above. Token-gated, same as the rest of the control surface.
+  if (u.pathname === '/api/tmux/rename-session') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleTmuxRenameSession(req, res);
+  }
   // GET /api/uploads/<basename> — token-gated, path-traversal-guarded.
   // Serves a single file from uploadsDir by basename only; no directory
   // segments are allowed. Used by the React UI to render inline attachment
@@ -1397,6 +1405,33 @@ async function handleSessionRename(req, res) {
     return endJson(res, 200, { ok: true });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/tmux/rename-session — rename a tmux SESSION (not a window/pane).
+// The sidebar groups panes under a tmux-session header (e.g. "0"); this lets
+// the operator rename that header inline. tmux.renameTmuxSession validates
+// `oldName` against the live session list before shelling out, so a stale or
+// mistyped name 404s instead of tmux silently no-op-ing. The rail picks up
+// the new name on its next registry refresh (no push needed).
+async function handleTmuxRenameSession(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  const oldName = typeof body.oldName === 'string' ? body.oldName : '';
+  const newName = tmux.sanitizeName(body.newName);
+  if (!oldName) return endJson(res, 400, { error: 'oldName is required' });
+  if (!newName) return endJson(res, 400, { error: 'newName is required' });
+  try {
+    await tmux.renameTmuxSession(oldName, newName);
+    return endJson(res, 200, { ok: true });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    const status = msg.includes('no such tmux session') ? 404 : 500;
+    return endJson(res, status, { error: msg });
   }
 }
 

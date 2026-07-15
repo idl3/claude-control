@@ -394,7 +394,8 @@ body.is-external-display .rail {
   flex-direction: column;
   margin-bottom: 10px;
 }
-/* Accordion header (a button): chevron + session name + collapsed-count. */
+/* Accordion header (a plain flex row, shared with the static .remote-group-head):
+   chevron+name toggle button, inline-rename affordance, collapsed-count. */
 .session-group-head {
   display: flex;
   align-items: center;
@@ -410,12 +411,30 @@ body.is-external-display .rail {
   background: none;
   border: none;
   border-radius: 6px;
-  cursor: pointer;
   text-align: left;
 }
 .session-group-head:hover {
   color: var(--text);
   background: var(--bg-hover);
+}
+/* The actual collapse/expand control — only this button is clickable now
+   (not the whole row), since the row also hosts the rename button/input. */
+.session-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
 }
 .session-group-chevron {
   flex: 0 0 auto;
@@ -427,6 +446,41 @@ body.is-external-display .rail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Inline tmux-session rename — mirrors .rename-btn / .detail-rename-input
+   (the per-window rename affordance in the detail header), just fitted into
+   this row's flex layout instead of that one's block width:100%. */
+.session-group-rename-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.session-group-rename-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.session-group-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  outline: none;
+}
+.session-group-rename-input:focus {
+  border-color: var(--accent);
 }
 .session-group-count {
   flex: 0 0 auto;
@@ -857,10 +911,13 @@ body.is-external-display .rail {
   cursor: pointer;
   flex: 0 0 auto;
 }
-/* Desktop-only stand-in for .rail-collapse-toggle when the rail is collapsed
-   (see App.tsx) — same visual treatment as that toggle so it reads as its
-   twin rather than a new control. */
-.rail-restore-btn {
+/* Sidebar-collapse toggle (⌘B) — desktop-only focus mode (mobile swaps the
+   whole rail for the detail pane instead, so there's nothing to "collapse"
+   there; App.tsx gates the button itself on !narrow). Parked permanently in
+   the detail header — reachable whether the rail is open or collapsed —
+   rather than living in the rail itself, so it never collapses along with
+   the thing it controls. */
+.rail-collapse-toggle {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -875,11 +932,15 @@ body.is-external-display .rail {
   cursor: pointer;
   transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
 }
-.rail-restore-btn:hover {
+.rail-collapse-toggle:hover {
   color: var(--text);
   border-color: var(--accent);
 }
-.rail-restore-btn:focus-visible {
+.rail-collapse-toggle[data-on='true'] {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.rail-collapse-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -4385,46 +4446,6 @@ body.is-external-display .composer {
     border-left: 1px solid var(--line);
   }
 }
-/* Sidebar-collapse toggle (⌘B) — desktop-only (mobile swaps the whole rail
-   for the detail pane instead, so there's nothing to "collapse" there).
-   Now the sole occupant of the rail's top strip (filter + new-session moved
-   to .rail-foot below), so it's a standalone flex child of <aside class="rail">
-   rather than living inside a shared header row. Sized/styled as a twin of
-   .rail-filter. */
-.rail-collapse-toggle {
-  display: none;
-}
-@media (min-width: 760px) {
-  .rail-collapse-toggle {
-    flex: 0 0 auto;
-    align-self: flex-end;
-    height: 30px;
-    min-width: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin: 10px 10px 0 0;
-    padding: 0 8px;
-    background: var(--bg-2);
-    color: var(--text-dim);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
-  }
-  .rail-collapse-toggle:hover {
-    color: var(--text);
-    border-color: var(--accent);
-  }
-  .rail-collapse-toggle[data-on='true'] {
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
-  }
-}
-.rail-collapse-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
 .rail-gear {
   flex: none;
   width: var(--hud-h);
@@ -7841,7 +7862,7 @@ select.config-input {
 .detail-body:focus-visible {
   outline: none;
 }
-/* Focus-mode toggle now lives in the rail header (see .rail-collapse-toggle);
+/* The focus-mode toggle lives in the detail header (see .rail-collapse-toggle);
    this block just keeps the collapsed-rail layout rule, desktop-only. */
 @media (min-width: 760px) {
   /* When collapsed, drop the rail's divider so the 0-width rail leaves no seam. */
