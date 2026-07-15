@@ -7648,10 +7648,10 @@ select.config-input {
 .ask-min-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 9px 12px;
+  padding: 8px;
   border: 1px solid var(--amber);
   border-radius: 10px;
   background: var(--amber-bg);
@@ -7716,7 +7716,7 @@ select.config-input {
 .ask-inline-freetext {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 /* The chosen option, restyled from a button into a header above the textarea. */
 .ask-freetext-chosen {
@@ -7890,7 +7890,7 @@ select.config-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px 10px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -7904,7 +7904,7 @@ select.config-input {
 
 /* Search input row */
 .skill-browser-search {
-  padding: 10px 12px;
+  padding: 8px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
 }
@@ -7935,14 +7935,14 @@ select.config-input {
 .skill-browser-list {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 6px 8px 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .skill-browser-empty {
-  padding: 24px 12px;
+  padding: 24px 8px;
   text-align: center;
   color: var(--text-faint);
   font-size: 13px;
@@ -7956,10 +7956,10 @@ select.config-input {
   border: none;
   cursor: pointer;
   border-radius: 7px;
-  padding: 7px 10px;
+  padding: 8px;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   transition: background var(--ease) 0.12s;
   /* Prevent horizontal overflow from long descriptions */
   min-width: 0;
