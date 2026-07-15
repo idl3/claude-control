@@ -19,6 +19,7 @@ import { useCockpit } from './hooks/useCockpit';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
+import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
@@ -357,7 +358,7 @@ function AppInner() {
       /* quota / private mode — non-fatal, in-memory state still works */
     }
   }, [pendingSends]);
-  const sendSeq = useRef(0);
+  const sendSeq = useRef(initialSendSeq(pendingSends));
   // Tracks whether the Composer's >_ terminal mode is active — updated by the
   // Composer via onTerminalModeChange. Used to gate the sub-agent prefix.
   const composerTerminalRef = useRef(false);
@@ -701,38 +702,16 @@ function AppInner() {
     );
   }, [cockpit.sessions, cockpit.selectedId, answering]);
 
-  const convertedMessages = useMemo<ThreadMessageLike[]>(() => {
-    const base =
-      hiddenCount > 0 ? fullConverted.slice(hiddenCount) : fullConverted.slice();
-    // Pending sends pin to the BOTTOM (near the composer), FIFO, NOT interleaved
-    // by time. While a send is un-echoed it isn't really in the transcript yet,
-    // so floating it up among the agent's streaming reply reads as "my message
-    // moved / the transcript isn't updating" (the reported confusion). Keeping it
-    // anchored + clearly tagged (queued/sent/failed) makes its state unambiguous;
-    // once the real transcript echo lands, this bubble is removed and the genuine
-    // message already sits in its correct chronological place.
-    for (const e of selectedPending) {
-      base.push({
-        role: 'user',
-        id: `queued-${e.key}`,
-        createdAt: new Date(e.at),
-        content: [{ type: 'text', text: e.label }],
-        metadata: { custom: { cockpitRole: 'user', optimistic: true, sendStatus: e.status } },
-      } as ThreadMessageLike);
-    }
-    // The "Working…" loader mirrors the session activity icon: same claudeWorking
-    // signal via selectedWorking above — derived OUTSIDE this memo so the
-    // thread only rebuilds when the flag FLIPS, not on every sessions frame.
-    if (selectedWorking) {
-      base.push({
-        role: 'assistant',
-        id: 'optimistic-working',
-        content: [{ type: 'text', text: 'Working…' }],
-        metadata: { custom: { cockpitRole: 'assistant', working: true } },
-      } as ThreadMessageLike);
-    }
-    return base;
-  }, [fullConverted, hiddenCount, selectedPending, selectedWorking]);
+  const convertedMessages = useMemo<ThreadMessageLike[]>(
+    () =>
+      buildThreadMessages(
+        fullConverted,
+        hiddenCount,
+        selectedPending,
+        selectedWorking,
+      ),
+    [fullConverted, hiddenCount, selectedPending, selectedWorking],
+  );
 
   const loadEarlier = useCallback(() => {
     setVisibleCount((c) => c + LOAD_EARLIER_STEP);
