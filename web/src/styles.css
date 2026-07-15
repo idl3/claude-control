@@ -4112,19 +4112,30 @@ body.is-external-display .composer {
 /*
  * Both .rail-new and .rail-gear share the --hud-h (34px) height token so
  * they're exactly equal. Both use inline-flex centering — no padding hacks.
+ *
+ * .rail-head-row wraps NewSessionForm's own .rail-head (new-session + filter
+ * funnel) plus .rail-collapse-toggle (moved here from the detail top bar) on
+ * one sticky row — the sticky/background/border that used to live on
+ * .rail-head now lives on the row so the two stay visually seamless.
  */
-.rail-head {
+.rail-head-row {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  min-height: 48px;
-  box-sizing: border-box;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 8px 10px;
+  min-height: 48px;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .rail-new {
   flex: 1;
@@ -4180,6 +4191,43 @@ body.is-external-display .composer {
   font-size: 10px;
   font-weight: 800;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+/* Sidebar-collapse toggle (⌘B), moved beside the filter funnel. Desktop-only —
+   mirrors the old .focus-toggle visibility (mobile swaps the whole rail for
+   the detail pane instead, so there's nothing to "collapse" there). Sized and
+   styled as a twin of .rail-filter. */
+.rail-collapse-toggle {
+  display: none;
+}
+@media (min-width: 760px) {
+  .rail-collapse-toggle {
+    flex: 0 0 auto;
+    height: 30px;
+    min-width: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+    padding: 0 8px;
+    background: var(--bg-2);
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+  }
+  .rail-collapse-toggle:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .rail-collapse-toggle[data-on='true'] {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  }
+}
+.rail-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .rail-gear {
   flex: none;
@@ -7479,28 +7527,9 @@ select.config-input {
 .detail-body:focus-visible {
   outline: none;
 }
-/* Focus-mode toggle lives in the detail header; desktop-only (mirror of back-btn). */
-.focus-toggle {
-  display: none;
-}
+/* Focus-mode toggle now lives in the rail header (see .rail-collapse-toggle);
+   this block just keeps the collapsed-rail layout rule, desktop-only. */
 @media (min-width: 760px) {
-  .focus-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    line-height: 1;
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 2px 8px;
-    cursor: pointer;
-    flex: 0 0 auto;
-    transition: color var(--ease) 0.15s;
-  }
-  .focus-toggle:hover {
-    color: var(--accent);
-  }
   /* When collapsed, drop the rail's divider so the 0-width rail leaves no seam. */
   .app[data-rail-collapsed='true'] .rail {
     border-right: none;

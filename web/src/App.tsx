@@ -2001,7 +2001,24 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
+            <div className="rail-head-row">
+              <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
+              {/* Sidebar-minimise toggle (⌘B), beside the filter funnel — desktop-only
+                  focus mode (mobile swaps the whole rail for the detail pane instead). */}
+              <button
+                type="button"
+                className="rail-collapse-toggle"
+                aria-pressed={railCollapsed}
+                data-on={railCollapsed ? 'true' : undefined}
+                aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
+                data-hotkey="⌘B"
+                data-hotkey-dir="down"
+                onClick={toggleRail}
+              >
+                <PanelLeftIcon />
+              </button>
+            </div>
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
@@ -2304,18 +2321,6 @@ function AppInner() {
                     ) : null}
                   </>
                 ) : null}
-                <button
-                  type="button"
-                  className="detail-action focus-toggle"
-                  aria-pressed={railCollapsed}
-                  aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-                  title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
-                  data-hotkey="⌘B"
-                  data-hotkey-dir="down"
-                  onClick={toggleRail}
-                >
-                  <PanelLeftIcon />
-                </button>
               </div>
             </header>
 
