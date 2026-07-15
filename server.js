@@ -3193,17 +3193,27 @@ async function main() {
   });
   mediaAppsWatcher.start();
 
-  // Daily attachment cleanup: sweep at startup, then every 24h.
-  runUploadSweep();
-  uploadSweepTimer = setInterval(runUploadSweep, 24 * 3600 * 1000);
-  uploadSweepTimer.unref();
+  // Daily attachment + captures cleanup: sweep at startup, then every 24h.
+  // GATED by the same CLAUDE_CONTROL_NO_REAP escape hatch as sibling-reaping
+  // (lib/reap-siblings.js): both are DESTRUCTIVE background maintenance against
+  // shared, on-disk state. A hermetic/test instance on a spare port sets
+  // NO_REAP=1 and — critically — may leave CLAUDE_CONTROL_UPLOADS unset, which
+  // defaults to the LIVE ~/.claude-control/uploads dir; without this gate its
+  // 24h sweep silently deletes real user uploads (incident: 17 files lost this
+  // way). Defense-in-depth with harnesses isolating UPLOADS: either alone
+  // prevents the footgun. The live server never sets NO_REAP, so it sweeps as
+  // before.
+  if (process.env.CLAUDE_CONTROL_NO_REAP === '1') {
+    console.log('claude-control: CLAUDE_CONTROL_NO_REAP=1 — skipping uploads/captures retention sweeps (shared-dir safety)');
+  } else {
+    runUploadSweep();
+    uploadSweepTimer = setInterval(runUploadSweep, 24 * 3600 * 1000);
+    uploadSweepTimer.unref();
 
-  // Daily captures/ cleanup (Studio Phase D CP3 audit, FIX 2): same cadence
-  // as the upload sweep above — captures/<name>/*.png otherwise grows
-  // unbounded, unlike uploads/ which already had this.
-  runCaptureSweep();
-  captureSweepTimer = setInterval(runCaptureSweep, 24 * 3600 * 1000);
-  captureSweepTimer.unref();
+    runCaptureSweep();
+    captureSweepTimer = setInterval(runCaptureSweep, 24 * 3600 * 1000);
+    captureSweepTimer.unref();
+  }
 
   // Without this, a stale instance still holding the port makes listen() emit an
   // unhandled 'error' and the process dies with an opaque EADDRINUSE stack. Fail
