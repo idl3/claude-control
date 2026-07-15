@@ -947,7 +947,12 @@ body.is-external-display .rail {
    (data-collapsed can't strand the bar hidden with no way to reopen it once
    the toggle that reopens it is itself hidden). */
 @media (min-width: 760px) {
-  .detail-actions-toggle {
+  /* Compound selector (.detail-action.detail-actions-toggle) so this beats the
+     later `.detail-action { display: inline-flex }` base rule — a bare
+     `.detail-actions-toggle` ties specificity (0,1,0) and LOSES on source order,
+     which is why the ⋯ was still showing on desktop. With it gone, the hoisted
+     artifacts button sits immediately beside the rename button. */
+  .detail-action.detail-actions-toggle {
     display: none;
   }
   .detail-actions[data-collapsed='true'] {
