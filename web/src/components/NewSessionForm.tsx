@@ -47,23 +47,19 @@ export function filterTag(filter: SessionFilter): string | null {
 }
 
 /**
- * Rail-head "new session" control: a "+ New session" button that opens the
- * draft-composer screen in the main content area (see NewSessionDraft.tsx —
- * agent/transport/model/name/cwd pickers plus the initial-prompt composer all
- * live there now, not in an inline rail form), and the filter funnel button
- * (all → agents → Claude → Codex → terminals).
+ * Rail-foot "new session" control: the filter funnel button (all → agents →
+ * Claude → Codex → terminals) on the left, and a "+ New session" button that
+ * opens the draft-composer screen in the main content area (see
+ * NewSessionDraft.tsx — agent/transport/model/name/cwd pickers plus the
+ * initial-prompt composer all live there now, not in an inline rail form) on
+ * the right. Lives in the rail's bottom bar (right-thumb reachable on
+ * mobile) — filter first so the primary "+ New session" action lands
+ * rightmost.
  */
 export function NewSessionForm({ onOpenDraft, filter, onCycleFilter }: NewSessionFormProps) {
   const tag = filterTag(filter);
   return (
-    <div className="rail-head">
-      <button
-        type="button"
-        className="rail-new"
-        onClick={onOpenDraft}
-      >
-        + New session
-      </button>
+    <div className="rail-foot">
       <button
         type="button"
         className="rail-filter"
@@ -74,6 +70,13 @@ export function NewSessionForm({ onOpenDraft, filter, onCycleFilter }: NewSessio
       >
         <FunnelIcon size={15} />
         {tag ? <span className="rail-filter-tag">{tag}</span> : null}
+      </button>
+      <button
+        type="button"
+        className="rail-new"
+        onClick={onOpenDraft}
+      >
+        + New session
       </button>
     </div>
   );

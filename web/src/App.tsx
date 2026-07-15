@@ -2012,24 +2012,24 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            <div className="rail-head-row">
-              <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
-              {/* Sidebar-minimise toggle (⌘B), beside the filter funnel — desktop-only
-                  focus mode (mobile swaps the whole rail for the detail pane instead). */}
-              <button
-                type="button"
-                className="rail-collapse-toggle"
-                aria-pressed={railCollapsed}
-                data-on={railCollapsed ? 'true' : undefined}
-                aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-                title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
-                data-hotkey="⌘B"
-                data-hotkey-dir="down"
-                onClick={toggleRail}
-              >
-                <PanelLeftIcon />
-              </button>
-            </div>
+            {/* Sidebar-minimise toggle (⌘B) — desktop-only focus mode (mobile swaps
+                the whole rail for the detail pane instead, so there's nothing to
+                collapse there). Sole occupant of the rail's top strip now that
+                "+ New session" + the filter funnel live in the bottom bar below
+                (see .rail-foot / NewSessionForm) for right-thumb reachability. */}
+            <button
+              type="button"
+              className="rail-collapse-toggle"
+              aria-pressed={railCollapsed}
+              data-on={railCollapsed ? 'true' : undefined}
+              aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+              title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
+              data-hotkey="⌘B"
+              data-hotkey-dir="down"
+              onClick={toggleRail}
+            >
+              <PanelLeftIcon />
+            </button>
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
@@ -2043,6 +2043,9 @@ function AppInner() {
                 runningSubagentCountById={cockpit.runningSubagentCountById}
               />
             </div>
+            {/* Bottom bar, pinned below .rail-scroll (never scrolls with the list):
+                filter on the left, "+ New session" (primary action) on the right. */}
+            <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
           </aside>
 
           <main className="detail">

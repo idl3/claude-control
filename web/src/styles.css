@@ -4162,34 +4162,29 @@ body.is-external-display .composer {
   flex: 0 0 auto;
 }
 
-/* ── Rail header: new-session + settings ──────────────────────── */
+/* ── Rail footer: filter + new-session (bottom bar) ─────────────── */
 /*
- * Both .rail-new and .rail-gear share the --hud-h (34px) height token so
- * they're exactly equal. Both use inline-flex centering — no padding hacks.
+ * .rail-foot (NewSessionForm's own root) is a flex sibling AFTER
+ * .rail-scroll inside <aside class="rail">, not inside the scrolling
+ * container — so it's always visible and never scrolls with the session
+ * list. Filter sits left, "+ New session" (primary action) sits right, for
+ * right-thumb reachability on mobile.
  *
- * .rail-head-row wraps NewSessionForm's own .rail-head (new-session + filter
- * funnel) plus .rail-collapse-toggle (moved here from the detail top bar) on
- * one sticky row — the sticky/background/border that used to live on
- * .rail-head now lives on the row so the two stay visually seamless.
+ * Desktop keeps the original padded-bar look (subtle uniform corners).
+ * Mobile stretches both buttons edge-to-edge and gives only their OUTER
+ * bottom corners (filter's bottom-left, new-session's bottom-right) a
+ * generous radius, so the bar hugs the phone's own rounded corners — see
+ * the `@media (max-width: 759px)` override below .rail-filter/.rail-new.
  */
-.rail-head-row {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+.rail-foot {
   display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  padding-bottom: calc(8px + var(--safe-bottom));
   background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-.rail-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 0 8px 10px;
-  min-height: 48px;
-  box-sizing: border-box;
-  flex: 1 1 auto;
-  min-width: 0;
+  border-top: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 .rail-new {
   flex: 1;
@@ -4246,22 +4241,54 @@ body.is-external-display .composer {
   font-weight: 800;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
-/* Sidebar-collapse toggle (⌘B), moved beside the filter funnel. Desktop-only —
-   mirrors the old .focus-toggle visibility (mobile swaps the whole rail for
-   the detail pane instead, so there's nothing to "collapse" there). Sized and
-   styled as a twin of .rail-filter. */
+/* Mobile: buttons fill the full bar height and sit flush against the rail's
+   left/right/bottom edges (which, with the rail swapped full-screen for the
+   detail pane, ARE the device's screen edges) so the generous outer-corner
+   radius below actually reads as hugging the phone's own rounded corners —
+   a plain border-radius on a padded, inset button would leave a square
+   background notch beyond the curve. Inner corners (top, and the two
+   touching in the middle) stay at the base 8px — only the true device-edge
+   corner is pronounced. */
+@media (max-width: 759px) {
+  .rail-foot {
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+  }
+  .rail-foot .rail-filter,
+  .rail-foot .rail-new {
+    height: auto;
+    padding-top: 10px;
+    padding-bottom: calc(10px + var(--safe-bottom));
+  }
+  .rail-foot .rail-filter {
+    padding-left: 16px;
+    border-bottom-left-radius: 24px;
+  }
+  .rail-foot .rail-new {
+    padding-right: 16px;
+    border-bottom-right-radius: 24px;
+  }
+}
+/* Sidebar-collapse toggle (⌘B) — desktop-only (mobile swaps the whole rail
+   for the detail pane instead, so there's nothing to "collapse" there).
+   Now the sole occupant of the rail's top strip (filter + new-session moved
+   to .rail-foot below), so it's a standalone flex child of <aside class="rail">
+   rather than living inside a shared header row. Sized/styled as a twin of
+   .rail-filter. */
 .rail-collapse-toggle {
   display: none;
 }
 @media (min-width: 760px) {
   .rail-collapse-toggle {
     flex: 0 0 auto;
+    align-self: flex-end;
     height: 30px;
     min-width: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-right: 10px;
+    margin: 10px 10px 0 0;
     padding: 0 8px;
     background: var(--bg-2);
     color: var(--text-dim);
@@ -7761,9 +7788,12 @@ select.config-input {
   opacity: 0;
 }
 
-/* Rail foot bar (Settings/Reload/Processes) removed — those buttons now live
-   in the top HUD bar (.hud-reload / .hud-settings / .hud-processes below),
-   beside the fullscreen toggle. */
+/* The OLD rail foot bar (Settings/Reload/Processes) was removed here — those
+   buttons now live in the top HUD bar (.hud-reload / .hud-settings /
+   .hud-processes below), beside the fullscreen toggle. The `.rail-foot`
+   class name has since been reused for a DIFFERENT bottom bar (filter +
+   "+ New session" — see NewSessionForm.tsx / the "Rail footer" rules above),
+   not restoring this one. */
 
 /* ── HUD battery chip ──────────────────────────────────────────── */
 .hud-battery {

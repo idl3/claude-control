@@ -117,14 +117,15 @@ describe('normalizeClaudeTransport', () => {
   });
 });
 
-// ── NewSessionForm (collapsed rail-head control) ─────────────────────────────
+// ── NewSessionForm (rail-foot bottom-bar control) ─────────────────────────────
 // The expanded picker/composer UI moved to NewSessionDraft (see
 // NewSessionDraft.vitest.ts) — this component is now just the "+ New session"
 // button (opens the draft screen in the main content area) and the filter
-// funnel button, unchanged from before.
+// funnel button, rendered in the rail's bottom bar (filter left, new-session
+// right).
 
 describe('NewSessionForm', () => {
-  it('renders the collapsed rail-head button + filter button', () => {
+  it('renders the rail-foot "+ New session" button + filter button', () => {
     render(createElement(NewSessionForm, {
       onOpenDraft: () => {},
       filter: 'all',
@@ -132,6 +133,18 @@ describe('NewSessionForm', () => {
     }));
     expect(screen.getByRole('button', { name: '+ New session' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Showing all panes/ })).toBeTruthy();
+  });
+
+  it('renders the filter button before "+ New session" (filter left, primary action right)', () => {
+    render(createElement(NewSessionForm, {
+      onOpenDraft: () => {},
+      filter: 'all',
+      onCycleFilter: () => {},
+    }));
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].getAttribute('aria-label')).toMatch(/Showing all panes/);
+    expect(buttons[1].textContent).toBe('+ New session');
   });
 
   it('clicking "+ New session" calls onOpenDraft (no inline form expands)', () => {
@@ -143,7 +156,7 @@ describe('NewSessionForm', () => {
     }));
     fireEvent.click(screen.getByRole('button', { name: '+ New session' }));
     expect(onOpenDraft).toHaveBeenCalledTimes(1);
-    // Still just the two rail-head buttons — no expanded form appeared.
+    // Still just the two rail-foot buttons — no expanded form appeared.
     expect(screen.queryByRole('form', { name: 'Create session' })).toBeNull();
   });
 
