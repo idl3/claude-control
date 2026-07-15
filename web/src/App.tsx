@@ -1013,9 +1013,13 @@ function AppInner() {
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>(() => {
     try {
       const v = localStorage.getItem('cc:sessionFilter');
-      return v === 'claude' || v === 'codex' || v === 'terminal' ? v : 'all';
+      // Default is 'agents' (Claude + Codex) — a persisted choice (including an
+      // explicit 'all') always wins over that default on reload.
+      return v === 'all' || v === 'agents' || v === 'claude' || v === 'codex' || v === 'terminal'
+        ? v
+        : 'agents';
     } catch {
-      return 'all';
+      return 'agents';
     }
   });
   const cycleFilter = useCallback(() => {
