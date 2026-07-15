@@ -9539,6 +9539,22 @@ select.config-input {
   justify-content: center;
   overflow: hidden;
 }
+/* Frame-sizing fix: EmbeddedApp's placeholder carries .embed-media-frame's
+   transcript-oriented margin/border/border-radius/640px width-cap — override
+   to fill the frame exactly, same reset as `.artifact-app-slot .embed-app-
+   frame` above (panel context) already applies for the same reason. Without
+   this, `.embed-app-frame`'s 640px max-width silently clips the placeholder's
+   measured width below `.studio-frame`'s own footprint on any device preset
+   wider than 640px logical px (every Desktop/Laptop preset). AppFrameLayer's
+   `hoistGeometry` then derives its scale from that clipped `rect.width` and
+   applies it uniformly to height too, undersizing the hosted iframe and
+   leaving an empty band at the bottom of the frame. */
+.studio-frame .embed-app-frame {
+  margin: 0;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+}
 /* Feature 2 (bezel fix): the body-portaled live-app hoist for the studio slot
    (AppFrameLayer.tsx) is clipped+rounded to match `.studio-frame` above, so
    its corners read as one continuous curve instead of a square edge peeking
