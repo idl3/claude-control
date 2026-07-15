@@ -54,6 +54,7 @@ import { resolveClaudeBin } from './lib/claude-cli.js';
 import {
   MLX_MODELS,
   CLAUDE_MODELS,
+  CODEX_MODELS,
   detectMachine,
   recommendMlxModel,
   recommendClaudeModel,
@@ -538,6 +539,7 @@ const _handler = (req, res) => {
       // show downloaded vs. will-download (avoids a surprise multi-GB fetch).
       mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
       claudeModels: CLAUDE_MODELS,
+      codexModels: CODEX_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -1121,8 +1123,13 @@ async function resolvePaneTarget(target) {
 
 // Claude model flag values the draft-composer UI may request. 'default'
 // (or anything else unrecognized) omits --model entirely — silent fallback,
-// same pattern as claudeTransport/codexTransport below, not a 400.
-const ALLOWED_CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku']);
+// same pattern as claudeTransport/codexTransport below, not a 400. Derived
+// from CLAUDE_MODELS (lib/models.js) — single source of truth, not a
+// hand-duplicated list of shorthand ids.
+const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
+
+// Same pattern for Codex — single source of truth is CODEX_MODELS (lib/models.js).
+const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
 
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
@@ -1154,6 +1161,9 @@ async function handleSessionNew(req, res) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }
   const config = readConfig();
+  // Default ON (readConfig already resolves an absent stored value to true) —
+  // the explicit !== false guard is defense-in-depth at the point of use.
+  const skipPermissions = config.skipPermissions !== false;
   const rawCwd =
     typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
   // Expand a leading ~ to the home directory so projectDirs paths like
@@ -1182,6 +1192,10 @@ async function handleSessionNew(req, res) {
 
   // model: Claude-only. Unknown/absent → null (no --model flag, agent default).
   const model = agent === 'claude' && ALLOWED_CLAUDE_MODELS.has(body.model) ? body.model : null;
+
+  // codexModel: same pattern, Codex-only. Unknown/absent → null (no --model
+  // flag / no thread/start model field, Codex CLI default).
+  const codexModel = agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
 
   // prompt: optional initial message, delivered atomically with the launch
   // (tmux transports) or over the print/RPC socket once the agent is ready.
@@ -1284,7 +1298,7 @@ async function handleSessionNew(req, res) {
         // dash-prefixed positional as an unknown option without it — same
         // hazard verified against `claude -p`; codex's own parser is clap-based
         // and `--` is standard clap behavior).
-        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
+        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand, model: codexModel || undefined, skipPermissions });
         const argv = args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a));
         if (prompt) argv.push('--', tmux.shellQuoteName(prompt));
         launch = `${bin} ${argv.join(' ')}`;
@@ -1305,7 +1319,14 @@ async function handleSessionNew(req, res) {
         claudeBin,
         name,
         model: model || undefined,
-        permissionMode: 'bypassPermissions',
+        // 'manual' asks for each action, same as claude's own interactive
+        // default — the closest --permission-mode literal to "prompt
+        // normally" (there is no literal "default" in its enum). Note:
+        // print/-p mode has no interactive channel to answer a prompt at
+        // all, so with skipPermissions off this transport will effectively
+        // auto-deny un-preapproved tools — a pre-existing architectural
+        // constraint of print mode, not something this toggle introduces.
+        permissionMode: skipPermissions ? 'bypassPermissions' : 'manual',
         quote: tmux.shellQuoteName,
       });
     } else {
@@ -1321,6 +1342,12 @@ async function handleSessionNew(req, res) {
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
       if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
+      // Explicit, idempotent bypass flag — harmless if config.launchCommand
+      // is a shell alias that already carries it. Appending it here (rather
+      // than relying solely on the alias) is the robust fix: an alias may
+      // not expand in this non-interactive tmux send context, or its own
+      // flag could be shadowed by the --name/--model/-- we append after it.
+      if (skipPermissions) launch += ' --dangerously-skip-permissions';
       // Positional prompt goes last (`claude [options] [command] [prompt]`),
       // preceded by `--` to end option parsing. Verified on-host this is load-
       // bearing: `claude -p --model haiku "-x reply with just ok"` errors with
@@ -1353,7 +1380,7 @@ async function handleSessionNew(req, res) {
       }
     }
     if (agent === 'codex' && codexRpcEndpoint) {
-      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd });
+      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd, model: codexModel || undefined, skipPermissions });
       if (prompt) {
         try {
           await codexRpc.submit(target, prompt, { cwd });

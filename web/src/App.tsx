@@ -32,6 +32,7 @@ import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
+import { loadFontSize } from './lib/fontSizePrefs';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -272,8 +273,12 @@ function AppInner() {
     getConfig()
       .then((c) => {
         if (!alive) return;
-        basePx = c.transcriptFontSize ?? 0;
-        extPx = c.externalFontSize ?? 0;
+        // This device's localStorage override wins; the server value is only
+        // the fallback (see lib/fontSizePrefs.ts) — that's what makes the
+        // size per-device rather than shared across every browser hitting
+        // this server.
+        basePx = loadFontSize('transcript') ?? c.transcriptFontSize ?? 0;
+        extPx = loadFontSize('external') ?? c.externalFontSize ?? 0;
         apply();
       })
       .catch(() => { /* non-fatal — keep CSS defaults */ });
@@ -1982,6 +1987,13 @@ function AppInner() {
   // height, so a focus-driven toggle previously caused a visible jump
   // (see the styles.css comment this replaces). Viewport height only moves
   // when the keyboard itself slides, so this stays stable across taps.
+  //
+  // Same effect also republishes vv.offsetTop as --vv-top: iOS Safari scrolls
+  // the VISUAL viewport (not the layout viewport) up when the keyboard opens,
+  // so a `position: fixed; top: 0` element — like .app-top-fade below — stays
+  // pinned to the layout viewport's top and drifts out of alignment with the
+  // status-bar area it's meant to cover. Anchoring it to `var(--vv-top)`
+  // instead keeps it glued to the true visible top edge.
   useEffect(() => {
     if (!window.visualViewport) return;
     const vv = window.visualViewport;
@@ -1994,12 +2006,19 @@ function AppInner() {
       lastUp = up;
       document.body.classList.toggle('kbd-up', up);
     };
+    const applyOffset = () => {
+      document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+    };
     const onViewportChange = () => {
       // Coalesce the burst of resize/scroll events fired during the
       // keyboard's slide animation into one DOM write per frame.
       if (rafId != null) return;
-      rafId = requestAnimationFrame(apply);
+      rafId = requestAnimationFrame(() => {
+        apply();
+        applyOffset();
+      });
     };
+    applyOffset();
     vv.addEventListener('resize', onViewportChange);
     vv.addEventListener('scroll', onViewportChange);
     return () => {
@@ -2007,6 +2026,7 @@ function AppInner() {
       vv.removeEventListener('scroll', onViewportChange);
       if (rafId != null) cancelAnimationFrame(rafId);
       document.body.classList.remove('kbd-up');
+      document.documentElement.style.removeProperty('--vv-top');
     };
   }, []);
 

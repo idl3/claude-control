@@ -45,6 +45,15 @@
   --txt-meta: calc(11px * var(--ui-scale));
   --txt-composer: max(16px, calc(16px * var(--ui-scale))); /* >=16px: stops iOS auto-zoom */
 
+  /* Shared text-input/select chrome — single source for New Session's fields
+     (.rail-new-name, .rail-new-cwd) and the config modal's (.config-input),
+     which had drifted to three slightly different font-sizes/paddings.
+     Font-size aliases --txt-composer (>=16px) so every text control clears
+     the iOS auto-zoom-on-focus threshold, not just the composer itself. */
+  --control-font: var(--txt-composer);
+  --control-radius: 8px;
+  --control-pad: 7px 10px;
+
   --hud-h: 34px;
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
@@ -1346,10 +1355,14 @@ body.is-external-display .rail {
 /* Fixed scrim pinned to the very top of the viewport, covering the status-bar
    safe area. Mobile only: when the composer is focused iOS scrolls the app up
    (nav bars leave, content reaches the status bar), so this fades that content
-   into the background. Hidden on desktop where there's no keyboard scroll. */
+   into the background. Hidden on desktop where there's no keyboard scroll.
+   `top` tracks --vv-top (App.tsx's visualViewport effect), not a bare 0 —
+   `position: fixed` anchors to the LAYOUT viewport, but iOS Safari scrolls the
+   VISUAL viewport when the keyboard opens, so a bare `top: 0` drifts out of
+   alignment with the actual visible top edge. */
 .app-top-fade {
   position: fixed;
-  top: 0;
+  top: var(--vv-top, 0px);
   left: 0;
   right: 0;
   height: calc(var(--safe-top) + 52px);
@@ -2658,8 +2671,10 @@ details.block-tool[open] > summary .tool-arrow,
   display: flex;
   flex-direction: column;
   /* Seamless with the transcript: no top border, no bar background — the card
-     floats on the same surface as the messages. */
-  padding: 0 12px 8px;
+     floats on the same surface as the messages. Consistent 8px on every
+     side (was 12px horizontal, an unexplained mismatch vs the 8px
+     bottom/top rhythm used everywhere else around the composer card). */
+  padding: 0 8px 8px;
   /* Use the REAL bottom inset here (not the iPad-zeroed --safe-bottom): the
      sidebar + everything else sit flush to the screen bottom, but the composer
      keeps a home-indicator clearance so the input/send isn't under it. env() is
@@ -4536,9 +4551,9 @@ body.is-external-display .composer {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: var(--txt-composer);
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .rail-new-name:focus {
@@ -4548,20 +4563,12 @@ body.is-external-display .composer {
 .rail-new-name:disabled {
   opacity: 0.6;
 }
-.rail-new-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-.rail-new-cancel,
-.rail-new-create {
+.rail-new-cancel {
   border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   padding: 6px 12px;
   cursor: pointer;
-}
-.rail-new-cancel {
   background: transparent;
   color: var(--text-dim);
   border: 1px solid var(--line);
@@ -4569,16 +4576,7 @@ body.is-external-display .composer {
 .rail-new-cancel:hover:not(:disabled) {
   color: var(--text);
 }
-.rail-new-create {
-  background: var(--accent);
-  color: var(--bg);
-  border: 0;
-}
-.rail-new-create:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.rail-new-cancel:disabled,
-.rail-new-create:disabled {
+.rail-new-cancel:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -4588,9 +4586,9 @@ body.is-external-display .composer {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 13px;
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   width: 100%;
   box-sizing: border-box;
@@ -4748,10 +4746,15 @@ select.rail-new-cwd {
   color: var(--text);
   letter-spacing: -0.02em;
 }
-.new-session-draft-composer {
-  margin-top: 4px;
+/* Wraps the heading + agent/mode/model/name/cwd/tmux pickers, sitting above
+   the composer card. Same 12px field-to-field rhythm .new-session-draft-body
+   used before Create/Cancel moved into the composer's own toolbar. */
+.new-session-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.new-session-draft-actions {
+.new-session-draft-composer {
   margin-top: 4px;
 }
 
@@ -5121,12 +5124,15 @@ html.lightbox-open body {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 9px;
-  font-size: 13px;
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  font-size: var(--control-font);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+/* Dropdown variant uses system font so labels read naturally — same
+   convention as select.rail-new-cwd below. */
 select.config-input {
+  font-family: inherit;
   appearance: none;
   cursor: pointer;
   /* caret */
@@ -5156,6 +5162,29 @@ select.config-input {
   color: var(--text-dim);
   padding: 0 4px;
   border-radius: 4px;
+}
+/* Checkbox field: a full-width row (native checkbox + label text), same
+   visual language as .config-field's label/hint pair. Used for boolean
+   toggles like Harness's "skip permission prompts". */
+.config-checkbox-field {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.config-checkbox-field input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.config-checkbox-field .config-checkbox-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.config-checkbox-field .config-label {
+  cursor: pointer;
 }
 /* Agent group: a labelled sub-block that spans the full grid and lays out its
    own fields inside a nested 2-column grid. */
@@ -7440,6 +7469,50 @@ select.config-input {
   .composer-subagent-label {
     white-space: normal;
     max-width: 13ch; /* forces "Dispatch task in sub-agent" onto 2 lines */
+  }
+}
+
+/* Mobile alternative: an icon-only toggle button, same size/shape as the
+   other toolbar icon buttons (.composer-attach/.composer-mic), added
+   alongside the checkbox+label toggle above rather than replacing it — CSS
+   swaps which one is visible per breakpoint so there's exactly one hit
+   target at any given width. */
+.composer-subagent-btn {
+  display: none;
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ease) 0.15s,
+    color var(--ease) 0.15s,
+    border-color var(--ease) 0.15s;
+}
+.composer-subagent-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.composer-subagent-btn--on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 15%, transparent);
+}
+.composer-subagent-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+@media (max-width: 760px) {
+  .composer-subagent-toggle {
+    display: none;
+  }
+  .composer-subagent-btn {
+    display: inline-flex;
   }
 }
 

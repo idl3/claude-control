@@ -27,6 +27,15 @@ describe('SpawnAgentInfo type contract', () => {
   });
 });
 
+/** Mirrors lib/models.js CLAUDE_MODELS — kept in sync by the model-id
+ *  assertion test below (asserts the real ids, not this fixture). */
+const FIXTURE_CLAUDE_MODELS = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+];
+
 function stubApi({
   claudeAvailable = true,
   codexAvailable = true,
@@ -46,6 +55,16 @@ function stubApi({
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
+    }
+    if (url.endsWith('/api/models')) {
+      return new Response(JSON.stringify({
+        machine: { ramGB: 32, arch: 'arm64', platform: 'darwin', appleSilicon: true },
+        mlxModels: [],
+        claudeModels: FIXTURE_CLAUDE_MODELS,
+        codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }, { id: 'gpt-5.4', label: 'GPT-5.4' }],
+        recommendedMlxModel: '',
+        recommendedClaudeModel: 'claude-haiku-4-5-20251001',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.endsWith('/api/spawn-agents')) {
       return new Response(JSON.stringify({
@@ -114,12 +133,16 @@ describe('NewSessionDraft agent, mode, and model controls', () => {
       expect(screen.getByRole('group', { name: 'Claude mode' })).toBeTruthy();
       expect(screen.getByRole('group', { name: 'Model' })).toBeTruthy();
     });
-    // Model picker shows all four options, default active.
+    // Model picker shows Default + all fetched models (exact ids/labels
+    // asserted separately below), default active.
     const defaultBtn = screen.getByRole('button', { name: 'Default' }) as HTMLButtonElement;
     expect(defaultBtn.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Opus' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Sonnet' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Haiku' })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Opus 4.8' })).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'Sonnet 5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fable 5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Haiku 4.5' })).toBeTruthy();
 
     fireEvent.click(codexButton);
 
@@ -139,10 +162,100 @@ describe('NewSessionDraft agent, mode, and model controls', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const opusBtn = await screen.findByRole('button', { name: 'Opus' });
+    const opusBtn = await screen.findByRole('button', { name: 'Opus 4.8' });
     fireEvent.click(opusBtn);
     expect(opusBtn.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Default' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers the exact Claude model ids from /api/models, including Fable 5', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fable 5' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].model).toBe('claude-fable-5');
+  });
+});
+
+describe('NewSessionDraft Codex model picker', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows a Codex model group (not the Claude "Model" group) with Default + fetched models, once Codex is selected', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: 'Codex model' })).toBeTruthy();
+    });
+    expect(screen.queryByRole('group', { name: 'Model' })).toBeNull();
+    const defaultBtn = screen.getByRole('button', { name: 'Default' }) as HTMLButtonElement;
+    expect(defaultBtn.getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'GPT-5.5' })).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'GPT-5.4' })).toBeTruthy();
+  });
+
+  it('sends the selected codexModel id on create, and omits it when left at Default', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'GPT-5.5' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].codexModel).toBe('gpt-5.5');
+    expect(createCalls[0].agent).toBe('codex');
+  });
+
+  it('omits codexModel when left at Default', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByRole('group', { name: 'Codex model' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].codexModel).toBeUndefined();
+  });
+
+  it('does not send codexModel for claude even if one was picked while on codex', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'GPT-5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Claude' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('claude');
+    expect(createCalls[0].codexModel).toBeUndefined();
   });
 });
 
@@ -161,13 +274,13 @@ describe('NewSessionDraft submit payload', () => {
       onCreated,
     }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Sonnet' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sonnet 5' }));
     const textarea = screen.getByLabelText('Initial prompt');
     fireEvent.change(textarea, { target: { value: 'fix the failing test' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
-    expect(createCalls[0].model).toBe('sonnet');
+    expect(createCalls[0].model).toBe('claude-sonnet-5');
     expect(createCalls[0].prompt).toBe('fix the failing test');
     expect(createCalls[0].agent).toBe('claude');
 
@@ -184,7 +297,7 @@ describe('NewSessionDraft submit payload', () => {
       onCreated: () => {},
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].model).toBeUndefined();
@@ -202,7 +315,7 @@ describe('NewSessionDraft submit payload', () => {
 
     const textarea = await screen.findByLabelText('Initial prompt');
     fireEvent.change(textarea, { target: { value: '   \n  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].prompt).toBeUndefined();
@@ -217,9 +330,9 @@ describe('NewSessionDraft submit payload', () => {
       onCreated: () => {},
     }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Opus' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Opus 4.8' }));
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].agent).toBe('codex');
@@ -244,7 +357,7 @@ describe('NewSessionDraft submit payload', () => {
 
     const textarea = await screen.findByLabelText('Initial prompt');
     fireEvent.change(textarea, { target: { value: 'do not lose me' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => {
       expect(onToast).toHaveBeenCalledWith(expect.stringContaining('New session failed'), 'error');
@@ -330,7 +443,7 @@ describe('NewSessionDraft tmux target picker', () => {
       onCreated: () => {},
     }));
     await screen.findByLabelText('Tmux session');
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].tmuxSession).toBeUndefined();
@@ -347,7 +460,7 @@ describe('NewSessionDraft tmux target picker', () => {
     }));
     const select = await screen.findByLabelText('Tmux session');
     fireEvent.change(select, { target: { value: 'work' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].tmuxSession).toBe('work');
@@ -366,7 +479,7 @@ describe('NewSessionDraft tmux target picker', () => {
     fireEvent.change(select, { target: { value: '__new__' } });
     const nameInput = await screen.findByLabelText('New tmux session name');
     fireEvent.change(nameInput, { target: { value: 'my-feature' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].newTmuxSession).toBe('my-feature');
