@@ -8,7 +8,7 @@ import path from 'node:path';
 // module is ESM with a module-level os.homedir() call in listSkills(), we use
 // _bustCache to force re-reads and set HOME env so os.homedir() returns the
 // fixture dir.
-import { listSkills, readSkill, _bustCache } from '../lib/skills.js';
+import { listSkills, readSkill, _bustCache, _cacheSizeForTest } from '../lib/skills.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +160,22 @@ test('cache is used on repeated calls within TTL', () => {
     // Same reference (cache hit)
     assert.equal(first, second);
     assert.equal(second.length, 1);
+  } finally {
+    process.env.HOME = orig;
+    _bustCache();
+  }
+});
+
+test('listSkills cache is bounded by LRU eviction', () => {
+  _bustCache();
+  const orig = process.env.HOME;
+  const tmp = makeTmp();
+  process.env.HOME = tmp;
+  try {
+    for (let i = 0; i < 160; i++) {
+      listSkills(path.join(tmp, `project-${i}`));
+    }
+    assert.equal(_cacheSizeForTest(), 128);
   } finally {
     process.env.HOME = orig;
     _bustCache();

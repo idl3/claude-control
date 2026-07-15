@@ -333,6 +333,19 @@ test('WS auth: wrong token subprotocol → upgrade rejected', async () => {
   assert.equal(result.connected, false, 'upgrade with wrong token must be rejected');
 });
 
+test('static cache headers: index revalidates, hashed assets are immutable', async () => {
+  const indexRes = await req(port, '/');
+  assert.equal(indexRes.status, 200);
+  assert.match(indexRes.headers.get('cache-control') || '', /no-store/);
+  const html = await indexRes.text();
+  const assetPath = html.match(/\.\/(assets\/[^"']+\.(?:js|css))/)?.[1];
+  assert.ok(assetPath, 'built index.html must reference at least one hashed Vite asset');
+
+  const assetRes = await req(port, `/${assetPath}`);
+  assert.equal(assetRes.status, 200);
+  assert.equal(assetRes.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+});
+
 // ===========================================================================
 // 4. WS op: promptselect — unknown session → error ack
 //
