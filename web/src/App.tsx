@@ -56,7 +56,6 @@ import {
   BotIcon,
   PanelLeftIcon,
   EllipsisIcon,
-  SettingsIcon,
   ActivityIcon,
   SearchIcon,
   RefreshIcon,
@@ -1989,6 +1988,9 @@ function AppInner() {
           resources={cockpit.resources}
           conn={cockpit.conn}
           push={push}
+          onReload={() => window.location.reload()}
+          onOpenSettings={() => setConfigOpen(true)}
+          onOpenProcesses={() => setProcessOpen(true)}
         />
         <UpdateBanner />
         <PermissionBanner show={cockpit.sessions.some((s) => s.permIssue)} />
@@ -2031,38 +2033,6 @@ function AppInner() {
                 workingOverrideId={agentWorking ? cockpit.selectedId : null}
                 runningSubagentCountById={cockpit.runningSubagentCountById}
               />
-            </div>
-            {/* Bottom bar: reload + settings + process monitor, all on one level
-                at the sidebar foot. */}
-            <div className="rail-foot">
-              <button
-                type="button"
-                className="rail-foot-btn rail-foot-icon reload-foot"
-                aria-label="Reload app"
-                title="Reload app"
-                onClick={() => window.location.reload()}
-              >
-                <span className="reload-glyph" aria-hidden="true">↻</span>
-              </button>
-              <button
-                type="button"
-                className="rail-foot-btn"
-                aria-label="Settings"
-                title="Settings"
-                onClick={() => setConfigOpen(true)}
-              >
-                <SettingsIcon size={16} />
-                <span>Settings</span>
-              </button>
-              <button
-                type="button"
-                className="rail-foot-btn rail-foot-icon"
-                aria-label="Processes & system"
-                title="Processes & system"
-                onClick={() => setProcessOpen(true)}
-              >
-                <ActivityIcon size={16} />
-              </button>
             </div>
           </aside>
 

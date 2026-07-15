@@ -7413,9 +7413,9 @@ select.config-input {
   margin-left: auto;
 }
 
-/* ── Reload button (lives in the rail foot, beside Settings) ─────── */
+/* ── Reload button (lives in the top HUD bar, beside Settings/Processes) ── */
 /* Only the glyph rotates (not the whole button), and it's a touch smaller. */
-.reload-glyph {
+.hud-reload-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7423,10 +7423,10 @@ select.config-input {
   line-height: 1;
   transition: transform 0.45s var(--ease);
 }
-.reload-foot:hover .reload-glyph {
+.hud-reload:hover .hud-reload-glyph {
   transform: rotate(180deg);
 }
-.reload-foot:active .reload-glyph {
+.hud-reload:active .hud-reload-glyph {
   transform: rotate(360deg);
 }
 
@@ -7589,47 +7589,9 @@ select.config-input {
   opacity: 0;
 }
 
-/* ── Rail foot bar: settings + process monitor, pinned at sidebar bottom ── */
-.rail-foot {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  border-top: 1px solid var(--line);
-  background: var(--bg);
-}
-.rail-foot-btn {
-  height: var(--hud-h);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  flex: 1;
-  background: var(--bg-2);
-  color: var(--text-dim);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0 12px;
-  cursor: pointer;
-  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
-}
-.rail-foot-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
-  background: var(--bg-hover);
-}
-.rail-foot-btn.rail-foot-icon {
-  flex: 0 0 auto;
-  width: var(--hud-h);
-  padding: 0;
-}
-.rail-foot-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
+/* Rail foot bar (Settings/Reload/Processes) removed — those buttons now live
+   in the top HUD bar (.hud-reload / .hud-settings / .hud-processes below),
+   beside the fullscreen toggle. */
 
 /* ── HUD battery chip ──────────────────────────────────────────── */
 .hud-battery {
@@ -7963,7 +7925,7 @@ select.config-input {
   }
 }
 
-/* ── Icon delight: foot bar + composer ─────────────────────────── */
+/* ── Icon delight: HUD cluster + composer ──────────────────────── */
 @keyframes foot-pulse {
   50% {
     transform: scale(1.14);
@@ -7972,27 +7934,28 @@ select.config-input {
 /* Refresh: slightly larger glyph on desktop; the GLYPH rotates (see above), the
    button just tints on hover. */
 @media (min-width: 760px) {
-  .reload-glyph {
+  .hud-reload-glyph {
     font-size: 18px;
   }
 }
-.reload-foot {
+.hud-reload {
   transition: color 0.15s var(--ease), border-color 0.15s var(--ease),
     background 0.15s var(--ease);
 }
-.reload-foot:hover {
+.hud-reload:hover {
   color: var(--accent);
 }
-/* Processes: pulse in the accent on hover. */
-.rail-foot-icon:not(.reload-foot):hover {
+/* Settings + Processes: pulse in the accent on hover. */
+.hud-settings:hover,
+.hud-processes:hover {
   color: var(--accent);
   animation: foot-pulse 0.9s var(--ease) infinite;
 }
 /* Settings cog: rotates on hover. */
-.rail-foot-btn:not(.rail-foot-icon) svg {
+.hud-settings svg {
   transition: transform 0.5s var(--ease);
 }
-.rail-foot-btn:not(.rail-foot-icon):hover svg {
+.hud-settings:hover svg {
   transform: rotate(120deg);
 }
 /* Composer toolbar icons: subtle lift / press; mic pulses; send leans in. */
@@ -8024,11 +7987,12 @@ select.config-input {
   filter: brightness(1.08);
 }
 @media (prefers-reduced-motion: reduce) {
-  .reload-glyph,
-  .reload-foot:hover .reload-glyph,
-  .reload-foot:active .reload-glyph,
-  .rail-foot-icon:not(.reload-foot):hover,
-  .rail-foot-btn:not(.rail-foot-icon):hover svg,
+  .hud-reload-glyph,
+  .hud-reload:hover .hud-reload-glyph,
+  .hud-reload:active .hud-reload-glyph,
+  .hud-settings:hover,
+  .hud-processes:hover,
+  .hud-settings:hover svg,
   .composer-attach,
   .composer-skills-btn,
   .composer-mic,
