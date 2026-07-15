@@ -1247,7 +1247,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: var(--txt-meta);
@@ -1270,7 +1270,7 @@ body.is-external-display .rail {
   flex: 1 1 auto;
   min-height: 0; /* allow the flex child to shrink so it scrolls when capped */
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px;
   /* True terminal surface — near-black so the ANSI palette reads correctly. */
   background: #0b0d10;
   color: #c0caf5;
@@ -1300,7 +1300,7 @@ body.is-external-display .rail {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 8px;
   border-top: 1px solid var(--line);
   background: #0b0d10;
   overflow-x: auto;
@@ -1517,7 +1517,7 @@ body.is-external-display .rail {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   opacity: 0.5;
 }
 .thread-loading-spinner {
@@ -1640,13 +1640,13 @@ body.is-external-display .rail {
      now that the role label is gone). */
   border: 1px solid transparent;
   border-left: 2px solid var(--accent);
-  padding: 8px 10px;
+  padding: 8px;
 }
 .msg-row[data-role='system'] .msg-body {
   background: transparent;
   border: 1px dashed var(--line);
   color: var(--text-dim);
-  padding: 8px 10px;
+  padding: 8px;
 }
 /* Optimistic (un-echoed) send. State comes from the server ack via data-send:
    queued = awaiting ack (pulsing), sent = ack'd/awaiting echo, failed = never landed. */
@@ -1835,7 +1835,7 @@ body.is-external-display .rail {
 .login-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   width: min(340px, 88vw);
 }
 .login-title {
@@ -1887,15 +1887,15 @@ body.is-external-display .rail {
 }
 
 /* ── Pin transcript modal ─────────────────────────────────────── */
-.pin-modal { display: flex; flex-direction: column; gap: 10px; max-height: 80vh; }
+.pin-modal { display: flex; flex-direction: column; gap: 8px; max-height: 80vh; }
 .pin-search {
   width: 100%; box-sizing: border-box;
-  padding: 10px 12px; border-radius: 8px;
+  padding: 8px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text);
   font-size: 14px;
 }
 .pin-unpin {
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  padding: 8px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text-dim);
   font-size: 12px;
 }
@@ -1903,7 +1903,7 @@ body.is-external-display .rail {
 .pin-empty { color: var(--text-faint); font-size: 12px; padding: 16px; text-align: center; }
 .pin-row {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  padding: 8px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-1); color: var(--text);
 }
 .pin-row:hover { border-color: var(--accent, #3b82f6); }
