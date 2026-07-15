@@ -1,0 +1,29 @@
+{
+  "name": "@idl3/collab-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Harness-agnostic cross-agent collaboration engine (MCP + CLI) over a shared SQLite store.",
+  "bin": {
+    "collab": "./dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "serve": "node dist/mcp/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.23.0",
+    "minimatch": "^10.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.23.0",
+    "@types/node": "^26.1.1"
+  }
+}
