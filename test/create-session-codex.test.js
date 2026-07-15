@@ -24,8 +24,8 @@ import { buildBridgeCommand } from '../lib/claude-print.js';
 // arg is shell-quoted because the command is typed into an interactive shell.
 // Keeping this in lockstep with the server guards against the prior bug where
 // buildSpawnCommand's result was discarded (`void`) and the string hand-rolled.
-function launchFor(config, cwd, { prompt = '' } = {}) {
-  const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand });
+function launchFor(config, cwd, { prompt = '', model = undefined } = {}) {
+  const { bin, args } = buildSpawnCommand({ cwd, bin: config.codexLaunchCommand, model });
   const argv = args.map((a) => (a === cwd ? shellQuoteName(cwd) : a));
   // `--` ends option parsing before the positional prompt — verified on-host
   // that codex's clap-based parser (like claude's) treats a dash-prefixed
@@ -52,6 +52,13 @@ function claudeLaunchFor(config, name, { model = null, prompt = '' } = {}) {
 const ALLOWED_CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku']);
 function selectModel(body, agent) {
   return agent === 'claude' && ALLOWED_CLAUDE_MODELS.has(body.model) ? body.model : null;
+}
+
+// Mirror of server.js handleSessionNew's codexModel selection: same
+// silent-fallback pattern, Codex-only, sourced from lib/models.js CODEX_MODELS.
+const ALLOWED_CODEX_MODELS = new Set(['gpt-5.5', 'gpt-5.4']);
+function selectCodexModel(body, agent) {
+  return agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
 }
 
 // Mirror of server.js handleSessionNew's prompt boundary validation: type
@@ -119,6 +126,65 @@ describe('handleSessionNew codex launch string', () => {
     assert.equal(launch, `codex -C '/home/user/my project dir'`);
     // Single-quote wrapping keeps spaces safe for the shell
     assert.ok(launch.includes("'"), 'cwd must be quoted');
+  });
+});
+
+// ── Codex model selection (draft-composer model picker, tmux/TUI transport) ──
+// buildSpawnCommand is the single source of truth for the --model flag shape
+// (mirrors Claude's --model handling in the tmux launch string above).
+
+describe('buildSpawnCommand — Codex --model flag', () => {
+  test('appends --model <id> when a model is passed', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex', model: 'gpt-5.5' });
+    assert.deepEqual(result, { bin: 'codex', args: ['-C', '/workspace', '--model', 'gpt-5.5'] });
+  });
+
+  test('omits --model entirely when no model is passed (regression: byte-identical to no-model shape)', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex' });
+    assert.deepEqual(result, { bin: 'codex', args: ['-C', '/workspace'] });
+  });
+
+  test('omits --model when model is undefined explicitly', () => {
+    const result = buildSpawnCommand({ cwd: '/workspace', bin: 'codex', model: undefined });
+    assert.deepEqual(result, { bin: 'codex', args: ['-C', '/workspace'] });
+  });
+});
+
+describe('handleSessionNew codex launch string — --model flag (tmux/TUI transport)', () => {
+  test('codex launch string is `codex -C <cwd> --model <id>` when a model is set', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', { model: 'gpt-5.5' });
+    assert.equal(launch, `codex -C '/workspace' --model gpt-5.5`);
+  });
+
+  test('--model precedes the -- guard and positional prompt when both are set', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace', {
+      model: 'gpt-5.4',
+      prompt: 'fix the failing test',
+    });
+    assert.equal(launch, `codex -C '/workspace' --model gpt-5.4 -- 'fix the failing test'`);
+  });
+
+  test('is byte-identical to the no-model shape when model is unset (regression)', () => {
+    const launch = launchFor({ codexLaunchCommand: 'codex' }, '/workspace');
+    assert.equal(launch, `codex -C '/workspace'`);
+  });
+});
+
+describe('handleSessionNew codexModel selection (Codex-only, silent-fallback validation)', () => {
+  test('accepts each allowed model for the codex agent', () => {
+    assert.equal(selectCodexModel({ codexModel: 'gpt-5.5' }, 'codex'), 'gpt-5.5');
+    assert.equal(selectCodexModel({ codexModel: 'gpt-5.4' }, 'codex'), 'gpt-5.4');
+  });
+
+  test('"default", unknown strings, and absent codexModel all resolve to null (no --model flag)', () => {
+    assert.equal(selectCodexModel({ codexModel: 'default' }, 'codex'), null);
+    assert.equal(selectCodexModel({ codexModel: 'gpt-5.1-codex' }, 'codex'), null);
+    assert.equal(selectCodexModel({}, 'codex'), null);
+    assert.equal(selectCodexModel({ codexModel: '' }, 'codex'), null);
+  });
+
+  test('codexModel is ignored entirely for the claude agent, even a valid-looking value', () => {
+    assert.equal(selectCodexModel({ codexModel: 'gpt-5.5' }, 'claude'), null);
   });
 });
 

@@ -183,6 +183,82 @@ describe('NewSessionDraft agent, mode, and model controls', () => {
   });
 });
 
+describe('NewSessionDraft Codex model picker', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows a Codex model group (not the Claude "Model" group) with Default + fetched models, once Codex is selected', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: 'Codex model' })).toBeTruthy();
+    });
+    expect(screen.queryByRole('group', { name: 'Model' })).toBeNull();
+    const defaultBtn = screen.getByRole('button', { name: 'Default' }) as HTMLButtonElement;
+    expect(defaultBtn.getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'GPT-5.5' })).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'GPT-5.4' })).toBeTruthy();
+  });
+
+  it('sends the selected codexModel id on create, and omits it when left at Default', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'GPT-5.5' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].codexModel).toBe('gpt-5.5');
+    expect(createCalls[0].agent).toBe('codex');
+  });
+
+  it('omits codexModel when left at Default', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByRole('group', { name: 'Codex model' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].codexModel).toBeUndefined();
+  });
+
+  it('does not send codexModel for claude even if one was picked while on codex', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'GPT-5.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Claude' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('claude');
+    expect(createCalls[0].codexModel).toBeUndefined();
+  });
+});
+
 describe('NewSessionDraft submit payload', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

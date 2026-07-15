@@ -72,6 +72,73 @@ test('CodexRpcClient _openThread starts persistent non-ephemeral threads', async
   });
 });
 
+test('CodexRpcClient _openThread includes model in thread/start params when constructed with one', async () => {
+  const calls = [];
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+    model: 'gpt-5.5',
+  });
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { thread: { id: 'thread-1', path: '/tmp/rollout.jsonl' } };
+  };
+
+  await client._openThread();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'thread/start');
+  assert.deepEqual(calls[0].params, {
+    cwd: '/workspace',
+    ephemeral: false,
+    threadSource: 'user',
+    sessionStartSource: 'startup',
+    model: 'gpt-5.5',
+  });
+});
+
+test('CodexRpcClient _openThread omits model from thread/resume params even when constructed with one (model only applies to fresh threads)', async () => {
+  const calls = [];
+  const client = new CodexRpcClient({
+    target: 's:0.0',
+    endpoint: 'ws://127.0.0.1:1',
+    cwd: '/workspace',
+    resumeThreadId: 'thread-1',
+    transcriptPath: '/tmp/rollout.jsonl',
+    model: 'gpt-5.5',
+  });
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    return { thread: { id: 'thread-1', path: '/tmp/rollout.jsonl' } };
+  };
+
+  await client._openThread();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'thread/resume');
+  assert.ok(!('model' in calls[0].params), 'thread/resume must not carry a model field');
+});
+
+test('CodexRpcManager.attach forwards model into the CodexRpcClient it constructs', () => {
+  // Pure construction check — verifies the manager's attach() signature
+  // accepts + forwards `model` without needing a live connection.
+  const manager = new CodexRpcManager();
+  const originalConnect = CodexRpcClient.prototype.connect;
+  let capturedModel;
+  CodexRpcClient.prototype.connect = async function connect() {
+    capturedModel = this.model;
+    throw new Error('stop before real connect');
+  };
+  return manager
+    .attach({ target: 's:0.0', endpoint: 'ws://127.0.0.1:1', cwd: '/workspace', model: 'gpt-5.4' })
+    .catch(() => {})
+    .finally(() => {
+      CodexRpcClient.prototype.connect = originalConnect;
+      assert.equal(capturedModel, 'gpt-5.4');
+    });
+});
+
 test('CodexRpcClient _openThread resumes by thread id and rollout path', async () => {
   const calls = [];
   const client = new CodexRpcClient({

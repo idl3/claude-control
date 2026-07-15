@@ -49,6 +49,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   const [model, setModel] = useState<ClaudeModel>('default');
+  const [codexModel, setCodexModel] = useState<ClaudeModel>('default');
   const [name, setName] = useState('');
   const [placeholder] = useState(defaultName);
   // Selected value in the project-dir dropdown: a path string, or '' to use
@@ -64,6 +65,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const [creating, setCreating] = useState(false);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
   const [claudeModels, setClaudeModels] = useState<ClaudeModelInfo[]>([]);
+  const [codexModels, setCodexModels] = useState<ClaudeModelInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionSummary[]>([]);
@@ -98,6 +100,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     getModels()
       .then((info) => {
         setClaudeModels(info.claudeModels ?? []);
+        setCodexModels(info.codexModels ?? []);
       })
       .catch(() => {
         // Non-fatal: model picker falls back to just "Default".
@@ -132,6 +135,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
         claudeTransport: agent === 'claude' ? claudeTransport : undefined,
         codexTransport: agent === 'codex' ? codexTransport : undefined,
         model: agent === 'claude' && model !== 'default' ? model : undefined,
+        codexModel: agent === 'codex' && codexModel !== 'default' ? codexModel : undefined,
         prompt: prompt.trim() || undefined,
         tmuxSession: resolvedTmuxSession,
         newTmuxSession: resolvedNewTmuxSession,
@@ -151,6 +155,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     claudeTransport,
     codexTransport,
     model,
+    codexModel,
     prompt,
     name,
     cwdChoice,
@@ -286,6 +291,32 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
                     disabled={creating}
                     aria-pressed={isActive}
                     onClick={() => setModel(id)}
+                  >
+                    <span className="rail-new-agent-seg-label">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* Model picker — Codex only. Same pattern as the Claude picker
+              above, sourced from /api/models' codexModels field (single
+              source of truth: lib/models.js CODEX_MODELS). Separate group
+              label ("Codex model") so it never collides with the Claude
+              picker's "Model" group when toggling agents. */}
+          {agent === 'codex' ? (
+            <div className="rail-new-mode-seg" role="group" aria-label="Codex model">
+              {[DEFAULT_MODEL_OPTION, ...codexModels].map(({ id, label }) => {
+                const isActive = codexModel === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className="rail-new-mode-seg-btn"
+                    data-active={isActive ? 'true' : 'false'}
+                    disabled={creating}
+                    aria-pressed={isActive}
+                    onClick={() => setCodexModel(id)}
                   >
                     <span className="rail-new-agent-seg-label">{label}</span>
                   </button>

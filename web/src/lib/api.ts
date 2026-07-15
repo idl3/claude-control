@@ -371,6 +371,8 @@ export interface ModelsInfo {
   machine: { ramGB: number; arch: string; platform: string; appleSilicon: boolean };
   mlxModels: MlxModelInfo[];
   claudeModels: ClaudeModelInfo[];
+  /** Codex model catalog (id/label), same shape as claudeModels. */
+  codexModels: ClaudeModelInfo[];
   recommendedMlxModel: string;
   recommendedClaudeModel: string;
 }
@@ -481,6 +483,9 @@ export async function createSession(opts?: {
   /** Claude-only model override — a full model id from ClaudeModelInfo.id
    *  (e.g. 'claude-opus-4-8'). Omitted/'default' → agent's own default. */
   model?: string;
+  /** Codex-only model override — a full model id from ClaudeModelInfo.id
+   *  (e.g. 'gpt-5.5'). Omitted/'default' → agent's own default. */
+  codexModel?: string;
   /** Initial prompt, submitted atomically with session creation. */
   prompt?: string;
   /**

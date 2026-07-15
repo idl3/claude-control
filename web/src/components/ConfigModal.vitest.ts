@@ -57,6 +57,7 @@ const FIXTURE_MODELS: ModelsInfo = {
   machine: { ramGB: 32, arch: 'arm64', platform: 'darwin', appleSilicon: true },
   mlxModels: [{ id: 'qwen-7b', label: 'Qwen 7B', sizeGB: 4, minRamGB: 8, installed: true }],
   claudeModels: [{ id: 'claude-sonnet', label: 'Sonnet' }],
+  codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }],
   recommendedMlxModel: 'qwen-7b',
   recommendedClaudeModel: 'claude-sonnet',
 };

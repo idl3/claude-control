@@ -54,6 +54,7 @@ import { resolveClaudeBin } from './lib/claude-cli.js';
 import {
   MLX_MODELS,
   CLAUDE_MODELS,
+  CODEX_MODELS,
   detectMachine,
   recommendMlxModel,
   recommendClaudeModel,
@@ -538,6 +539,7 @@ const _handler = (req, res) => {
       // show downloaded vs. will-download (avoids a surprise multi-GB fetch).
       mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
       claudeModels: CLAUDE_MODELS,
+      codexModels: CODEX_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -1118,6 +1120,9 @@ async function resolvePaneTarget(target) {
 // hand-duplicated list of shorthand ids.
 const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
+// Same pattern for Codex — single source of truth is CODEX_MODELS (lib/models.js).
+const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
+
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
 // for a prompt up to this size plus JSON-escaping overhead and the other
@@ -1176,6 +1181,10 @@ async function handleSessionNew(req, res) {
 
   // model: Claude-only. Unknown/absent → null (no --model flag, agent default).
   const model = agent === 'claude' && ALLOWED_CLAUDE_MODELS.has(body.model) ? body.model : null;
+
+  // codexModel: same pattern, Codex-only. Unknown/absent → null (no --model
+  // flag / no thread/start model field, Codex CLI default).
+  const codexModel = agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
 
   // prompt: optional initial message, delivered atomically with the launch
   // (tmux transports) or over the print/RPC socket once the agent is ready.
@@ -1278,7 +1287,7 @@ async function handleSessionNew(req, res) {
         // dash-prefixed positional as an unknown option without it — same
         // hazard verified against `claude -p`; codex's own parser is clap-based
         // and `--` is standard clap behavior).
-        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand });
+        const { bin, args } = buildSpawnCommand({ cwd, bin: codexCommand, model: codexModel || undefined });
         const argv = args.map((a) => (a === cwd ? tmux.shellQuoteName(cwd) : a));
         if (prompt) argv.push('--', tmux.shellQuoteName(prompt));
         launch = `${bin} ${argv.join(' ')}`;
@@ -1347,7 +1356,7 @@ async function handleSessionNew(req, res) {
       }
     }
     if (agent === 'codex' && codexRpcEndpoint) {
-      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd });
+      await codexRpc.attach({ target, endpoint: codexRpcEndpoint, cwd, model: codexModel || undefined });
       if (prompt) {
         try {
           await codexRpc.submit(target, prompt, { cwd });
