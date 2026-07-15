@@ -220,10 +220,17 @@ body {
      the repeating tile's position parallaxes the stars without revealing an
      edge and leaves the drift transform below free to animate independently. */
   background-position: 0 var(--cosmos-shift, 0px);
-  will-change: transform, background-position;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .cosmos-backdrop::after { animation: cosmos-drift var(--star-drift) linear infinite alternate; }
+  .cosmos-backdrop::after {
+    animation: cosmos-drift var(--star-drift) linear infinite alternate;
+    /* GPU-layer promotion belongs ONLY where the drift animation + the scroll
+       parallax (both no-preference-gated; parallax listener at App.tsx) actually
+       run. Declaring it in the base rule made reduced-motion sessions pay a
+       standing compositor cost on this always-mounted full-viewport backdrop for
+       zero animation. */
+    will-change: transform, background-position;
+  }
 }
 @keyframes cosmos-drift { to { transform: translate3d(0, -16px, 0); } }
 
@@ -1145,6 +1152,12 @@ body.is-external-display .rail {
   50% {
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
   }
+}
+/* The running-agents glow was the one infinite animation missing a reduced-motion
+   gate (its siblings mic-pulse / cosmos-drift are gated). Hold the accent state,
+   drop the continuous pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .detail-action[data-running='true'] { animation: none; }
 }
 .detail-name {
   font-weight: 700;
