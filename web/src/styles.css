@@ -5511,7 +5511,7 @@ select.config-input {
   justify-content: space-between;
   gap: 8px;
   /* Same fixed-at-top status-bar clearance as .sa-panel-head. */
-  padding: calc(8px + var(--safe-top)) 12px 8px;
+  padding: calc(8px + var(--safe-top)) 8px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   flex: 0 0 auto;
@@ -5528,7 +5528,7 @@ select.config-input {
 .term-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
 }
 .term-newtab {
@@ -5590,8 +5590,8 @@ select.config-input {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px calc(8px + var(--safe-bottom, 0px));
+  gap: 8px;
+  padding: 8px 8px calc(8px + var(--safe-bottom, 0px));
   border-top: 1px solid var(--line);
   background: var(--bg-1);
 }
@@ -5640,7 +5640,7 @@ select.config-input {
 .gate-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   max-width: 320px;
   padding: 24px;
@@ -5656,14 +5656,14 @@ select.config-input {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--text-dim);
 }
 
 .gate-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
@@ -6261,7 +6261,7 @@ select.config-input {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 16px;
   text-align: center;
   background: color-mix(in oklch, var(--red) 8%, var(--bg-2));
@@ -6391,8 +6391,8 @@ select.config-input {
 .skill-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 8px 16px;
   height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -6400,7 +6400,7 @@ select.config-input {
 .skill-legend-source-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .skill-legend-source-badge {
   display: inline-flex;
@@ -6450,19 +6450,19 @@ select.config-input {
   /* Accent colour matching other modal titles but cooler than amber. */
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--accent);
 }
 /* The modal body for skill detail: flex column, scrollable. */
 .skill-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   /* Remove the default .modal-body bottom padding so the body content touches
      the scroll edge cleanly; the outer overflow handles the rest. */
-  padding: 14px;
+  padding: 8px;
 }
 
 /* ── Front-matter definition list ────────────────────────────────
@@ -6470,9 +6470,9 @@ select.config-input {
 .skill-fm {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
+  gap: 4px 8px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
