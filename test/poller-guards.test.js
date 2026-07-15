@@ -174,6 +174,73 @@ test('_pollThinking: skips body when flag is already set', async () => {
   assert.equal(captureCalls, 1, '_pollThinking must call capturePane once when flag is clear');
 });
 
+// ── _pollCtx: shouldScrapePane idle gate (R7) ────────────────────────────────
+//
+// _pollCtx used to capture-pane unconditionally for every discovered session.
+// It now shares _pollThinking's shouldScrapePane/_activeUntil gate, so an idle
+// session (no thinking/compacting/pending/errored flag, transcript present but
+// stale, no fresh fs.watch window) must be skipped by BOTH pollers. This test
+// proves parity: same idle session, same zero-capture result, on both workers.
+
+test('_pollCtx: idle session (gated, like _pollThinking) makes zero capturePane calls', async () => {
+  let ctxCaptureCalls = 0;
+  let thinkingCaptureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { ctxCaptureCalls++; thinkingCaptureCalls++; return ''; },
+    },
+  });
+  // Idle session: has a transcriptPath (so the gate can evaluate it) but no
+  // live flags and no recent activity anywhere (_activeUntil map empty,
+  // lastActivityMs unset) — shouldScrapePane must resolve to "skip".
+  reg._sessions = [{
+    target: 'test:0.0',
+    kind: 'claude',
+    transcriptPath: '/p/idle-session.jsonl',
+    thinking: false,
+    compacting: false,
+    pending: false,
+    errored: false,
+  }];
+
+  await reg._pollCtx();
+  assert.equal(ctxCaptureCalls, 0, '_pollCtx must skip capturePane for an idle-gated session');
+
+  await reg._pollThinking();
+  assert.equal(thinkingCaptureCalls, 0, '_pollThinking must skip capturePane for the same idle session (sibling parity)');
+});
+
+test('_pollCtx: active session (recent transcript activity) still calls capturePane', async () => {
+  let captureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { captureCalls++; return ''; },
+    },
+  });
+  const transcriptPath = '/p/active-session.jsonl';
+  reg._sessions = [{
+    target: 'test:0.0',
+    kind: 'claude',
+    transcriptPath,
+    thinking: false,
+    compacting: false,
+    pending: false,
+    errored: false,
+  }];
+  // Seed _activeUntil as _syncTranscriptWatchers would for a recently-changed
+  // transcript, so the gate sees this pane as live.
+  reg._activeUntil.set(transcriptPath, Date.now() + 20_000);
+
+  await reg._pollCtx();
+  assert.equal(captureCalls, 1, '_pollCtx must still capture an active-gated session');
+});
+
 test('_pollCtx: flag resets after rejection so next call runs', async () => {
   let callCount = 0;
   let shouldThrow = true;
