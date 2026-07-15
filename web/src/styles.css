@@ -4681,7 +4681,7 @@ html.lightbox-open body {
 }
 .config-modal {
   width: 100%;
-  max-width: 600px;
+  max-width: 900px;
   max-height: 90dvh;
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -4699,11 +4699,71 @@ html.lightbox-open body {
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
-/* Scrollable body: a 2-column field grid on desktop, single column on mobile. */
-.config-body {
+/* Two-pane body: a fixed-width left nav + a scrollable right content pane. */
+.config-panes {
   flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.config-nav {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.config-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--ease) 0.15s, background var(--ease) 0.15s, border-color var(--ease) 0.15s;
+}
+.config-nav-item svg {
+  flex-shrink: 0;
+}
+.config-nav-item:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.config-nav-item[aria-current='page'] {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+.config-nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Scrollable content pane: section heading + a 2-column field grid on desktop
+   (single column on mobile). */
+.config-content {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-y: auto;
   padding: 16px;
+}
+.config-section-heading {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+.config-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px 14px;
@@ -4783,18 +4843,6 @@ select.config-input {
   padding: 0 4px;
   border-radius: 4px;
 }
-/* Section divider label (e.g. "CLI", "Session") spanning the full grid. */
-.config-section-label {
-  grid-column: 1 / -1;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  padding: 4px 0 2px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 2px;
-}
 /* Agent group: a labelled sub-block that spans the full grid and lays out its
    own fields inside a nested 2-column grid. */
 .config-agent-group {
@@ -4817,6 +4865,58 @@ select.config-input {
 /* Wide fields inside agent groups still span both columns. */
 .config-agent-group .config-field--wide {
   grid-column: 1 / -1;
+}
+/* Header row for groups that need a trailing badge (e.g. "Coming soon"). */
+.config-agent-group-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.config-agent-group-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+/* Placeholder groups (e.g. OpenCode, not yet wired) read as inert. */
+.config-agent-group[data-disabled='true'] {
+  opacity: 0.7;
+}
+/* Live font-size preview: a small mock transcript that resizes instantly. */
+.config-preview {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.config-preview-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.config-preview-row {
+  align-self: flex-start;
+  max-width: 90%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text);
+  line-height: 1.4;
+}
+.config-preview-row--user {
+  align-self: flex-end;
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg-hover));
+}
+.config-preview-meta {
+  font-size: 10px;
+  color: var(--text-faint);
 }
 .config-icon-row {
   display: flex;
@@ -4956,8 +5056,9 @@ select.config-input {
   opacity: 0.6;
   cursor: default;
 }
-/* Mobile: single-column fields, full-height sheet anchored to the bottom. */
-@media (max-width: 560px) {
+/* Mobile: nav collapses to a horizontal scrollable pill row above the
+   content; fields go single-column; full-height sheet anchored to the bottom. */
+@media (max-width: 640px) {
   .config-overlay {
     align-items: flex-end;
     padding: 0;
@@ -4966,6 +5067,23 @@ select.config-input {
     max-width: 100%;
     max-height: 92dvh;
     border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .config-panes {
+    flex-direction: column;
+  }
+  .config-nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .config-nav-item {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   .config-body {
     grid-template-columns: 1fr;
