@@ -461,6 +461,16 @@ function PaneRow({
           ) : claudeState === 'sleeping' ? (
             <span className="pane-icon-badge pane-icon-zzz" aria-hidden="true">z</span>
           ) : null}
+          {/* ⌘N badge — covers the icon glyph while ⌘ is held (see
+              .app[data-cmd-held] in styles.css), so the hotkey target of
+              each local row is readable at a glance. Only local claude/codex
+              rows ever get a `hotkey` value (hotkeyById excludes
+              terminal/remote — see App.tsx addressableClaude). */}
+          {hotkey ? (
+            <span className="session-hotkey-badge" aria-hidden="true">
+              {hotkey}
+            </span>
+          ) : null}
         </span>
         <span className="session-name">{label}</span>
         {!isTerminal && claudeState === 'working' ? (

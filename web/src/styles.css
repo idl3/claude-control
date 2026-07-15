@@ -549,6 +549,32 @@ body.is-external-display .rail {
   0%, 100% { opacity: 0.25; transform: translateY(0); }
   50% { opacity: 0.85; transform: translateY(-2px); }
 }
+/* ⌘N badge overlaying the icon while ⌘ is held — chip styling matches
+   .hotkey-hint (the floating HotkeyHints keycap) so the two affordances read
+   as one family. Hidden by default; only local claude/codex rows render the
+   element at all (hotkey is undefined for terminal/remote), and even then
+   it's invisible until .app[data-cmd-held='true'] (App.tsx cmdHeld, same
+   500ms useModifierHeld gate the HotkeyHints overlay uses). */
+.session-hotkey-badge {
+  display: none;
+  position: absolute;
+  inset: -1px;
+  align-items: center;
+  justify-content: center;
+  background: oklch(96% 0.045 95);
+  color: #2a2510;
+  border: 1px solid oklch(88% 0.06 92);
+  border-radius: 4px;
+  font-family: ui-monospace, 'SFMono-Regular', 'Cascadia Code', monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  pointer-events: none;
+}
+.app[data-cmd-held='true'] .session-hotkey-badge {
+  display: flex;
+}
 /* Cloning: session has ≥1 running sub-agent — cell division / amoeba split.
    The icon jumps up slightly while a small "offspring" pseudo-blob buds off
    bottom-right and fades, evoking Claude spawning a child agent. */
