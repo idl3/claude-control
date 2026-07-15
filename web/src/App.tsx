@@ -2120,20 +2120,20 @@ function AppInner() {
                     >
                       <PencilIcon />
                     </button>
-                    {artifactCount > 0 ? (
-                      <button
-                        type="button"
-                        className="detail-action detail-action--count"
-                        aria-pressed={galleryOpen}
-                        data-on={galleryOpen ? 'true' : undefined}
-                        aria-label="Toggle artifacts"
-                        title="Artifacts"
-                        onClick={() => setGalleryOpen((v) => !v)}
-                      >
-                        <GalleryIcon />
+                    <button
+                      type="button"
+                      className="detail-action detail-action--count"
+                      aria-pressed={galleryOpen}
+                      data-on={galleryOpen ? 'true' : undefined}
+                      aria-label="Toggle artifacts"
+                      title="Artifacts"
+                      onClick={() => setGalleryOpen((v) => !v)}
+                    >
+                      <GalleryIcon />
+                      {artifactCount > 0 ? (
                         <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
-                      </button>
-                    ) : null}
+                      ) : null}
+                    </button>
                     <button
                       type="button"
                       className="detail-action"
