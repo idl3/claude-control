@@ -2060,24 +2060,12 @@ function AppInner() {
 
         <div className="app-body">
           <aside className="rail" ref={railRef}>
-            {/* Sidebar-minimise toggle (⌘B) — desktop-only focus mode (mobile swaps
-                the whole rail for the detail pane instead, so there's nothing to
-                collapse there). Sole occupant of the rail's top strip now that
-                "+ New session" + the filter funnel live in the bottom bar below
-                (see .rail-foot / NewSessionForm) for right-thumb reachability. */}
-            <button
-              type="button"
-              className="rail-collapse-toggle"
-              aria-pressed={railCollapsed}
-              data-on={railCollapsed ? 'true' : undefined}
-              aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
-              title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
-              data-hotkey="⌘B"
-              data-hotkey-dir="down"
-              onClick={toggleRail}
-            >
-              <PanelLeftIcon />
-            </button>
+            {/* The sidebar-minimise toggle (⌘B) used to live here as the rail's own
+                top strip; it now lives permanently in .detail-head (see below) so
+                there's one control, reachable whether the rail is open or
+                collapsed, instead of two twinned buttons. That frees this whole
+                top row — "+ New session" + the filter funnel live in the bottom
+                bar (see .rail-foot / NewSessionForm) for right-thumb reachability. */}
             <div className="rail-scroll">
               <SessionRail
                 sessions={cockpit.sessions}
@@ -2089,6 +2077,7 @@ function AppInner() {
                 hotkeyById={railHotkeys}
                 workingOverrideId={agentWorking ? cockpit.selectedId : null}
                 runningSubagentCountById={cockpit.runningSubagentCountById}
+                onToast={showToast}
               />
             </div>
             {/* Bottom bar, pinned below .rail-scroll (never scrolls with the list):
@@ -2115,19 +2104,22 @@ function AppInner() {
               >
                 ‹
               </button>
-              {/* Desktop-only: when focus mode (⌘B) has collapsed the rail to 0-width,
-                  its own .rail-collapse-toggle collapses along with it, stranding the
-                  user with only the hotkey to bring it back. Mirror that toggle here so
-                  there's always a visible way back. */}
-              {railCollapsed && !narrow ? (
+              {/* Sidebar-collapse toggle (⌘B) — desktop-only focus mode (mobile swaps
+                  the whole rail for the detail pane instead, so there's nothing to
+                  collapse there). Parked here permanently (not just when collapsed)
+                  so there's exactly one control, always reachable, whether the rail
+                  is open or collapsed; the icon/label flip with railCollapsed. */}
+              {!narrow ? (
                 <button
                   type="button"
-                  className="rail-restore-btn"
-                  aria-label="Show sidebar"
-                  title="Show sidebar (⌘B)"
+                  className="rail-collapse-toggle"
+                  aria-pressed={railCollapsed}
+                  data-on={railCollapsed ? 'true' : undefined}
+                  aria-label={railCollapsed ? 'Show sidebar' : 'Focus mode (hide sidebar)'}
+                  title={railCollapsed ? 'Show sidebar (⌘B)' : 'Focus mode (hide sidebar) (⌘B)'}
                   data-hotkey="⌘B"
                   data-hotkey-dir="down"
-                  onClick={() => setRailCollapsed(false)}
+                  onClick={toggleRail}
                 >
                   <PanelLeftIcon />
                 </button>
