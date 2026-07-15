@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createElement } from 'react';
-import { render, cleanup, screen, act, waitFor } from '@testing-library/react';
+import { render, cleanup, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import {
   AppFrameLayer,
   computePaneClip,
@@ -296,6 +296,35 @@ describe('hoistZIndex (Phase B, B1: studio 310 vs panel 210, pure)', () => {
     expect(hoistZIndex('panel', true, false)).toBe(210);
     expect(hoistZIndex('panel', false, false)).toBeUndefined();
     expect(hoistZIndex('transcript', true, true)).toBeUndefined();
+  });
+
+  it('omitting the 4th (fullscreen) argument entirely preserves the pre-existing 3-arg behavior byte-for-byte', () => {
+    expect(hoistZIndex('studio', false, false)).toBe(310);
+    expect(hoistZIndex('panel', true, true)).toBe(210);
+    expect(hoistZIndex('panel', false, false)).toBeUndefined();
+    expect(hoistZIndex('transcript', true, true)).toBeUndefined();
+  });
+});
+
+describe('hoistZIndex (Task 1: fullscreen tier, pure)', () => {
+  it('fullscreen always resolves to 320, regardless of context/narrow/elevate', () => {
+    expect(hoistZIndex('transcript', false, false, true)).toBe(320);
+    expect(hoistZIndex('transcript', true, true, true)).toBe(320);
+    expect(hoistZIndex('panel', false, false, true)).toBe(320);
+    expect(hoistZIndex('panel', true, true, true)).toBe(320);
+    expect(hoistZIndex('studio', false, false, true)).toBe(320);
+    expect(hoistZIndex('studio', true, true, true)).toBe(320);
+  });
+
+  it('DESIGN RULE: fullscreen (320) is checked first — it wins even over an open studio host (310)', () => {
+    expect(hoistZIndex('studio', false, false, true)).not.toBe(hoistZIndex('studio', false, false, false));
+    expect(hoistZIndex('studio', false, false, true)).toBeGreaterThan(hoistZIndex('studio', false, false, false)!);
+  });
+
+  it('fullscreen=false behaves identically to omitting the argument', () => {
+    expect(hoistZIndex('panel', true, true, false)).toBe(hoistZIndex('panel', true, true));
+    expect(hoistZIndex('studio', false, false, false)).toBe(hoistZIndex('studio', false, false));
+    expect(hoistZIndex('transcript', true, true, false)).toBe(hoistZIndex('transcript', true, true));
   });
 });
 
@@ -863,6 +892,131 @@ describe('Scroll-lag fix: synchronous scroll/resize reposition (mounted)', () =>
 
     const iframeAfter = screen.getByTitle('apps/scroll-no-remount.html');
     expect(iframeAfter).toBe(iframeBefore); // same DOM node, never torn down
+  });
+});
+
+describe('Task 1: cover-transcript fullscreen (mounted)', () => {
+  function mockRect(over: Partial<DOMRect>): DOMRect {
+    const r = { top: 100, left: 20, width: 400, height: 320, x: 20, y: 100, ...over };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    authFetchMock.mockReset();
+    authFetchMock.mockImplementation((url: string) =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(`<html>${url}</html>`) }),
+    );
+    rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect({}));
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 768 });
+  });
+  afterEach(() => {
+    rectSpy.mockRestore();
+  });
+
+  // EmbeddedApp's context defaults to 'transcript' — canExpand's gate.
+  function mountApp(url: string) {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url, height: 320 }),
+        createElement(AppFrameLayer),
+      ),
+    );
+  }
+
+  it('toggling the expand button covers the viewport (rect/z-index/data-attr) and never remounts the live iframe', async () => {
+    mountApp('apps/expand-toggle.html');
+    const iframeBefore = await screen.findByTitle('apps/expand-toggle.html');
+    const hoist = iframeBefore.closest('.embed-app-hoist') as HTMLElement;
+    expect(hoist.dataset.embedAppFullscreen).toBeUndefined();
+
+    const expandBtn = screen.getByRole('button', { name: 'Enter fullscreen' });
+    fireEvent.click(expandBtn);
+
+    expect(hoist.dataset.embedAppFullscreen).toBe('true');
+    expect(hoist.style.zIndex).toBe('320');
+    expect(hoist.style.width).toBe('1024px');
+    expect(hoist.style.height).toBe('768px');
+    expect(hoist.style.transform).toBe('translate3d(0px, 0px, 0)');
+    // never-remount seam: same DOM node before and after the toggle.
+    const iframeAfter = screen.getByTitle('apps/expand-toggle.html');
+    expect(iframeAfter).toBe(iframeBefore);
+
+    // Toggling back off (aria-label flips to "Exit fullscreen") restores
+    // the placeholder-sourced rect/z-index and clears the data attribute.
+    const exitBtn = screen.getByRole('button', { name: 'Exit fullscreen' });
+    fireEvent.click(exitBtn);
+    expect(hoist.dataset.embedAppFullscreen).toBeUndefined();
+    expect(hoist.style.zIndex).toBe('');
+    expect(hoist.style.transform).toBe('translate3d(20px, 100px, 0)');
+    expect(screen.getByTitle('apps/expand-toggle.html')).toBe(iframeBefore);
+  });
+
+  it('Escape exits an expanded slot, without ever remounting the live iframe', async () => {
+    mountApp('apps/expand-escape.html');
+    const iframeBefore = await screen.findByTitle('apps/expand-escape.html');
+    const hoist = iframeBefore.closest('.embed-app-hoist') as HTMLElement;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter fullscreen' }));
+    expect(hoist.dataset.embedAppFullscreen).toBe('true');
+
+    // Unlike the scroll/resize sync path (direct style mutation), the Escape
+    // handler drives a React state update (forceRender) via a plain
+    // window.addEventListener callback — not React's synthetic event system —
+    // so the commit isn't guaranteed to have flushed synchronously; act()
+    // flushes it before the assertion below runs.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(hoist.dataset.embedAppFullscreen).toBeUndefined();
+    expect(screen.getByTitle('apps/expand-escape.html')).toBe(iframeBefore);
+  });
+
+  it('a panel-hosted embed (canExpand=false) never renders the fullscreen expand button', async () => {
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(EmbeddedApp, { url: 'apps/panel-no-expand.html', height: 320, context: 'panel' }),
+        createElement(AppFrameLayer),
+      ),
+    );
+    await screen.findByTitle('apps/panel-no-expand.html');
+    expect(screen.queryByRole('button', { name: 'Enter fullscreen' })).toBeNull();
+  });
+
+  it('drag-resizing the placeholder box (AppResizeHandle) writes width/height onto the placeholder, dispatches cockpit:app-resize, and never remounts the iframe', async () => {
+    mountApp('apps/resize-drag.html');
+    const iframeBefore = await screen.findByTitle('apps/resize-drag.html');
+    // The reserved-box placeholder is the EmbeddedApp-rendered span (distinct
+    // from the hoisted .embed-app-hoist AppFrameLayer portals into document.body).
+    const placeholder = document.querySelector('[data-embed-app-url="apps/resize-drag.html"]') as HTMLElement;
+    expect(placeholder).toBeTruthy();
+
+    const handle = document.querySelector('.embed-app-resize-handle') as HTMLElement;
+    expect(handle).toBeTruthy();
+
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100 });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 200, clientY: 180 }));
+    // beginResize's apply() is rAF-throttled — flush it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    window.dispatchEvent(new PointerEvent('pointerup'));
+
+    // startRect from mockRect: width 400, height 320; drag delta +100/+80.
+    expect(placeholder.style.width).toBe('500px');
+    expect(placeholder.style.height).toBe('400px');
+    const resizeCall = dispatchSpy.mock.calls.find(([e]) => (e as CustomEvent).type === 'cockpit:app-resize');
+    expect(resizeCall).toBeTruthy();
+    expect((resizeCall![0] as CustomEvent).detail).toMatchObject({ url: 'apps/resize-drag.html' });
+    expect(screen.getByTitle('apps/resize-drag.html')).toBe(iframeBefore);
+    dispatchSpy.mockRestore();
   });
 });
 

@@ -616,6 +616,30 @@ describe('ArtifactPanel — C2 always-mounted app stack (mounted, mobile sheet)'
     expect(document.querySelector('.artifact-app-stack')).toBeTruthy();
     expect(document.querySelector('.artifact-pre')).toBeNull();
   });
+
+  // Mobile fix: the sheet must open full-screen (SNAP_MOBILE_OPEN = 100dvh),
+  // not the cramped 40dvh peek — a fresh open should read as a real
+  // dismissible full-screen view, not a sliver at the bottom of the screen.
+  it('opens at 100dvh (full screen) by default, not the 40dvh peek', async () => {
+    let api!: ReturnType<typeof useArtifactPanel>;
+    render(
+      createElement(
+        ArtifactPanelProvider,
+        null,
+        createElement(Api, { onReady: (a) => (api = a) }),
+        createElement(ArtifactPanel),
+        createElement(AppFrameLayer),
+      ),
+    );
+
+    await act(async () => {
+      api.open({ id: 'app1', kind: 'app', title: 'app1', content: '', appUrl: 'apps/app1.html', appHeight: 320, pinned: true });
+    });
+
+    const sheet = document.querySelector('[data-mode="sheet"]') as HTMLElement;
+    expect(sheet).toBeTruthy();
+    expect(sheet.style.height).toBe('100dvh');
+  });
 });
 
 // ── D4: per-tab version pin / track-latest picker ───────────────────────────

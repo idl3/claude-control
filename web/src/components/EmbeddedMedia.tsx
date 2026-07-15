@@ -238,7 +238,7 @@ export function MarkdownImg(props: MdImgProps) {
       <EmbeddedApp
         url={rawUrl ?? rest.src ?? ''}
         height={Number.isFinite(parsedHeight) ? parsedHeight : APP_HEIGHT_DEFAULT}
-        width={width === 'wide' ? 'wide' : 'default'}
+        width={width === 'wide' ? 'wide' : width === 'medium' ? 'medium' : 'default'}
       />
     );
   }

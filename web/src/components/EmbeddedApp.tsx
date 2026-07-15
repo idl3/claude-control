@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
 import type { EmbedAppWidth } from '../lib/embeds';
 import { resolveMediaUrl } from '../lib/mediaUrl';
+import { loadAppSize, type AppSize } from '../lib/appSize';
+import { GalleryIcon } from './icons';
 
 /**
  * Renders one <embedded-app url="…" height="…" /> transcript block as a
@@ -82,21 +85,38 @@ import { resolveMediaUrl } from '../lib/mediaUrl';
  * live-frame cap. A transcript placeholder for the same url renders the
  * existing non-host "open in panel" chip, relabeled "suspended in panel".
  *
- * Wide presentation embeds (`<embedded-app width="wide">`, lib/embeds.ts
- * parseEmbedAppAttrs — the create-artifact skill's html/react lanes emit
- * this for slide decks / webpages / dashboards): `width` ('default' default)
- * adds an `embed-app-frame--wide` modifier class to the placeholder below.
- * styles.css's `.embed-app-frame--wide` widens the reserved box to
- * `min(90%, 1400px)` of the transcript column on desktop/iPad
+ * Wide/medium presentation embeds (`<embedded-app width="wide"|"medium">`,
+ * lib/embeds.ts parseEmbedAppAttrs — the create-artifact skill's html/react
+ * lanes emit these for slide decks / webpages / dashboards): `width`
+ * ('default' default) adds an `embed-app-frame--wide` or
+ * `embed-app-frame--medium` modifier class to the placeholder below.
+ * styles.css widens the reserved box to `min(90%, 1400px)` (wide) or
+ * `min(70%, 1100px)` (medium) of the transcript column on desktop/iPad
  * (`@media (min-width: 720px)`) only — mobile keeps today's 640px cap
  * unchanged. AppFrameLayer needs no update for this: it sizes the hoisted
  * iframe from the placeholder's own `getBoundingClientRect()` (see
  * AppFrameLayer.tsx's `tick()`/`syncPositions()`), so a wider CSS box
  * auto-widens the iframe with zero changes there. Ignored in effect for
  * panel/studio contexts — `.artifact-app-slot .embed-app-frame` already
- * overrides both the default and wide max-width via higher selector
+ * overrides both the default and wide/medium max-width via higher selector
  * specificity, so those always fill their slot exactly regardless of this
  * prop's value.
+ *
+ * Resizable transcript embeds: AppFrameLayer renders a drag handle
+ * (AppResizeHandle below) on the hoisted chrome that writes the new box size
+ * directly onto THIS component's placeholder DOM node (same direct-DOM-write
+ * idiom as AppFrameLayer's syncPositions()) and dispatches
+ * `cockpit:app-resize` `{url, width, height}` on window. This component
+ * listens for that event (transcript context only) so its own React-owned
+ * `style` follows the same size on the next render — otherwise a later
+ * re-render here would stomp the direct DOM write back to the tag's fixed
+ * `height`/100% width (placeholder-follows-hoist invariant: the reserved box
+ * and the hoisted iframe must never visually disagree). The persisted size
+ * (lib/appSize.ts, localStorage-backed) is read once on mount so a resized
+ * embed reopens at its last size instead of flashing at the default and then
+ * jumping. A manual size also clears the CSS `max-width` cap inline (see
+ * frameStyle below) — otherwise styles.css's default/wide/medium max-width
+ * would silently reclamp a drag that grew past it.
  */
 export function EmbeddedApp({
   url,
@@ -133,6 +153,23 @@ export function EmbeddedApp({
 }) {
   const resolution = resolveMediaUrl(url);
 
+  // Persisted drag-resize size (transcript embeds only — panel/studio always
+  // fill their slot). Read once on mount, then kept live by the
+  // cockpit:app-resize listener below so this placeholder always matches
+  // whatever AppFrameLayer just wrote directly onto its DOM node.
+  const [size, setSize] = useState<AppSize | null>(() => (context === 'transcript' ? loadAppSize(url) : null));
+  useEffect(() => {
+    if (context !== 'transcript') return;
+    setSize(loadAppSize(url));
+    function onResize(ev: Event) {
+      const detail = (ev as CustomEvent<{ url: string; width: number; height: number }>).detail;
+      if (!detail || detail.url !== url) return;
+      setSize({ width: detail.width, height: detail.height });
+    }
+    window.addEventListener('cockpit:app-resize', onResize);
+    return () => window.removeEventListener('cockpit:app-resize', onResize);
+  }, [context, url]);
+
   // resolveMediaUrl's 'direct' branch is media's allowance for http(s)
   // hotlinking — app embeds reject that branch too (see doc comment above),
   // not just 'rejected', so only 'fetch' (local media-root) proceeds.
@@ -144,17 +181,23 @@ export function EmbeddedApp({
   // .artifact-app-slot sizes the panel box; StudioModal's .studio-frame sizes
   // the device-preset box — see B2) instead of the transcript's reserved-box
   // width cap + fixed height from the tag's `height` attr.
-  // maxWidth is CSS-owned now (styles.css .embed-app-frame / --wide), so the
-  // wide modifier's media-query override isn't fighting a higher-precedence
-  // inline style — see the width doc comment above.
+  // maxWidth is CSS-owned now (styles.css .embed-app-frame / --wide/--medium),
+  // so the modifier classes' media-query override isn't fighting a
+  // higher-precedence inline style — see the width doc comment above. A
+  // manual resize (`size` set) overrides both: explicit px width/height plus
+  // maxWidth:'none', since the CSS max-width would otherwise silently
+  // reclamp a drag that grew past the default/wide/medium cap.
   const frameStyle =
     context === 'panel' || context === 'studio'
       ? { width: '100%', height: '100%' }
-      : { width: '100%', height: `${height}px` };
+      : size
+        ? { width: `${size.width}px`, height: `${size.height}px`, maxWidth: 'none' }
+        : { width: '100%', height: `${height}px` };
+  const widthClass = width === 'wide' ? ' embed-app-frame--wide' : width === 'medium' ? ' embed-app-frame--medium' : '';
 
   return (
     <span
-      className={`embed-media-frame embed-app-frame${width === 'wide' ? ' embed-app-frame--wide' : ''}`}
+      className={`embed-media-frame embed-app-frame${widthClass}`}
       style={{
         ...frameStyle,
         visibility: hidden ? 'hidden' : undefined,
@@ -163,7 +206,7 @@ export function EmbeddedApp({
       data-embed-app-url={url}
       data-embed-app-height={height}
       data-embed-app-context={context}
-      data-embed-app-width={width === 'wide' ? 'wide' : undefined}
+      data-embed-app-width={width !== 'default' ? width : undefined}
       data-embed-app-hidden={hidden ? 'true' : undefined}
       data-embed-app-track-latest={trackLatest === false ? 'false' : undefined}
       data-embed-app-suspended={suspended ? 'true' : undefined}
@@ -240,20 +283,6 @@ export function AppReloadButton({
   );
 }
 
-function PinIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 21s7-7.58 7-12A7 7 0 1 0 5 9c0 4.42 7 12 7 12Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-        fill={filled ? 'currentColor' : 'none'}
-      />
-    </svg>
-  );
-}
-
 /**
  * Phase C, C3 (A2: relabeled "Pin to panel" -> "Open in panel"; className
  * tokens kept as-is since AppFrameLayer.tsx positions by them): "pin to
@@ -272,6 +301,11 @@ function PinIcon({ filled }: { filled: boolean }) {
  * happens from the panel side (tab close). `pinned` only drives the visual
  * (filled icon + aria-pressed) so the control still reads as a real toggle to
  * the user even though the click handler is one-directional.
+ *
+ * Icon: reuses GalleryIcon (icons.tsx) — the same "layers" glyph as the
+ * header's artifacts toggle — so this button visually reads as "send to the
+ * artifacts gallery" rather than a generic pin. className tokens are
+ * unchanged (embed-app-pin-btn*); only the glyph swapped.
  */
 export function AppPinButton({
   pinned,
@@ -295,7 +329,7 @@ export function AppPinButton({
       onClick={onClick}
       style={style}
     >
-      <PinIcon filled={pinned} />
+      <GalleryIcon className="act-ico" />
       {quiet ? null : pinned ? 'Opened' : 'Open'}
     </button>
   );
@@ -352,5 +386,106 @@ export function AppFullscreenButton({
       <FullscreenIcon />
       {quiet ? null : 'Fullscreen'}
     </button>
+  );
+}
+
+function ExpandIcon({ expanded }: { expanded: boolean }) {
+  // lucide's maximize-2 / minimize-2 pair (diagonal corner arrows) —
+  // deliberately distinct from FullscreenIcon's static corner brackets above
+  // so the two adjacent buttons don't read as duplicates of each other (this
+  // one covers the transcript in place; AppFullscreenButton opens Studio).
+  return expanded ? (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M9 3H3v6M21 15v6h-6M15 9l6-6M3 21l6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ) : (
+    <svg className="act-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Task 1: "cover the transcript" fullscreen — a SEPARATE control from
+ * AppFullscreenButton above. AppFullscreenButton dispatches
+ * `cockpit:studio-open`, handing the app off to StudioModal (a distinct
+ * device-preset-aware surface, own routing/back-stack). This button instead
+ * toggles AppFrameLayer's own `expandedRef` set for this url in place: the
+ * SAME hoisted iframe (never remounted — never-reload seam) gets
+ * re-positioned to cover the full viewport (AppFrameLayer's render +
+ * syncPositions() source the rect from viewportRect() instead of the
+ * placeholder while expanded) rather than being handed to another component.
+ * Escape exits, same as this button toggled again. Do not conflate the two —
+ * see AppFrameLayer.tsx's module doc comment and the PR description.
+ *
+ * Same presentation/composition split as AppPinButton: this file owns only
+ * the button's look; AppFrameLayer owns `expandedRef` and the toggle
+ * function, since only it has access to that ref.
+ */
+export function AppExpandButton({
+  expanded,
+  onClick,
+  quiet = true,
+  style,
+}: {
+  expanded: boolean;
+  onClick: () => void;
+  quiet?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      className={`act-btn embed-app-expand-btn${quiet ? '' : ' embed-app-expand-btn-labeled'}${
+        expanded ? ' embed-app-expand-btn-active' : ''
+      }`}
+      aria-label={expanded ? 'Exit fullscreen' : 'Enter fullscreen'}
+      aria-pressed={expanded}
+      onClick={onClick}
+      style={style}
+    >
+      <ExpandIcon expanded={expanded} />
+      {quiet ? null : expanded ? 'Exit fullscreen' : 'Fullscreen'}
+    </button>
+  );
+}
+
+/**
+ * Task 1: drag-to-resize grip for a transcript embed's reserved box.
+ * Presentation only — `onPointerDown` is wired by AppFrameLayer (the only
+ * component with access to the placeholder's DOM node via `slot.hostEl`) to
+ * begin a pointer-capture drag that writes width/height directly onto the
+ * placeholder, dispatches `cockpit:app-resize` on every frame, and persists
+ * the final size (lib/appSize.ts) on pointerup. Not rendered for panel/studio
+ * contexts (those always fill their slot) or while a slot is expanded
+ * (fullscreen ignores the placeholder's box entirely).
+ */
+export function AppResizeHandle({
+  onPointerDown,
+  style,
+}: {
+  onPointerDown: (ev: React.PointerEvent<HTMLSpanElement>) => void;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <span
+      className="embed-app-resize-handle"
+      role="presentation"
+      aria-hidden="true"
+      onPointerDown={onPointerDown}
+      style={style}
+    />
   );
 }

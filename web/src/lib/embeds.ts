@@ -3,7 +3,7 @@
 // Agent responses may contain self-closing blocks:
 //   <embedded-image url="…" size="sm|md|lg|full" />
 //   <embedded-video url="…" size="sm|md|lg|full" />
-//   <embedded-app url="…" height="160-800" width="wide"? />
+//   <embedded-app url="…" height="160-800" width="medium|wide"? />
 // react-markdown (no rehype-raw) renders raw HTML as escaped literal text, so
 // remarkEmbeds() rewrites the mdast `html` nodes into `image` nodes carrying
 // data-embed / data-size|data-height / data-url props. MarkdownText maps
@@ -19,9 +19,12 @@ export type EmbedSize = 'sm' | 'md' | 'lg' | 'full';
 // <embedded-app width="…"> — 'wide' opts a presentation-type app (slide
 // deck / webpage / dashboard, see the create-artifact skill's html/react
 // lanes) into the widened, desktop/iPad-only reserved box (styles.css
-// .embed-app-frame--wide). Missing/unknown value → 'default' (today's
-// APP_FRAME_MAX_WIDTH cap, every breakpoint).
-export type EmbedAppWidth = 'default' | 'wide';
+// .embed-app-frame--wide). 'medium' is the same idea at a narrower cap
+// (styles.css .embed-app-frame--medium) for single-panel/narrower content
+// that still wants more room than the default 640px cap but shouldn't go
+// full wide. Missing/unknown value → 'default' (today's APP_FRAME_MAX_WIDTH
+// cap, every breakpoint).
+export type EmbedAppWidth = 'default' | 'medium' | 'wide';
 
 // Mapped widths (full = 100% of the bubble). Missing/unknown size → md.
 export const EMBED_WIDTH: Record<EmbedSize, string> = {
@@ -79,8 +82,11 @@ export function parseEmbedAppAttrs(
   const height = Number.isFinite(parsed)
     ? Math.min(APP_HEIGHT_MAX, Math.max(APP_HEIGHT_MIN, parsed))
     : APP_HEIGHT_DEFAULT;
-  const width: EmbedAppWidth =
-    /(?:^|\s)width="wide"/.exec(attrs) !== null ? 'wide' : 'default';
+  const width: EmbedAppWidth = /(?:^|\s)width="wide"/.exec(attrs) !== null
+    ? 'wide'
+    : /(?:^|\s)width="medium"/.exec(attrs) !== null
+      ? 'medium'
+      : 'default';
   return { url, height, width };
 }
 
