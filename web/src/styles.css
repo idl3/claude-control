@@ -54,7 +54,7 @@
   --control-radius: 8px;
   --control-pad: 7px 10px;
 
-  --hud-h: 34px;
+  --hud-h: 37px;
   --radius: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -258,7 +258,7 @@ body {
 .hud {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   height: var(--hud-h);
   padding: 0 14px;
   padding-top: var(--safe-top);
@@ -6617,7 +6617,7 @@ select.config-input {
 .artifact-gallery {
   position: absolute;
   top: 10px;
-  right: 14px;
+  right: 10px;
   z-index: 30;
   display: flex;
   flex-direction: column;
