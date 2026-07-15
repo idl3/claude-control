@@ -2446,8 +2446,19 @@ function startPromptPoller(id, sub) {
         // Visible pane only (no scrollback) — an answered picker frozen in
         // history must not re-fire. The live prompt is always on screen.
         if (session.kind === 'codex') {
-          const cap = await tmux.capturePane(session.target, 120, false, false, { visibleOnly: true });
-          prompt = parseCodexPrompt(cap);
+          // Dedup: registry._pollThinking runs this SAME `tmux capture-pane -p
+          // -t <target>` (visibleOnly, lines arg is a no-op in that mode) for
+          // codex panes on its own 2 s cadence. Reuse that result when fresh
+          // instead of re-capturing; fall back to our own capture when it's
+          // stale/absent (pane was idle-gated in _pollThinking this cycle —
+          // an approval prompt can appear with no preceding transcript write).
+          const cached = registry.getPanePrompt(session.target);
+          if (cached.fresh) {
+            prompt = cached.prompt;
+          } else {
+            const cap = await tmux.capturePane(session.target, 120, false, false, { visibleOnly: true });
+            prompt = parseCodexPrompt(cap);
+          }
           pickerOpen = !!prompt; // for codex, pickerOpen tracks the same parsed prompt
         } else {
           // Claude: use join=true (-J) capture so hard-wrapped narrow-pane text
