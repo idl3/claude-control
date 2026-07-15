@@ -4718,7 +4718,7 @@ select.rail-new-cwd {
 
 /* Codex no-name note — dim, low-height placeholder row instead of an input */
 .rail-new-name-note {
-  padding: 6px 10px;
+  padding: 8px;
   font-size: 11px;
   color: var(--text-faint);
   font-style: italic;
@@ -4749,7 +4749,7 @@ select.rail-new-cwd {
 .new-session-draft-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   max-width: calc(640px * var(--ui-scale));
   margin-inline: auto;
@@ -4765,12 +4765,12 @@ select.rail-new-cwd {
   letter-spacing: -0.02em;
 }
 /* Wraps the heading + agent/mode/model/name/cwd/tmux pickers, sitting above
-   the composer card. Same 12px field-to-field rhythm .new-session-draft-body
+   the composer card. Same 8px field-to-field rhythm .new-session-draft-body
    used before Create/Cancel moved into the composer's own toolbar. */
 .new-session-setup {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 .new-session-draft-composer {
   margin-top: 4px;
@@ -4784,7 +4784,7 @@ select.rail-new-cwd {
 .transcript-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 6px;
 }
 
