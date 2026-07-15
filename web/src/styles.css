@@ -3360,7 +3360,8 @@ body.is-external-display .composer {
   justify-content: center;
   transition:
     background var(--ease) 0.15s,
-    color var(--ease) 0.15s;
+    color var(--ease) 0.15s,
+    opacity var(--ease) 0.15s;
 }
 .composer-attach:hover {
   background: var(--bg-hover);
@@ -3400,6 +3401,20 @@ body.is-external-display .composer {
 .composer-send[data-terminal]:hover {
   filter: brightness(1.08);
 }
+/* Stop + Send fixed-slot group: both buttons stay permanently mounted (see
+   Composer.tsx) so Send's rightmost position never shifts as `working`
+   toggles. Each fades in/out within its own reserved-width slot via
+   `data-active` instead of being conditionally unmounted. */
+.composer-send-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.composer-send-group .composer-send:not([data-active='true']) {
+  opacity: 0;
+  pointer-events: none;
+}
 /* STOP button: shown when the agent is actively generating. */
 .composer-send[data-stop="true"] {
   background: var(--red);
@@ -3410,7 +3425,7 @@ body.is-external-display .composer {
   filter: brightness(1.08);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .composer-send[data-stop="true"] {
+  .composer-send[data-stop="true"][data-active="true"] {
     animation: stop-pulse 1.4s ease-in-out infinite;
   }
 }
@@ -3418,10 +3433,13 @@ body.is-external-display .composer {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
 }
-/* The optimise/send button animates in beside Stop when text is typed while the
-   agent is still working (so you can stop AND queue a new message). */
+/* The optimise/send button pops in beside Stop when text is typed while the
+   agent is still working (so you can stop AND queue a new message). Gated on
+   data-active (not just data-queue) so the animation-name only changes -- and
+   therefore only replays -- at the moment the button actually becomes
+   visible, since the button now stays mounted the whole time. */
 @media (prefers-reduced-motion: no-preference) {
-  .composer-send[data-queue="true"] {
+  .composer-send[data-queue="true"][data-active="true"] {
     animation: queue-in 0.18s var(--ease) both;
   }
 }
