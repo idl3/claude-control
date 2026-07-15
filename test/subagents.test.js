@@ -482,3 +482,49 @@ test('poll discovers nested agents created after a live parent was tracked', () 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: poll() must PUSH a purely time-based running->done transition.
+//
+// A finishing agent's transcript goes quiet -- no more 'append' events ever
+// fire -- so nothing re-emits a 'change' frame when the freshness threshold
+// later crosses from 'running' to 'done'. Without the _emitChange sweep at the
+// end of poll(), this test fails: no 'change' event carries status 'done' for
+// this agentId even though snapshot() correctly reports it as done.
+// ---------------------------------------------------------------------------
+test('poll emits a change event when a running agent silently goes done (time-based transition)', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'finishing0001';
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  // Stub the follower for determinism — no real disk tailing/async I/O (mirrors
+  // how 'large historical discovery...' stubs _readNested/_readLatestModel).
+  watcher._startFollower = () => {};
+
+  const changes = [];
+  watcher.on('change', (entry) => changes.push(entry));
+
+  watcher.poll();
+  assert.equal(watcher.snapshot()[0].status, 'running', 'fresh agent should poll as running');
+  assert.equal(changes.length, 0, 'discovery itself does not emit a change');
+
+  // Back-date the jsonl mtime past RUNNING_WINDOW_MS (45s) so the agent goes
+  // quiet -- the file itself never changes again, only the clock does.
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+  const sixtySecondsAgo = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
+
+  watcher.poll();
+  assert.equal(watcher.snapshot()[0].status, 'done', 'agent should now read as done');
+
+  const doneChange = changes.find((c) => c.agentId === agentId && c.status === 'done');
+  assert.ok(doneChange, 'poll must emit a change event with status="done" for the finished agent');
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

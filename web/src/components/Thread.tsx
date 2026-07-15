@@ -201,6 +201,10 @@ export function Thread({
   onReply,
   emptyState = null,
 }: ThreadProps) {
+  // Extra bottom room ONLY while the strip/Working indicator is showing, so the
+  // last transcript line at max scroll never hides behind the overhanging pills.
+  const showAgentRoom = subagents.length > 0 && (working || subagents.some((a) => a.status === 'running'));
+
   return (
     <ThreadPrimitive.Root className="thread-root">
       {viewingAgent ? (
@@ -237,7 +241,7 @@ export function Thread({
               tails new content while pinned, but PAUSES while you're actively
               touching/scrolling so it can never fight your gesture (the deadlock that
               previously froze scroll). autoScroll is therefore off. */}
-          <ThreadPrimitive.Viewport className="thread-viewport">
+          <ThreadPrimitive.Viewport className={`thread-viewport${showAgentRoom ? ' has-subagents' : ''}`}>
             {!hasSelection ? (
               <div className="thread-empty">select a session</div>
             ) : (
@@ -309,6 +313,7 @@ export function Thread({
         subagents={subagents}
         onOpenAgent={onOpenAgent}
         viewingAgentId={viewingAgent?.agentId ?? null}
+        working={working}
       />
       <Composer
         disabled={!hasSelection || loading}
