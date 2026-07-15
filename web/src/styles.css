@@ -2577,9 +2577,16 @@ body.is-external-display .composer {
 /* Pill row — wraps when many agents are running */
 .subagent-pills {
   display: flex;
-  flex-wrap: wrap;
+  /* Overflow scrolls horizontally instead of wrapping onto stacked rows — many
+     concurrent agents stay on one swipeable line. */
+  flex-wrap: nowrap;
   gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
 }
+.subagent-pill { flex: 0 0 auto; }
 /* Individual pill */
 .subagent-pill {
   display: inline-flex;
