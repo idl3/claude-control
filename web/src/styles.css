@@ -6831,7 +6831,7 @@ select.config-input {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 8px;
   background: var(--glass-chrome);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -7006,7 +7006,7 @@ select.config-input {
 }
 .artifact-pre {
   margin: 0;
-  padding: 12px 14px;
+  padding: 8px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
@@ -7026,7 +7026,7 @@ select.config-input {
 }
 .artifact-large-note {
   margin: 0;
-  padding: 6px 14px;
+  padding: 8px;
   font-size: var(--txt-meta);
   color: var(--text-faint);
   background: var(--bg-2);
@@ -7125,7 +7125,7 @@ select.config-input {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   font-size: var(--txt-meta);
@@ -7176,7 +7176,7 @@ select.config-input {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
   font-size: var(--txt-meta);
@@ -7192,7 +7192,7 @@ select.config-input {
 .agent-nested-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -7288,7 +7288,7 @@ select.config-input {
 .optimize-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .optimize-section-label {
   font-size: var(--txt-meta);
@@ -7303,7 +7303,7 @@ select.config-input {
   width: 100%;
   box-sizing: border-box;
   min-height: 120px;
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg);
@@ -7322,7 +7322,7 @@ select.config-input {
 
 /* Diff view */
 .optimize-diff {
-  padding: 10px 12px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg);
