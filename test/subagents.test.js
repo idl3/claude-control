@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { SubAgentsWatcher, CodexSubAgentsWatcher, hasActiveSubAgents } from '../lib/subagents.js';
+import {
+  SubAgentsWatcher,
+  CodexSubAgentsWatcher,
+  hasActiveSubAgents,
+  listAgents,
+  _agentsCacheSizeForTest,
+  _bustAgentsCache,
+} from '../lib/subagents.js';
 
 // ---------------------------------------------------------------------------
 // Helper: set up a minimal on-disk subagents dir with one agent fixture.
@@ -56,6 +63,23 @@ test('CodexSubAgentsWatcher ingests notifications as SubAgent entries', () => {
   assert.equal(snap[0].messages[1].blocks[0].text, 'Implemented the parser.');
 
   watcher.stop();
+});
+
+test('listAgents cache is bounded by LRU eviction', () => {
+  _bustAgentsCache();
+  const orig = process.env.HOME;
+  const tmp = makeTmpDir();
+  process.env.HOME = tmp;
+  try {
+    for (let i = 0; i < 160; i++) {
+      listAgents(path.join(tmp, `project-${i}`));
+    }
+    assert.equal(_agentsCacheSizeForTest(), 128);
+  } finally {
+    process.env.HOME = orig;
+    _bustAgentsCache();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

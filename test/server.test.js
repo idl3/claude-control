@@ -20,6 +20,7 @@ import os from 'node:os';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
+import { staticCacheControl } from '../server.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -331,6 +332,21 @@ test('WS auth: no subprotocols (missing token) → upgrade rejected', async () =
 test('WS auth: wrong token subprotocol → upgrade rejected', async () => {
   const result = await tryWsConnect(port, ['claude-control', 'wrong-token-xyz']);
   assert.equal(result.connected, false, 'upgrade with wrong token must be rejected');
+});
+
+test('static cache headers: index revalidates, hashed assets are immutable', async () => {
+  const indexRes = await req(port, '/');
+  assert.equal(indexRes.status, 200);
+  assert.match(indexRes.headers.get('cache-control') || '', /no-store/);
+
+  assert.equal(
+    staticCacheControl('assets/index-AbCdEf123.js', { viteDist: true }),
+    'public, max-age=31536000, immutable',
+  );
+  assert.equal(
+    staticCacheControl('assets/index.css', { viteDist: true }),
+    'no-store, must-revalidate',
+  );
 });
 
 // ===========================================================================
