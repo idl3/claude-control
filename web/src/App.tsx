@@ -1961,6 +1961,42 @@ function AppInner() {
     return () => document.removeEventListener('focusin', onFocusIn, true);
   }, []);
 
+  // Mobile soft-keyboard gap: the composer keeps a constant
+  // safe-area-inset-bottom clearance for the home indicator (styles.css
+  // .composer), but once the iOS keyboard is up it covers the home bar, so
+  // that inset becomes dead space floating above the keyboard. Detect
+  // keyboard-up via visualViewport rather than :focus-within — tapping the
+  // composer's mic/+ buttons blurs the textarea without changing viewport
+  // height, so a focus-driven toggle previously caused a visible jump
+  // (see the styles.css comment this replaces). Viewport height only moves
+  // when the keyboard itself slides, so this stays stable across taps.
+  useEffect(() => {
+    if (!window.visualViewport) return;
+    const vv = window.visualViewport;
+    let rafId: number | null = null;
+    let lastUp = false;
+    const apply = () => {
+      rafId = null;
+      const up = window.innerHeight - vv.height - vv.offsetTop > 120;
+      if (up === lastUp) return;
+      lastUp = up;
+      document.body.classList.toggle('kbd-up', up);
+    };
+    const onViewportChange = () => {
+      // Coalesce the burst of resize/scroll events fired during the
+      // keyboard's slide animation into one DOM write per frame.
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(apply);
+    };
+    vv.addEventListener('resize', onViewportChange);
+    vv.addEventListener('scroll', onViewportChange);
+    return () => {
+      vv.removeEventListener('resize', onViewportChange);
+      vv.removeEventListener('scroll', onViewportChange);
+      if (rafId != null) cancelAnimationFrame(rafId);
+      document.body.classList.remove('kbd-up');
+    };
+  }, []);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
