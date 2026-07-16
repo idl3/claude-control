@@ -167,8 +167,13 @@ index and press `Space`, then `Enter`. (Picker-navigation assumption — documen
 README as the one load-bearing assumption, with the free-text `reply` as fallback.)
 
 ## public/ (frontend — vanilla, no build)
-`index.html`, `styles.css`, `app.js`. Connects to `ws://<host>:<port>` (+ `?token=` if
-served a token). Renders: left session rail (active dot, pending badge, cwd), a chat
+`index.html`, `styles.css`, `app.js`. Connects to `ws://<host>:<port>`, authenticating
+via the `Sec-WebSocket-Protocol` subprotocol (`['claude-control', <token>]`) when a
+token is configured, and sends `Authorization: Bearer <token>` on HTTP requests (e.g.
+`/api/upload`) — matching lib/auth.js's `checkWsToken`/`checkToken` contract, never
+`?token=` in the URL. A legacy `?token=` on first load is lifted into `localStorage`
+and stripped from the visible URL via `history.replaceState`, then read from storage
+thereafter. Renders: left session rail (active dot, pending badge, cwd), a chat
 transcript pane (text/thinking/tool blocks visually distinct, thinking collapsible), a
 reply composer (Enter to send → `reply`), and an **AskUserQuestion modal** that appears
 when `pending` is set: shows each question + options as buttons (multi-select toggles),

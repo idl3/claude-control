@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { SessionRegistry } from '../lib/sessions.js';
+import { checkWsToken } from '../lib/auth.js';
 
 /**
  * WS protocol backward-compat guard (phase A, plan T-regression row):
@@ -58,4 +59,26 @@ test('remote ids never collide with local id shapes', () => {
   ]);
   const ids = reg.getSessions().map((s) => s.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+/**
+ * Legacy no-build UI compat (public/app.js): the zero-build vanilla client
+ * has no login prompt and can't set arbitrary WS headers, so it authenticates
+ * purely via subprotocol — `new WebSocket(url, ['claude-control', token])`.
+ * Browsers join the offered array into a single comma-separated
+ * `Sec-WebSocket-Protocol` header, so we simulate that exact join here to
+ * lock in the contract public/app.js's connect() now depends on.
+ */
+function wsUpgradeReq(offeredProtocols) {
+  return { headers: { 'sec-websocket-protocol': offeredProtocols.join(', ') } };
+}
+
+test('legacy UI contract: WS upgrade offering [claude-control, <token>] is accepted', () => {
+  const req = wsUpgradeReq(['claude-control', 's3cr3t']);
+  assert.equal(checkWsToken(req, 's3cr3t'), true);
+});
+
+test('legacy UI contract: WS upgrade offering only [claude-control] (no token) is rejected when a token is configured', () => {
+  const req = wsUpgradeReq(['claude-control']);
+  assert.equal(checkWsToken(req, 's3cr3t'), false);
 });
