@@ -91,18 +91,41 @@
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
 
-  /* ── Cosmic backdrop system — tune intensity HERE (single source) ─────── */
+  /* ── Cosmic backdrop system — tune intensity HERE (single source) ───────
+     Three star planes (far/mid/near) give the starfield actual depth: near
+     is bigger, brighter, drifts faster and gets the strongest scroll
+     parallax; far is tiny, dim, dense, and barely moves. --star-near/
+     --star-far were previously declared but never wired to a layer (dead
+     tokens from an earlier pass) — both are now live. */
   --space-base:   oklch(12% 0.02 265);   /* near-black deep-space base */
   --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
-  --space-edge:   oklch(8%  0.015 265);  /* darkest, viewport edges */
-  --star:         oklch(92% 0.02 250);   /* soft blue-white star */
-  --star-near:    0.80;                   /* brightest star-layer opacity */
-  --star-mid:     0.45;
-  --star-far:     0.28;
-  --nebula-1:     oklch(55% 0.10 285);   /* desaturated indigo/violet */
-  --nebula-2:     oklch(58% 0.08 200);   /* desaturated teal (echoes --accent) */
-  --nebula-alpha: 0.05;                   /* VERY low — the wash must recede */
-  --star-drift:   90s;                    /* ultra-slow; OFF under reduced-motion */
+  --space-edge:   oklch(7%  0.015 265);  /* darkest, viewport edges — deepened a touch */
+  --star:         oklch(93% 0.02 250);   /* soft blue-white star */
+  --star-near:    0.88;                   /* near plane — biggest/brightest, fastest drift + strongest parallax */
+  --star-mid:     0.50;                   /* mid plane — the original starfield */
+  --star-far:     0.32;                   /* far plane — dense, tiny, dim; barely moves (depth cue) */
+  --nebula-1:     oklch(55% 0.12 285);   /* desaturated indigo/violet */
+  --nebula-2:     oklch(58% 0.10 200);   /* desaturated teal (echoes --accent) */
+  --nebula-alpha:      0.06;              /* resting wash alpha — still very low, must recede */
+  --nebula-alpha-peak: 0.11;              /* slow breathing peak — the "color life" swell */
+  --nebula-drift:      150s;              /* one full breathe+drift+rotate cycle, ultra-slow */
+  --star-drift:      70s;                 /* mid plane drift; near/far derive their own below */
+  --star-drift-near: 40s;                 /* fastest — closest plane */
+  --star-drift-far:  160s;                /* slowest — barely perceptible (depth cue) */
+  --shoot-cycle:  11s;                     /* avg interval scale for a rare shooting-star streak */
+  --shoot-alpha:  0.85;                    /* streak peak brightness */
+
+  /* Composer-active boost — cosmos leans in + tints toward --accent while the
+     composer is focused/typing (".composer-card:focus-within" via :has(),
+     see the rules near .cosmos-active-tint below). Plain tokens: every
+     consumer is an ordinary `transition` on opacity/filter/transform, which
+     interpolates these natively — no @property registration needed (unlike
+     the composer ring's angle/pulse, which animate mid-keyframe). */
+  --cosmos-active-tint-alpha: 0.11;   /* accent-tint layer's peak opacity */
+  --cosmos-active-brightness: 1.30;   /* whole-backdrop filter boost while typing */
+  --cosmos-active-saturate:   1.20;
+  --cosmos-active-scale:      1.018;  /* whole-backdrop "lean in" nudge */
+  --cosmos-active-ease:       650ms;  /* breathe-in/out duration */
 
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
@@ -172,13 +195,23 @@ body {
   position: relative;
 }
 
-/* ── Cosmic backdrop — deep-space base + ultra-low-alpha nebula wash + sparse
-   drifting starfield, painted BEHIND the entire app (z-index:-1 relative to
-   .app's own stacking context) but ABOVE body's flat --space-base fill.
-   Deliberately static except one compositor-only transform (the star drift):
-   no per-frame JS, no layout-affecting properties. Every intensity value
-   lives in the --space-, --star- and --nebula- tokens above so tuning is a
-   one-file, one-block edit. */
+/* ── Cosmic backdrop — deep-space base + a two-tone breathing nebula wash +
+   a three-plane parallax starfield (far/mid/near) + twinkling highlights +
+   rare shooting stars, painted BEHIND the entire app (z-index:-1 relative
+   to .app's own stacking context) but ABOVE body's flat --space-base fill.
+   Every animated layer below moves ONLY transform/opacity (blur, where
+   used, is a STATIC filter radius baked into a layer once — never
+   recomputed per frame; only the already-blurred texture's transform
+   moves, which is compositor-cheap, same technique the codebase already
+   uses for the composer's living ring). No per-frame JS beyond the single
+   existing rAF scroll-parallax handler in App.tsx (extended to publish
+   three shift vars instead of one). Every intensity value lives in the
+   --space-, --star-, --nebula- and --shoot- tokens above so tuning is a
+   one-file, one-block edit. Reduced-motion strips every `animation`/
+   `will-change` declaration below (all gated inside `no-preference`
+   blocks) and the twinkle + shooting-star layers are never even painted
+   under reduced-motion (their content/background is declared ONLY inside
+   the gated block) — everything else still renders, just frozen. */
 .cosmos-backdrop {
   position: absolute;
   inset: 0;
@@ -187,23 +220,94 @@ body {
   overflow: hidden;
   background: radial-gradient(125% 90% at 50% -8%,
     var(--space-lift) 0%, var(--space-base) 46%, var(--space-edge) 100%);
+  /* Composer-active boost transition target — see the block near the bottom
+     of this section. Declared here (not repeated per-layer) so ONE filter/
+     transform on the container lifts every child (nebula/stars/twinkle/
+     shooting) at once instead of touching each layer individually. */
+  transition:
+    filter var(--cosmos-active-ease) var(--ease),
+    transform var(--cosmos-active-ease) var(--ease);
 }
-/* nebula wash — two large ultra-low-alpha desaturated clouds, off-center */
-.cosmos-backdrop::before {
-  content: '';
-  position: absolute;
-  inset: -12%;
-  background:
-    radial-gradient(42% 38% at 22% 18%, var(--nebula-1) 0%, transparent 70%),
-    radial-gradient(48% 42% at 82% 74%, var(--nebula-2) 0%, transparent 72%);
-  opacity: var(--nebula-alpha);
-  filter: blur(34px);
-}
-/* starfield — sparse; 3 depth sizes, per-layer background-size so no visible grid */
+
+/* nebula wash — two large, softly-blurred color blobs (indigo + teal) as the
+   backdrop's own ::before/::after (paint order between two diffuse,
+   low-alpha, blurred washes is visually immaterial, so both live as pseudo-
+   elements; every star plane below is an ordinary child so their back-to-
+   front DOM order reads correctly instead of fighting ::after's "always
+   paints last" rule). Each independently drifts/rotates/scales and breathes
+   opacity, offset half a cycle apart, so the wash feels alive — dominance
+   gently shifts between the two hues — rather than a flat static gradient.
+   Blur radius (34px) is fixed and applied once; only the pre-blurred
+   layer's transform/opacity animate. */
+.cosmos-backdrop::before,
 .cosmos-backdrop::after {
   content: '';
   position: absolute;
-  inset: -40px;              /* bleed so drift never reveals an edge */
+  inset: -18%;
+  filter: blur(34px);
+  opacity: var(--nebula-alpha);
+}
+.cosmos-backdrop::before {
+  background: radial-gradient(42% 38% at 22% 18%, var(--nebula-1) 0%, transparent 70%);
+}
+.cosmos-backdrop::after {
+  background: radial-gradient(48% 42% at 82% 74%, var(--nebula-2) 0%, transparent 72%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cosmos-backdrop::before,
+  .cosmos-backdrop::after {
+    animation: cosmos-nebula-1 var(--nebula-drift) ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+  .cosmos-backdrop::after {
+    animation-name: cosmos-nebula-2;
+    /* Half-cycle offset: while nebula-1 dims, nebula-2 swells (and vice
+       versa) — the "color life" cross-fade, purely via a negative delay on
+       the SAME duration, no extra state needed. */
+    animation-delay: calc(var(--nebula-drift) / -2);
+  }
+}
+@keyframes cosmos-nebula-1 {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: var(--nebula-alpha); }
+  50%      { transform: translate3d(3%, -4%, 0) rotate(7deg) scale(1.1); opacity: var(--nebula-alpha-peak); }
+}
+@keyframes cosmos-nebula-2 {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: var(--nebula-alpha); }
+  50%      { transform: translate3d(-3%, 4%, 0) rotate(-6deg) scale(1.1); opacity: var(--nebula-alpha-peak); }
+}
+
+/* starfield — three depth planes, back to front. Each is an ordinary tiled
+   radial-gradient dot-field (no visible seam thanks to per-layer
+   background-size) with its own density/size/opacity/drift speed, so the
+   trio reads as real depth rather than one flat sprinkle of dust:
+     far  — tiny, dense, dim, almost static (the milky "dust" plane)
+     mid  — the original starfield, medium everything
+     near — few, big, bright, fastest drift + strongest scroll parallax
+   Scroll parallax: App sets --cosmos-shift-far/-mid/-near from the
+   transcript scrollTop (one rAF handler, three writes). Shifting each
+   plane's background-position by a different multiplier is what actually
+   sells the depth — near moves the most, far almost not at all — and never
+   reveals a tile edge since it's a repeating pattern, not a moving box. */
+.cosmos-stars-far,
+.cosmos-stars-mid,
+.cosmos-stars-near {
+  position: absolute;
+  inset: -40px;              /* bleed so drift/parallax never reveals an edge */
+  background-repeat: repeat;
+}
+.cosmos-stars-far {
+  background-image:
+    radial-gradient(0.75px 0.75px at 20px 30px,  var(--star), transparent),
+    radial-gradient(0.75px 0.75px at 70px 110px, var(--star), transparent),
+    radial-gradient(1px 1px at 130px 60px,       var(--star), transparent),
+    radial-gradient(0.75px 0.75px at 45px 170px, var(--star), transparent),
+    radial-gradient(1px 1px at 160px 150px,      var(--star), transparent),
+    radial-gradient(0.75px 0.75px at 100px 20px, var(--star), transparent);
+  background-size: 180px 180px, 180px 180px, 150px 150px, 150px 150px, 210px 210px, 210px 210px;
+  opacity: var(--star-far);
+  background-position: 0 var(--cosmos-shift-far, 0px);
+}
+.cosmos-stars-mid {
   background-image:
     radial-gradient(1px 1px at 30px 40px,   var(--star), transparent),
     radial-gradient(1px 1px at 120px 150px, var(--star), transparent),
@@ -213,26 +317,29 @@ body {
     radial-gradient(1px 1px at 160px 30px,  var(--star), transparent),
     radial-gradient(1.5px 1.5px at 300px 160px, var(--star), transparent),
     radial-gradient(1px 1px at 90px 300px,  var(--star), transparent);
-  background-repeat: repeat;
   background-size: 320px 320px, 320px 320px, 270px 270px, 270px 270px, 400px 400px, 400px 400px, 220px 220px, 220px 220px;
   opacity: var(--star-mid);
-  /* parallax: App sets --cosmos-shift from the transcript scrollTop; shifting
-     the repeating tile's position parallaxes the stars without revealing an
-     edge and leaves the drift transform below free to animate independently. */
   background-position: 0 var(--cosmos-shift, 0px);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-backdrop::after {
-    animation: cosmos-drift var(--star-drift) linear infinite alternate;
-    /* GPU-layer promotion belongs ONLY where the drift animation + the scroll
-       parallax (both no-preference-gated; parallax listener at App.tsx) actually
-       run. Declaring it in the base rule made reduced-motion sessions pay a
-       standing compositor cost on this always-mounted full-viewport backdrop for
-       zero animation. */
-    will-change: transform, background-position;
-  }
+.cosmos-stars-near {
+  background-image:
+    radial-gradient(2px 2px at 60px 80px,    var(--star), transparent),
+    radial-gradient(1.5px 1.5px at 260px 200px, var(--star), transparent),
+    radial-gradient(2px 2px at 340px 60px,   var(--star), transparent),
+    radial-gradient(1.5px 1.5px at 150px 320px, var(--star), transparent),
+    radial-gradient(2px 2px at 400px 260px,  var(--star), transparent);
+  background-size: 460px 460px, 460px 460px, 400px 400px, 400px 400px, 520px 520px;
+  opacity: var(--star-near);
+  background-position: 0 var(--cosmos-shift-near, 0px);
 }
-@keyframes cosmos-drift { to { transform: translate3d(0, -16px, 0); } }
+@media (prefers-reduced-motion: no-preference) {
+  .cosmos-stars-far  { animation: cosmos-drift-far  var(--star-drift-far)  linear infinite alternate; will-change: transform, background-position; }
+  .cosmos-stars-mid  { animation: cosmos-drift-mid  var(--star-drift)      linear infinite alternate; will-change: transform, background-position; }
+  .cosmos-stars-near { animation: cosmos-drift-near var(--star-drift-near) linear infinite alternate; will-change: transform, background-position; }
+}
+@keyframes cosmos-drift-far  { to { transform: translate3d(0, -7px, 0); } }
+@keyframes cosmos-drift-mid  { to { transform: translate3d(0, -22px, 0); } }
+@keyframes cosmos-drift-near { to { transform: translate3d(0, -34px, 0); } }
 
 /* twinkle — a sparse overlay of stars that gently blink, in two out-of-phase
    layers so it reads as individual stars flickering rather than a group pulse.
@@ -264,7 +371,84 @@ body {
     animation-delay: -2.1s;
   }
 }
-@keyframes cosmos-twinkle { 0%, 100% { opacity: 0.16; } 50% { opacity: 0.5; } }
+@keyframes cosmos-twinkle { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.58; } }
+
+/* shooting stars — two long-cycle streaks (transform + opacity only, no
+   filter) so a rare diagonal flash crosses the sky every so often instead
+   of a constant sprinkle of motion. Entirely declared inside the
+   no-preference block (nothing in the base rule, matching .cosmos-twinkle
+   above) so reduced-motion drops them completely rather than freezing a
+   streak mid-flight. box-shadow supplies the glow; it's static relative to
+   the element (baked into the layer once, moves as a unit with the
+   transform) — never recomputed per frame. */
+.cosmos-shooting { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .cosmos-shooting::before,
+  .cosmos-shooting::after {
+    content: '';
+    position: absolute;
+    width: 90px;
+    height: 1.5px;
+    top: 16%;
+    left: -12%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
+    box-shadow: 0 0 6px 0.5px color-mix(in oklch, var(--star) 65%, transparent);
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(18deg);
+    will-change: transform, opacity;
+    animation: cosmos-shoot var(--shoot-cycle) linear infinite;
+  }
+  .cosmos-shooting::after {
+    top: 64%;
+    left: -12%;
+    width: 70px;
+    transform: translate3d(0, 0, 0) rotate(13deg);
+    animation-duration: calc(var(--shoot-cycle) * 1.7);
+    animation-delay: calc(var(--shoot-cycle) * -0.55);
+  }
+}
+@keyframes cosmos-shoot {
+  0%, 91%  { opacity: 0; transform: translate3d(0, 0, 0) rotate(18deg); }
+  92%      { opacity: var(--shoot-alpha); }
+  97%, 100% { opacity: 0; transform: translate3d(135vw, 60px, 0) rotate(18deg); }
+}
+
+/* Composer-active boost — the cosmos leans in + tints toward the composer's
+   own accent while the composer is focused/typing, so typing reads as
+   active ideation rather than a static backdrop. Pure CSS: :has() is
+   already used elsewhere in this file (composer-subagent-toggle,
+   artifact-tab, studio-side-panel), so no new JS/class is needed —
+   .composer-card:focus-within is the SAME signal that already drives the
+   living ring border a few thousand lines down. Everything below is a
+   plain `transition` on opacity/filter/transform (no @keyframes), so it
+   never competes with the ambient nebula/star loops above; it just lifts
+   them for as long as focus holds. Per this file's own convention (see the
+   .composer-card:focus-within / ::before transitions), short bounded state
+   transitions like this are NOT gated behind reduced-motion — only
+   continuous/infinite `animation`s are; this is one ~650ms ease per focus/
+   blur toggle, not ambient motion, so it still fires under reduced-motion
+   (just without the accompanying ambient drift, which stays frozen). */
+.app:has(.composer-card:focus-within) .cosmos-backdrop {
+  filter: brightness(var(--cosmos-active-brightness)) saturate(var(--cosmos-active-saturate));
+  transform: scale(var(--cosmos-active-scale));
+}
+/* Accent-tint — a single low-alpha, blurred glow biased toward the bottom
+   of the viewport (where the composer physically sits), fading in only
+   while composer-active, as if the glow emanates upward from typing.
+   Opacity-only transition; deliberately no animation on this layer. */
+.cosmos-active-tint {
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(55% 50% at 50% 88%, var(--accent) 0%, transparent 70%);
+  filter: blur(46px);
+  opacity: 0;
+  transition: opacity var(--cosmos-active-ease) var(--ease);
+  pointer-events: none;
+}
+.app:has(.composer-card:focus-within) .cosmos-active-tint {
+  opacity: var(--cosmos-active-tint-alpha);
+}
 
 /* ── Resource HUD ─────────────────────────────────────────────── */
 .hud {
@@ -1161,7 +1345,7 @@ body.is-external-display .rail {
   }
 }
 /* The running-agents glow was the one infinite animation missing a reduced-motion
-   gate (its siblings mic-pulse / cosmos-drift are gated). Hold the accent state,
+   gate (its siblings mic-pulse / cosmos-drift-* are gated). Hold the accent state,
    drop the continuous pulse. */
 @media (prefers-reduced-motion: reduce) {
   .detail-action[data-running='true'] { animation: none; }

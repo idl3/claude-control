@@ -1142,9 +1142,13 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Subtle cosmic parallax: the transcript scroll nudges the starfield's
-  // background-position via --cosmos-shift. Shifting a repeating tile never
-  // reveals an edge and leaves the drift transform free to animate. One
+  // Subtle cosmic parallax: the transcript scroll nudges each starfield
+  // plane's background-position via --cosmos-shift(-near/-far). Shifting a
+  // repeating tile never reveals an edge and leaves each plane's own drift
+  // transform free to animate independently. Three different multipliers
+  // (near moves most, far almost not at all) is what actually sells the
+  // depth between planes — still the SAME single rAF handler, just three
+  // property writes instead of one; no new per-frame JS loop. One
   // capture-phase listener catches whichever .thread-viewport is mounted, so
   // it survives session switches. Reduced-motion → no listener at all.
   const cosmosRef = useRef<HTMLDivElement | null>(null);
@@ -1156,7 +1160,11 @@ function AppInner() {
       if (!t?.classList?.contains('thread-viewport') || raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        cosmosRef.current?.style.setProperty('--cosmos-shift', `${-t.scrollTop * 0.06}px`);
+        const el = cosmosRef.current;
+        if (!el) return;
+        el.style.setProperty('--cosmos-shift', `${-t.scrollTop * 0.06}px`);
+        el.style.setProperty('--cosmos-shift-near', `${-t.scrollTop * 0.13}px`);
+        el.style.setProperty('--cosmos-shift-far', `${-t.scrollTop * 0.02}px`);
       });
     };
     document.addEventListener('scroll', onScroll, { capture: true, passive: true });
@@ -2112,7 +2120,12 @@ function AppInner() {
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
         <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
+          <i className="cosmos-stars-far" />
+          <i className="cosmos-stars-mid" />
+          <i className="cosmos-stars-near" />
           <i className="cosmos-twinkle" />
+          <i className="cosmos-shooting" />
+          <i className="cosmos-active-tint" />
         </div>
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
