@@ -1,6 +1,6 @@
 # claude-cockpit — module contract (authoritative)
 
-All files are **ESM** (`"type":"module"`). Node ≥20. Only runtime dependency: `ws`.
+All files are **ESM** (`"type":"module"`). Node ≥20. Runtime dependencies: `ws`, `web-push`, `zod` (`zod` added by the protocol-split epic — `lib/protocol/` wire schemas + fingerprint compat gate).
 Everything else uses Node built-ins. Bind to **127.0.0.1 only**. Never pass user
 strings through a shell — always `execFile`/`spawn` with an args array.
 
