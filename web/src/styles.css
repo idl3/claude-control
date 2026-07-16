@@ -4557,23 +4557,22 @@ body.is-external-display .composer {
   .rail-foot {
     align-items: center; /* vertically center the fixed-height buttons */
     gap: 8px;
-    /* 8px top + sides; bottom lifts the buttons ~4-6px ABOVE the home-indicator
-       bar. safe-bottom is ~34px in standalone; -16 lands the button just above
-       the visible pill, not the full inset (which read as too much dead space). */
-    padding: 8px 8px max(8px, calc(var(--safe-bottom) - 16px));
+    /* Edge-to-edge (no side padding) so the two buttons hug the phone's left/right
+       edges; bottom lifts them ~4-6px ABOVE the home-indicator bar. */
+    padding: 8px 0 max(8px, calc(var(--safe-bottom) - 16px));
   }
   .rail-foot .rail-filter,
   .rail-foot .rail-new {
-    /* Fixed, consistent height with flex-centered text (base .rail-* already
-       center via align/justify). The old auto height + asymmetric 12/22px
-       padding made the buttons too tall with the label riding high. */
+    /* Fixed, consistent height with flex-centered text. 8px radius; the outer
+       bottom corners (filter bottom-left, New-session bottom-right) round to
+       hug the phone's rounded bottom corners. */
     height: 40px;
     padding-top: 0;
     padding-bottom: 0;
-    border-radius: 10px;
+    border-radius: 8px;
   }
   .rail-foot .rail-filter {
-    padding-left: 14px;
+    padding-left: 16px;
     padding-right: 14px;
   }
   .rail-foot .rail-new {
