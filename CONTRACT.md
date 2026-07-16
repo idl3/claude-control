@@ -1,6 +1,12 @@
 # claude-cockpit — module contract (authoritative)
 
 All files are **ESM** (`"type":"module"`). Node ≥20. Runtime dependencies: `ws`, `web-push`, `zod` (`zod` added by the protocol-split epic — `lib/protocol/` wire schemas + fingerprint compat gate).
+Optional dependency: `node-pty` (Phase A4's `lib/pty-bridge.js` — a binary PTY
+bridge that replaces ttyd). It is `optionalDependencies`, not a hard `dependencies`
+entry, because its native addon may have no prebuild on a given Node/platform
+combo; `lib/pty-bridge.js` lazy-`import()`s it only on first real spawn and
+accepts an injected `spawn` seam so every other code path (including the whole
+test suite) needs zero native module.
 Everything else uses Node built-ins. Bind to **127.0.0.1 only**. Never pass user
 strings through a shell — always `execFile`/`spawn` with an args array.
 
