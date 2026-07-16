@@ -7,6 +7,7 @@ import { SubAgentStrip } from './SubAgentStrip';
 import { SubAgentThread } from './SubAgentThread';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ArrowDownIcon } from './icons';
+import { WelcomeHero } from './WelcomeHero';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { AnswerSelection, Pending, SubAgent } from '../lib/types';
 import type { ActivePrompt } from './AskInline';
@@ -82,20 +83,6 @@ const messageComponents = {
   SystemMessage: AssistantMessage,
 } as const;
 
-interface WelcomeChip {
-  label: string;
-  /** Text to insert into the composer on click. If absent the chip is decorative. */
-  insert?: string;
-}
-
-const WELCOME_CHIPS: WelcomeChip[] = [
-  { label: 'Plan with /plan-hard', insert: '/plan-hard ' },
-  { label: 'Browse skills (/)', insert: '/' },
-  { label: 'Mention an agent (@)', insert: '@' },
-  { label: 'Dictate (⌘S)' },
-  { label: 'Run a shell command (>_)' },
-];
-
 // Safety fallback: if the transcript frame itself never arrives (`loading`) for
 // more than 8s (e.g. the WS frame is lost), stop waiting so the empty/welcome
 // state renders rather than spinning forever. Doesn't apply to the
@@ -151,33 +138,23 @@ function TranscriptLoader() {
   );
 }
 
-/** Chip row rendered inside ThreadPrimitive.Empty — has access to composer runtime. */
-function WelcomeChips() {
+/** Wires WelcomeHero's onInsert to the live assistant-ui composer runtime —
+ *  rendered inside ThreadPrimitive.Empty, which has runtime context. Mounted
+ *  only in the same JSX position the old inline `.thread-welcome` block was,
+ *  so behavior is 1:1 identical to before the WelcomeHero extraction. */
+function ThreadWelcomeHero({ agentName }: { agentName: string }) {
   const composer = useComposerRuntime();
 
-  const handleChip = (chip: WelcomeChip) => {
-    if (!chip.insert) return;
-    composer.setText(chip.insert);
-    // Focus the composer textarea so the user sees the inserted text immediately.
-    const ta = document.querySelector<HTMLTextAreaElement>('.composer .composer-input');
-    ta?.focus();
-  };
-
   return (
-    <div className="thread-welcome-chips" role="list">
-      {WELCOME_CHIPS.map((chip) => (
-        <button
-          key={chip.label}
-          type="button"
-          role="listitem"
-          className="thread-welcome-chip"
-          data-clickable={chip.insert ? 'true' : undefined}
-          onClick={() => handleChip(chip)}
-        >
-          {chip.label}
-        </button>
-      ))}
-    </div>
+    <WelcomeHero
+      agentName={agentName}
+      onInsert={(text) => {
+        composer.setText(text);
+        // Focus the composer textarea so the user sees the inserted text immediately.
+        const ta = document.querySelector<HTMLTextAreaElement>('.composer .composer-input');
+        ta?.focus();
+      }}
+    />
   );
 }
 
@@ -277,13 +254,7 @@ function ThreadImpl({
                     ) : null}
                   </div>
                 ) : (
-                  <div className="thread-welcome">
-                    <h1 className="thread-welcome-heading">What are we shipping today?</h1>
-                    <p className="thread-welcome-subtitle">
-                      Talk to {agentName} — type a prompt, or use a skill&nbsp;/ agent.
-                    </p>
-                    <WelcomeChips />
-                  </div>
+                  <ThreadWelcomeHero agentName={agentName} />
                 )}
               </ThreadPrimitive.Empty>
             )}

@@ -1876,10 +1876,14 @@ function AppInner() {
 
   // ⌘/Ctrl+N opens the New Session draft — same action as clicking the rail's
   // "+ New session" button — instead of letting the browser open a new
-  // window/tab. Note: a plain browser tab may not let JS preventDefault ⌘N (some
-  // browsers reserve it outright), but this works in the installed/standalone
-  // PWA and any focused window that lets the keydown through, so the handler is
-  // wired regardless.
+  // window/tab. Registered on the CAPTURE phase (like the other global
+  // shortcuts below) so it fires before a focused pane's keydown handler can
+  // stopPropagation() it (e.g. TerminalPanel.tsx swallows keydown on the
+  // bubble phase, which previously made ⌘N a no-op while a terminal pane had
+  // focus). Note: a raw (non-PWA) browser tab still reserves Cmd+N at the OS
+  // level and JS can't preventDefault it there, but this works in the
+  // installed/standalone PWA and any in-app focus context (terminal, textarea,
+  // etc.) that lets the keydown reach the window.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
@@ -1888,8 +1892,8 @@ function AppInner() {
       e.preventDefault();
       openDraft();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [openDraft]);
 
   // Detail-head shortcuts (these mirror the header icon buttons + their reveal

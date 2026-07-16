@@ -43,6 +43,92 @@ describe('SpawnAgentInfo type contract', () => {
   });
 });
 
+describe('NewSessionDraft welcome hero', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders the shared WelcomeHero (heading + chips) instead of a bespoke "New session" title', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    expect(screen.getByText('What are we shipping today?')).toBeTruthy();
+    expect(screen.queryByText('New session')).toBeNull();
+    // Option row (agent/model selects etc.) still renders alongside the hero.
+    expect(await screen.findByLabelText('Agent')).toBeTruthy();
+    expect(screen.getByLabelText('Model')).toBeTruthy();
+  });
+
+  it('renders every welcome chip', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    // role="listitem" has "Name from: prohibited" per the ARIA spec, so
+    // getByRole(..., {name}) never matches these buttons on text content —
+    // query by text instead, and assert the ARIA structure (5 listitems)
+    // separately.
+    expect(screen.getAllByRole('listitem')).toHaveLength(5);
+    expect(screen.getByText('Plan with /plan-hard')).toBeTruthy();
+    expect(screen.getByText('Browse skills (/)')).toBeTruthy();
+    expect(screen.getByText('Mention an agent (@)')).toBeTruthy();
+    expect(screen.getByText('Dictate (⌘S)')).toBeTruthy();
+    expect(screen.getByText('Run a shell command (>_)')).toBeTruthy();
+  });
+
+  it('clicking a clickable chip inserts its text into the prompt and focuses it', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    fireEvent.click(screen.getByText('Plan with /plan-hard'));
+    expect(textarea.value).toBe('/plan-hard ');
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('a decorative chip (no insert text) does not touch the prompt', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    fireEvent.click(screen.getByText('Dictate (⌘S)'));
+    expect(textarea.value).toBe('');
+  });
+
+  it('submit still calls createSession once, hero rendered alongside the composer', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByText('What are we shipping today?');
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+  });
+});
+
 /** Mirrors lib/models.js CLAUDE_MODELS — kept in sync by the model-id
  *  assertion test below (asserts the real ids, not this fixture). */
 const FIXTURE_CLAUDE_MODELS = [

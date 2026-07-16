@@ -1107,18 +1107,36 @@ async function resolveBin(bin) {
     // Fall through to the user's login shell; aliases/functions are only visible
     // there, but the lookup script itself is fixed and receives `b` as argv.
   }
+  // Alias/function fallback: run the user's login shell the SAME way the
+  // launcher types the command into a tmux pane (interactive), but guard the
+  // result with a sentinel so we can tell three cases apart:
+  //   sentinel + value  -> resolved (available)
+  //   sentinel + empty  -> ran cleanly, genuinely not found (unavailable)
+  //   sentinel absent   -> shell startup itself didn't complete (e.g. a
+  //                        TTY-dependent zshrc). INCONCLUSIVE: do NOT
+  //                        false-negative the agent — the launcher types the
+  //                        command into an interactive pane where it resolves
+  //                        regardless, so treat as available.
   try {
     const shell = process.env.SHELL || '/bin/zsh';
+    const SENT = '__CC_RESOLVE__';
     const { stdout } = await _execFile(
       shell,
-      ['-lic', 'command -v -- "$1"', 'claude-control-resolve', b],
+      ['-lic', `r=$(command -v -- "$1" 2>/dev/null || true); printf '%s:%s\\n' '${SENT}' "$r"`, 'claude-control-resolve', b],
       { timeout: 5000 },
     );
-    const resolved = stdout.trim();
-    if (resolved) return { available: true, path: resolved };
-    return { available: false, reason: `${b} not found in login shell` };
+    const line = stdout
+      .split('\n')
+      .map((s) => s.replace(/\r/g, ''))
+      .find((s) => s.startsWith(`${SENT}:`));
+    if (line) {
+      const resolved = line.slice(SENT.length + 1).trim();
+      if (resolved) return { available: true, path: resolved.startsWith('/') ? resolved : b };
+      return { available: false, reason: `${b} not found in login shell` };
+    }
+    return { available: true, path: b }; // inconclusive -> optimistic (launch validates)
   } catch {
-    return { available: false, reason: `${b} not found in login shell` };
+    return { available: true, path: b }; // inconclusive -> optimistic (launch validates)
   }
 }
 
