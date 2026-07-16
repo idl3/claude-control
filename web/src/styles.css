@@ -172,6 +172,21 @@ body {
   position: relative;
 }
 
+/* Installed-PWA (iOS standalone) viewport fill. In standalone, 100dvh (and every
+   other viewport unit) under-reports by the status-bar height, leaving a dead band
+   below the footer. main.tsx measures the FULL physical screen (window.screen.height,
+   portrait-locked by the manifest) into --screen-h and adds `pwa-fill`, so the whole
+   height chain fills the real screen and the footer touches the device bottom. Safari
+   never gets `pwa-fill` — its viewport units are correct there. */
+html.pwa-fill,
+html.pwa-fill body,
+html.pwa-fill #root {
+  height: var(--screen-h);
+}
+html.pwa-fill .app {
+  height: var(--screen-h);
+}
+
 /* ── Cosmic backdrop — deep-space base + ultra-low-alpha nebula wash + sparse
    drifting starfield, painted BEHIND the entire app (z-index:-1 relative to
    .app's own stacking context) but ABOVE body's flat --space-base fill.
@@ -4541,7 +4556,7 @@ body.is-external-display .composer {
   .rail-foot {
     align-items: stretch;
     gap: 8px; /* visible separation between the filter + New session actions */
-    padding: 0;
+    padding: 8px 0 0; /* breathing room above the buttons (below the border/list) */
   }
   .rail-foot .rail-filter,
   .rail-foot .rail-new {
