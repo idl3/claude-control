@@ -112,12 +112,11 @@
   --star-drift:      70s;                 /* mid plane drift; near/far derive their own below */
   --star-drift-near: 40s;                 /* fastest — closest plane */
   --star-drift-far:  160s;                /* slowest — barely perceptible (depth cue) */
-  --shoot-cycle:  96s;                     /* base cycle (streak "a" / nearest) — three streaks
-                                               derive long, desynced periods from this so flashes
-                                               stay rare (~28-40s effective gap) and never line up */
-  --shoot-alpha:    0.85;                  /* streak "a" (near) peak brightness — biggest/brightest/fastest */
-  --shoot-alpha-2:  0.50;                  /* streak "b" (mid) peak brightness */
-  --shoot-alpha-3:  0.30;                  /* streak "c" (far) peak brightness — dimmest/thinnest/slowest */
+  /* Shooting stars are now one-shot, JS/GSAP-triggered (rare ambient timer +
+     turn-completion event — see lib/shootingStars.ts + App.tsx's
+     fireShootingStar), not an always-on CSS @keyframes loop, so the old
+     --shoot-cycle/--shoot-alpha* tokens are gone; per-depth numbers live in
+     shootingStars.ts's PRESETS instead. */
 
   /* Composer-active boost — cosmos leans in + tints toward --accent while the
      composer is focused/typing (".composer-card:focus-within" via :has(),
@@ -130,6 +129,14 @@
   --cosmos-active-saturate:   1.20;
   --cosmos-active-scale:      1.018;  /* whole-backdrop "lean in" nudge */
   --cosmos-active-ease:       650ms;  /* breathe-in/out duration */
+
+  /* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint
+     while typing (see .cosmos-aurora below). Blur radius is fixed/static
+     (never animated, only transform/opacity move) and alpha stays low/dark
+     so it reads as a subtle organic wash, not a light show. */
+  --aurora-alpha: 0.16;   /* peak opacity while composer-active */
+  --aurora-blur:  40px;   /* static blur radius */
+  --aurora-drift: 22s;    /* one flowing drift+skew cycle, slow */
 
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
@@ -418,81 +425,46 @@ html.pwa-fill body.kbd-up .app {
 }
 @keyframes cosmos-twinkle { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.58; } }
 
-/* shooting stars — three long-cycle streaks (transform + opacity only, no
-   filter) so a rare diagonal flash crosses the sky every so often instead
-   of a constant sprinkle of motion. Entirely declared inside the
-   no-preference block (nothing in the base rule, matching .cosmos-twinkle
-   above) so reduced-motion drops them completely rather than freezing a
-   streak mid-flight. box-shadow supplies the glow; it's static relative to
-   the element (baked into the layer once, moves as a unit with the
-   transform) — never recomputed per frame.
-   Each streak gets its own "flight depth": near (biggest/brightest, crosses
-   fastest — shortest visible window covering the longest distance), mid,
-   and far (thinnest/dimmest, lingers longest but covers the shortest
-   distance). Periods (96s / ~118s / ~142s) and delays use non-round
-   multipliers of --shoot-cycle so the three never fall into a visible
-   loop together — combined they read as a rare, organic ~30-40s average
-   gap between flashes rather than a metronome. */
-.cosmos-shooting,
-.cosmos-shooting-far { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-shooting::before,
-  .cosmos-shooting::after,
-  .cosmos-shooting-far::before {
-    content: '';
-    position: absolute;
-    left: -14%;
-    border-radius: 999px;
-    background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
-    opacity: 0;
-    will-change: transform, opacity;
-  }
-  /* Streak "a" — near: biggest, brightest, fastest (shortest visible window). */
-  .cosmos-shooting::before {
-    width: 110px;
-    height: 2px;
-    top: 14%;
-    box-shadow: 0 0 7px 0.5px color-mix(in oklch, var(--star) 70%, transparent);
-    transform: translate3d(0, 0, 0) rotate(19deg);
-    animation: cosmos-shoot-a var(--shoot-cycle) linear infinite;
-  }
-  /* Streak "b" — mid: medium size/brightness/speed, desynced via delay. */
-  .cosmos-shooting::after {
-    width: 70px;
-    height: 1.3px;
-    top: 58%;
-    box-shadow: 0 0 5px 0.5px color-mix(in oklch, var(--star) 55%, transparent);
-    transform: translate3d(0, 0, 0) rotate(16deg);
-    animation: cosmos-shoot-b calc(var(--shoot-cycle) * 1.23) linear infinite;
-    animation-delay: calc(var(--shoot-cycle) * -0.37);
-  }
-  /* Streak "c" — far: thinnest/dimmest/shortest travel, lingers longest. */
-  .cosmos-shooting-far::before {
-    width: 40px;
-    height: 0.8px;
-    top: 34%;
-    box-shadow: 0 0 3px 0.4px color-mix(in oklch, var(--star) 40%, transparent);
-    transform: translate3d(0, 0, 0) rotate(21deg);
-    animation: cosmos-shoot-c calc(var(--shoot-cycle) * 1.482) linear infinite;
-    animation-delay: calc(var(--shoot-cycle) * -0.81);
-  }
+/* shooting stars — a pool of real (ref-able) elements, one-shot fired from
+   JS via GSAP (App.tsx's fireShootingStar), NOT an always-on CSS @keyframes
+   loop: CSS pseudo-elements can't be targeted by GSAP/DOM APIs, which is
+   exactly why this used to be three infinite-loop ::before/::after streaks
+   (see git history) — now each slot is idle (opacity: 0, no motion) until
+   JS drives it. Firing itself is rare by construction: at most once a
+   minute ambient (lib/shootingStars.ts's nextAmbientDelayMs) plus one shot
+   per agent turn completing (detectTurnCompletions), both gated behind the
+   Feature-B "shooting stars" setting AND prefers-reduced-motion — so no
+   media query is needed here (JS never fires a tween when reduced-motion is
+   on, and an idle slot with opacity 0 paints nothing either way). transform
+   + opacity only (box-shadow is static relative to the element, baked into
+   the layer once, moves as a unit with the transform — never recomputed per
+   frame), matching the compositor-only constraint on every other cosmos
+   layer. Depth ([data-depth]) reuses the retired streaks' exact look: near
+   = biggest/brightest, far = thinnest/dimmest; per-shot angle/travel/
+   duration/start-row are randomized in JS (buildShot's jitter). */
+.cosmos-shoot-stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.cosmos-shoot-slot {
+  position: absolute;
+  left: -14%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
+  opacity: 0;
+  will-change: transform, opacity;
 }
-/* Travel direction matches each streak's rotate angle (vw-ratio ≈ tan(angle))
-   so the tail trails naturally behind the head along the line of motion. */
-@keyframes cosmos-shoot-a {
-  0%, 93%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(19deg); }
-  94%       { opacity: var(--shoot-alpha); }
-  96%, 100% { opacity: 0; transform: translate3d(150vw, 51vw, 0) rotate(19deg); }
+.cosmos-shoot-slot[data-depth='near'] {
+  width: 110px;
+  height: 2px;
+  box-shadow: 0 0 7px 0.5px color-mix(in oklch, var(--star) 70%, transparent);
 }
-@keyframes cosmos-shoot-b {
-  0%, 90%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(16deg); }
-  92%       { opacity: var(--shoot-alpha-2); }
-  97%, 100% { opacity: 0; transform: translate3d(115vw, 33vw, 0) rotate(16deg); }
+.cosmos-shoot-slot[data-depth='mid'] {
+  width: 70px;
+  height: 1.3px;
+  box-shadow: 0 0 5px 0.5px color-mix(in oklch, var(--star) 55%, transparent);
 }
-@keyframes cosmos-shoot-c {
-  0%, 88%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(21deg); }
-  90%       { opacity: var(--shoot-alpha-3); }
-  99%, 100% { opacity: 0; transform: translate3d(70vw, 27vw, 0) rotate(21deg); }
+.cosmos-shoot-slot[data-depth='far'] {
+  width: 40px;
+  height: 0.8px;
+  box-shadow: 0 0 3px 0.4px color-mix(in oklch, var(--star) 40%, transparent);
 }
 
 /* Composer-active boost — the cosmos leans in + tints toward the composer's
@@ -529,6 +501,72 @@ html.pwa-fill body.kbd-up .app {
 }
 .app:has(.composer-card:focus-within) .cosmos-active-tint {
   opacity: var(--cosmos-active-tint-alpha);
+}
+
+/* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint,
+   active only while the composer is focused/typing (same :has() signal).
+   Two low-alpha, blurred bands (--accent + --nebula-2, echoing the nebula
+   wash's two-hue trick) independently drift/skew/scale so the glow feels
+   like real northern-lights motion rather than a static gradient, while
+   staying compositor-only: only transform/opacity animate, and the blur
+   radius (--aurora-blur) is fixed, applied once via `filter`, never itself
+   animated. Concentrated toward the bottom of the viewport, right behind
+   the composer (inset biased downward). The opacity fade-in/out is a short
+   ~600ms bounded transition tied directly to focus — per this file's own
+   convention (see .cosmos-active-tint above), that's NOT gated behind
+   reduced-motion. Only the continuous drift loop is gated, and simply
+   omitting its `animation` under reduced-motion leaves the glow visible but
+   motionless (freeze), matching the composer-boost precedent exactly. */
+.cosmos-aurora {
+  position: absolute;
+  inset: -20% -10% -35% -10%;
+  filter: blur(var(--aurora-blur));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cosmos-active-ease) var(--ease);
+}
+.app:has(.composer-card:focus-within) .cosmos-aurora {
+  opacity: var(--aurora-alpha);
+}
+.cosmos-aurora::before,
+.cosmos-aurora::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+}
+.cosmos-aurora::before {
+  background: linear-gradient(100deg,
+    transparent 5%, var(--accent) 35%, transparent 60%,
+    var(--nebula-2) 78%, transparent 95%);
+  opacity: 0.8;
+}
+.cosmos-aurora::after {
+  background: linear-gradient(115deg,
+    transparent 10%, var(--nebula-2) 40%, transparent 65%,
+    var(--accent) 82%, transparent 98%);
+  opacity: 0.55;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app:has(.composer-card:focus-within) .cosmos-aurora::before,
+  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
+    animation: cosmos-aurora-1 var(--aurora-drift) ease-in-out infinite;
+    will-change: transform;
+  }
+  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
+    animation-name: cosmos-aurora-2;
+    animation-delay: calc(var(--aurora-drift) / -2.4);
+  }
+}
+@keyframes cosmos-aurora-1 {
+  0%, 100% { transform: translate3d(-4%, 0, 0) scaleY(1) skewX(0deg); }
+  33%      { transform: translate3d(3%, -3%, 0) scaleY(1.18) skewX(-4deg); }
+  66%      { transform: translate3d(-2%, 2%, 0) scaleY(0.92) skewX(3deg); }
+}
+@keyframes cosmos-aurora-2 {
+  0%, 100% { transform: translate3d(4%, 0, 0) scaleY(1) skewX(0deg); }
+  33%      { transform: translate3d(-3%, 3%, 0) scaleY(0.9) skewX(4deg); }
+  66%      { transform: translate3d(2%, -2%, 0) scaleY(1.15) skewX(-3deg); }
 }
 
 /* ── Resource HUD ─────────────────────────────────────────────── */

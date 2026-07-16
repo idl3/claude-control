@@ -81,6 +81,8 @@ import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
+import { loadCosmosPref } from './lib/cosmosPrefs';
+import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
 
 // Sentinel toolUseId used when the inline AskBody is synthesized from the
 // session's boolean `pending` flag rather than a full structured Pending object
@@ -309,6 +311,31 @@ function AppInner() {
       window.removeEventListener('resize', apply);
       window.removeEventListener('cockpit:fontsize', onFontSize);
     };
+  }, []);
+
+  // Cosmos backdrop toggles (Settings → General): device-local, no server
+  // round-trip (see lib/cosmosPrefs.ts). `cosmosBackground` drives the JSX
+  // mount below (needs a re-render); parallax/shooting-stars are read inside
+  // non-React loops (rAF scroll handler, ambient timer, GSAP tween) so they
+  // live in refs instead — same live-apply CustomEvent as font size, just
+  // updating a ref for those two instead of triggering a re-render.
+  const [cosmosBackground, setCosmosBackground] = useState(() => loadCosmosPref('background'));
+  const parallaxEnabledRef = useRef(loadCosmosPref('parallax'));
+  const shootingStarsEnabledRef = useRef(loadCosmosPref('shootingStars'));
+  useEffect(() => {
+    const onPrefs = (e: Event) => {
+      const d = (e as CustomEvent<{
+        cosmosBackground?: boolean;
+        cosmosParallax?: boolean;
+        cosmosShootingStars?: boolean;
+      }>).detail;
+      if (!d) return;
+      if (typeof d.cosmosBackground === 'boolean') setCosmosBackground(d.cosmosBackground);
+      if (typeof d.cosmosParallax === 'boolean') parallaxEnabledRef.current = d.cosmosParallax;
+      if (typeof d.cosmosShootingStars === 'boolean') shootingStarsEnabledRef.current = d.cosmosShootingStars;
+    };
+    window.addEventListener('cockpit:cosmosprefs', onPrefs);
+    return () => window.removeEventListener('cockpit:cosmosprefs', onPrefs);
   }, []);
 
   // Surface WS ack errors / answer confirmations as toasts.
@@ -1195,7 +1222,7 @@ function AppInner() {
       raf = requestAnimationFrame(() => {
         raf = 0;
         const el = cosmosRef.current;
-        if (!el) return;
+        if (!el || !parallaxEnabledRef.current) return;
         el.style.setProperty('--cosmos-shift', `${-t.scrollTop * 0.06}px`);
         el.style.setProperty('--cosmos-shift-near', `${-t.scrollTop * 0.13}px`);
         el.style.setProperty('--cosmos-shift-far', `${-t.scrollTop * 0.02}px`);
@@ -1207,6 +1234,76 @@ function AppInner() {
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
+
+  // Shooting stars — a small pool of real, ref-able elements (CSS
+  // pseudo-elements can't be targeted by GSAP/DOM APIs, which is why this
+  // used to be three infinite-loop ::before/::after streaks instead — see
+  // styles.css's .cosmos-shoot-slot comment). One-shot fired from JS: rare
+  // ambient timer (at most once a minute) + once per agent turn completing.
+  // A round-robin index picks the next slot so overlapping shots (ambient +
+  // turn-done landing close together) never fight over the same element.
+  const shootSlotRefs = useRef<(HTMLElement | null)[]>([]);
+  const shootSlotCursor = useRef(0);
+  const fireShootingStar = useCallback((depth?: Shot['depth']) => {
+    if (prefersReducedMotion() || !shootingStarsEnabledRef.current) return;
+    const slots = shootSlotRefs.current;
+    if (!slots.length) return;
+    const el = slots[shootSlotCursor.current % slots.length];
+    shootSlotCursor.current += 1;
+    if (!el) return;
+    const shot = buildShot(depth);
+    el.dataset.depth = shot.depth;
+    el.style.top = `${shot.topPercent}%`;
+    gsap.killTweensOf(el);
+    gsap.set(el, { opacity: 0, x: 0, y: 0, rotate: shot.angleDeg });
+    // durationMs is the whole one-shot flight (already 2.1x-speedup'd in
+    // shootingStars.ts's PRESETS) — position travels the full distance at a
+    // constant rate across it, while opacity ramps in over the first ~12%
+    // and fades out over the last ~30%, so the streak flashes in, crosses,
+    // and dims out rather than popping abruptly at either end.
+    const totalS = shot.durationMs / 1000;
+    const tl = gsap.timeline();
+    tl.to(el, { x: `${shot.travelXvw}vw`, y: `${shot.travelYvw}vw`, duration: totalS, ease: 'none' }, 0)
+      .to(el, { opacity: shot.peakAlpha, duration: totalS * 0.12, ease: 'power1.in' }, 0)
+      .to(el, { opacity: 0, duration: totalS * 0.3, ease: 'power1.out' }, totalS * 0.7);
+  }, []);
+
+  // Ambient cadence: self-rescheduling timeout (not setInterval) so each gap
+  // is freshly randomized — see lib/shootingStars.ts's nextAmbientDelayMs
+  // (never less than a minute). Skips entirely under reduced-motion/toggle-
+  // off, but keeps rescheduling so a later re-enable picks back up without
+  // remounting.
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    const tick = () => {
+      if (!alive) return;
+      if (!prefersReducedMotion() && shootingStarsEnabledRef.current) fireShootingStar();
+      timer = window.setTimeout(tick, nextAmbientDelayMs());
+    };
+    timer = window.setTimeout(tick, nextAmbientDelayMs());
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [fireShootingStar]);
+
+  // Turn-completion trigger: fire one shooting star whenever any session's
+  // active→idle edge fires — the same signal lib/push-trigger.js's
+  // evaluateEdges uses server-side to send the "✅ finished" push
+  // (wasActive && !nowActive && !pending), mirrored client-side via
+  // claudeWorking() over cockpit.sessions. See lib/shootingStars.ts's
+  // detectTurnCompletions for the pure edge-detection logic.
+  const turnActiveRef = useRef<Map<string, boolean>>(new Map());
+  useEffect(() => {
+    const { completed, nextActive } = detectTurnCompletions(
+      turnActiveRef.current,
+      cockpit.sessions,
+      claudeWorking,
+    );
+    turnActiveRef.current = nextActive;
+    if (completed.length) fireShootingStar();
+  }, [cockpit.sessions, fireShootingStar]);
 
   // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
   // streaming, OR reflowing message scrolls to the latest — no Ctrl+. needed.
@@ -2164,15 +2261,27 @@ function AppInner() {
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
-        <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
-          <i className="cosmos-stars-far" />
-          <i className="cosmos-stars-mid" />
-          <i className="cosmos-stars-near" />
-          <i className="cosmos-twinkle" />
-          <i className="cosmos-shooting" />
-          <i className="cosmos-shooting-far" />
-          <i className="cosmos-active-tint" />
-        </div>
+        {cosmosBackground && (
+          <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
+            <i className="cosmos-stars-far" />
+            <i className="cosmos-stars-mid" />
+            <i className="cosmos-stars-near" />
+            <i className="cosmos-twinkle" />
+            <div className="cosmos-shoot-stars">
+              {[0, 1, 2].map((i) => (
+                <i
+                  key={i}
+                  className="cosmos-shoot-slot"
+                  ref={(el) => {
+                    shootSlotRefs.current[i] = el;
+                  }}
+                />
+              ))}
+            </div>
+            <i className="cosmos-active-tint" />
+            <i className="cosmos-aurora" />
+          </div>
+        )}
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
         {pull > 0 || refreshing ? (
