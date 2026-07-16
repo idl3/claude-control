@@ -216,8 +216,13 @@ const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 // R8: registry.start()/resources.start() run unconditionally at boot (main(),
 // below) and stay armed forever even with zero browser tabs open. This gate
 // pauses both on the last WS disconnect and resumes + fires an immediate tick
-// on the next connect — see lib/ws-poll-gate.js for the full rationale.
-const wsPollGate = createWsPollGate(registry, resources);
+// on the next connect — see lib/ws-poll-gate.js for the full rationale. The
+// gate stays armed (does not pause) whenever a device has an active push
+// subscription, so ask/done edges keep firing to closed/backgrounded apps —
+// see lib/ws-poll-gate.js's "Exception — live push subscriptions" note.
+const wsPollGate = createWsPollGate(registry, resources, {
+  hasSubscribers: () => push.subscriptionCount() > 0,
+});
 const codexRpc = new CodexRpcManager();
 const claudePrint = new ClaudePrintManager();
 

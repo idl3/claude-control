@@ -187,6 +187,61 @@ test('full round trip: disconnect -> reconnect -> disconnect toggles paused stat
   assert.equal(resources.refreshNowCallCount(), 2, 'each resume must fire its own immediate tick');
 });
 
+// ── push subscribers: the gate must NOT pause while a device is subscribed ──
+//
+// registry.on('change') is the only thing that drives lib/push-trigger.js's
+// ask/done edge detection. If the gate paused the registry the instant the
+// last WS client disconnected — the exact moment a push is needed, since the
+// app is now closed/backgrounded — no push would ever fire. `hasSubscribers`
+// must keep the loop armed whenever at least one PushSubscription exists.
+
+test('onDisconnect(0) with an active push subscriber: does NOT pause (keeps polling for push edges)', () => {
+  const registry = fakeRegistry();
+  const resources = fakeResources();
+  const gate = createWsPollGate(registry, resources, { hasSubscribers: () => true });
+
+  gate.onDisconnect(0);
+
+  assert.equal(gate.isPaused(), false, 'must stay unpaused so push-trigger.js keeps detecting ask/done edges');
+  assert.equal(registry.stop.callCount(), 0);
+  assert.equal(resources.stop.callCount(), 0);
+});
+
+test('onDisconnect(0) with zero push subscribers: pauses as before (no regression to R8 battery saving)', () => {
+  const registry = fakeRegistry();
+  const resources = fakeResources();
+  const gate = createWsPollGate(registry, resources, { hasSubscribers: () => false });
+
+  gate.onDisconnect(0);
+
+  assert.equal(gate.isPaused(), true);
+  assert.equal(registry.stop.callCount(), 1);
+  assert.equal(resources.stop.callCount(), 1);
+});
+
+test('createWsPollGate() with no opts arg: defaults hasSubscribers to false (back-compat, matches all tests above)', () => {
+  const registry = fakeRegistry();
+  const resources = fakeResources();
+  const gate = createWsPollGate(registry, resources);
+
+  gate.onDisconnect(0);
+
+  assert.equal(gate.isPaused(), true, 'omitting opts must preserve the original pause-on-last-disconnect behaviour');
+});
+
+test('a push subscriber appearing after the gate is already paused does not retroactively resume it (hasSubscribers is only read at onDisconnect time)', () => {
+  const registry = fakeRegistry();
+  const resources = fakeResources();
+  let subscribed = false;
+  const gate = createWsPollGate(registry, resources, { hasSubscribers: () => subscribed });
+
+  gate.onDisconnect(0); // paused, 0 subscribers at the time
+  assert.equal(gate.isPaused(), true);
+
+  subscribed = true; // a subscription is added out-of-band while paused
+  assert.equal(gate.isPaused(), true, 'the gate only re-evaluates on the next onConnect/onDisconnect transition');
+});
+
 // ── teeth: without the `if (!paused) return` guard, a redundant connect
 // would double-start — this is exactly the leak the guard exists to prevent.
 
