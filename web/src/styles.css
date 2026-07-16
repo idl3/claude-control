@@ -3425,21 +3425,11 @@ body.is-external-display .composer {
 .composer-send[data-terminal]:hover {
   filter: brightness(1.08);
 }
-/* Stop + Send fixed-slot group: both buttons stay permanently mounted (see
-   Composer.tsx) so Send's rightmost position never shifts as `working`
-   toggles. Each fades in/out within its own reserved-width slot via
-   `data-active` instead of being conditionally unmounted. */
-.composer-send-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-.composer-send-group .composer-send:not([data-active='true']) {
-  opacity: 0;
-  pointer-events: none;
-}
-/* STOP button: shown when the agent is actively generating. */
+/* STOP button: rendered (in Composer.tsx) only while the agent is generating,
+   positioned to the LEFT of both send buttons. The send cluster is
+   right-aligned (the toolbar spacer is flex-grow), so Stop grows leftward into
+   the spacer when it mounts — the send buttons never shift, and there's no
+   reserved empty slot when idle. */
 .composer-send[data-stop="true"] {
   background: var(--red);
   color: oklch(98% 0.01 25);
@@ -3449,27 +3439,13 @@ body.is-external-display .composer {
   filter: brightness(1.08);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .composer-send[data-stop="true"][data-active="true"] {
+  .composer-send[data-stop="true"] {
     animation: stop-pulse 1.4s ease-in-out infinite;
   }
 }
 @keyframes stop-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
-}
-/* The optimise/send button pops in beside Stop when text is typed while the
-   agent is still working (so you can stop AND queue a new message). Gated on
-   data-active (not just data-queue) so the animation-name only changes -- and
-   therefore only replays -- at the moment the button actually becomes
-   visible, since the button now stays mounted the whole time. */
-@media (prefers-reduced-motion: no-preference) {
-  .composer-send[data-queue="true"][data-active="true"] {
-    animation: queue-in 0.18s var(--ease) both;
-  }
-}
-@keyframes queue-in {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
 }
 .composer-input {
   width: 100%;
