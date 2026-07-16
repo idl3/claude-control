@@ -2168,10 +2168,10 @@ export function Composer({
               <TerminalIcon />
             </button>
           ) : null}
-          <span className="composer-toolbar-spacer" />
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
-              with "Using a sub-agent." Sits to the LEFT of the raw-dispatch
-              button so the raw button reads as the right-most secondary action.
+              with "Using a sub-agent." Sits in the LEFT toolbar cluster,
+              beside attach/mic/terminal — deliberately far from the Send
+              button on the right so toggling it can't misclick-fire a send.
               Only shown in non-terminal, non-voice mode. */}
           {!terminal && !voice ? (
             <label
@@ -2209,6 +2209,7 @@ export function Composer({
               <BotIcon size={16} />
             </button>
           ) : null}
+          <span className="composer-toolbar-spacer" />
           {/* Secondary: bypass — send the raw composer text without optimising. */}
           {!terminal && !voice ? (
             <button
@@ -2238,43 +2239,52 @@ export function Composer({
               <ArrowUpIcon />
             </button>
           ) : voice ? null : (
-            // While the agent is generating, show STOP (Esc). The optimise/send
-            // button stays available too WHENEVER there's text — so you can stop
-            // the current turn AND queue a new message. Empty + working → just
-            // Stop. Not working → just optimise/send.
-            <>
-              {working ? (
-                <button
-                  type="button"
-                  className="composer-send"
-                  data-stop="true"
-                  aria-label="Stop (Esc)"
-                  title="Stop the agent (Esc)"
-                  onClick={() => onStop?.()}
-                >
-                  <StopIcon size={14} />
-                </button>
-              ) : null}
-              {!working || !empty ? (
-                <button
-                  type="button"
-                  ref={sendBtnRef}
-                  className="composer-send"
-                  data-queue={working ? 'true' : undefined}
-                  aria-label="Optimise and send"
-                  title="Optimise & send (⌘/Ctrl+↵)"
-                  disabled={disabled || optimizing || empty || compacting || resuming}
-                  data-hotkey="⌘↵"
-                  onClick={() => void runEnhance()}
-                >
-                  {optimizing ? (
-                    <span className="composer-enhance-spinner" aria-hidden="true" />
-                  ) : (
-                    <SparkleIcon />
-                  )}
-                </button>
-              ) : null}
-            </>
+            // Stop + Send are BOTH always mounted here (never conditionally
+            // unmounted) so Send's rightmost position never shifts as
+            // `working` toggles — each fades in/out in its own reserved slot
+            // via `data-active` instead of mounting/unmounting, which used to
+            // push Send sideways whenever Stop appeared. Stop's slot sits
+            // immediately left of Send. While the agent is generating, Stop
+            // becomes active; the optimise/send button stays active too
+            // WHENEVER there's text — so you can stop the current turn AND
+            // queue a new message. Empty + working → only Stop active.
+            // Not working → only Send active.
+            <div className="composer-send-group">
+              <button
+                type="button"
+                className="composer-send"
+                data-stop="true"
+                data-active={working ? 'true' : undefined}
+                aria-label="Stop (Esc)"
+                title="Stop the agent (Esc)"
+                aria-hidden={!working}
+                tabIndex={working ? 0 : -1}
+                disabled={!working}
+                onClick={() => onStop?.()}
+              >
+                <StopIcon size={14} />
+              </button>
+              <button
+                type="button"
+                ref={sendBtnRef}
+                className="composer-send"
+                data-queue={working ? 'true' : undefined}
+                data-active={!working || !empty ? 'true' : undefined}
+                aria-label="Optimise and send"
+                title="Optimise & send (⌘/Ctrl+↵)"
+                aria-hidden={working && empty}
+                tabIndex={working && empty ? -1 : 0}
+                disabled={disabled || optimizing || empty || compacting || resuming}
+                data-hotkey={working && empty ? undefined : '⌘↵'}
+                onClick={() => void runEnhance()}
+              >
+                {optimizing ? (
+                  <span className="composer-enhance-spinner" aria-hidden="true" />
+                ) : (
+                  <SparkleIcon />
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>
