@@ -10,7 +10,7 @@ Environment knobs (read in `server.js`, with defaults):
 - `COCKPIT_PROJECTS` (default `~/.claude/projects`)
 - `COCKPIT_TMUX` (default: auto-resolved tmux binary)
 - `COCKPIT_RSS_LIMIT_MB` (default `350`) — self-RSS soft cap
-- `COCKPIT_TOKEN` (optional) — if set, WS upgrade and `/api/*` require `?token=` match
+- `COCKPIT_TOKEN` (optional) — if set, `/api/*` requires `Authorization: Bearer <token>` and the WS upgrade must offer the token as a `Sec-WebSocket-Protocol` subprotocol (alongside the `claude-control` label). The token is never accepted in a `?token=` URL query — URLs leak via history/logs/referrer. (`CLAUDE_CONTROL_TOKEN` is the current name; `COCKPIT_TOKEN` remains a legacy alias.)
 
 ## Resource doctrine (the whole point — "don't go overboard")
 - **Never read a transcript fully.** Files reach 200 MB+. Initial load reads only a
