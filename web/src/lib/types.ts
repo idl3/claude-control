@@ -63,6 +63,10 @@ export interface Session {
   ccShell?: boolean;
   model?: string | null;
   ctxPct?: number | null;
+  /** Reasoning-effort tier reported by the harness (Claude statusLine `.effort.level`;
+   *  Codex has no dedicated field — its effort stays embedded in `model` and is
+   *  parsed client-side via `parseEffort`). */
+  effort?: string | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
   thinking?: boolean;
   /** true while Claude is compacting the conversation (TUI "Compacting conversation…") */
