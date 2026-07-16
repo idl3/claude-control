@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useMessage } from '@assistant-ui/react';
+import { useMessage, TextMessagePartProvider } from '@assistant-ui/react';
 import type {
   TextMessagePartComponent,
   ToolCallMessagePartComponent,
 } from '@assistant-ui/react';
+import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import { toolInput, toolResult, toolSummary } from '../lib/convert';
-import { MarkdownText } from './MarkdownText';
+import { MarkdownText, MD_COMPONENTS, BASE_PLUGINS } from './MarkdownText';
 import { InlineAttachmentPreviews } from './AttachmentPreview';
 import { isSkillInvocation, SkillInvocation } from './SkillInvocation';
 import { GoalPill, TextWithUltrathink } from './ReservedTokens';
@@ -171,6 +172,50 @@ export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
   if (questions.length === 0) return <ToolPart {...props} />;
 
   return <AskCard questions={questions} pairs={pairs} answered={answered} />;
+};
+
+// ExitPlanMode → a titled, collapsible "Plan" card showing the `plan` argument
+// (Claude's plan markdown) rendered as GitHub-flavored markdown, instead of the
+// raw JSON args blob the generic ToolPart would otherwise dump into a <pre>.
+// Reuses the SAME markdown pipeline as assistant message text (MarkdownText.tsx's
+// MD_COMPONENTS + BASE_PLUGINS, fed through MarkdownTextPrimitive) via
+// TextMessagePartProvider, which stands up a synthetic "text" message-part
+// context for arbitrary strings outside the normal transcript stream — no
+// second markdown library, no hand-rolled remark config.
+export const ExitPlanPart: ToolCallMessagePartComponent = (props) => {
+  const input = toolInput(props.args) as { plan?: unknown; planFilePath?: unknown } | null;
+  const plan = input && typeof input.plan === 'string' ? input.plan : '';
+
+  // No plan text to show (unexpected shape) → fall back to the generic tool row.
+  if (!plan.trim()) return <ToolPart {...props} />;
+
+  const planFilePath =
+    input && typeof input.planFilePath === 'string' && input.planFilePath.trim()
+      ? input.planFilePath
+      : null;
+
+  return (
+    <details className="block-tool block-plan" open>
+      <summary className="block-tool-use">
+        <span className="tool-head">
+          <span className="tool-arrow" data-peek="true" aria-hidden="true">
+            ▸
+          </span>
+          <span className="tool-name">Plan</span>
+        </span>
+      </summary>
+      <div className="block-tool-body block-plan-body">
+        <TextMessagePartProvider text={plan}>
+          <MarkdownTextPrimitive
+            className="aui-md"
+            remarkPlugins={BASE_PLUGINS}
+            components={MD_COMPONENTS}
+          />
+        </TextMessagePartProvider>
+        {planFilePath ? <div className="block-plan-path">{planFilePath}</div> : null}
+      </div>
+    </details>
+  );
 };
 
 // The live, unanswered question — rendered in the transcript timeline the moment

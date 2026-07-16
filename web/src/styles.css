@@ -3119,6 +3119,37 @@ details.block-tool[open] > summary .tool-arrow,
   color: var(--text);
 }
 
+/* ExitPlanMode → rendered-markdown "Plan" card (see MessageParts' ExitPlanPart).
+   Keeps the .block-tool chrome (arrow + name row) but the body is a bordered,
+   accent-toned surface holding real GFM markdown instead of a JSON <pre>. */
+details.block-plan > summary.block-tool-use {
+  border-left: 2px solid var(--accent);
+}
+.block-plan-body {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-1);
+  padding: 10px 12px;
+}
+.block-plan-body .aui-md {
+  font-size: calc(13px * var(--ui-scale));
+}
+.block-plan-body .aui-md > :first-child {
+  margin-top: 0;
+}
+.block-plan-body .aui-md > :last-child {
+  margin-bottom: 0;
+}
+.block-plan-path {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-faint, var(--text-dim));
+  overflow-wrap: anywhere;
+}
+
 /* ── Composer ─────────────────────────────────────────────────── */
 .composer {
   display: flex;
