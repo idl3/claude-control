@@ -5921,6 +5921,11 @@ select.config-input {
   touch-action: none;
   user-select: none;
 }
+/* Show the full token label in the pill — .meta-model's 60% max-width (tuned for
+   the rail's multi-chip row) otherwise truncates "model" to "mo…" here. */
+.railcfg-pill .meta-model {
+  max-width: none;
+}
 .railcfg-pill--placeholder {
   width: 48px;
   height: 24px;
