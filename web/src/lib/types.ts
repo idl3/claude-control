@@ -63,6 +63,10 @@ export interface Session {
   ccShell?: boolean;
   model?: string | null;
   ctxPct?: number | null;
+  /** Reasoning-effort tier reported by the harness (Claude statusLine `.effort.level`;
+   *  Codex has no dedicated field — its effort stays embedded in `model` and is
+   *  parsed client-side via `parseEffort`). */
+  effort?: string | null;
   /** true while Claude is actively generating in this pane (TUI "esc to interrupt") */
   thinking?: boolean;
   /** true while Claude is compacting the conversation (TUI "Compacting conversation…") */
@@ -117,6 +121,16 @@ export interface Msg {
   // convert if the same text later lands as a real type=user message.
   queued?: boolean;
 }
+
+/**
+ * One question's answer on the wire. Either the chosen option labels (the option
+ * path, unchanged + backward-compatible) OR a free-text/chat directive telling the
+ * server to type the literal `text` into the picker's "Type something" /
+ * "Chat about this" row instead of selecting an option.
+ */
+export type AnswerSelection =
+  | string[]
+  | { kind: 'text' | 'chat'; text: string };
 
 export interface PendingOption {
   label: string;
@@ -268,7 +282,7 @@ export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
-  | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
+  | { type: 'answer'; id: string; toolUseId: string; selections: AnswerSelection[] }
   | { type: 'subagent-load'; id: string; agentId: string }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }

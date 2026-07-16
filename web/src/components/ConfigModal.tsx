@@ -12,7 +12,10 @@ import {
   type ModelsInfo,
 } from '../lib/api';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
+import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
+import { loadRailTokens, saveRailTokens, DEFAULT_RAIL_TOKENS, type RailToken } from '../lib/railTokenPrefs';
 import { TypeIcon, TerminalSquareIcon } from './icons';
+import { RailTokenConfig } from './RailTokenConfig';
 
 interface ConfigModalProps {
   onClose: () => void;
@@ -61,13 +64,36 @@ function FolderNavIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-type SectionId = 'general' | 'harness' | 'voice' | 'session';
+// Lucide "repeat" glyph — represents the rail's rotating meta tokens.
+function RepeatNavIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
+type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens';
 
 const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { id: 'general', label: 'General', Icon: TypeIcon },
   { id: 'harness', label: 'Harness', Icon: TerminalSquareIcon },
   { id: 'voice', label: 'Voice Control', Icon: MicNavIcon },
   { id: 'session', label: 'Session Defaults', Icon: FolderNavIcon },
+  { id: 'railtokens', label: 'Rail tokens', Icon: RepeatNavIcon },
 ];
 
 interface GeneralSectionProps {
@@ -75,6 +101,12 @@ interface GeneralSectionProps {
   setTranscriptFontSize: (n: number) => void;
   externalFontSize: number;
   setExternalFontSize: (n: number) => void;
+  cosmosBackground: boolean;
+  setCosmosBackground: (b: boolean) => void;
+  cosmosParallax: boolean;
+  setCosmosParallax: (b: boolean) => void;
+  cosmosShootingStars: boolean;
+  setCosmosShootingStars: (b: boolean) => void;
   loading: boolean;
   iconBust: number;
   iconBusy: boolean;
@@ -83,12 +115,18 @@ interface GeneralSectionProps {
   onResetIcon: () => void;
 }
 
-/** Display/appearance: font sizes (with a live preview), app icon. */
+/** Display/appearance: font sizes (with a live preview), app icon, cosmos backdrop toggles. */
 function GeneralSection({
   transcriptFontSize,
   setTranscriptFontSize,
   externalFontSize,
   setExternalFontSize,
+  cosmosBackground,
+  setCosmosBackground,
+  cosmosParallax,
+  setCosmosParallax,
+  cosmosShootingStars,
+  setCosmosShootingStars,
   loading,
   iconBust,
   iconBusy,
@@ -160,6 +198,43 @@ function GeneralSection({
             Sample transcript at the size above — updates instantly, no need to save first.
           </span>
         </div>
+
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosBackground}
+            disabled={loading}
+            onChange={(e) => setCosmosBackground(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Background cosmos</span>
+            <span className="config-hint">Starfield/nebula backdrop. Off shows a flat dark background.</span>
+          </span>
+        </label>
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosParallax}
+            disabled={loading}
+            onChange={(e) => setCosmosParallax(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Parallax scrolling</span>
+            <span className="config-hint">Star planes shift depth while you scroll. Off keeps the backdrop still on scroll.</span>
+          </span>
+        </label>
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosShootingStars}
+            disabled={loading}
+            onChange={(e) => setCosmosShootingStars(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Shooting stars</span>
+            <span className="config-hint">A rare ambient streak, plus one whenever an agent finishes a turn.</span>
+          </span>
+        </label>
 
         <div className="config-field config-field--wide">
           <span className="config-label">App icon</span>
@@ -600,6 +675,14 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   // 0 = CSS default (auto); non-zero = user-chosen px value.
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
+  // Device-local only (no server counterpart) — loaded straight from
+  // localStorage below, not from getConfig(). See lib/cosmosPrefs.ts.
+  const [cosmosBackground, setCosmosBackground] = useState(true);
+  const [cosmosParallax, setCosmosParallax] = useState(true);
+  const [cosmosShootingStars, setCosmosShootingStars] = useState(true);
+  // Session-rail meta-slot token order — same device-local, no-server-
+  // counterpart shape as the cosmos toggles above. See lib/railTokenPrefs.ts.
+  const [railTokens, setRailTokens] = useState<RailToken[]>(DEFAULT_RAIL_TOKENS);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
@@ -634,6 +717,15 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // Cosmos toggles have no server counterpart — load once from this
+  // device's localStorage (see lib/cosmosPrefs.ts).
+  useEffect(() => {
+    setCosmosBackground(loadCosmosPref('background'));
+    setCosmosParallax(loadCosmosPref('parallax'));
+    setCosmosShootingStars(loadCosmosPref('shootingStars'));
+    setRailTokens(loadRailTokens());
   }, []);
 
   useEffect(() => {
@@ -756,6 +848,20 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
           },
         }),
       );
+      // Cosmos toggles are device-local only — persist directly (no server
+      // round-trip) and apply LIVE the same way as font size.
+      saveCosmosPref('background', cosmosBackground);
+      saveCosmosPref('parallax', cosmosParallax);
+      saveCosmosPref('shootingStars', cosmosShootingStars);
+      window.dispatchEvent(
+        new CustomEvent('cockpit:cosmosprefs', {
+          detail: { cosmosBackground, cosmosParallax, cosmosShootingStars },
+        }),
+      );
+      // Rail-token order is device-local only too — persist + apply LIVE the
+      // same way. SessionRail owns the load + listener (see its mount effect).
+      saveRailTokens(railTokens);
+      window.dispatchEvent(new CustomEvent('cockpit:railtokenprefs', { detail: { railTokens } }));
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
@@ -857,6 +963,12 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setTranscriptFontSize={setTranscriptFontSize}
                 externalFontSize={externalFontSize}
                 setExternalFontSize={setExternalFontSize}
+                cosmosBackground={cosmosBackground}
+                setCosmosBackground={setCosmosBackground}
+                cosmosParallax={cosmosParallax}
+                setCosmosParallax={setCosmosParallax}
+                cosmosShootingStars={cosmosShootingStars}
+                setCosmosShootingStars={setCosmosShootingStars}
                 loading={loading}
                 iconBust={iconBust}
                 iconBusy={iconBusy}
@@ -900,6 +1012,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setProjectDirs={setProjectDirs}
                 loading={loading}
               />
+            ) : null}
+            {activeSection === 'railtokens' ? (
+              <RailTokenConfig railTokens={railTokens} setRailTokens={setRailTokens} />
             ) : null}
           </div>
         </div>

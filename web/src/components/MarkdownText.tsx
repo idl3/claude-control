@@ -132,14 +132,18 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
 // lib/delivery.ts's module doc for why array order among tree-transforms
 // can't by itself prevent that mangling (gfm's autolinking is a micromark
 // parse-time syntax extension, not a transform).
-const BASE_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds];
+// Exported so non-text-part callers (e.g. MessageParts' ExitPlanPart, which
+// renders ExitPlanMode's `plan` argument through the same markdown pipeline
+// via TextMessagePartProvider) can reuse the exact assistant-message config
+// instead of duplicating it.
+export const BASE_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds];
 const USER_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds, remarkUltrathink];
 
 // Stable module-level component map. All six are module-scope refs, so this
 // object never needs to change — hoisting it out of the render body keeps a
 // single identity (matches the messageComponents / partComponents pattern) and
 // avoids handing react-markdown a fresh `components` object on every render.
-const MD_COMPONENTS = {
+export const MD_COMPONENTS = {
   CodeHeader,
   SyntaxHighlighter: CodeHighlighter,
   table: TableWrap,

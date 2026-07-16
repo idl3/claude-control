@@ -21,7 +21,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
+import { renameSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -66,7 +66,7 @@ import {
   GalleryIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { Pending, ServerMessage } from './lib/types';
+import type { AnswerSelection, Pending, ServerMessage } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
 import {
   echoMatches,
@@ -76,17 +76,14 @@ import {
   removePendingSend,
   toMs,
 } from './lib/pendingSend';
-import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './lib/answerSettle';
+import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS, FLAG_PENDING_TOOL_USE_ID } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
+import { loadCosmosPref } from './lib/cosmosPrefs';
+import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
 
-// Sentinel toolUseId used when the inline AskBody is synthesized from the
-// session's boolean `pending` flag rather than a full structured Pending object
-// (tailer-less sessions only carry the flag). The server will not recognise this
-// id, which is acceptable — the goal is to never leave the user blind.
-const FLAG_PENDING_TOOL_USE_ID = '__flag__';
 
 // How long a queued send waits for its transcript echo before we stop showing it.
 // Keep an unconfirmed optimistic send visible for a long time: the user must
@@ -309,6 +306,31 @@ function AppInner() {
       window.removeEventListener('resize', apply);
       window.removeEventListener('cockpit:fontsize', onFontSize);
     };
+  }, []);
+
+  // Cosmos backdrop toggles (Settings → General): device-local, no server
+  // round-trip (see lib/cosmosPrefs.ts). `cosmosBackground` drives the JSX
+  // mount below (needs a re-render); parallax/shooting-stars are read inside
+  // non-React loops (rAF scroll handler, ambient timer, GSAP tween) so they
+  // live in refs instead — same live-apply CustomEvent as font size, just
+  // updating a ref for those two instead of triggering a re-render.
+  const [cosmosBackground, setCosmosBackground] = useState(() => loadCosmosPref('background'));
+  const parallaxEnabledRef = useRef(loadCosmosPref('parallax'));
+  const shootingStarsEnabledRef = useRef(loadCosmosPref('shootingStars'));
+  useEffect(() => {
+    const onPrefs = (e: Event) => {
+      const d = (e as CustomEvent<{
+        cosmosBackground?: boolean;
+        cosmosParallax?: boolean;
+        cosmosShootingStars?: boolean;
+      }>).detail;
+      if (!d) return;
+      if (typeof d.cosmosBackground === 'boolean') setCosmosBackground(d.cosmosBackground);
+      if (typeof d.cosmosParallax === 'boolean') parallaxEnabledRef.current = d.cosmosParallax;
+      if (typeof d.cosmosShootingStars === 'boolean') shootingStarsEnabledRef.current = d.cosmosShootingStars;
+    };
+    window.addEventListener('cockpit:cosmosprefs', onPrefs);
+    return () => window.removeEventListener('cockpit:cosmosprefs', onPrefs);
   }, []);
 
   // Surface WS ack errors / answer confirmations as toasts.
@@ -1195,7 +1217,7 @@ function AppInner() {
       raf = requestAnimationFrame(() => {
         raf = 0;
         const el = cosmosRef.current;
-        if (!el) return;
+        if (!el || !parallaxEnabledRef.current) return;
         el.style.setProperty('--cosmos-shift', `${-t.scrollTop * 0.06}px`);
         el.style.setProperty('--cosmos-shift-near', `${-t.scrollTop * 0.13}px`);
         el.style.setProperty('--cosmos-shift-far', `${-t.scrollTop * 0.02}px`);
@@ -1207,6 +1229,76 @@ function AppInner() {
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
+
+  // Shooting stars — a small pool of real, ref-able elements (CSS
+  // pseudo-elements can't be targeted by GSAP/DOM APIs, which is why this
+  // used to be three infinite-loop ::before/::after streaks instead — see
+  // styles.css's .cosmos-shoot-slot comment). One-shot fired from JS: rare
+  // ambient timer (at most once a minute) + once per agent turn completing.
+  // A round-robin index picks the next slot so overlapping shots (ambient +
+  // turn-done landing close together) never fight over the same element.
+  const shootSlotRefs = useRef<(HTMLElement | null)[]>([]);
+  const shootSlotCursor = useRef(0);
+  const fireShootingStar = useCallback((depth?: Shot['depth']) => {
+    if (prefersReducedMotion() || !shootingStarsEnabledRef.current) return;
+    const slots = shootSlotRefs.current;
+    if (!slots.length) return;
+    const el = slots[shootSlotCursor.current % slots.length];
+    shootSlotCursor.current += 1;
+    if (!el) return;
+    const shot = buildShot(depth);
+    el.dataset.depth = shot.depth;
+    el.style.top = `${shot.topPercent}%`;
+    gsap.killTweensOf(el);
+    gsap.set(el, { opacity: 0, x: 0, y: 0, rotate: shot.angleDeg });
+    // durationMs is the whole one-shot flight (already 2.1x-speedup'd in
+    // shootingStars.ts's PRESETS) — position travels the full distance at a
+    // constant rate across it, while opacity ramps in over the first ~12%
+    // and fades out over the last ~30%, so the streak flashes in, crosses,
+    // and dims out rather than popping abruptly at either end.
+    const totalS = shot.durationMs / 1000;
+    const tl = gsap.timeline();
+    tl.to(el, { x: `${shot.travelXvw}vw`, y: `${shot.travelYvw}vw`, duration: totalS, ease: 'none' }, 0)
+      .to(el, { opacity: shot.peakAlpha, duration: totalS * 0.12, ease: 'power1.in' }, 0)
+      .to(el, { opacity: 0, duration: totalS * 0.3, ease: 'power1.out' }, totalS * 0.7);
+  }, []);
+
+  // Ambient cadence: self-rescheduling timeout (not setInterval) so each gap
+  // is freshly randomized — see lib/shootingStars.ts's nextAmbientDelayMs
+  // (never less than a minute). Skips entirely under reduced-motion/toggle-
+  // off, but keeps rescheduling so a later re-enable picks back up without
+  // remounting.
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    const tick = () => {
+      if (!alive) return;
+      if (!prefersReducedMotion() && shootingStarsEnabledRef.current) fireShootingStar();
+      timer = window.setTimeout(tick, nextAmbientDelayMs());
+    };
+    timer = window.setTimeout(tick, nextAmbientDelayMs());
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [fireShootingStar]);
+
+  // Turn-completion trigger: fire one shooting star whenever any session's
+  // active→idle edge fires — the same signal lib/push-trigger.js's
+  // evaluateEdges uses server-side to send the "✅ finished" push
+  // (wasActive && !nowActive && !pending), mirrored client-side via
+  // claudeWorking() over cockpit.sessions. See lib/shootingStars.ts's
+  // detectTurnCompletions for the pure edge-detection logic.
+  const turnActiveRef = useRef<Map<string, boolean>>(new Map());
+  useEffect(() => {
+    const { completed, nextActive } = detectTurnCompletions(
+      turnActiveRef.current,
+      cockpit.sessions,
+      claudeWorking,
+    );
+    turnActiveRef.current = nextActive;
+    if (completed.length) fireShootingStar();
+  }, [cockpit.sessions, fireShootingStar]);
 
   // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
   // streaming, OR reflowing message scrolls to the latest — no Ctrl+. needed.
@@ -1682,7 +1774,7 @@ function AppInner() {
     showToast(ok ? 'Retry → Continue' : 'Not connected', ok ? 'ok' : 'error');
   }, [cockpit.sendReply, showToast]);
   const onThreadAnswer = useCallback(
-    (toolUseId: string, selections: string[][]) => {
+    (toolUseId: string, selections: AnswerSelection[]) => {
       cockpit.sendAnswer(toolUseId, selections);
       cockpit.clearCapture();
       markAnswered();
@@ -1751,6 +1843,36 @@ function AppInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // ⌘/Ctrl+, opens Settings — same action as clicking the header's Settings
+  // button. Mirrors the ⌘K / ⌘. guards (modifier + no shift/alt, bail if a
+  // dialog already owns the keys — the palette itself sets aria-modal="true").
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ',' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
+      e.preventDefault();
+      setConfigOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ⌘/Ctrl+Shift+A toggles the Artifacts pane for the selected session — same
+  // action as the header's Artifacts button. Guard mirrors the other detail-head
+  // shortcuts (⌘J/⌘U/⌘B below): only meaningful with a session selected.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'a') return;
+      if (!selectedSession) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
+      e.preventDefault();
+      setGalleryOpen((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedSession]);
 
   // ⌘/Ctrl+N opens the New Session draft — same action as clicking the rail's
   // "+ New session" button — instead of letting the browser open a new
@@ -1959,11 +2081,16 @@ function AppInner() {
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
     const base = (cwd?: string) => (cwd ? cwd.replace(/\/$/, '').split('/').pop() || cwd : '');
     const cmds: PaletteCommand[] = [];
-    // Sessions BEFORE Terminals; within each, mirror the rail's natural tmux
-    // order (session name → window → pane) so positions feel stable.
+    // LOCAL sessions (claude/codex/terminal) FIRST, OLAM cloud sessions LAST —
+    // same `kind === 'remote'` predicate SessionRail uses to split its own
+    // local vs. per-org olam sections (see groupRemoteByOrg / rail filters).
+    // Within the local tier, Sessions before Terminals; within each tier,
+    // mirror the rail's natural tmux order (session name → window → pane) so
+    // positions feel stable.
     const ordered = [...cockpit.sessions].sort((a, b) => {
-      const at = a.kind === 'terminal' ? 1 : 0;
-      const bt = b.kind === 'terminal' ? 1 : 0;
+      const tierOf = (k: string | undefined) => (k === 'remote' ? 2 : k === 'terminal' ? 1 : 0);
+      const at = tierOf(a.kind);
+      const bt = tierOf(b.kind);
       if (at !== bt) return at - bt;
       return (
         (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
@@ -1973,12 +2100,13 @@ function AppInner() {
     });
     for (const s of ordered) {
       const term = s.kind === 'terminal';
+      const remote = s.kind === 'remote';
       cmds.push({
         id: `switch:${s.id}`,
         label: s.name || s.title || s.tmuxName || s.id,
         hint: [term ? 'terminal' : base(s.cwd), s.pending ? 'ASK' : ''].filter(Boolean).join(' · '),
         keywords: `${s.sessionName ?? ''} ${s.cwd ?? ''} ${s.id}`,
-        group: term ? 'Terminals' : 'Sessions',
+        group: remote ? 'Olam' : term ? 'Terminals' : 'Sessions',
         run: () => select(s.id),
       });
     }
@@ -1995,13 +2123,13 @@ function AppInner() {
         id: 'act:new-session',
         label: 'New session',
         group: 'Actions',
-        keywords: 'create start claude',
-        run: () => {
-          showToast('Creating session…');
-          createSession({})
-            .then((r) => showToast(`Session created → ${r.name}`, 'ok'))
-            .catch((err) => showToast(`New session failed: ${(err as Error).message}`, 'error'));
-        },
+        keywords: 'create start draft claude',
+        hotkey: '⌘N',
+        // Same action as ⌘N and the rail's "+ New session" button
+        // (NewSessionForm onOpenDraft={openDraft}) — opens the draft page for
+        // review rather than instant-creating with empty defaults, so the
+        // palette entry matches what its own hotkey badge promises.
+        run: () => openDraft(),
       },
       {
         id: 'act:processes',
@@ -2015,14 +2143,76 @@ function AppInner() {
         label: 'Settings',
         group: 'Actions',
         keywords: 'config preferences model mlx',
+        hotkey: '⌘,',
         run: () => setConfigOpen(true),
+      },
+      {
+        id: 'act:terminal-mode',
+        label: terminalShown ? 'Exit terminal mode' : 'Terminal mode',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'raw tmux ttyd shell toggle',
+        hotkey: '⌘J',
+        run: () => toggleTerminal(),
+      },
+      {
+        id: 'act:artifacts',
+        label: galleryOpen ? 'Close artifacts pane' : 'Open artifacts pane',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'gallery embed embedded-app artifact panel',
+        hotkey: '⌘⇧A',
+        run: () => setGalleryOpen((v) => !v),
+      },
+      {
+        id: 'act:subagents',
+        label: 'Sub-agents panel',
+        group: 'Actions',
+        keywords: 'agents sidebar list',
+        hotkey: '⌘U',
+        run: () => {
+          setPanelAgentId(null);
+          setPanelOpen((v) => !v);
+        },
       },
       {
         id: 'act:toggle-sidebar',
         label: railCollapsed ? 'Show sidebar' : 'Hide sidebar (focus mode)',
         group: 'Actions',
         keywords: 'rail collapse focus',
+        hotkey: '⌘B',
         run: () => toggleRail(),
+      },
+      {
+        id: 'act:search-transcript',
+        label: searchOpen ? 'Close transcript search' : 'Search transcript',
+        group: 'Actions',
+        keywords: 'find quick-find',
+        hotkey: '⌘/',
+        run: () => setSearchOpen((v) => !v),
+      },
+      {
+        id: 'act:jump-latest',
+        label: 'Jump to latest',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'scroll bottom tail',
+        hotkey: '⌘.',
+        run: () => {
+          const vp = document.querySelector<HTMLElement>('.thread-viewport');
+          vp?.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
+        },
+      },
+      {
+        id: 'act:focus-composer',
+        label: 'Focus composer',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'type message input',
+        hotkey: '⌘⏎',
+        run: () => {
+          document.querySelector<HTMLTextAreaElement>('.composer .composer-input')?.focus();
+        },
       },
       {
         id: 'act:rematch-all',
@@ -2045,7 +2235,21 @@ function AppInner() {
       },
     );
     return cmds;
-  }, [cockpit.sessions, cockpit.selectedId, selectedSession, railCollapsed, select, toggleRail, showToast, openTerminal]);
+  }, [
+    cockpit.sessions,
+    cockpit.selectedId,
+    selectedSession,
+    railCollapsed,
+    select,
+    toggleRail,
+    showToast,
+    openTerminal,
+    openDraft,
+    terminalShown,
+    toggleTerminal,
+    galleryOpen,
+    searchOpen,
+  ]);
 
   // The live "thinking" block is the trailing reasoning of the last real
   // transcript message, but only while the server says this session is actively
@@ -2164,14 +2368,27 @@ function AppInner() {
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
       >
-        <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
-          <i className="cosmos-stars-far" />
-          <i className="cosmos-stars-mid" />
-          <i className="cosmos-stars-near" />
-          <i className="cosmos-twinkle" />
-          <i className="cosmos-shooting" />
-          <i className="cosmos-active-tint" />
-        </div>
+        {cosmosBackground && (
+          <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
+            <i className="cosmos-stars-far" />
+            <i className="cosmos-stars-mid" />
+            <i className="cosmos-stars-near" />
+            <i className="cosmos-twinkle" />
+            <div className="cosmos-shoot-stars">
+              {[0, 1, 2].map((i) => (
+                <i
+                  key={i}
+                  className="cosmos-shoot-slot"
+                  ref={(el) => {
+                    shootSlotRefs.current[i] = el;
+                  }}
+                />
+              ))}
+            </div>
+            <i className="cosmos-active-tint" />
+            <i className="cosmos-aurora" />
+          </div>
+        )}
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
             release-to-refresh. */}
         {pull > 0 || refreshing ? (
