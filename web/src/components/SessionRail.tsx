@@ -267,6 +267,9 @@ function RemoteRow({
         {s.model || s.ctxPct != null ? (
           <div className="session-meta">
             {s.model ? <span className="meta-model">{formatModel(s.model)}</span> : null}
+            {s.model && parseEffort(s.model) ? (
+              <span className="meta-effort">{parseEffort(s.model)}</span>
+            ) : null}
             {s.ctxPct != null ? (
               <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
             ) : null}
@@ -405,7 +408,14 @@ interface MetaField {
  *  Drops any trailing parenthetical (e.g. "Opus 4.8 (1M context)" → "opus-4.8") so
  *  every row reads the same. Already-hyphenated ids ("claude-fable-5", "gpt-5.5")
  *  pass through unchanged. */
-function formatModel(model: string): string {
+/** Codex reasoning-effort suffixes baked into the model label (e.g.
+ *  "gpt-5.5-xhigh"). Claude models carry no effort suffix — so effort is only
+ *  available for the sessions whose model string ends in one of these. */
+const EFFORT_RE = /-(minimal|low|medium|high|xhigh)$/;
+
+/** Normalize a model id: drop trailing parenthetical, lowercase, hyphenate, and
+ *  strip a "claude-" prefix. Does NOT touch the effort suffix. */
+function normalizeModel(model: string): string {
   return model
     .replace(/\s*\([^)]*\)\s*$/, '')
     .trim()
@@ -414,12 +424,30 @@ function formatModel(model: string): string {
     .replace(/^claude-/, ''); // "claude-fable-5" → "fable-5"
 }
 
+/** Display model id with the reasoning-effort suffix removed — effort is shown
+ *  as its own meta dimension (see parseEffort / paneMetaFields), not inline. */
+function formatModel(model: string): string {
+  return normalizeModel(model).replace(EFFORT_RE, '');
+}
+
+/** The reasoning effort baked into a model id (e.g. "gpt-5.5-xhigh" → "xhigh"),
+ *  or null when the model carries none (all Claude models, most Codex ones). */
+function parseEffort(model: string): string | null {
+  const m = normalizeModel(model).match(EFFORT_RE);
+  return m ? m[1] : null;
+}
+
 function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {
   if (isTerminal) {
     return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
   }
   const fields: MetaField[] = [];
   if (s.model) fields.push({ key: 'model', text: formatModel(s.model), className: 'meta-model' });
+  // Effort is a third rotating dimension, present only when the model reports it
+  // (Codex reasoning effort); absent for Claude models, so it simply doesn't join
+  // the rotation there.
+  const effort = s.model ? parseEffort(s.model) : null;
+  if (effort) fields.push({ key: 'effort', text: effort, className: 'meta-effort' });
   if (s.ctxPct != null) {
     fields.push({ key: 'ctx', text: `ctx:${Math.round(s.ctxPct)}%`, className: 'meta-ctx' });
   }

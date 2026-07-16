@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAnswerKeys, buildAnswerProgram } from '../lib/answer.js';
+import { buildAnswerKeys, buildAnswerProgram, nextSubmitAction } from '../lib/answer.js';
 
 // Picker model (verified against the live picker):
 //   single-select = Down*index then Enter (Enter selects + advances/submits);
@@ -125,4 +125,54 @@ test('buildAnswerProgram: two multi-select questions — Q1 Next advances, Q2 Su
 
 test('buildAnswerProgram: no questions throws', () => {
   assert.throws(() => buildAnswerProgram({ questions: [] }, []), /no questions/i);
+});
+
+// ── nextSubmitAction: post-answer submit-confirmation decision ───────────────
+// Guards the reported bug: multi-question picker parked on "Submit"/review and
+// never actually submitted. The driver loops on this until it returns 'done'.
+
+test('nextSubmitAction: no picker (low confidence) → done (submitted)', () => {
+  assert.equal(nextSubmitAction({ rows: [], actionLabel: null, isReview: false, confidence: 'low' }), 'done');
+  assert.equal(nextSubmitAction(null), 'done');
+});
+
+test('nextSubmitAction: review screen up → enter (send final Submit)', () => {
+  const parsed = {
+    rows: [
+      { kind: 'review-submit', label: 'Submit answers', cursor: true },
+      { kind: 'review-cancel', label: 'Cancel', cursor: false },
+    ],
+    actionLabel: null,
+    isReview: true,
+    confidence: 'ok',
+  };
+  assert.equal(nextSubmitAction(parsed), 'enter');
+});
+
+test('nextSubmitAction: parked with cursor on the Submit action row (dropped Enter) → enter', () => {
+  const parsed = {
+    rows: [
+      { kind: 'option', label: 'a', checked: true, cursor: false },
+      { kind: 'type-something', label: 'Type something', cursor: false },
+      { kind: 'action', label: 'Submit', cursor: true },
+      { kind: 'chat', label: 'Chat about this', cursor: false },
+    ],
+    actionLabel: 'Submit',
+    isReview: false,
+    confidence: 'ok',
+  };
+  assert.equal(nextSubmitAction(parsed), 'enter');
+});
+
+test('nextSubmitAction: picker up but cursor on an option (mid-render) → wait (never blind-Enter an option)', () => {
+  const parsed = {
+    rows: [
+      { kind: 'option', label: 'a', checked: false, cursor: true },
+      { kind: 'action', label: 'Submit', cursor: false },
+    ],
+    actionLabel: 'Submit',
+    isReview: false,
+    confidence: 'ok',
+  };
+  assert.equal(nextSubmitAction(parsed), 'wait');
 });
