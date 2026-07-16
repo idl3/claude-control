@@ -401,14 +401,16 @@ interface MetaField {
  * model ⟷ context alternation for the common 2-field case and folds Codex's
  * extra rate-limit field into the same rotation instead of dropping it.
  */
-/** Normalise the server's model label to a consistent lowercase `<model>-<version>`
- *  form: "Opus 4.8" → "opus-4.8", "Opus 4.8 (1M context)" → "opus-4.8 (1m context)".
- *  Already-hyphenated ids ("claude-fable-5", "gpt-5.5") pass through unchanged. */
+/** Normalise the server's model label to a consistent lowercase `<model>-<version>`.
+ *  Drops any trailing parenthetical (e.g. "Opus 4.8 (1M context)" → "opus-4.8") so
+ *  every row reads the same. Already-hyphenated ids ("claude-fable-5", "gpt-5.5")
+ *  pass through unchanged. */
 function formatModel(model: string): string {
-  const m = model.match(/^(.*?)(\s*\([^)]*\))?\s*$/);
-  const base = (m?.[1] ?? model).trim().toLowerCase().replace(/\s+/g, '-');
-  const suffix = m?.[2] ? ` ${m[2].trim().toLowerCase()}` : '';
-  return base + suffix;
+  return model
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-');
 }
 
 function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {

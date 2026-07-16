@@ -2961,7 +2961,7 @@ details.block-tool[open] > summary .tool-arrow,
   .composer {
     /* Unfocused: sit ~8px higher off the bottom contour (matches the rail-foot
        clearance so both bottom bars read consistently above the home indicator). */
-    padding-bottom: max(8px, calc(env(safe-area-inset-bottom) - 16px));
+    padding-bottom: max(12px, calc(env(safe-area-inset-bottom) - 10px));
     transition: padding-bottom 120ms ease;
   }
   body.kbd-up .composer {
