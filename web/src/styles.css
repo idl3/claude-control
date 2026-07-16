@@ -850,7 +850,6 @@ body.is-external-display .rail {
 }
 @media (prefers-reduced-motion: reduce) {
   .session-item, .session-meta { transition: none; }
-  .session-row-meta > * { animation: none; }
 }
 .meta-model {
   font-size: var(--txt-meta);
@@ -882,8 +881,13 @@ body.is-external-display .rail {
    One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
    cycle every 10s (SessionRail.tsx useMetaCyclePhase/paneMetaFields), or the
    tmux pane name while ⌘ is held (overrides the cycle — see PaneRow). The
-   `key`-per-swap in PaneRow remounts the child span on every change so this
-   mount-only keyframe replays as a subtle crossfade instead of a hard cut. */
+   text transition itself is the slot-text package's <SlotText> (a
+   dependency-free CSS text-roll — see node_modules/slot-text/style.css for
+   its .slot-text/.char-slot/.char-face rules); PaneRow keeps ONE persistent
+   SlotText instance across every state so its roll animates on each swap
+   instead of a hard cut. This wrapper only owns the slot's reserved
+   width/clipping, not the child's display/white-space (slot-text needs
+   `.slot-text`'s own inline-flex + pre for its per-character layout). */
 .session-row-meta {
   flex: 0 0 auto;
   max-width: 108px;
@@ -894,13 +898,9 @@ body.is-external-display .rail {
   font-size: var(--txt-meta);
 }
 .session-row-meta > * {
-  display: inline-block;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   vertical-align: bottom;
-  animation: meta-swap-in 0.28s var(--ease);
 }
 /* Local single-slot usage isn't flex-wrapped like RemoteRow's multi-chip
    .session-meta row, so it can use the slot's full reserved width instead
@@ -914,10 +914,6 @@ body.is-external-display .rail {
   border-radius: 5px;
   background: var(--bg-2);
   color: var(--text-dim);
-}
-@keyframes meta-swap-in {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 .session-empty {
   list-style: none;
