@@ -852,11 +852,12 @@ function AppInner() {
   // Raw-terminal overlay (A5: xterm.js + the A4 PTY bridge). The panel is now
   // mounted only while open (matching every other useModalTransition
   // consumer — CommandPalette, ConfigModal, …), not kept warm-but-hidden the
-  // way the old ttyd-iframe cache was: the A4 bridge's own server-side
-  // idle-grace (~30s) + reuse-by-sessionId already makes a reopen within that
-  // window a fast reattach to the still-live tmux pty, so the old N-warm-
-  // panel client-side cache (built specifically to avoid re-spawning ttyd,
-  // which node-pty's centrally-managed registry doesn't need) is gone.
+  // way the old iframe-based terminal cache was: the A4 bridge's own
+  // server-side idle-grace (~30s) + reuse-by-sessionId already makes a
+  // reopen within that window a fast reattach to the still-live tmux pty, so
+  // the old N-warm-panel client-side cache (built specifically to avoid
+  // re-spawning the old raw-terminal process, which node-pty's
+  // centrally-managed registry doesn't need) is gone.
   const [terminalShown, setTerminalShown] = useState(false);
 
   // Open: show the current session's panel. Toggle: same key (⌘J) flips it
@@ -1780,7 +1781,7 @@ function AppInner() {
         // state updates — this is collision #6's deliberate exception (A1
         // design §2): ⌘1-9 wins even while the terminal has focus, and
         // closing first avoids remounting a panel for the new session while
-        // this switch is still in flight. (The old "blur a stuck ttyd
+        // this switch is still in flight. (The old "blur a stuck terminal
         // iframe first" workaround is gone — xterm.js has no iframe
         // document boundary to get stuck behind.)
         setTerminalShown(false);
@@ -1922,7 +1923,7 @@ function AppInner() {
         label: 'View raw tmux window',
         hint: selectedSession ? selectedSession.name || selectedSession.id : 'select a session first',
         group: 'Actions',
-        keywords: 'terminal ttyd pane window',
+        keywords: 'terminal pane window',
         run: () => openTerminal(),
       },
       {
@@ -1999,10 +2000,11 @@ function AppInner() {
   // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
   const cmdHeld = useModifierHeld(500);
 
-  // The old iframe focus-steal guard (ttyd's warm/hidden <iframe> silently
-  // grabbing focus) is gone: the terminal panel is no longer kept mounted
-  // while hidden (see the terminalShown state comment), and xterm.js has no
-  // separate document to steal focus from in the first place.
+  // The old iframe focus-steal guard (the raw-terminal's warm/hidden
+  // <iframe> silently grabbing focus) is gone: the terminal panel is no
+  // longer kept mounted while hidden (see the terminalShown state comment),
+  // and xterm.js has no separate document to steal focus from in the first
+  // place.
 
   // Mobile soft-keyboard gap: the composer keeps a constant
   // safe-area-inset-bottom clearance for the home indicator (styles.css

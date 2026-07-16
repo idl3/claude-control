@@ -1,10 +1,9 @@
 // API helpers. The token is sent as an `Authorization: Bearer <token>` header
 // (never in the URL — URLs leak via history/logs/referrer). The token lives in
-// localStorage via lib/auth. Same-origin throughout.
-//
-// ttyd raw-terminal surface is the ONE exception: it is opened via window.open /
-// an iframe to a separately-proxied URL that cannot send an Authorization
-// header, so terminalUrl() keeps a `?token=` sourced from the stored token.
+// localStorage via lib/auth. Same-origin throughout — every surface, including
+// the raw-terminal PTY bridge (`/pty`, see useTerminalRelay), is header/
+// subprotocol-authed; there is no URL-token exception left (the old ttyd
+// surface that needed one was fully retired in A6).
 
 import { getToken, clearToken } from './auth';
 import type { SessionLiveness } from './olamMode';
@@ -54,19 +53,6 @@ export async function authFetch(
   });
   if (res.status === 401) handleUnauthorized();
   return res;
-}
-
-/**
- * Build the token-gated URL for a session's raw-terminal (ttyd) surface. The id
- * is a tmux target (e.g. `name:0`) and is percent-encoded into a single path
- * segment to match the server's `/term/<encoded-id>` route + ttyd `-b` base.
- * ttyd cannot send an Authorization header, so this surface keeps a `?token=`
- * sourced from the stored token (the only place a URL token survives).
- */
-export function terminalUrl(id: string): string {
-  const base = `/term/${encodeURIComponent(id)}/`;
-  const t = getToken();
-  return t ? `${base}?token=${encodeURIComponent(t)}` : base;
 }
 
 export function wsUrl(): string {

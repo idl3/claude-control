@@ -1,10 +1,12 @@
 #!/bin/bash
-# claude-control setup — install local dependencies (voice + raw terminal).
+# claude-control setup — install local dependencies (voice).
 #
 # None of these are bundled. The 🎤 voice input needs ffmpeg, the whisper-cli
 # binary (Homebrew `whisper-cpp`), and a ggml model under ~/.claude-control/models.
-# The in-browser raw terminal needs ttyd. This installs/downloads them all
-# idempotently. tmux (required to run the app at all) is checked too.
+# This installs/downloads them all idempotently. tmux (required to run the app
+# at all) is checked too. The in-browser raw terminal needs no manual install —
+# it's a bundled xterm.js panel backed by `node-pty` (an npm optional
+# dependency installed automatically; ttyd is no longer used, see A6).
 set -uo pipefail
 
 MODELS_DIR="$HOME/.claude-control/models"
@@ -28,10 +30,8 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-say "Installing ffmpeg + whisper-cpp + ttyd (Homebrew, skips if already present)…"
-# ttyd powers the in-browser raw tmux terminal; the server spawns/manages it on
-# demand (no daemon to start), but the binary must exist first.
-brew install ffmpeg whisper-cpp ttyd || {
+say "Installing ffmpeg + whisper-cpp (Homebrew, skips if already present)…"
+brew install ffmpeg whisper-cpp || {
   bad "brew install failed — see output above"
   exit 1
 }
@@ -56,7 +56,6 @@ say "Verifying local dependencies…"
 command -v ffmpeg >/dev/null 2>&1 && ok "ffmpeg: $(command -v ffmpeg)" || bad "ffmpeg missing"
 command -v whisper-cli >/dev/null 2>&1 && ok "whisper-cli: $(command -v whisper-cli)" || bad "whisper-cli missing (brew install whisper-cpp)"
 ls "$MODELS_DIR"/ggml-*.bin >/dev/null 2>&1 && ok "model: $(ls "$MODELS_DIR"/ggml-*.bin | head -1)" || bad "no ggml model in $MODELS_DIR"
-command -v ttyd >/dev/null 2>&1 && ok "ttyd: $(command -v ttyd)" || bad "ttyd missing (brew install ttyd) — raw in-browser terminal won't work without it"
 
 say "Done. The 🎤 mic (voice → text) is ready."
 echo "  Note: the MLX prompt-enhancer (optional) is separate; the optimiser falls"
