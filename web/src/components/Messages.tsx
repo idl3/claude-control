@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { SlotText } from 'slot-text/react';
 import 'slot-text/style.css';
-import { TextPart, ToolPart, AskAnsweredPart, lastUpdateLine } from './MessageParts';
+import { TextPart, ToolPart, AskAnsweredPart, ExitPlanPart, lastUpdateLine } from './MessageParts';
 import { useLiveThinkingId } from './ThinkingContext';
 import { parsePendingKey } from '../lib/pendingSend';
 
@@ -176,9 +176,12 @@ function GroupedReasoning({ text }: ReasoningMessagePartProps) {
 const partComponents = {
   Text: TextPart,
   Reasoning: GroupedReasoning,
-  // AskUserQuestion renders as a clean Q&A card; everything else uses the
-  // generic expandable tool row.
-  tools: { by_name: { AskUserQuestion: AskAnsweredPart }, Fallback: ToolPart },
+  // AskUserQuestion renders as a clean Q&A card, ExitPlanMode as a rendered-
+  // markdown Plan card; everything else uses the generic expandable tool row.
+  tools: {
+    by_name: { AskUserQuestion: AskAnsweredPart, ExitPlanMode: ExitPlanPart },
+    Fallback: ToolPart,
+  },
 } as const;
 
 /**
