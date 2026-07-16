@@ -7,6 +7,80 @@
 const WS_RECONNECT_BASE_MS = 1000;
 const WS_RECONNECT_MAX_MS  = 30_000;
 
+// Dedicated WS subprotocol label the server expects alongside the token (see
+// lib/auth.js WS_PROTOCOL / checkWsToken — inlined here since public/app.js is
+// a plain script with no imports).
+const WS_PROTOCOL = 'claude-control';
+
+// ── Auth token storage ───────────────────────────────────────────────────
+// Tokens never ride the URL past first load (URLs leak via history/logs/
+// referrer). The token lives in localStorage and is sent as an
+// `Authorization: Bearer <token>` header on HTTP requests and as a WebSocket
+// subprotocol on the WS connection — matching web/src/lib/auth.ts.
+const TOKEN_STORAGE_KEY = 'claude-control.token';
+
+let cachedToken = null;
+let tokenLoaded = false;
+
+function readStoredToken() {
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // localStorage can throw in private-mode / sandboxed iframes.
+    return null;
+  }
+}
+
+function getToken() {
+  if (!tokenLoaded) {
+    cachedToken = readStoredToken();
+    tokenLoaded = true;
+  }
+  return cachedToken;
+}
+
+function setToken(token) {
+  cachedToken = token;
+  tokenLoaded = true;
+  try {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  } catch {
+    /* ignore storage failures — in-memory cache still works for this session */
+  }
+}
+
+// Migrate a legacy `?token=<t>` from the URL into localStorage and strip it
+// from the visible URL. Runs once on module load. Mirrors
+// web/src/lib/auth.ts's migrateLegacyUrlToken.
+function migrateLegacyUrlToken() {
+  if (typeof window === 'undefined' || !window.location) return;
+  let params;
+  try {
+    params = new URLSearchParams(window.location.search);
+  } catch {
+    return;
+  }
+  const legacy = params.get('token');
+  if (!legacy) return;
+  setToken(legacy);
+  params.delete('token');
+  const query = params.toString();
+  const cleaned =
+    window.location.pathname + (query ? `?${query}` : '') + window.location.hash;
+  try {
+    window.history.replaceState(null, '', cleaned);
+  } catch {
+    /* replaceState can fail in some sandboxes; the token is already stored */
+  }
+}
+
+migrateLegacyUrlToken();
+
+function authHeaders() {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // ── Client state ─────────────────────────────────────────────────────────
 const state = {
   sessions:   [],          // Session[]
@@ -28,16 +102,16 @@ let wsConnected = false;
 function wsUrl() {
   const loc = window.location;
   const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-  const params = new URLSearchParams(loc.search);
-  const token = params.get('token');
-  const base = `${proto}//${loc.host}`;
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  return `${proto}//${loc.host}`;
 }
 
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   setConnState('connecting');
-  ws = new WebSocket(wsUrl());
+  const token = getToken();
+  // Offer the token as a subprotocol — browsers can't set arbitrary headers on
+  // `new WebSocket(...)`, but CAN offer subprotocols (see lib/auth.js checkWsToken).
+  ws = new WebSocket(wsUrl(), token ? [WS_PROTOCOL, token] : [WS_PROTOCOL]);
 
   ws.addEventListener('open', () => {
     wsConnected = true;
@@ -458,17 +532,12 @@ function initComposer() {
   });
 }
 
-function authQuery() {
-  const t = new URLSearchParams(window.location.search).get('token');
-  return t ? `&token=${encodeURIComponent(t)}` : '';
-}
-
 async function uploadOne(file) {
   if (!state.selectedId) { toast('select a session first', 'error'); return; }
   toast(`uploading ${file.name}…`);
   try {
-    const url = `/api/upload?name=${encodeURIComponent(file.name)}${authQuery()}`;
-    const res = await fetch(url, { method: 'POST', body: file });
+    const url = `/api/upload?name=${encodeURIComponent(file.name)}`;
+    const res = await fetch(url, { method: 'POST', body: file, headers: authHeaders() });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
     insertIntoComposer(json.path);
