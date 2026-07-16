@@ -13,6 +13,19 @@ import { createElement } from 'react';
 import type { Session } from '../lib/types';
 import { SessionRail } from './SessionRail';
 
+// slot-text's real <SlotText> builds its roll via per-character DOM nodes
+// (a hidden `.char-sizer` + a visible `.char-face` per glyph — see
+// node_modules/slot-text/dist/slotText.js buildSlotText), so
+// `element.textContent` on the real component doubles every character
+// ("opus" -> "ooppuuss"). These tests assert WHICH field the shared cycle
+// picked (model/ctx/usage/pane-name), not slot-text's own roll mechanics
+// (that's slot-text's own test surface, not this repo's) — so swap in a
+// plain-span stand-in that keeps `text`/`className` exactly as passed.
+vi.mock('slot-text/react', () => ({
+  SlotText: ({ text, className }: { text: string; className?: string }) =>
+    createElement('span', { className }, text),
+}));
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
