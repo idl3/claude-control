@@ -789,15 +789,26 @@ export function AskInline({
         </button>
       ) : activePrompt ? (
         <div className="ask-inline-full">
-          <button
-            type="button"
-            className="ask-min-btn"
-            aria-label="Minimise question"
-            title="Minimise"
-            onClick={minimize}
-          >
-            <span aria-hidden="true" />
-          </button>
+          {/* Sticky, zero-height header: `.ask-inline-body` (the bodyRef div)
+              is the actual overflow-y:auto scroller, so pinning the button
+              needs `position: sticky` on something INSIDE it, not `fixed` —
+              `.ask-inline-full` itself is a normal in-flow child of that
+              scroller, so the old plain `position: absolute` button (relative
+              to `.ask-inline-full`) scrolled away with the rest of the
+              question. This wrapper sticks to the scroller's top edge;
+              height:0 + overflow:visible keeps it from adding layout height
+              or pushing the question content down. */}
+          <div className="ask-min-header">
+            <button
+              type="button"
+              className="ask-min-btn"
+              aria-label="Minimise question"
+              title="Minimise"
+              onClick={minimize}
+            >
+              <span aria-hidden="true" />
+            </button>
+          </div>
           {activePrompt.kind === 'ask' ? (
             <AskBody
               key={activePrompt.pending.toolUseId}
