@@ -9,6 +9,29 @@ import './highlight-theme.css';
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found');
 
+// iOS installed-PWA (standalone) viewport fix. Measured on an iOS 26 sim: in an
+// installed PWA (display-mode: standalone, black-translucent, viewport-fit=cover)
+// EVERY viewport unit under-reports — 100dvh / 100vh / 100% / window.innerHeight /
+// visualViewport.height ALL equal screen-height minus the status-bar (793 of 852 on
+// an iPhone 15 Pro), so a .app sized with any of them leaves a ~59px dead band of
+// background below the footer. window.screen.height is the only value equal to the
+// FULL physical screen, and the PWA manifest locks portrait so it's stable. We fill
+// the full screen ONLY in standalone (Safari, where the units are correct and track
+// the browser chrome, keeps the dvh behavior — no pwa-fill class). See styles.css
+// `html.pwa-fill`.
+(function fillStandaloneViewport() {
+  const standalone =
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (window.navigator as { standalone?: boolean }).standalone === true;
+  if (!standalone) return;
+  const setScreenH = () =>
+    document.documentElement.style.setProperty('--screen-h', `${window.screen.height}px`);
+  setScreenH();
+  document.documentElement.classList.add('pwa-fill');
+  window.addEventListener('resize', setScreenH);
+  window.addEventListener('orientationchange', setScreenH);
+})();
+
 // Catch crashes OUTSIDE React's render path too (async handlers, event callbacks,
 // module init) — these never hit an ErrorBoundary but still break the app. Ship
 // them to the same server sink so every crash is logged + traceable.
