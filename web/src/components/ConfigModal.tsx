@@ -13,7 +13,13 @@ import {
 } from '../lib/api';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
 import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
-import { loadRailTokens, saveRailTokens, DEFAULT_RAIL_TOKENS, type RailToken } from '../lib/railTokenPrefs';
+import {
+  loadRailTokens,
+  saveRailTokens,
+  DEFAULT_RAIL_TOKENS,
+  DEFAULT_RAIL_INTERVAL_MS,
+  type RailToken,
+} from '../lib/railTokenPrefs';
 import { TypeIcon, TerminalSquareIcon } from './icons';
 import { RailTokenConfig } from './RailTokenConfig';
 
@@ -683,6 +689,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   // Session-rail meta-slot token order — same device-local, no-server-
   // counterpart shape as the cosmos toggles above. See lib/railTokenPrefs.ts.
   const [railTokens, setRailTokens] = useState<RailToken[]>(DEFAULT_RAIL_TOKENS);
+  const [railIntervalMs, setRailIntervalMs] = useState<number>(DEFAULT_RAIL_INTERVAL_MS);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
@@ -725,7 +732,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     setCosmosBackground(loadCosmosPref('background'));
     setCosmosParallax(loadCosmosPref('parallax'));
     setCosmosShootingStars(loadCosmosPref('shootingStars'));
-    setRailTokens(loadRailTokens());
+    const railPrefs = loadRailTokens();
+    setRailTokens(railPrefs.tokens);
+    setRailIntervalMs(railPrefs.intervalMs);
   }, []);
 
   useEffect(() => {
@@ -860,8 +869,10 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
       );
       // Rail-token order is device-local only too — persist + apply LIVE the
       // same way. SessionRail owns the load + listener (see its mount effect).
-      saveRailTokens(railTokens);
-      window.dispatchEvent(new CustomEvent('cockpit:railtokenprefs', { detail: { railTokens } }));
+      saveRailTokens({ tokens: railTokens, intervalMs: railIntervalMs });
+      window.dispatchEvent(
+        new CustomEvent('cockpit:railtokenprefs', { detail: { railTokens, intervalMs: railIntervalMs } }),
+      );
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
@@ -1014,7 +1025,12 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
               />
             ) : null}
             {activeSection === 'railtokens' ? (
-              <RailTokenConfig railTokens={railTokens} setRailTokens={setRailTokens} />
+              <RailTokenConfig
+                railTokens={railTokens}
+                setRailTokens={setRailTokens}
+                intervalMs={railIntervalMs}
+                setIntervalMs={setRailIntervalMs}
+              />
             ) : null}
           </div>
         </div>
