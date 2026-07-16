@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CockpitSocket, type ConnState } from '../lib/ws';
 import { mergeMessages } from '../lib/messages';
 import type {
+  AnswerSelection,
   Msg,
   PanePrompt,
   Pending,
@@ -84,7 +85,7 @@ export interface CockpitStore {
   sendReply: (text: string, attachments?: number, viaAnswer?: boolean, hardSteer?: boolean) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
-  sendAnswer: (toolUseId: string, selections: string[][]) => boolean;
+  sendAnswer: (toolUseId: string, selections: AnswerSelection[]) => boolean;
   requestSubagent: (agentId: string) => boolean;
   requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
@@ -359,7 +360,7 @@ export function useCockpit(): CockpitStore {
   );
 
   const sendAnswer = useCallback(
-    (toolUseId: string, selections: string[][]): boolean => {
+    (toolUseId: string, selections: AnswerSelection[]): boolean => {
       const id = selectedRef.current;
       if (!id) return false;
       return socket.send({ type: 'answer', id, toolUseId, selections });
