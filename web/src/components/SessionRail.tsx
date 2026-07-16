@@ -7,6 +7,7 @@ import { TerminalSquareIcon, CloudIcon, PencilIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
+import { loadRailTokens, orderMetaFields, type RailToken } from '../lib/railTokenPrefs';
 
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
@@ -89,8 +90,9 @@ interface SessionGroup {
 /**
  * Format a Codex rate-limit window in minutes to a human label.
  * 300 → "5h", 10080 → "7d", other → "${min}m".
+ * Exported for RailTokenConfig's live preview (Codex usage chip).
  */
-function formatUsageWindow(windowMin?: number | null): string {
+export function formatUsageWindow(windowMin?: number | null): string {
   if (windowMin == null) return '?';
   if (windowMin === 300) return '5h';
   if (windowMin === 10080) return '7d';
@@ -381,6 +383,13 @@ function RemoteOrgSection({
   );
 }
 
+/** Shared cycle period for every row's right-hand meta slot — see
+ *  useMetaCyclePhase. Exported so the rail-token configurator's live preview
+ *  (RailTokenConfig.tsx) can render the real separator interval
+ *  (`${META_CYCLE_PERIOD_MS / 1000}s`) instead of a hardcoded guess, and
+ *  reuse the same tick via useMetaCyclePhase. */
+export const META_CYCLE_PERIOD_MS = 10_000;
+
 /**
  * ONE shared 10s interval for the whole rail — every row's right-hand meta
  * slot reads the same tick, so they all swap in lockstep instead of each
@@ -388,7 +397,7 @@ function RemoteOrgSection({
  * (not just a boolean) so a row with N available fields can rotate through
  * all of them via `fields[tick % fields.length]` (see paneMetaFields).
  */
-function useMetaCyclePhase(periodMs = 10_000): number {
+export function useMetaCyclePhase(periodMs = META_CYCLE_PERIOD_MS): number {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), periodMs);
@@ -434,14 +443,16 @@ function normalizeModel(model: string): string {
 }
 
 /** Display model id with the reasoning-effort suffix removed — effort is shown
- *  as its own meta dimension (see parseEffort / paneMetaFields), not inline. */
-function formatModel(model: string): string {
+ *  as its own meta dimension (see parseEffort / paneMetaFields), not inline.
+ *  Exported for RailTokenConfig's live preview. */
+export function formatModel(model: string): string {
   return normalizeModel(model).replace(EFFORT_RE, '');
 }
 
 /** The reasoning effort baked into a model id (e.g. "gpt-5.5-xhigh" → "xhigh"),
- *  or null when the model carries none (all Claude models, most Codex ones). */
-function parseEffort(model: string): string | null {
+ *  or null when the model carries none (all Claude models, most Codex ones).
+ *  Exported for RailTokenConfig's live preview. */
+export function parseEffort(model: string): string | null {
   const m = normalizeModel(model).match(EFFORT_RE);
   return m ? m[1] : null;
 }
@@ -452,8 +463,9 @@ function parseEffort(model: string): string | null {
  *  out AT `xhigh` (no `max`) — so the "rainbow" top-tier treatment (borrowed
  *  from .ultrathink-text) lands on a different level per harness, and
  *  Claude's `xhigh` (one below its ceiling) reads as red rather than
- *  rainbow. Everything below that is shared: amber → yellow → gray. */
-function effortClass(effort: string, isCodex: boolean): string {
+ *  rainbow. Everything below that is shared: amber → yellow → gray.
+ *  Exported for RailTokenConfig's live preview. */
+export function effortClass(effort: string, isCodex: boolean): string {
   const level = effort.toLowerCase();
   if (isCodex) {
     switch (level) {
@@ -484,7 +496,17 @@ function effortClass(effort: string, isCodex: boolean): string {
   }
 }
 
-function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {
+/** Available meta fields for a row's right-hand slot, gated by data
+ *  presence (same as ever) then reordered/filtered to the operator's
+ *  configured `tokens` order (see lib/railTokenPrefs.ts, Settings → Rail
+ *  tokens). Terminal rows ignore `tokens` entirely — they only ever have
+ *  the one `cwd` field and no configurator entry for it. */
+function paneMetaFields(
+  s: Session,
+  isTerminal: boolean,
+  isCodex: boolean,
+  tokens: RailToken[],
+): MetaField[] {
   if (isTerminal) {
     return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
   }
@@ -507,7 +529,7 @@ function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): Meta
       className: 'meta-usage',
     });
   }
-  return fields;
+  return orderMetaFields(fields, tokens);
 }
 
 function PaneRow({
@@ -519,6 +541,7 @@ function PaneRow({
   hasRunningSubagents,
   cmdHeld,
   metaTick,
+  railTokens,
 }: {
   s: Session;
   selected: boolean;
@@ -536,6 +559,10 @@ function PaneRow({
   /** Shared cycle phase (see paneMetaFields) — one counter for the whole rail,
    *  ticking every 10s, so every row's meta slot swaps in lockstep. */
   metaTick: number;
+  /** Operator-configured meta-slot rotation + order (Settings → Rail tokens,
+   *  see lib/railTokenPrefs.ts) — owned/loaded by SessionRail (the only
+   *  consumer) and threaded down here for the paneMetaFields call. */
+  railTokens: RailToken[];
 }) {
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
@@ -590,7 +617,7 @@ function PaneRow({
   // firstTextEffectRef, only animates on update, not on mount).
   const paneName = s.tmuxName;
   const showPaneName = Boolean(cmdHeld && paneName);
-  const metaFields = paneMetaFields(s, isTerminal, isCodex);
+  const metaFields = paneMetaFields(s, isTerminal, isCodex, railTokens);
   const activeField = metaFields.length > 0 ? metaFields[metaTick % metaFields.length] : null;
   const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 300 };
 
@@ -746,6 +773,21 @@ export function SessionRail({
   // Shared cycle phase for every row's right-hand meta slot — see
   // useMetaCyclePhase / paneMetaFields.
   const metaTick = useMetaCyclePhase();
+
+  // Operator-configured meta-slot token order (Settings → Rail tokens, see
+  // lib/railTokenPrefs.ts). SessionRail is the only consumer, so it owns the
+  // load + live-update listener directly (mirrors the cosmos-prefs pattern
+  // in App.tsx, just scoped to the component that actually renders the
+  // affected UI instead of threaded through App.tsx).
+  const [railTokens, setRailTokens] = useState<RailToken[]>(loadRailTokens);
+  useEffect(() => {
+    const onPrefs = (e: Event) => {
+      const d = (e as CustomEvent<{ railTokens?: RailToken[] }>).detail;
+      if (d?.railTokens) setRailTokens(d.railTokens);
+    };
+    window.addEventListener('cockpit:railtokenprefs', onPrefs);
+    return () => window.removeEventListener('cockpit:railtokenprefs', onPrefs);
+  }, []);
 
   // Inline tmux-session rename (the group header, e.g. "0") — double-click the
   // name or use the hover-reveal pencil button. Only one group can be renaming
@@ -903,6 +945,7 @@ export function SessionRail({
                           }
                           cmdHeld={cmdHeld}
                           metaTick={metaTick}
+                          railTokens={railTokens}
                         />
                       ))}
                     </ul>
