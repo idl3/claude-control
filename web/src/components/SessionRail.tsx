@@ -410,7 +410,8 @@ function formatModel(model: string): string {
     .replace(/\s*\([^)]*\)\s*$/, '')
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, '-');
+    .replace(/\s+/g, '-')
+    .replace(/^claude-/, ''); // "claude-fable-5" → "fable-5"
 }
 
 function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {

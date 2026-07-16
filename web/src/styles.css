@@ -4777,7 +4777,7 @@ body.is-external-display .composer {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 0 8px;
+  padding: 8px 8px 8px 14px; /* desktop (glass) default; mobile @media overrides */
   background: var(--bg-2);
   color: var(--text-dim);
   border: 1px solid var(--line);
@@ -7723,7 +7723,7 @@ select.config-input {
    <input type="checkbox"> + the text -- deliberately far from Send. */
 .composer-subagent-toggle {
   flex: 0 0 auto;
-  display: inline-flex;
+  display: none; /* superseded by the agent-icon button (.composer-subagent-btn) at ALL widths */
   align-items: center;
   gap: 7px;
   height: 34px;
@@ -7823,7 +7823,7 @@ select.config-input {
    swaps which one is visible per breakpoint so there's exactly one hit
    target at any given width. */
 .composer-subagent-btn {
-  display: none;
+  display: inline-flex; /* the agent-icon toggle — now shown at ALL widths (desktop + mobile) */
   flex: 0 0 auto;
   height: 34px;
   min-width: 34px;
