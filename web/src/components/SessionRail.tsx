@@ -390,7 +390,7 @@ function useMetaCyclePhase(periodMs = 10_000): number {
 
 /** One field the row's right-hand meta slot can show, in cycle order. */
 interface MetaField {
-  key: 'model' | 'ctx' | 'usage' | 'cwd';
+  key: 'model' | 'effort' | 'ctx' | 'usage' | 'cwd';
   text: string;
   className: string;
 }
@@ -516,6 +516,10 @@ function PaneRow({
   // a reply (pending false→true). The steady ASK-badge pulse is CSS.
   const rowRef = useRef<HTMLLIElement>(null);
   const prevPending = useRef(s.pending);
+  // ⌘-held right slot shows the session id; clicking it copies + flashes "Copied!".
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   useEffect(() => {
     if (s.pending && !prevPending.current && rowRef.current && !prefersReducedMotion()) {
       gsap.fromTo(
@@ -539,18 +543,50 @@ function PaneRow({
   const showPaneName = Boolean(cmdHeld && paneName);
   const metaFields = paneMetaFields(s, isTerminal, isCodex);
   const activeField = metaFields.length > 0 ? metaFields[metaTick % metaFields.length] : null;
-  const metaText = showPaneName ? (paneName ?? '') : activeField ? activeField.text : '';
-  const metaClassName = showPaneName ? 'session-row-meta-pane' : (activeField?.className ?? '');
-  const rightSlot =
-    showPaneName || activeField ? (
-      <span className="session-row-meta" title={showPaneName ? paneName : activeField?.text}>
-        <SlotText
-          text={metaText}
-          className={metaClassName}
-          options={{ direction: 'up', skipUnchanged: true, duration: 300 }}
-        />
+  const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 300 };
+
+  const copyId = (e: React.MouseEvent) => {
+    e.stopPropagation(); // copy the id, don't select the row
+    const id = paneName ?? '';
+    if (!id) return;
+    void navigator.clipboard
+      ?.writeText(id)
+      .then(() => {
+        setCopied(true);
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        copyTimer.current = setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
+  };
+
+  // Right-hand meta slot. Priority: a just-copied "Copied!" flash → the ⌘-held
+  // (clickable, copyable) session id → the rotating model/effort/ctx cycle.
+  let rightSlot: React.ReactNode = null;
+  if (copied) {
+    rightSlot = (
+      <span className="session-row-meta session-row-meta-copy" data-copied="true" title="Copied!">
+        <SlotText text="Copied!" className="session-row-meta-pane" options={slotOpts} />
       </span>
-    ) : null;
+    );
+  } else if (showPaneName) {
+    rightSlot = (
+      <button
+        type="button"
+        className="session-row-meta session-row-meta-copy"
+        title={`Copy session id: ${paneName}`}
+        aria-label={`Copy session id ${paneName}`}
+        onClick={copyId}
+      >
+        <SlotText text={paneName ?? ''} className="session-row-meta-pane" options={slotOpts} />
+      </button>
+    );
+  } else if (activeField) {
+    rightSlot = (
+      <span className="session-row-meta" title={activeField.text}>
+        <SlotText text={activeField.text} className={activeField.className} options={slotOpts} />
+      </span>
+    );
+  }
 
   return (
     <li

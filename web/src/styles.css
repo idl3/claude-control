@@ -1267,6 +1267,23 @@ body.is-external-display .rail {
   background: var(--bg-2);
   color: var(--text-dim);
 }
+/* ⌘-held session-id slot is a click-to-copy button — strip button chrome so it
+   reads as the same chip, and flash green on "Copied!". */
+.session-row-meta-copy {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.session-row-meta-copy:hover .session-row-meta-pane {
+  color: var(--text);
+}
+.session-row-meta-copy[data-copied='true'] .session-row-meta-pane {
+  color: var(--green);
+}
 .session-empty {
   list-style: none;
   padding: 16px;
