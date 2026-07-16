@@ -5899,15 +5899,39 @@ select.config-input {
   font-size: 11px;
   color: var(--text-faint);
 }
-.railcfg-bracket {
+.railcfg-arrow {
+  display: inline-flex;
+  align-items: center;
   color: var(--text-faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex-shrink: 0;
 }
-.railcfg-sep {
-  font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.railcfg-interval-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.railcfg-interval-label {
+  font-size: 11px;
   color: var(--text-faint);
-  white-space: nowrap;
+}
+.railcfg-interval {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.railcfg-interval:hover {
+  border-color: var(--accent);
+}
+.railcfg-interval:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .railcfg-pill {
   display: flex;
@@ -5964,6 +5988,12 @@ select.config-input {
   background: var(--bg-2);
   opacity: 0.9;
 }
+/* Same rationale as .railcfg-pill .meta-model above — the body-portaled
+   ghost still gets the rail's global meta-model rule (60% max-width, tuned
+   for the multi-chip row), which would truncate the label here too. */
+.railcfg-ghost .meta-model {
+  max-width: none;
+}
 .railcfg-preview {
   display: flex;
   flex-direction: column;
@@ -5974,24 +6004,12 @@ select.config-input {
   border-radius: 8px;
   background: var(--bg-2);
 }
-.railcfg-preview-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text);
-}
-.railcfg-preview-icon {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-.railcfg-preview-label {
-  flex: 1;
-  color: var(--text-dim);
-}
-.railcfg-preview-empty {
-  color: var(--text-faint);
+/* The preview reuses the real rail's .session-group/.session-item markup
+   (see RailTokenConfig's PreviewPaneRow) so it renders identically to an
+   actual rail group — just zero out the rail-column spacing that markup
+   normally sits in, since it's nested one level deeper here. */
+.railcfg-preview .session-group {
+  margin: 0;
 }
 @media (max-width: 640px) {
   .railcfg-pool,

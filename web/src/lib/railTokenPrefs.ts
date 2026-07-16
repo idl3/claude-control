@@ -19,6 +19,23 @@ const STORAGE_KEY = 'cc:rail-tokens';
  *  paneMetaFields has always built them in. */
 export const DEFAULT_RAIL_TOKENS: RailToken[] = ['model', 'effort', 'ctx', 'usage'];
 
+/** Default rotation interval for the rail's shared meta-slot cycle (see
+ *  SessionRail's useMetaCyclePhase) — matches the pre-configurator hardcoded
+ *  10s period. */
+export const DEFAULT_RAIL_INTERVAL_MS = 10_000;
+/** Floor for the operator-configured interval — guards against a pathological
+ *  stored value (e.g. 0 or negative) driving setInterval into a tight loop. */
+export const MIN_RAIL_INTERVAL_MS = 1_000;
+/** Choices offered by the configurator's interval `<select>`. */
+export const RAIL_INTERVAL_CHOICES_MS = [3_000, 5_000, 10_000, 15_000, 30_000] as const;
+
+/** The operator's full rail-token configuration: which tokens rotate through
+ *  each row's meta slot, in what order, and how often. */
+export interface RailTokenPrefs {
+  tokens: RailToken[];
+  intervalMs: number;
+}
+
 function isRailToken(v: unknown): v is RailToken {
   return typeof v === 'string' && (RAIL_TOKENS as readonly string[]).includes(v);
 }
@@ -41,22 +58,46 @@ function sanitize(parsed: unknown): RailToken[] | null {
   return out.length > 0 ? out : null;
 }
 
-/** Load the operator's rail-token order, falling back to
- *  `DEFAULT_RAIL_TOKENS` on absent/corrupt storage or a value with no valid
- *  tokens left after sanitization. */
-export function loadRailTokens(): RailToken[] {
+/** Coerce a parsed `intervalMs` value to a finite number no smaller than
+ *  `MIN_RAIL_INTERVAL_MS`, falling back to `DEFAULT_RAIL_INTERVAL_MS` for
+ *  anything non-numeric/non-finite. */
+function coerceInterval(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v)
+    ? Math.max(MIN_RAIL_INTERVAL_MS, Math.round(v))
+    : DEFAULT_RAIL_INTERVAL_MS;
+}
+
+/** Load the operator's rail-token prefs (order + rotation interval), falling
+ *  back to defaults on absent/corrupt storage. Handles both the legacy
+ *  storage shape (a bare `RailToken[]`, pre-interval-control) and the current
+ *  `RailTokenPrefs` object shape under the same `STORAGE_KEY` — a legacy
+ *  array always resolves to `DEFAULT_RAIL_INTERVAL_MS` since it predates the
+ *  interval control entirely. */
+export function loadRailTokens(): RailTokenPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_RAIL_TOKENS;
-    return sanitize(JSON.parse(raw)) ?? DEFAULT_RAIL_TOKENS;
+    if (!raw) return { tokens: DEFAULT_RAIL_TOKENS, intervalMs: DEFAULT_RAIL_INTERVAL_MS };
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Legacy bare token-array shape.
+      return { tokens: sanitize(parsed) ?? DEFAULT_RAIL_TOKENS, intervalMs: DEFAULT_RAIL_INTERVAL_MS };
+    }
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as { tokens?: unknown; intervalMs?: unknown };
+      return {
+        tokens: sanitize(obj.tokens) ?? DEFAULT_RAIL_TOKENS,
+        intervalMs: coerceInterval(obj.intervalMs),
+      };
+    }
+    return { tokens: DEFAULT_RAIL_TOKENS, intervalMs: DEFAULT_RAIL_INTERVAL_MS };
   } catch {
-    return DEFAULT_RAIL_TOKENS;
+    return { tokens: DEFAULT_RAIL_TOKENS, intervalMs: DEFAULT_RAIL_INTERVAL_MS };
   }
 }
 
-export function saveRailTokens(tokens: RailToken[]): void {
+export function saveRailTokens(prefs: RailTokenPrefs): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tokens));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tokens: prefs.tokens, intervalMs: prefs.intervalMs }));
   } catch {
     /* localStorage unavailable/full — the choice just doesn't survive reload */
   }
