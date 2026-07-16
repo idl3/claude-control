@@ -41,8 +41,13 @@ export function usePullToRefresh(
   };
 
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
+    // Listen at the WINDOW in capture phase (not the app root in bubble phase).
+    // In the installed PWA the app fills more than the layout viewport, so the
+    // document can rubber-band; a bubble-phase listener on .app fired too late to
+    // suppress it and the pull just scrolled the page instead of refreshing.
+    // Capturing at the window intercepts the gesture first, so preventDefault
+    // reliably suppresses the native overscroll and the custom pull runs.
+    void rootRef;
 
     const onStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) {
@@ -89,15 +94,15 @@ export function usePullToRefresh(
       }
     };
 
-    root.addEventListener('touchstart', onStart, { passive: true });
-    root.addEventListener('touchmove', onMove, { passive: false });
-    root.addEventListener('touchend', onEnd, { passive: true });
-    root.addEventListener('touchcancel', onEnd, { passive: true });
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: false, capture: true });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    window.addEventListener('touchcancel', onEnd, { passive: true });
     return () => {
-      root.removeEventListener('touchstart', onStart);
-      root.removeEventListener('touchmove', onMove);
-      root.removeEventListener('touchend', onEnd);
-      root.removeEventListener('touchcancel', onEnd);
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove, { capture: true });
+      window.removeEventListener('touchend', onEnd);
+      window.removeEventListener('touchcancel', onEnd);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, [rootRef, onRefresh]);
