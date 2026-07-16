@@ -1,6 +1,10 @@
 /// <reference types="vitest/config" />
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Built for claude-cockpit's Node server, which serves this from web/dist.
 // base: './' keeps asset URLs relative so it loads behind `tailscale serve`
@@ -8,6 +12,15 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  resolve: {
+    alias: {
+      // lib/protocol/ — the versioned wire-protocol schemas (plain JS + zod,
+      // no build step at the repo root; see lib/protocol/index.js). The web
+      // app imports the SAME schema modules the backend runs and derives its
+      // TS types from them with `z.infer` instead of hand-duplicating shapes.
+      '@protocol': path.resolve(__dirname, '../lib/protocol'),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

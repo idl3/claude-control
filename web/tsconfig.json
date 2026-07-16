@@ -15,7 +15,16 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    // lib/protocol/*.js is plain JS + zod (repo root has no TS build step —
+    // see CONTRACT.md). allowJs lets tsc resolve + infer types from those
+    // modules so `z.infer<typeof SessionEntrySchema>` works on the web side.
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {
+      "@protocol": ["../lib/protocol/index.js"],
+      "@protocol/*": ["../lib/protocol/*"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }
