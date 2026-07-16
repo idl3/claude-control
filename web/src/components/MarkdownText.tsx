@@ -135,6 +135,25 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
 const BASE_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds];
 const USER_PLUGINS = [remarkGfm, remarkDelivery, remarkEmbeds, remarkUltrathink];
 
+// Stable module-level component map. All six are module-scope refs, so this
+// object never needs to change — hoisting it out of the render body keeps a
+// single identity (matches the messageComponents / partComponents pattern) and
+// avoids handing react-markdown a fresh `components` object on every render.
+const MD_COMPONENTS = {
+  CodeHeader,
+  SyntaxHighlighter: CodeHighlighter,
+  table: TableWrap,
+  // <embedded-image|video …/> blocks (rewritten to image nodes by
+  // remarkEmbeds) render as real <img>/<video>; other images unchanged.
+  img: MarkdownImg,
+  // delivery-payload blocks (rewritten to `div[data-delivery]` nodes by
+  // remarkDelivery) render as a DeliveryCard; other divs unchanged.
+  div: MarkdownDiv,
+  // "ultrathink" (remarkUltrathink, user messages only) renders as an
+  // animated rainbow gradient <mark>.
+  mark: UltrathinkText,
+};
+
 const MarkdownTextImpl: TextMessagePartComponent = () => {
   const role = useMessage((m) => m.role);
   const remarkPlugins = useMemo(
@@ -145,20 +164,7 @@ const MarkdownTextImpl: TextMessagePartComponent = () => {
     <MarkdownTextPrimitive
       className="aui-md"
       remarkPlugins={remarkPlugins}
-      components={{
-        CodeHeader,
-        SyntaxHighlighter: CodeHighlighter,
-        table: TableWrap,
-        // <embedded-image|video …/> blocks (rewritten to image nodes by
-        // remarkEmbeds) render as real <img>/<video>; other images unchanged.
-        img: MarkdownImg,
-        // delivery-payload blocks (rewritten to `div[data-delivery]` nodes by
-        // remarkDelivery) render as a DeliveryCard; other divs unchanged.
-        div: MarkdownDiv,
-        // "ultrathink" (remarkUltrathink, user messages only) renders as an
-        // animated rainbow gradient <mark>.
-        mark: UltrathinkText,
-      }}
+      components={MD_COMPONENTS}
     />
   );
 };
