@@ -21,7 +21,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, createSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
+import { renameSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -1849,6 +1849,36 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // ⌘/Ctrl+, opens Settings — same action as clicking the header's Settings
+  // button. Mirrors the ⌘K / ⌘. guards (modifier + no shift/alt, bail if a
+  // dialog already owns the keys — the palette itself sets aria-modal="true").
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ',' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
+      e.preventDefault();
+      setConfigOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ⌘/Ctrl+Shift+A toggles the Artifacts pane for the selected session — same
+  // action as the header's Artifacts button. Guard mirrors the other detail-head
+  // shortcuts (⌘J/⌘U/⌘B below): only meaningful with a session selected.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'a') return;
+      if (!selectedSession) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // let dialogs handle keys
+      e.preventDefault();
+      setGalleryOpen((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedSession]);
+
   // ⌘/Ctrl+N opens the New Session draft — same action as clicking the rail's
   // "+ New session" button — instead of letting the browser open a new
   // window/tab. Note: a plain browser tab may not let JS preventDefault ⌘N (some
@@ -2056,11 +2086,16 @@ function AppInner() {
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
     const base = (cwd?: string) => (cwd ? cwd.replace(/\/$/, '').split('/').pop() || cwd : '');
     const cmds: PaletteCommand[] = [];
-    // Sessions BEFORE Terminals; within each, mirror the rail's natural tmux
-    // order (session name → window → pane) so positions feel stable.
+    // LOCAL sessions (claude/codex/terminal) FIRST, OLAM cloud sessions LAST —
+    // same `kind === 'remote'` predicate SessionRail uses to split its own
+    // local vs. per-org olam sections (see groupRemoteByOrg / rail filters).
+    // Within the local tier, Sessions before Terminals; within each tier,
+    // mirror the rail's natural tmux order (session name → window → pane) so
+    // positions feel stable.
     const ordered = [...cockpit.sessions].sort((a, b) => {
-      const at = a.kind === 'terminal' ? 1 : 0;
-      const bt = b.kind === 'terminal' ? 1 : 0;
+      const tierOf = (k: string | undefined) => (k === 'remote' ? 2 : k === 'terminal' ? 1 : 0);
+      const at = tierOf(a.kind);
+      const bt = tierOf(b.kind);
       if (at !== bt) return at - bt;
       return (
         (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
@@ -2070,12 +2105,13 @@ function AppInner() {
     });
     for (const s of ordered) {
       const term = s.kind === 'terminal';
+      const remote = s.kind === 'remote';
       cmds.push({
         id: `switch:${s.id}`,
         label: s.name || s.title || s.tmuxName || s.id,
         hint: [term ? 'terminal' : base(s.cwd), s.pending ? 'ASK' : ''].filter(Boolean).join(' · '),
         keywords: `${s.sessionName ?? ''} ${s.cwd ?? ''} ${s.id}`,
-        group: term ? 'Terminals' : 'Sessions',
+        group: remote ? 'Olam' : term ? 'Terminals' : 'Sessions',
         run: () => select(s.id),
       });
     }
@@ -2092,13 +2128,13 @@ function AppInner() {
         id: 'act:new-session',
         label: 'New session',
         group: 'Actions',
-        keywords: 'create start claude',
-        run: () => {
-          showToast('Creating session…');
-          createSession({})
-            .then((r) => showToast(`Session created → ${r.name}`, 'ok'))
-            .catch((err) => showToast(`New session failed: ${(err as Error).message}`, 'error'));
-        },
+        keywords: 'create start draft claude',
+        hotkey: '⌘N',
+        // Same action as ⌘N and the rail's "+ New session" button
+        // (NewSessionForm onOpenDraft={openDraft}) — opens the draft page for
+        // review rather than instant-creating with empty defaults, so the
+        // palette entry matches what its own hotkey badge promises.
+        run: () => openDraft(),
       },
       {
         id: 'act:processes',
@@ -2112,14 +2148,76 @@ function AppInner() {
         label: 'Settings',
         group: 'Actions',
         keywords: 'config preferences model mlx',
+        hotkey: '⌘,',
         run: () => setConfigOpen(true),
+      },
+      {
+        id: 'act:terminal-mode',
+        label: terminalShown ? 'Exit terminal mode' : 'Terminal mode',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'raw tmux ttyd shell toggle',
+        hotkey: '⌘J',
+        run: () => toggleTerminal(),
+      },
+      {
+        id: 'act:artifacts',
+        label: galleryOpen ? 'Close artifacts pane' : 'Open artifacts pane',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'gallery embed embedded-app artifact panel',
+        hotkey: '⌘⇧A',
+        run: () => setGalleryOpen((v) => !v),
+      },
+      {
+        id: 'act:subagents',
+        label: 'Sub-agents panel',
+        group: 'Actions',
+        keywords: 'agents sidebar list',
+        hotkey: '⌘U',
+        run: () => {
+          setPanelAgentId(null);
+          setPanelOpen((v) => !v);
+        },
       },
       {
         id: 'act:toggle-sidebar',
         label: railCollapsed ? 'Show sidebar' : 'Hide sidebar (focus mode)',
         group: 'Actions',
         keywords: 'rail collapse focus',
+        hotkey: '⌘B',
         run: () => toggleRail(),
+      },
+      {
+        id: 'act:search-transcript',
+        label: searchOpen ? 'Close transcript search' : 'Search transcript',
+        group: 'Actions',
+        keywords: 'find quick-find',
+        hotkey: '⌘/',
+        run: () => setSearchOpen((v) => !v),
+      },
+      {
+        id: 'act:jump-latest',
+        label: 'Jump to latest',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'scroll bottom tail',
+        hotkey: '⌘.',
+        run: () => {
+          const vp = document.querySelector<HTMLElement>('.thread-viewport');
+          vp?.scrollTo({ top: vp.scrollHeight, behavior: 'smooth' });
+        },
+      },
+      {
+        id: 'act:focus-composer',
+        label: 'Focus composer',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'type message input',
+        hotkey: '⌘⏎',
+        run: () => {
+          document.querySelector<HTMLTextAreaElement>('.composer .composer-input')?.focus();
+        },
       },
       {
         id: 'act:rematch-all',
@@ -2142,7 +2240,21 @@ function AppInner() {
       },
     );
     return cmds;
-  }, [cockpit.sessions, cockpit.selectedId, selectedSession, railCollapsed, select, toggleRail, showToast, openTerminal]);
+  }, [
+    cockpit.sessions,
+    cockpit.selectedId,
+    selectedSession,
+    railCollapsed,
+    select,
+    toggleRail,
+    showToast,
+    openTerminal,
+    openDraft,
+    terminalShown,
+    toggleTerminal,
+    galleryOpen,
+    searchOpen,
+  ]);
 
   // The live "thinking" block is the trailing reasoning of the last real
   // transcript message, but only while the server says this session is actively
