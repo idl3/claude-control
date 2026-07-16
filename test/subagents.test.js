@@ -552,3 +552,57 @@ test('poll emits a change event when a running agent silently goes done (time-ba
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// R10: _agents never shrank on its own -- trim() only strips heavy fields,
+// markDone() only flips a flag, full clear only happened on stop(). poll()
+// now prunes entries that are both 'done' (_statusFor) AND whose jsonl file
+// is gone from disk, so a long-running server doesn't accumulate an
+// unbounded _agents Map across many completed sub-agent runs.
+// ---------------------------------------------------------------------------
+test('poll prunes done agents whose jsonl has been deleted, keeps _agents bounded', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+
+  const old = new Date(Date.now() - 120_000); // past RUNNING_WINDOW_MS (45s) -> done
+  const goneIds = [];
+  for (let i = 0; i < 20; i++) {
+    const id = `gone-${i}`;
+    goneIds.push(id);
+    writeAgentFiles(subDir, id, { jsonlContent: '{}\n' });
+    fs.utimesSync(path.join(subDir, `agent-${id}.jsonl`), old, old);
+  }
+  // One agent that stays done but keeps its jsonl on disk -- must survive the
+  // prune (still loadable historical data, not dead weight).
+  writeAgentFiles(subDir, 'stays-done', { jsonlContent: '{}\n' });
+  fs.utimesSync(path.join(subDir, 'agent-stays-done.jsonl'), old, old);
+  // One live agent -- must survive the prune (not done).
+  writeAgentFiles(subDir, 'still-running', { jsonlContent: '{}\n' });
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+  assert.equal(watcher._agents.size, 22, 'all 22 agents tracked after first poll');
+
+  // Delete the jsonl files for the "gone" agents only, simulating cleanup
+  // elsewhere on disk (or a very old session dir being reaped).
+  for (const id of goneIds) {
+    fs.unlinkSync(path.join(subDir, `agent-${id}.jsonl`));
+  }
+
+  watcher.poll();
+  assert.equal(watcher._agents.size, 2, '_agents must shrink to just the surviving 2 entries');
+  assert.ok(watcher._agents.has('stays-done'), 'done agent with jsonl still on disk must survive prune');
+  assert.ok(watcher._agents.has('still-running'), 'running agent must survive prune regardless of jsonl state');
+  for (const id of goneIds) {
+    assert.ok(!watcher._agents.has(id), `pruned agent ${id} must be gone from _agents`);
+  }
+
+  // A further poll() with nothing changed must stay stable (idempotent).
+  watcher.poll();
+  assert.equal(watcher._agents.size, 2, 'prune is idempotent across repeated poll() calls');
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
