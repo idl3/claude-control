@@ -5868,6 +5868,132 @@ select.config-input {
   display: flex;
   gap: 8px;
 }
+/* Rail-token configurator: pool/bar drag-and-drop + live preview. Reuses the
+   real rail's meta-model / meta-effort / meta-ctx / meta-usage chip classes
+   and session-row-meta (see ~1196 / ~1288 above) inside the pills and
+   preview rows so they match the real rail exactly. */
+.railcfg-dnd-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.railcfg-pool,
+.railcfg-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.railcfg-bar {
+  background: var(--bg-hover);
+}
+.railcfg-pool-empty,
+.railcfg-bar-empty {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.railcfg-bracket {
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.railcfg-sep {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.railcfg-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.railcfg-pill--placeholder {
+  width: 48px;
+  height: 24px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.railcfg-pill-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.railcfg-pill-remove:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.railcfg-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  pointer-events: none;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+  opacity: 0.9;
+}
+.railcfg-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.railcfg-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.railcfg-preview-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.railcfg-preview-label {
+  flex: 1;
+  color: var(--text-dim);
+}
+.railcfg-preview-empty {
+  color: var(--text-faint);
+}
+@media (max-width: 640px) {
+  .railcfg-pool,
+  .railcfg-bar {
+    padding: 6px 8px;
+  }
+}
 /* Pinned footer: version on the left, actions on the right. */
 .config-foot {
   flex: 0 0 auto;
