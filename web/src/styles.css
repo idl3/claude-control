@@ -100,7 +100,7 @@
   --space-base:   oklch(12% 0.02 265);   /* near-black deep-space base */
   --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
   --space-edge:   oklch(7%  0.015 265);  /* darkest, viewport edges — deepened a touch */
-  --star:         oklch(93% 0.02 250);   /* soft blue-white star */
+  --star:         oklch(88% 0.08 250);   /* blue star (raised chroma for a clearer blue tint) */
   --star-near:    0.88;                   /* near plane — biggest/brightest, fastest drift + strongest parallax */
   --star-mid:     0.50;                   /* mid plane — the original starfield */
   --star-far:     0.32;                   /* far plane — dense, tiny, dim; barely moves (depth cue) */
@@ -430,15 +430,17 @@ html.pwa-fill body.kbd-up .app {
     top: 64%;
     left: -12%;
     width: 70px;
-    transform: translate3d(0, 0, 0) rotate(13deg);
+    transform: translate3d(0, 0, 0) rotate(18deg);
     animation-duration: calc(var(--shoot-cycle) * 1.7);
     animation-delay: calc(var(--shoot-cycle) * -0.55);
   }
 }
 @keyframes cosmos-shoot {
+  /* Travel direction matches the 18deg streak angle (42vw/130vw = tan18°) so the
+     tail trails naturally behind the head along the line of motion. */
   0%, 91%  { opacity: 0; transform: translate3d(0, 0, 0) rotate(18deg); }
   92%      { opacity: var(--shoot-alpha); }
-  97%, 100% { opacity: 0; transform: translate3d(135vw, 60px, 0) rotate(18deg); }
+  97%, 100% { opacity: 0; transform: translate3d(130vw, 42vw, 0) rotate(18deg); }
 }
 
 /* Composer-active boost — the cosmos leans in + tints toward the composer's
@@ -2959,7 +2961,7 @@ details.block-tool[open] > summary .tool-arrow,
   .composer {
     /* Unfocused: sit ~8px higher off the bottom contour (matches the rail-foot
        clearance so both bottom bars read consistently above the home indicator). */
-    padding-bottom: max(16px, calc(env(safe-area-inset-bottom) - 4px));
+    padding-bottom: max(8px, calc(env(safe-area-inset-bottom) - 16px));
     transition: padding-bottom 120ms ease;
   }
   body.kbd-up .composer {
