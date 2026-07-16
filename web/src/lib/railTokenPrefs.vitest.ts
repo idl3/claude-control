@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   RAIL_TOKENS,
   DEFAULT_RAIL_TOKENS,
+  DEFAULT_RAIL_INTERVAL_MS,
+  MIN_RAIL_INTERVAL_MS,
   loadRailTokens,
   saveRailTokens,
   poolTokens,
@@ -39,47 +41,49 @@ describe('railTokenPrefs — load/save', () => {
   });
 
   it('defaults to DEFAULT_RAIL_TOKENS when nothing is stored', () => {
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
   });
 
   it('defaults to DEFAULT_RAIL_TOKENS on corrupt JSON', () => {
     localStorage.setItem('cc:rail-tokens', '{not json');
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
   });
 
   it('defaults to DEFAULT_RAIL_TOKENS when storage holds a non-array', () => {
     localStorage.setItem('cc:rail-tokens', JSON.stringify({ model: true }));
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
   });
 
   it('saveRailTokens then loadRailTokens round-trips', () => {
-    saveRailTokens(['ctx', 'model']);
-    expect(loadRailTokens()).toEqual(['ctx', 'model']);
+    saveRailTokens({ tokens: ['ctx', 'model'], intervalMs: 10000 });
+    const p = loadRailTokens();
+    expect(p.tokens).toEqual(['ctx', 'model']);
+    expect(p.intervalMs).toBe(10000);
   });
 
   it('drops unknown tokens on load, keeping the valid ones in order', () => {
     localStorage.setItem('cc:rail-tokens', JSON.stringify(['ctx', 'bogus', 'model']));
-    expect(loadRailTokens()).toEqual(['ctx', 'model']);
+    expect(loadRailTokens().tokens).toEqual(['ctx', 'model']);
   });
 
   it('dedupes repeated tokens on load, keeping the first occurrence', () => {
     localStorage.setItem('cc:rail-tokens', JSON.stringify(['ctx', 'model', 'ctx']));
-    expect(loadRailTokens()).toEqual(['ctx', 'model']);
+    expect(loadRailTokens().tokens).toEqual(['ctx', 'model']);
   });
 
   it('falls back to the default when every stored token is unknown/invalid', () => {
     localStorage.setItem('cc:rail-tokens', JSON.stringify(['bogus', 42, null]));
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
   });
 
   it('an intentionally empty bar (operator removed everything) round-trips as empty', () => {
-    saveRailTokens([]);
+    saveRailTokens({ tokens: [], intervalMs: 10000 });
     // An explicitly-saved [] parses to a valid empty array — sanitize()
     // treats "no valid tokens survived" the same as "started empty", so this
     // degrades to the default rather than staying blank. That's the
     // documented behavior (see sanitize()'s jsdoc): corrupt-vs-empty aren't
     // distinguishable once nothing is left, so we choose the safer default.
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
   });
 
   it('degrades to the default (non-throwing) when localStorage throws', () => {
@@ -91,8 +95,30 @@ describe('railTokenPrefs — load/save', () => {
         throw new Error('storage disabled');
       },
     });
-    expect(() => saveRailTokens(['model'])).not.toThrow();
-    expect(loadRailTokens()).toEqual(DEFAULT_RAIL_TOKENS);
+    expect(() => saveRailTokens({ tokens: ['model'], intervalMs: 10000 })).not.toThrow();
+    expect(loadRailTokens().tokens).toEqual(DEFAULT_RAIL_TOKENS);
+  });
+
+  it('legacy bare-array storage loads with the default interval', () => {
+    localStorage.setItem('cc:rail-tokens', JSON.stringify(['ctx', 'model']));
+    const p = loadRailTokens();
+    expect(p.tokens).toEqual(['ctx', 'model']);
+    expect(p.intervalMs).toBe(DEFAULT_RAIL_INTERVAL_MS);
+  });
+
+  it('new object-shape storage round-trips the interval', () => {
+    saveRailTokens({ tokens: ['model'], intervalMs: 3000 });
+    expect(loadRailTokens().intervalMs).toBe(3000);
+  });
+
+  it('clamps an interval below the floor to MIN_RAIL_INTERVAL_MS', () => {
+    localStorage.setItem('cc:rail-tokens', JSON.stringify({ tokens: ['model'], intervalMs: 200 }));
+    expect(loadRailTokens().intervalMs).toBe(MIN_RAIL_INTERVAL_MS);
+  });
+
+  it('falls back to the default interval when intervalMs is non-numeric', () => {
+    localStorage.setItem('cc:rail-tokens', JSON.stringify({ tokens: ['model'], intervalMs: 'soon' }));
+    expect(loadRailTokens().intervalMs).toBe(DEFAULT_RAIL_INTERVAL_MS);
   });
 });
 
