@@ -4557,9 +4557,10 @@ body.is-external-display .composer {
   .rail-foot {
     align-items: center; /* vertically center the fixed-height buttons */
     gap: 8px;
-    /* Edge-to-edge (no side padding) so the two buttons hug the phone's left/right
-       edges; bottom lifts them ~4-6px ABOVE the home-indicator bar. */
-    padding: 8px 0 max(8px, calc(var(--safe-bottom) - 16px));
+    /* 8px on every side so the buttons sit slightly inset from the screen edges
+       (the 24px outer bottom corners are visible instead of clipped at the edge);
+       bottom lifts them ~4-6px ABOVE the home-indicator bar. */
+    padding: 8px 8px max(8px, calc(var(--safe-bottom) - 16px));
   }
   .rail-foot .rail-filter,
   .rail-foot .rail-new {
