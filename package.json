@@ -1,6 +1,6 @@
 {
   "name": "@idl3/claude-control",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "type": "module",
   "description": "Local web UI to watch and drive your Claude Code sessions running in tmux — live transcripts, reply, answer AskUserQuestion, attach files, from a browser or phone.",
   "keywords": [
@@ -40,7 +40,7 @@
     "install-hook": "node scripts/install-pane-hook.mjs",
     "build:web": "cd web && npm install && npm run build",
     "build": "npm run build:web",
-    "prepack": "npm run build"
+    "prepack": "npm run build && find web/dist -name '*.map' -type f -delete"
   },
   "engines": {
     "node": ">=20"
