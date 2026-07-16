@@ -1794,7 +1794,7 @@ export function Composer({
   }, [text]);
 
   return (
-    <ComposerPrimitive.Root className="composer">
+    <ComposerPrimitive.Root className="composer" data-ask-active={askActive ? 'true' : undefined}>
       {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
           keyboard is below). Populated from the live session skill list. */}
       {acOpen ? (
