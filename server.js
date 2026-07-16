@@ -31,7 +31,7 @@ import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
-import { buildAnswerProgram, parsePicker, planStep } from './lib/answer.js';
+import { buildAnswerProgram, parsePicker, planStep, nextSubmitAction } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
@@ -2953,23 +2953,45 @@ async function handleClientMessage(ws, msg) {
             }
           }
 
-          // After processing all questions via dynamic path, check if we need to
-          // handle the review screen (multi-question pickers).
-          if (dynamicOk && questions.length > 1) {
-            // Capture and check: we may already be on the review screen (handled
-            // in the loop above) or may need to check.
-            try {
-              const finalCapture = await tmux.capturePane(session.target, 40, false, true);
-              const finalParsed = parsePicker(finalCapture);
-              if (finalParsed.isReview && finalParsed.confidence === 'ok') {
-                // Submit the review screen.
-                console.log(`[answer/dynamic] post-loop review screen — sending Enter`);
+          // After processing all questions, CONFIRM the picker actually submitted
+          // rather than assuming the last Enter landed. A multi-question picker ends
+          // on a "Ready to submit your answers? › Submit answers" review screen that
+          // needs a final Enter; that Enter (or the last question's action-row Enter)
+          // can be dropped or fire before the screen renders, parking the picker on
+          // "Submit" unsubmitted — the reported bug. Poll + nudge until the picker is
+          // provably gone. Runs whenever a dropped submit is possible (multi-question,
+          // or any multi-select question with its own Submit action row).
+          const needsSubmitConfirm =
+            questions.length > 1 || questions.some((q) => q && q.multiSelect);
+          if (dynamicOk && needsSubmitConfirm) {
+            const SUBMIT_TRIES = 5; // ~5×2×SETTLE_MS ceiling; exits as soon as gone
+            let submitted = false;
+            for (let t = 0; t < SUBMIT_TRIES; t += 1) {
+              let cap;
+              try {
+                cap = await tmux.capturePane(session.target, 40, false, true);
+              } catch (captureErr) {
+                console.log(`[answer/dynamic] submit-confirm capture failed: ${captureErr?.message}`);
+                break; // can't confirm — fail loud below
+              }
+              const action = nextSubmitAction(parsePicker(cap));
+              if (action === 'done') {
+                submitted = true;
+                break;
+              }
+              if (action === 'enter') {
+                console.log(`[answer/dynamic] submit-confirm ${t}: picker up (review/parked) — sending Enter`);
                 sentAny = true;
                 await tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS);
               }
-            } catch (captureErr) {
-              // Non-fatal: we already sent the question answers; review Enter is best-effort.
-              console.log(`[answer/dynamic] final review capture failed: ${captureErr?.message}`);
+              // 'enter' → let the submit land; 'wait' → let the TUI finish rendering.
+              await new Promise((r) => setTimeout(r, SETTLE_MS));
+            }
+            if (!submitted) {
+              console.error(
+                `[answer/dynamic] picker never confirmed submitted after ${SUBMIT_TRIES} tries — failing loud toolUseId=${msg.toolUseId}`,
+              );
+              dynamicOk = false;
             }
           }
 

@@ -1219,6 +1219,16 @@ body.is-external-display .rail {
   margin-left: auto; /* right-align within the meta row */
   opacity: 0.85;
 }
+.meta-effort {
+  /* Codex reasoning-effort chip (minimal/low/medium/high/xhigh) — distinct hue
+     from model (accent-2) and ctx (dim), so the three dimensions read apart. */
+  font-size: var(--txt-meta);
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--amber);
+  letter-spacing: 0.02em;
+}
 /* ── Session row right-hand meta slot (local rows only) ──────────────────
    One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
    cycle every 10s (SessionRail.tsx useMetaCyclePhase/paneMetaFields), or the
