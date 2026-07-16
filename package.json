@@ -33,7 +33,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-concurrency=2",
+    "test": "node --test test/*.test.js --test-concurrency=2",
     "eval:optimise": "node scripts/eval-optimize.mjs",
     "cleanup:stale-dev": "node scripts/cleanup-stale-dev.mjs",
     "cleanup:stale-dev:apply": "node scripts/cleanup-stale-dev.mjs --apply",
