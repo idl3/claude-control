@@ -19,6 +19,7 @@ import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
+import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { MediaAppWatcher } from './lib/media-watch.js';
@@ -1887,6 +1888,22 @@ function runSerial(target, fn) {
 // forcing a multi-hundred-MB string allocation in the cockpit process.
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
+// The binary PTY bridge (A4 — replaces ttyd, see lib/pty-bridge.js). Its own
+// WebSocketServer + resource-model instance; `resolveTarget` looks a client's
+// session id up in the SAME registry /term/'s termIdFromPath uses, so a
+// sessionId the bridge accepts must be BOTH a syntactically valid tmux target
+// AND a session the registry currently knows about (defense-in-depth beyond
+// the bridge's own isValidTarget check).
+const ptyWss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
+const ptyBridge = createPtyBridge({
+  resolveTarget: (sessionId) => {
+    const session = sessionById(sessionId);
+    if (!session || !tmux.isValidTarget(session.target)) return null;
+    return { target: session.target };
+  },
+});
+ptyWss.on('connection', (ws, req) => ptyBridge.handleConnection(ws, req));
+
 server.on('upgrade', (req, socket, head) => {
   // Origin check first (403) — applies to every upgrade regardless of path.
   if (!isAllowedOrigin(req.headers.origin)) {
@@ -1908,6 +1925,15 @@ server.on('upgrade', (req, socket, head) => {
       return;
     }
     relayTerminalUpgrade(req, socket, head);
+    return;
+  }
+
+  // A4's binary PTY bridge: bearer-gated identically to the main cockpit WS
+  // (checkWsToken / WS_PROTOCOL subprotocol — see lib/auth.js). Auth +
+  // handoff both live in handlePtyUpgrade so the gate is unit-testable
+  // without a real HTTP server (test/pty-bridge.test.js).
+  if (upgradePath === '/pty') {
+    handlePtyUpgrade(req, socket, head, { wss: ptyWss, token: CONFIG.token });
     return;
   }
 
@@ -3345,6 +3371,7 @@ function shutdown() {
   clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   terminal.shutdownAll();
+  ptyBridge.shutdownAll();
   mlx.shutdown();
   registry.stop();
   resources.stop();

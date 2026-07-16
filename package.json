@@ -52,5 +52,8 @@
     "web-push": "^3.6.7",
     "ws": "^8.18.0",
     "zod": "^4.4.3"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   }
 }
