@@ -96,36 +96,45 @@ const WELCOME_CHIPS: WelcomeChip[] = [
   { label: 'Run a shell command (>_)' },
 ];
 
-// Safety fallback: if loading stays true for more than 8s (e.g. WS frame never
-// arrives), flip showLoader off so the welcome renders rather than spinning forever.
+// Safety fallback: if the transcript frame itself never arrives (`loading`) for
+// more than 8s (e.g. the WS frame is lost), stop waiting so the empty/welcome
+// state renders rather than spinning forever. Doesn't apply to the
+// `working`-driven wait below (see stillLoading in ThreadImpl) — that's already
+// self-bounded by claudeWorking's own 15s recency window, so a second hard
+// cutoff would just blank out a session that's still visibly generating.
 const LOADER_TIMEOUT_MS = 8_000;
 
-/** Widths (%) for each skeleton row's text bars — mimics a few chat bubbles
- *  of varying length so the shape reads as "message-ish" rather than generic. */
-const SKELETON_ROWS: { align?: 'end'; widths: number[] }[] = [
-  { widths: [62, 38] },
-  { align: 'end', widths: [46] },
-  { widths: [70, 54, 30] },
-];
-
-/** Skeleton + spinner shown while the transcript tail is being fetched from the
- *  server. The skeleton rows give a sense of "content incoming" (vs. a bare
- *  spinner reading as indefinite/stuck); the spinner keeps the classic
- *  in-progress affordance for users who scan past the shimmer. */
-function TranscriptLoader({ loading }: { loading: boolean }) {
-  const [showLoader, setShowLoader] = useState(true);
+function useLoaderTimedOut(loading: boolean): boolean {
+  const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
     if (!loading) {
-      setShowLoader(true);
+      setTimedOut(false);
       return;
     }
-    const id = setTimeout(() => setShowLoader(false), LOADER_TIMEOUT_MS);
+    const id = setTimeout(() => setTimedOut(true), LOADER_TIMEOUT_MS);
     return () => clearTimeout(id);
   }, [loading]);
 
-  if (!loading || !showLoader) return null;
+  return timedOut;
+}
 
+/** Widths (%) for each skeleton row's text bars — mimics a couple of real chat
+ *  turns (a multi-line assistant paragraph, a short user reply) so the shape
+ *  reads as "message-ish" rather than generic. Percentages are relative to the
+ *  real message column: .thread-skeleton/.thread-skeleton-row in styles.css are
+ *  sized to match .thread-viewport/.msg-row exactly, not a fixed narrow box. */
+const SKELETON_ROWS: { align?: 'end'; widths: number[] }[] = [
+  { widths: [88, 72, 45] },
+  { align: 'end', widths: [72, 40] },
+  { widths: [95, 80, 60, 30] },
+];
+
+/** Skeleton + spinner shown while the transcript tail is expected but hasn't
+ *  rendered yet. The skeleton rows give a sense of "content incoming" (vs. a
+ *  bare spinner reading as indefinite/stuck); the spinner keeps the classic
+ *  in-progress affordance for users who scan past the shimmer. */
+function TranscriptLoader() {
   return (
     <div className="thread-loading" aria-label="Loading transcript" aria-live="polite">
       <span className="thread-loading-spinner" aria-hidden="true" />
@@ -201,6 +210,18 @@ function ThreadImpl({
   onReply,
   emptyState = null,
 }: ThreadProps) {
+  const loaderTimedOut = useLoaderTimedOut(!!loading);
+  // Hold the skeleton (instead of falling through to the empty/welcome state)
+  // while either:
+  //  - the transcript frame itself hasn't arrived yet (`loading`), or
+  //  - it HAS arrived (and is empty) but Claude is demonstrably active for this
+  //    session (`working`) — covers a session just created with an initial
+  //    prompt, where the tmux pane/transcript file can legitimately still be
+  //    empty on the first WS frame while the prompt is being delivered.
+  // Remote sessions already get their own tailored `emptyState` copy for this
+  // exact "loading over the wire while working" case, so `working` only
+  // extends the skeleton window when there's no `emptyState` override.
+  const stillLoading = (!!loading && !loaderTimedOut) || (!!working && !emptyState);
   // Extra bottom room ONLY while the strip/Working indicator is showing, so the
   // last transcript line at max scroll never hides behind the overhanging pills.
   const showAgentRoom = subagents.length > 0 && (working || subagents.some((a) => a.status === 'running'));
@@ -246,8 +267,8 @@ function ThreadImpl({
               <div className="thread-empty">select a session</div>
             ) : (
               <ThreadPrimitive.Empty>
-                {loading ? (
-                  <TranscriptLoader loading={loading} />
+                {stillLoading ? (
+                  <TranscriptLoader />
                 ) : emptyState ? (
                   <div className="thread-empty-remote" role="status">
                     <p className="thread-empty-remote-heading">{emptyState.heading}</p>

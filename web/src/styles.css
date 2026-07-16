@@ -1955,9 +1955,12 @@ body.is-external-display .rail {
   color: var(--accent);
 }
 /* Transcript loading state — shown while the server delivers the messages frame.
-   Centered spinner using the same cockpit-spin keyframe. Fades out once loaded. */
+   Centered spinner using the same cockpit-spin keyframe. Fades out once loaded.
+   width:100% (not an auto-shrink box) so .thread-skeleton's own width:100% below
+   resolves against the real message column instead of collapsing to content size. */
 .thread-loading {
-  margin: auto;
+  margin: auto 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1982,28 +1985,36 @@ body.is-external-display .rail {
   }
 }
 /* Skeleton rows — message-shaped shimmer placeholders shown alongside the
-   spinner above while a transcript is loading (primarily the remote/olam
-   backfill window; local sessions resolve near-instantly). Rows alternate
-   alignment to loosely suggest a user/assistant exchange without implying
-   real content. */
+   spinner above while a transcript is loading. Sized to the SAME column as
+   real messages (.thread-viewport's padded content box, .msg-row's 92% cap)
+   rather than a fixed narrow box, so it reads as an actual conversation
+   skeleton instead of a small generic stub. Rows alternate alignment to
+   loosely suggest a user/assistant exchange without implying real content;
+   the end-aligned row mirrors .msg-row[data-role='user']'s bubble treatment. */
 .thread-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  width: min(420px, 80vw);
+  gap: calc(16px * var(--ui-scale)); /* mirrors .thread-viewport's inter-turn gap */
+  width: 100%;
 }
 .thread-skeleton-row {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(10px * var(--ui-scale)); /* mirrors .msg-body's line gap */
+  max-width: 92%; /* mirrors .msg-row */
 }
 .thread-skeleton-row[data-align='end'] {
   align-items: flex-end;
+  align-self: flex-end; /* mirrors .msg-row[data-role='user']'s self alignment */
+  background: var(--user);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px;
 }
 .thread-skeleton-bar {
   display: block;
-  height: 10px;
+  height: 12px;
   border-radius: 6px;
   background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-hover) 50%, var(--bg-2) 75%);
   background-size: 200% 100%;
