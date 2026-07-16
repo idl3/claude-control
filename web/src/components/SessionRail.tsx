@@ -266,7 +266,7 @@ function RemoteRow({
             olam-side SPA change to surface message_usage lands separately. */}
         {s.model || s.ctxPct != null ? (
           <div className="session-meta">
-            {s.model ? <span className="meta-model">{s.model}</span> : null}
+            {s.model ? <span className="meta-model">{formatModel(s.model)}</span> : null}
             {s.ctxPct != null ? (
               <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
             ) : null}
@@ -401,12 +401,22 @@ interface MetaField {
  * model ⟷ context alternation for the common 2-field case and folds Codex's
  * extra rate-limit field into the same rotation instead of dropping it.
  */
+/** Normalise the server's model label to a consistent lowercase `<model>-<version>`
+ *  form: "Opus 4.8" → "opus-4.8", "Opus 4.8 (1M context)" → "opus-4.8 (1m context)".
+ *  Already-hyphenated ids ("claude-fable-5", "gpt-5.5") pass through unchanged. */
+function formatModel(model: string): string {
+  const m = model.match(/^(.*?)(\s*\([^)]*\))?\s*$/);
+  const base = (m?.[1] ?? model).trim().toLowerCase().replace(/\s+/g, '-');
+  const suffix = m?.[2] ? ` ${m[2].trim().toLowerCase()}` : '';
+  return base + suffix;
+}
+
 function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {
   if (isTerminal) {
     return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
   }
   const fields: MetaField[] = [];
-  if (s.model) fields.push({ key: 'model', text: s.model, className: 'meta-model' });
+  if (s.model) fields.push({ key: 'model', text: formatModel(s.model), className: 'meta-model' });
   if (s.ctxPct != null) {
     fields.push({ key: 'ctx', text: `ctx:${Math.round(s.ctxPct)}%`, className: 'meta-ctx' });
   }

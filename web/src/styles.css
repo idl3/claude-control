@@ -186,6 +186,18 @@ html.pwa-fill #root {
 html.pwa-fill .app {
   height: var(--screen-h);
 }
+/* Keyboard up in the installed PWA: pin .app to the visible area ABOVE the
+   keyboard (standard visualViewport follow — App.tsx publishes --vv-top/--vv-h).
+   position:fixed takes .app out of document flow, so its size never changes the
+   document height and iOS never re-scrolls → the composer at .app's bottom lands
+   reliably above the keyboard every time (no more random under/over). */
+html.pwa-fill body.kbd-up .app {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vv-top, 0px);
+  height: var(--vv-h, 100dvh);
+}
 
 /* ── Cosmic backdrop — deep-space base + ultra-low-alpha nebula wash + sparse
    drifting starfield, painted BEHIND the entire app (z-index:-1 relative to
@@ -2767,10 +2779,9 @@ details.block-tool[open] > summary .tool-arrow,
     transition: padding-bottom 120ms ease;
   }
   body.kbd-up .composer {
-    /* Focused: the app shrinks to the area above the keyboard (App.tsx pwa-fill
-       handling), so the composer already hugs the keyboard — keep a small even
-       gap so composer→keyboard-bar matches keyboard-bar→suggestions. */
-    padding-bottom: 8px;
+    /* Focused: .app is pinned to just above the keyboard, so the composer already
+       hugs it — drop the bottom padding entirely (keyboard covers the home bar). */
+    padding-bottom: 0;
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the
@@ -4575,12 +4586,12 @@ body.is-external-display .composer {
   .rail-foot .rail-filter {
     padding-left: 16px;
     padding-right: 14px;
-    border-bottom-left-radius: 24px; /* hug the phone's bottom-left corner */
+    border-bottom-left-radius: 28px; /* hug the phone's bottom-left corner */
   }
   .rail-foot .rail-new {
     padding-left: 14px;
     padding-right: 16px;
-    border-bottom-right-radius: 24px; /* hug the phone's bottom-right corner */
+    border-bottom-right-radius: 28px; /* hug the phone's bottom-right corner */
   }
 }
 .rail-gear {

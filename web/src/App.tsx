@@ -2079,17 +2079,17 @@ function AppInner() {
     };
     const applyOffset = () => {
       document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
-      // Installed PWA (pwa-fill) only: .app fills the FULL screen when idle, but
-      // shrinks to the area ABOVE the keyboard when it's up — so the composer at
-      // the app's bottom sits right above the keyboard (hugs it) and is always in
-      // view on focus. Fixes both "keyboard opens but the composer doesn't come
-      // up" and the big gap between the composer and the keyboard bar. Idle →
-      // screen.height; keyboard up → keyboard-top (offsetTop + visible height).
-      if (document.documentElement.classList.contains('pwa-fill')) {
-        const kbdUp = window.innerHeight - vv.height - vv.offsetTop > 120;
-        const h = kbdUp ? Math.round(vv.offsetTop + vv.height) : window.screen.height;
-        document.documentElement.style.setProperty('--screen-h', `${h}px`);
-      }
+      // Publish the visual-viewport height too. When the keyboard is up the
+      // installed PWA pins .app to the visible area above the keyboard via
+      // position:fixed + top:--vv-top + height:--vv-h (see styles.css
+      // `html.pwa-fill body.kbd-up .app`). This is a standard visualViewport
+      // FOLLOW: .app is out of document flow so its size never changes the
+      // document height, so iOS never re-scrolls — the composer lands reliably
+      // above the keyboard every time (the earlier `--screen-h = offsetTop +
+      // height` resized the document and fed back into iOS's scroll → the
+      // composer landed randomly under/over the keyboard). --screen-h stays the
+      // full screen (set in main.tsx) for the keyboard-down / rail case.
+      document.documentElement.style.setProperty('--vv-h', `${vv.height}px`);
     };
     const onViewportChange = () => {
       // Coalesce the burst of resize/scroll events fired during the
