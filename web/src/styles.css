@@ -792,6 +792,19 @@ body.is-external-display .rail {
   background: var(--bg-2);
   color: var(--text-dim);
 }
+/* Desktop: hide rename button by default, show on hover. */
+@media (min-width: 760px) {
+  .session-group-rename-btn {
+    opacity: 0;
+    transition: opacity 150ms var(--ease);
+  }
+  .session-group-head:hover .session-group-rename-btn {
+    opacity: 1;
+  }
+  .session-group-rename-btn:focus-visible {
+    opacity: 1;
+  }
+}
 .session-window {
   display: flex;
   flex-direction: column;
@@ -3139,7 +3152,7 @@ body.is-external-display .composer {
 }
 /* Running dot inside pill — steady for 'done', pulsing only while running. */
 .subagent-pill .sa-dot[data-status='running'] {
-  animation: pulse 1.4s var(--ease) infinite;
+  animation: pulse 0.82s var(--ease) infinite;
 }
 /* Working — reuses the composer's living animated rim (registered
    `--composer-ring-angle` custom property + `composer-ring-flow` keyframes +
@@ -3172,7 +3185,7 @@ body.is-external-display .composer {
 }
 @media (prefers-reduced-motion: no-preference) {
   .subagent-pill[data-status='running']::before {
-    animation: composer-ring-flow 12s linear infinite;
+    animation: composer-ring-flow 7s linear infinite;
   }
 }
 /* Done, waiting on the parent to respond/clear — steady muted green border,
