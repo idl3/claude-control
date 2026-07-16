@@ -3193,6 +3193,10 @@ body.is-external-display .composer {
      rim itself. Without padding-top this clipped the rim's top arc flat. */
   padding-top: 2px;
   padding-bottom: 2px;
+  /* Same rim-overflow reasoning as padding-top: the first pill's running rim /
+     active ring draws ~1.4px outside its border box and the forced horizontal
+     clip would shave the left edge — a 1px left buffer keeps the border intact. */
+  padding-left: 1px;
   margin-top: -30px;
   position: relative;
   z-index: 1;
