@@ -2170,6 +2170,7 @@ function AppInner() {
           <i className="cosmos-stars-near" />
           <i className="cosmos-twinkle" />
           <i className="cosmos-shooting" />
+          <i className="cosmos-shooting-far" />
           <i className="cosmos-active-tint" />
         </div>
         {/* Pull-to-refresh indicator: tracks the pull, becomes a spinner on
