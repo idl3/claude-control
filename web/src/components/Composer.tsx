@@ -2245,10 +2245,11 @@ export function Composer({
             // via `data-active` instead of mounting/unmounting, which used to
             // push Send sideways whenever Stop appeared. Stop's slot sits
             // immediately left of Send. While the agent is generating, Stop
-            // becomes active; the optimise/send button stays active too
-            // WHENEVER there's text — so you can stop the current turn AND
-            // queue a new message. Empty + working → only Stop active.
-            // Not working → only Send active.
+            // becomes active in its own slot. The optimise/improve-prompt
+            // button stays VISIBLE at all times (only disabled when the
+            // composer is empty) so the improve-prompt action never
+            // disappears — you can stop the current turn AND still see/queue
+            // a new message. Not working → only Send shows (Stop hidden).
             <div className="composer-send-group">
               <button
                 type="button"
@@ -2269,13 +2270,11 @@ export function Composer({
                 ref={sendBtnRef}
                 className="composer-send"
                 data-queue={working ? 'true' : undefined}
-                data-active={!working || !empty ? 'true' : undefined}
+                data-active="true"
                 aria-label="Optimise and send"
                 title="Optimise & send (⌘/Ctrl+↵)"
-                aria-hidden={working && empty}
-                tabIndex={working && empty ? -1 : 0}
                 disabled={disabled || optimizing || empty || compacting || resuming}
-                data-hotkey={working && empty ? undefined : '⌘↵'}
+                data-hotkey={empty ? undefined : '⌘↵'}
                 onClick={() => void runEnhance()}
               >
                 {optimizing ? (
