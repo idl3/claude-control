@@ -11,6 +11,7 @@ import {
   type CodexTransport,
 } from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
+import { WelcomeHero } from './WelcomeHero';
 
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
@@ -102,9 +103,15 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   // `.composer`-classed wrapper — the element the center↔bottom lift is
   // applied to (see the centering effect + submit() below).
   const composerWrapRef = useRef<HTMLDivElement | null>(null);
-  // Heading + option row — fades out (opacity only) as the card slides to
-  // the bottom slot, so it reads as the plain live composer on arrival.
+  // Option row (agent/model/advanced/tmux/dir) — fades out (opacity only) as
+  // the card slides to the bottom slot, so it reads as the plain live
+  // composer on arrival.
   const fadeRef = useRef<HTMLDivElement | null>(null);
+  // `.new-session-draft-hero` wrapper (WelcomeHero + its own bottom gap baked
+  // in via padding) — gets the SAME translateY lift as composerWrapRef so
+  // [hero, composer] read as one centered group (see the centering effect),
+  // and fades opacity-only on submit (see submit() below).
+  const heroRef = useRef<HTMLDivElement | null>(null);
   // Last-computed centered translateY, in px (negative = lifted up). Read by
   // submit()'s error-path reverse animation to slide back to the same spot.
   const liftRef = useRef(0);
@@ -152,6 +159,25 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     setModel('default');
   }, [agent]);
 
+  // If agentInfos arrives showing the currently-selected agent is genuinely
+  // unavailable while the OTHER agent is available, switch to the available
+  // one rather than leaving the user staring at a disabled harness they can't
+  // submit. If both (or neither) report unavailable, leave the selection
+  // alone — nothing safe to switch to.
+  useEffect(() => {
+    if (agentInfos.length === 0) return;
+    const claude = agentInfos.find((a) => a.id === 'claude');
+    const codex = agentInfos.find((a) => a.id === 'codex');
+    setAgent((prev) => {
+      const prevInfo = prev === 'claude' ? claude : codex;
+      const otherInfo = prev === 'claude' ? codex : claude;
+      if (prevInfo?.available === false && otherInfo?.available !== false) {
+        return prev === 'claude' ? 'codex' : 'claude';
+      }
+      return prev;
+    });
+  }, [agentInfos]);
+
   // Default-select the project directory whose path/label looks like this
   // workspace, once projectDirs arrive. Only applies while the user hasn't
   // already picked something (guards against clobbering a manual choice made
@@ -171,21 +197,29 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     setTmuxChoice((prev) => (prev ? prev : (tmuxSessions[0]?.name ?? '')));
   }, [tmuxSessions]);
 
-  // Keep the composer card visually centered while idle: measure the
-  // available height above it and lift it by half the empty space, so it
-  // reads as vertically centered rather than bottom-anchored. Recomputes on
-  // window resize and whenever a structural row (agent/advanced/custom-cwd/
-  // new-tmux-name) is added or removed. Skipped entirely while submitting —
-  // submit()'s own GSAP timeline owns the transform during that window.
+  // Keep [hero, composer] visually centered as a GROUP while idle: measure
+  // the available height above the pair and lift BOTH by half the empty
+  // space, so the hero + composer card read as one vertically centered block
+  // rather than the composer alone being bottom-anchored. The hero's own
+  // bottom padding (`.new-session-draft-hero`, in styles.css) is the visual
+  // gap between it and the composer card — it's included in heroH below
+  // since it's part of the wrapper's offsetHeight, so the gap survives the
+  // shared transform intact. Recomputes on window resize and whenever a
+  // structural row (agent/advanced/custom-cwd/new-tmux-name) is added or
+  // removed. Skipped entirely while submitting — submit()'s own GSAP
+  // timeline owns the transform during that window.
   useLayoutEffect(() => {
     if (creating) return;
     const root = rootRef.current;
     const wrap = composerWrapRef.current;
+    const hero = heroRef.current;
     if (!root || !wrap) return;
     const recompute = () => {
-      const lift = -Math.max(root.offsetHeight - wrap.offsetHeight, 0) / 2;
+      const heroH = hero?.offsetHeight ?? 0;
+      const lift = -Math.max(root.offsetHeight - heroH - wrap.offsetHeight, 0) / 2;
       liftRef.current = lift;
       gsap.set(wrap, { y: lift });
+      if (hero) gsap.set(hero, { y: lift });
     };
     recompute();
     window.addEventListener('resize', recompute);
@@ -213,7 +247,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     onToast('Creating session…');
 
     // Center→bottom handoff: slide the composer card down to its live-slot
-    // position (transform only) while fading out the heading/option row
+    // position (transform only) while fading out the option row and the hero
     // (opacity only) — both compositor-friendly. Gated by
     // prefers-reduced-motion, in which case it jumps straight to the end
     // state. onCreated() is called only once BOTH this animation and the
@@ -221,18 +255,21 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     // into an already-bottom-anchored composer with no visible pop.
     const wrap = composerWrapRef.current;
     const fade = fadeRef.current;
+    const hero = heroRef.current;
     const reduced = prefersReducedMotion();
 
     function slideToBottom(): Promise<void> {
       if (!wrap || reduced) {
         if (wrap) gsap.set(wrap, { y: 0 });
         if (fade) gsap.set(fade, { opacity: 0 });
+        if (hero) gsap.set(hero, { opacity: 0 });
         return Promise.resolve();
       }
       return new Promise((resolve) => {
         const tl = gsap.timeline({ onComplete: resolve });
         tl.to(wrap, { y: 0, duration: ANIM.base, ease: ANIM.enterEase }, 0);
         if (fade) tl.to(fade, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
+        if (hero) tl.to(hero, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
       });
     }
 
@@ -240,11 +277,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
       if (!wrap || reduced) {
         if (wrap) gsap.set(wrap, { y: liftRef.current });
         if (fade) gsap.set(fade, { opacity: 1 });
+        if (hero) gsap.set(hero, { opacity: 1 });
         return;
       }
       const tl = gsap.timeline();
       tl.to(wrap, { y: liftRef.current, duration: ANIM.base, ease: ANIM.exitEase }, 0);
       if (fade) tl.to(fade, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
+      if (hero) tl.to(hero, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
     }
 
     try {
@@ -311,10 +350,23 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
         }
       }}
     >
-      {/* Stands in for .thread-viewport: empty, but keeps the composer
-          pinned to the bottom of the flex column exactly like the live
-          session does, so the lift below is measured from the same shape. */}
-      <div className="new-session-draft-placeholder" aria-hidden="true" />
+      {/* Stands in for .thread-viewport: bottom-aligned so the hero sits
+          directly above the composer, exactly like the live transcript's
+          welcome state sits above its own composer. Same flex shape as the
+          live session (an empty stand-in used to, just now with the hero
+          bottom-anchored inside it), so the lift below is measured from the
+          same overall root height. */}
+      <div className="new-session-draft-placeholder">
+        <div className="new-session-draft-hero" ref={heroRef}>
+          <WelcomeHero
+            agentName={agent === 'codex' ? 'Codex' : 'Claude'}
+            onInsert={(t) => {
+              setPrompt(t);
+              promptRef.current?.focus();
+            }}
+          />
+        </div>
+      </div>
 
       <div className="composer" ref={composerWrapRef}>
         <form
@@ -325,12 +377,10 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             void submit();
           }}
         >
-          {/* Heading + option row — baked into the card, fades out on submit
-              (see submit()'s slideToBottom) so the card reads as the plain
-              live composer once it lands in the bottom slot. */}
+          {/* Option row — baked into the card, fades out on submit (see
+              submit()'s slideToBottom) so the card reads as the plain live
+              composer once it lands in the bottom slot. */}
           <div className="new-session-draft-head" ref={fadeRef}>
-            <h1 className="new-session-draft-heading">New session</h1>
-
             <div className="new-session-draft-options">
               <div className="new-session-draft-options-left">
                 <select
@@ -340,10 +390,18 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
                   onChange={(e) => setAgent(e.target.value as 'claude' | 'codex')}
                   aria-label="Agent"
                 >
-                  <option value="claude" title={claudeInfo?.available === false ? claudeInfo.reason : undefined}>
+                  <option
+                    value="claude"
+                    disabled={claudeInfo?.available === false}
+                    title={claudeInfo?.available === false ? claudeInfo.reason : undefined}
+                  >
                     Claude{claudeInfo?.available === false ? ' (unavailable)' : ''}
                   </option>
-                  <option value="codex" title={codexInfo?.available === false ? codexInfo.reason : undefined}>
+                  <option
+                    value="codex"
+                    disabled={codexInfo?.available === false}
+                    title={codexInfo?.available === false ? codexInfo.reason : undefined}
+                  >
                     Codex{codexInfo?.available === false ? ' (unavailable)' : ''}
                   </option>
                 </select>

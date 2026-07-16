@@ -5218,14 +5218,15 @@ select.rail-new-cwd {
 
 /* ── New-session draft screen (main content area) ────────────────
    Reads as the SAME view as a live session, not a page swap: the root
-   mirrors .thread-root's flex shape exactly (empty .new-session-draft-
-   placeholder standing in for .thread-viewport, above a .composer-classed
-   wrap), so the .composer-card sits in the identical bottom-anchored slot
-   the live composer occupies. It's then lifted to read as vertically
-   centered via a measured translateY on the .composer wrap (see
+   mirrors .thread-root's flex shape exactly (.new-session-draft-placeholder
+   standing in for .thread-viewport — holding the shared WelcomeHero,
+   bottom-anchored — above a .composer-classed wrap), so the .composer-card
+   sits in the identical bottom-anchored slot the live composer occupies.
+   [hero, composer] are then lifted TOGETHER to read as one vertically
+   centered group via a measured translateY applied to both (see
    NewSessionDraft.tsx's centering effect) — a compositor-only transform, not
-   a different layout — and animates back to y:0 on submit for an in-place,
-   no-pop handoff into the live <Thread>. */
+   a different layout — and animate back to y:0 (composer) / fade out
+   (hero) on submit for an in-place, no-pop handoff into the live <Thread>. */
 .new-session-draft {
   display: flex;
   flex-direction: column;
@@ -5237,49 +5238,99 @@ select.rail-new-cwd {
 .new-session-draft-placeholder {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
 }
-.new-session-draft-heading {
-  margin: 0 0 4px;
-  font-family: ui-serif, Georgia, 'Times New Roman', serif;
-  font-size: clamp(1.4rem, 3vw, 1.8rem);
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.02em;
+/* Wraps the shared WelcomeHero (see WelcomeHero.tsx) — its own bottom padding
+   is the visual gap to the composer below, so NewSessionDraft.tsx's
+   centering effect picks the gap up "for free" via this element's
+   offsetHeight rather than duplicating a gap constant in JS. width:100% so
+   .thread-welcome's own `margin: auto` + max-width centers it horizontally. */
+.new-session-draft-hero {
+  width: 100%;
+  padding-bottom: var(--s-6);
 }
-/* Heading + option row + name field, wrapped so it can fade out (opacity
-   only) as the card slides to the bottom slot on submit. */
+/* Option row + name field, wrapped so it can fade out (opacity only) as the
+   card slides to the bottom slot on submit. */
 .new-session-draft-head {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--s-2);
 }
+/* One cohesive, left-aligned control bar — the two clusters (harness/model/
+   Advanced, then tmux/dir) sit side by side with a slightly larger gap than
+   the rhythm within each cluster, so the row reads as intentional grouping
+   rather than two controls shoved to opposite edges of a void. */
 .new-session-draft-options {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s-4);
 }
 .new-session-draft-options-left,
 .new-session-draft-options-right {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-}
-.new-session-draft-options-right {
-  margin-left: auto;
+  gap: var(--s-2);
 }
 /* Option-row dropdowns size to content instead of the full-width rail-new-cwd
-   default (this row holds several selects side by side, not one stacked field). */
+   default (this row holds several selects side by side, not one stacked field).
+   max-width keeps the longer tmux/dir option labels from sprawling the row. */
 .new-session-draft-select {
   width: auto;
   min-width: 96px;
+  max-width: 220px;
   flex: 0 1 auto;
+}
+.new-session-draft-select:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.new-session-draft-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.new-session-draft-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* Custom chevron replaces the native OS arrow (killed via `appearance: none`
+   below — needs the SAME `select.` compound-selector specificity as
+   `select.rail-new-cwd`'s `appearance: auto` above to actually win; a bare
+   `.new-session-draft-select { appearance: none }` would lose to that rule
+   regardless of source order since CSS resolves conflicting specificity
+   before tie-breaking on order). */
+select.new-session-draft-select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  font-family: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a90a6' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px;
+  padding-right: 26px;
 }
 .new-session-draft-freetext {
   flex: 1 1 160px;
   width: auto;
+  max-width: 260px;
+}
+.new-session-draft-freetext:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.new-session-draft-freetext:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.new-session-draft-freetext:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .new-session-draft-advanced-toggle {
   background: transparent;
@@ -5296,6 +5347,17 @@ select.rail-new-cwd {
 .new-session-draft-advanced-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* Mobile: the tmux/dir selects' option text ("(default) — existing
+   session…") is long enough that the shared max-width:220px truncates it
+   unreadably when squeezed onto a shared row. Let each select claim a full
+   row so labels stay legible; the shorter agent/model pair still fits
+   side by side and is left alone. */
+@media (max-width: 760px) {
+  .new-session-draft-options-right .new-session-draft-select {
+    flex: 1 1 100%;
+    max-width: none;
+  }
 }
 
 /* ── Transcript inline attachment previews ────────────────────── */
