@@ -2079,6 +2079,17 @@ function AppInner() {
     };
     const applyOffset = () => {
       document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+      // Installed PWA (pwa-fill) only: .app fills the FULL screen when idle, but
+      // shrinks to the area ABOVE the keyboard when it's up — so the composer at
+      // the app's bottom sits right above the keyboard (hugs it) and is always in
+      // view on focus. Fixes both "keyboard opens but the composer doesn't come
+      // up" and the big gap between the composer and the keyboard bar. Idle →
+      // screen.height; keyboard up → keyboard-top (offsetTop + visible height).
+      if (document.documentElement.classList.contains('pwa-fill')) {
+        const kbdUp = window.innerHeight - vv.height - vv.offsetTop > 120;
+        const h = kbdUp ? Math.round(vv.offsetTop + vv.height) : window.screen.height;
+        document.documentElement.style.setProperty('--screen-h', `${h}px`);
+      }
     };
     const onViewportChange = () => {
       // Coalesce the burst of resize/scroll events fired during the
