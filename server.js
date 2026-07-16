@@ -2797,8 +2797,15 @@ async function handleClientMessage(ws, msg) {
 
         if (questions.length > 0) {
           let dynamicOk = true; // will be set false to fall back
+          // A free-text/chat directive is a WHOLE-picker escape hatch: activating
+          // "Type something" / "Chat about this" declines the entire structured
+          // question set and routes one free-form response (verified live — a
+          // 2-question picker reported BOTH declined). So once a directive is
+          // delivered we stop processing further questions rather than capturing a
+          // now-closed picker and failing.
+          let textAnswered = false;
 
-          for (let qi = 0; qi < questions.length && dynamicOk; qi += 1) {
+          for (let qi = 0; qi < questions.length && dynamicOk && !textAnswered; qi += 1) {
             const question = questions[qi];
             const selEntry = selections[qi];
             // Directives ({kind:'text'|'chat'}) are handled by their own branch;
@@ -2877,6 +2884,7 @@ async function handleClientMessage(ws, msg) {
                 await tmux.sendText(session.target, plan.text, { settleMs: SETTLE_MS * 3 });
                 await new Promise((r) => setTimeout(r, SETTLE_MS));
                 stepOk = true;
+                textAnswered = true; // whole picker answered — stop the question loop
                 break; // question done; the submit-confirm loop verifies the picker closed
               }
 
