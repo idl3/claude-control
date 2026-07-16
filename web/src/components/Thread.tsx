@@ -8,7 +8,7 @@ import { SubAgentThread } from './SubAgentThread';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ArrowDownIcon } from './icons';
 import type { SubAgentMode } from '../lib/subAgent';
-import type { Pending, SubAgent } from '../lib/types';
+import type { AnswerSelection, Pending, SubAgent } from '../lib/types';
 import type { ActivePrompt } from './AskInline';
 
 interface ThreadProps {
@@ -60,7 +60,7 @@ interface ThreadProps {
   /** Live unanswered AskUserQuestion to surface in the transcript timeline (with
    *  full context), or null when it's already present as a real transcript record. */
   incomingAsk?: Pending | null;
-  onAnswer?: (toolUseId: string, selections: string[][]) => void;
+  onAnswer?: (toolUseId: string, selections: AnswerSelection[]) => void;
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;

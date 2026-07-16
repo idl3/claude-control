@@ -66,7 +66,7 @@ import {
   GalleryIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { Pending, ServerMessage } from './lib/types';
+import type { AnswerSelection, Pending, ServerMessage } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
 import {
   echoMatches,
@@ -76,7 +76,7 @@ import {
   removePendingSend,
   toMs,
 } from './lib/pendingSend';
-import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './lib/answerSettle';
+import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS, FLAG_PENDING_TOOL_USE_ID } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
@@ -84,11 +84,6 @@ import gsap, { prefersReducedMotion } from './lib/anim';
 import { loadCosmosPref } from './lib/cosmosPrefs';
 import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
 
-// Sentinel toolUseId used when the inline AskBody is synthesized from the
-// session's boolean `pending` flag rather than a full structured Pending object
-// (tailer-less sessions only carry the flag). The server will not recognise this
-// id, which is acceptable — the goal is to never leave the user blind.
-const FLAG_PENDING_TOOL_USE_ID = '__flag__';
 
 // How long a queued send waits for its transcript echo before we stop showing it.
 // Keep an unconfirmed optimistic send visible for a long time: the user must
@@ -1779,7 +1774,7 @@ function AppInner() {
     showToast(ok ? 'Retry → Continue' : 'Not connected', ok ? 'ok' : 'error');
   }, [cockpit.sendReply, showToast]);
   const onThreadAnswer = useCallback(
-    (toolUseId: string, selections: string[][]) => {
+    (toolUseId: string, selections: AnswerSelection[]) => {
       cockpit.sendAnswer(toolUseId, selections);
       cockpit.clearCapture();
       markAnswered();
