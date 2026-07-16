@@ -122,6 +122,16 @@ export interface Msg {
   queued?: boolean;
 }
 
+/**
+ * One question's answer on the wire. Either the chosen option labels (the option
+ * path, unchanged + backward-compatible) OR a free-text/chat directive telling the
+ * server to type the literal `text` into the picker's "Type something" /
+ * "Chat about this" row instead of selecting an option.
+ */
+export type AnswerSelection =
+  | string[]
+  | { kind: 'text' | 'chat'; text: string };
+
 export interface PendingOption {
   label: string;
   description?: string;
@@ -272,7 +282,7 @@ export type ClientMessage =
   | { type: 'subscribe'; id: string }
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
-  | { type: 'answer'; id: string; toolUseId: string; selections: string[][] }
+  | { type: 'answer'; id: string; toolUseId: string; selections: AnswerSelection[] }
   | { type: 'subagent-load'; id: string; agentId: string }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }

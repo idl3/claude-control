@@ -55,6 +55,16 @@ export interface AnswerSettleState {
 /** Safety cap: 8s gives 3+ scrape cycles (3 × 2000ms) + ingest headroom. */
 export const SETTLE_CAP_MS = 8_000;
 
+/**
+ * Sentinel toolUseId for a SYNTHESIZED ask (tailer-less session: the pending flag
+ * is set but no structured Pending is available). The server has no real pending
+ * to navigate for this id, so its free-text answer must route through the plain
+ * `reply` path rather than the structured `answer` directive path. Shared here so
+ * both App (which builds the synthesized Pending) and AskInline (which routes the
+ * free-text submit) agree on the same constant.
+ */
+export const FLAG_PENDING_TOOL_USE_ID = '__flag__';
+
 export const IDLE_SETTLE: AnswerSettleState = {
   answerSettling: false,
   settleDeadline: 0,

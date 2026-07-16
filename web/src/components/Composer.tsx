@@ -23,6 +23,7 @@ import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
+import type { AnswerSelection } from '../lib/types';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import { StopIcon, BotIcon } from './icons';
 import { AskInline, type ActivePrompt } from './AskInline';
@@ -127,7 +128,7 @@ interface ComposerProps {
    *  composer morphs to show the inline prompt body instead of the input. */
   askActive?: boolean;
   activePrompt?: ActivePrompt | null;
-  onAnswer?: (toolUseId: string, selections: string[][]) => void;
+  onAnswer?: (toolUseId: string, selections: AnswerSelection[]) => void;
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
