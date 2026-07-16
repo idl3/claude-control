@@ -1220,14 +1220,59 @@ body.is-external-display .rail {
   opacity: 0.85;
 }
 .meta-effort {
-  /* Codex reasoning-effort chip (minimal/low/medium/high/xhigh) — distinct hue
-     from model (accent-2) and ctx (dim), so the three dimensions read apart. */
+  /* Reasoning-effort chip (minimal/low/medium/high/xhigh/max) — distinct hue
+     from model (accent-2) and ctx (dim), so the three dimensions read apart.
+     Color comes from a harness-aware modifier (.meta-effort-*, below), NOT
+     this base rule — SessionRail's effortClass() picks the modifier since
+     Claude and Codex tier ladders don't line up (see effortClass jsdoc). */
   font-size: var(--txt-meta);
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--bg-2);
-  color: var(--amber);
   letter-spacing: 0.02em;
+}
+.meta-effort-gray {
+  color: var(--text-faint);
+}
+.meta-effort-yellow {
+  /* No --yellow/--warn token exists in this palette yet — same hue family as
+     the Dracula yellow used by the statusline script this data is sourced
+     from (#f1fa8c ≈ oklch(85% 0.16 100)). */
+  color: oklch(85% 0.16 100);
+}
+.meta-effort-amber {
+  color: var(--amber);
+}
+.meta-effort-red {
+  color: var(--red);
+}
+/* Top-tier effort ("max" for Claude, "xhigh" for Codex — see effortClass) —
+   same rainbow text-clip recipe as .ultrathink-text / .block-cot's live
+   thinking flash (reused verbatim: gradient stops, background-size, clip,
+   thinking-flash keyframe), just sized down to fit the small meta chip. */
+.meta-effort-rainbow {
+  background-image: linear-gradient(
+    90deg,
+    oklch(70% 0.25 20),
+    oklch(75% 0.2 80),
+    oklch(78% 0.2 140),
+    oklch(72% 0.2 200),
+    oklch(68% 0.24 260),
+    oklch(70% 0.25 320),
+    oklch(70% 0.25 20)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-flash 2.2s linear infinite;
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) {
+  .meta-effort-rainbow {
+    animation: none;
+  }
 }
 /* ── Session row right-hand meta slot (local rows only) ──────────────────
    One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
