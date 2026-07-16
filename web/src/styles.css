@@ -134,14 +134,14 @@
      while typing (see .cosmos-aurora below). Blur radius is fixed/static
      (never animated, only transform/opacity move) and alpha stays low/dark
      so it reads as a subtle organic wash, not a light show. */
-  --aurora-alpha: 0.16;   /* peak opacity while composer-active */
+  --aurora-alpha: 0.10;   /* peak opacity while composer-active (dialed back) */
   --aurora-blur:  40px;   /* static blur radius */
-  --aurora-drift: 22s;    /* one flowing drift+skew cycle, slow */
+  --aurora-drift: 15s;    /* one flowing drift+skew cycle (~50% faster) */
 
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
   --glass-chrome:       oklch(20% 0.014 260 / 0.55);  /* chrome (no long text) */
-  --glass-panel:        oklch(18% 0.014 260 / 0.70);  /* text-bearing panels */
+  --glass-panel:        oklch(14% 0.014 260 / 0.70);  /* text-bearing panels (sidebar/top-bar chrome — darker) */
   --glass-panel-strong: oklch(16% 0.014 260 / 0.82);  /* dense text / floating popovers */
   --glass-border:       oklch(100% 0 0 / 0.06);       /* hairline top edge */
 
@@ -524,6 +524,12 @@ html.pwa-fill body.kbd-up .app {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--cosmos-active-ease) var(--ease);
+  /* Localise the glow to the composer (bottom) + top of the page — fade it out
+     across the transcript middle so it doesn't wash the whole viewport. */
+  -webkit-mask-image: linear-gradient(to bottom,
+    black 0%, transparent 34%, transparent 66%, black 100%);
+          mask-image: linear-gradient(to bottom,
+    black 0%, transparent 34%, transparent 66%, black 100%);
 }
 .app:has(.composer-card:focus-within) .cosmos-aurora {
   opacity: var(--aurora-alpha);
@@ -620,6 +626,19 @@ html.pwa-fill body.kbd-up .app {
 .hud-warn-text {
   color: var(--amber);
   font-weight: 600;
+}
+/* Warn state: the dim grays (metric labels + icon buttons) are illegible on the
+   amber background — lift them to the warn-text amber so the whole bar reads. */
+.hud[data-warn='true'] .hud-k {
+  color: var(--amber);
+}
+.hud[data-warn='true'] .notify-bell {
+  color: var(--amber);
+  border-color: color-mix(in oklab, var(--amber) 45%, transparent);
+}
+.hud[data-warn='true'] .notify-bell:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--amber);
 }
 
 .conn-dot {
@@ -1254,7 +1273,7 @@ body.is-external-display .rail {
   min-height: 48px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-1);
+  background: var(--bg);
   flex: 0 0 auto;
   /* A3 audit follow-up (CP3-A, FIX 1): outrank .embed-app-hoist's
      position:fixed hoisted iframes (z-index 1) — this header sits outside
