@@ -141,7 +141,7 @@
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
   --glass-chrome:       oklch(20% 0.014 260 / 0.55);  /* chrome (no long text) */
-  --glass-panel:        oklch(14% 0.014 260 / 0.70);  /* text-bearing panels (sidebar/top-bar chrome — darker) */
+  --glass-panel:        oklch(0.12 0.04 268.24 / 0.7);  /* text-bearing panels (sidebar/top-bar chrome — darker) */
   --glass-panel-strong: oklch(16% 0.014 260 / 0.82);  /* dense text / floating popovers */
   --glass-border:       oklch(100% 0 0 / 0.06);       /* hairline top edge */
 
