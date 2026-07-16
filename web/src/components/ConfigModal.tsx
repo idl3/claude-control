@@ -13,7 +13,9 @@ import {
 } from '../lib/api';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
 import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
+import { loadRailTokens, saveRailTokens, DEFAULT_RAIL_TOKENS, type RailToken } from '../lib/railTokenPrefs';
 import { TypeIcon, TerminalSquareIcon } from './icons';
+import { RailTokenConfig } from './RailTokenConfig';
 
 interface ConfigModalProps {
   onClose: () => void;
@@ -62,13 +64,36 @@ function FolderNavIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-type SectionId = 'general' | 'harness' | 'voice' | 'session';
+// Lucide "repeat" glyph — represents the rail's rotating meta tokens.
+function RepeatNavIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
+type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens';
 
 const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { id: 'general', label: 'General', Icon: TypeIcon },
   { id: 'harness', label: 'Harness', Icon: TerminalSquareIcon },
   { id: 'voice', label: 'Voice Control', Icon: MicNavIcon },
   { id: 'session', label: 'Session Defaults', Icon: FolderNavIcon },
+  { id: 'railtokens', label: 'Rail tokens', Icon: RepeatNavIcon },
 ];
 
 interface GeneralSectionProps {
@@ -655,6 +680,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [cosmosBackground, setCosmosBackground] = useState(true);
   const [cosmosParallax, setCosmosParallax] = useState(true);
   const [cosmosShootingStars, setCosmosShootingStars] = useState(true);
+  // Session-rail meta-slot token order — same device-local, no-server-
+  // counterpart shape as the cosmos toggles above. See lib/railTokenPrefs.ts.
+  const [railTokens, setRailTokens] = useState<RailToken[]>(DEFAULT_RAIL_TOKENS);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
@@ -697,6 +725,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     setCosmosBackground(loadCosmosPref('background'));
     setCosmosParallax(loadCosmosPref('parallax'));
     setCosmosShootingStars(loadCosmosPref('shootingStars'));
+    setRailTokens(loadRailTokens());
   }, []);
 
   useEffect(() => {
@@ -829,6 +858,10 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
           detail: { cosmosBackground, cosmosParallax, cosmosShootingStars },
         }),
       );
+      // Rail-token order is device-local only too — persist + apply LIVE the
+      // same way. SessionRail owns the load + listener (see its mount effect).
+      saveRailTokens(railTokens);
+      window.dispatchEvent(new CustomEvent('cockpit:railtokenprefs', { detail: { railTokens } }));
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
@@ -979,6 +1012,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setProjectDirs={setProjectDirs}
                 loading={loading}
               />
+            ) : null}
+            {activeSection === 'railtokens' ? (
+              <RailTokenConfig railTokens={railTokens} setRailTokens={setRailTokens} />
             ) : null}
           </div>
         </div>
