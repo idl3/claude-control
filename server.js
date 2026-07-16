@@ -31,7 +31,7 @@ import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
-import { buildAnswerProgram, parsePicker, planStep, nextSubmitAction } from './lib/answer.js';
+import { buildAnswerProgram, parsePicker, planStep, planTextStep, isTextDirective, nextSubmitAction } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
@@ -2797,10 +2797,21 @@ async function handleClientMessage(ws, msg) {
 
         if (questions.length > 0) {
           let dynamicOk = true; // will be set false to fall back
+          // A free-text/chat directive is a WHOLE-picker escape hatch: activating
+          // "Type something" / "Chat about this" declines the entire structured
+          // question set and routes one free-form response (verified live — a
+          // 2-question picker reported BOTH declined). So once a directive is
+          // delivered we stop processing further questions rather than capturing a
+          // now-closed picker and failing.
+          let textAnswered = false;
 
-          for (let qi = 0; qi < questions.length && dynamicOk; qi += 1) {
+          for (let qi = 0; qi < questions.length && dynamicOk && !textAnswered; qi += 1) {
             const question = questions[qi];
-            const selectedLabels = selections[qi] || [];
+            const selEntry = selections[qi];
+            // Directives ({kind:'text'|'chat'}) are handled by their own branch;
+            // keep selectedLabels a plain array so the option path never chokes on
+            // a non-array entry.
+            const selectedLabels = Array.isArray(selEntry) ? selEntry : [];
 
             let attempt = 0;
             let stepOk = false;
@@ -2843,6 +2854,38 @@ async function handleClientMessage(ws, msg) {
                 // Whether verified or not, we break out of the question loop —
                 // we've processed all questions.
                 break;
+              }
+
+              // 3b. Free-text / chat directive: navigate to the "Type something" /
+              //     "Chat about this" row, ACTIVATE it (Enter opens the inline
+              //     input), then TYPE the literal text and submit. This path NEVER
+              //     selects an option — on any doubt it fails loud (dynamicOk=false,
+              //     which with sentAny already true yields an ack:false, so the
+              //     picker is never mis-answered as option 1). The old bug pasted
+              //     the text as a raw viaAnswer reply into a picker still in nav
+              //     mode, so Enter selected the highlighted option 0 instead.
+              if (isTextDirective(selEntry)) {
+                const plan = planTextStep(parsed, selEntry);
+                if (!plan) {
+                  console.log(`[answer/dynamic] planTextStep null on q${qi} — failing loud (no option fallback for text)`);
+                  dynamicOk = false;
+                  break;
+                }
+                console.log(
+                  `[answer/dynamic] q${qi} TEXT kind=${plan.kind} navKeys=${JSON.stringify(plan.navKeys)} textLen=${plan.text.length}`,
+                );
+                sentAny = true;
+                // Navigate the cursor to the free-text row and Enter to open its input.
+                await tmux.sendRawKeysSequenced(session.target, plan.navKeys, SETTLE_MS);
+                await new Promise((r) => setTimeout(r, SETTLE_MS));
+                // Type the literal text into the now-open input and submit. sendText
+                // bracketed-pastes then waits for the paste to settle before its
+                // Enter, so the text can't be swallowed mid-ingest.
+                await tmux.sendText(session.target, plan.text, { settleMs: SETTLE_MS * 3 });
+                await new Promise((r) => setTimeout(r, SETTLE_MS));
+                stepOk = true;
+                textAnswered = true; // whole picker answered — stop the question loop
+                break; // question done; the submit-confirm loop verifies the picker closed
               }
 
               // 4. Plan keystrokes for this question.
@@ -2962,7 +3005,9 @@ async function handleClientMessage(ws, msg) {
           // provably gone. Runs whenever a dropped submit is possible (multi-question,
           // or any multi-select question with its own Submit action row).
           const needsSubmitConfirm =
-            questions.length > 1 || questions.some((q) => q && q.multiSelect);
+            questions.length > 1 ||
+            questions.some((q) => q && q.multiSelect) ||
+            selections.some((s) => isTextDirective(s));
           if (dynamicOk && needsSubmitConfirm) {
             const SUBMIT_TRIES = 5; // ~5×2×SETTLE_MS ceiling; exits as soon as gone
             let submitted = false;
@@ -3018,6 +3063,22 @@ async function handleClientMessage(ws, msg) {
           op: 'answer',
           ok: false,
           error: 'answer injection failed mid-picker — please retry',
+        });
+      }
+      // CRITICAL invariant: a free-text/chat answer must NEVER fall back to the
+      // static option program (buildAnswerProgram → selectedIndices), which resolves
+      // labels to option indices and would either throw or mis-pick option 1. If a
+      // directive is present and the dynamic path did not succeed, fail loud instead
+      // of mis-answering the picker.
+      if (!usedDynamic && (msg.selections || []).some((s) => isTextDirective(s))) {
+        console.error(
+          `[answer] free-text/chat answer could not be delivered dynamically; NOT falling back to option selection toolUseId=${msg.toolUseId}`,
+        );
+        return send(ws, {
+          type: 'ack',
+          op: 'answer',
+          ok: false,
+          error: 'could not deliver free-text answer — please retry',
         });
       }
       if (!usedDynamic) {
