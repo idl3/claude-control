@@ -101,9 +101,9 @@
   --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
   --space-edge:   oklch(7%  0.015 265);  /* darkest, viewport edges — deepened a touch */
   --star:         oklch(88% 0.08 250);   /* blue star (raised chroma for a clearer blue tint) */
-  --star-near:    0.88;                   /* near plane — biggest/brightest, fastest drift + strongest parallax */
-  --star-mid:     0.50;                   /* mid plane — the original starfield */
-  --star-far:     0.32;                   /* far plane — dense, tiny, dim; barely moves (depth cue) */
+  --star-near:    0.62;                   /* near plane — biggest/brightest, fastest drift + strongest parallax (~30% dimmer, same hue) */
+  --star-mid:     0.35;                   /* mid plane — the original starfield (~30% dimmer, same hue) */
+  --star-far:     0.22;                   /* far plane — dense, tiny, dim; barely moves (depth cue) (~30% dimmer, same hue) */
   --nebula-1:     oklch(55% 0.12 285);   /* desaturated indigo/violet */
   --nebula-2:     oklch(58% 0.10 200);   /* desaturated teal (echoes --accent) */
   --nebula-alpha:      0.06;              /* resting wash alpha — still very low, must recede */
@@ -7934,6 +7934,19 @@ select.config-input {
 .ask-inline-full .question:first-child .q-header,
 .ask-inline-full .question:first-child .q-text {
   padding-right: 30px;
+}
+/* Sticky wrapper: pins .ask-min-btn to the top of .ask-inline-body (the
+   actual overflow-y:auto scroller) while the question content scrolls
+   underneath it. Zero height + overflow:visible so it never adds layout
+   height or pushes the question down — the button (still absolutely
+   positioned, now relative to THIS instead of .ask-inline-full) is the
+   only thing that actually paints. */
+.ask-min-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+  overflow: visible;
 }
 .ask-min-btn {
   position: absolute;
