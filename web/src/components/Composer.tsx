@@ -2134,17 +2134,6 @@ export function Composer({
               >
                 <PlusIcon />
               </ComposerPrimitive.AddAttachment>
-              <button
-                type="button"
-                className="composer-mic"
-                aria-label="Voice input"
-                title="Voice input"
-                disabled={disabled}
-                data-hotkey="⌘S"
-                onClick={openVoice}
-              >
-                <MicIcon />
-              </button>
             </>
           ) : null}
           {/* Terminal-mode toggle (>_): hidden while voice mode is active. */}
@@ -2225,6 +2214,20 @@ export function Composer({
               onClick={() => onStop?.()}
             >
               <StopIcon size={14} />
+            </button>
+          ) : null}
+          {/* Voice input mic — sits just LEFT of the Raw Send (bypass) button. */}
+          {!terminal && !voice ? (
+            <button
+              type="button"
+              className="composer-mic"
+              aria-label="Voice input"
+              title="Voice input"
+              disabled={disabled}
+              data-hotkey="⌘S"
+              onClick={openVoice}
+            >
+              <MicIcon />
             </button>
           ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
