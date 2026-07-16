@@ -82,15 +82,16 @@ adopted-patterns: [ws, node-pty, "@xterm/xterm+webgl", zod, lib/terminal.js-atta
 > **Regression surfaces**: composer hotkeys, transcript scroll
 > **Integration-test**: Playwright terminal round-trip E2E
 
-### A6 — ttyd retirement behind soak flag
-> **Goal**: CLAUDE_CONTROL_TERMINAL flag (default: bridge; ttyd = fallback) using TOKEN_ENV conditional-omit plist pattern; after soak, ttyd spawn/proxy/checkTerminalToken/?token= deleted.
-> **Files**: server.js, lib/terminal.js, bin/install-service.sh, test/server-hardening.test.js
-> **Acceptance**: flag flip rehearsed via launchctl setenv+kickstart and VERIFIED with launchctl getenv; post-soak grep gate: zero runtime ttyd refs.
-> **Verification**: node --test test/server-hardening.test.js && ! grep -rn "ttyd" lib/ server.js --include="*.js" -l
-> **Depends on**: A5
+### A6 — ttyd retirement (deferred to post-soak; rollback via git-revert)
+> **DECISION (2026-07-16, operator):** A5 cleanly removed the client-side ttyd iframe, so the plan's Decision-13 "instant flag fallback to ttyd" no longer works from a server flag alone (client only speaks /pty now). Re-adding a parallel client ttyd path purely as a soak escape hatch was rejected as dead-code-for-safety. **New rollback model:** ttyd server code (spawn, /term/ proxy, checkTerminalToken, ?token=) stays DORMANT in place during the operator's live soak; if the bridge misbehaves, rollback = `git revert <A4 41bccf2> <A5 924bc39> && npm ci && npm run build:web && launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control` (~30s, no client-fallback code). The CLAUDE_CONTROL_TERMINAL flag is NOT built.
+> **Goal**: after the operator has live-soaked the bridge and is satisfied, delete the now-dormant ttyd surface: spawn/proxy/checkTerminalToken/?token= exception in server.js + lib/terminal.js, plus the orphaned web/src/lib/api.ts `terminalUrl()` A5 flagged.
+> **Files**: server.js, lib/terminal.js, web/src/lib/api.ts, test/server-hardening.test.js
+> **Acceptance**: post-soak grep gate: zero runtime ttyd refs; the ?token= URL auth exception gone (AC2). NO flag rehearsal (flag not built).
+> **Verification**: node --test test/server-hardening.test.js && ! grep -rn "ttyd\|checkTerminalToken" lib/ server.js --include="*.js" -l
+> **Depends on**: A5 + operator live-soak sign-off (deletion is destructive; waits for soak)
 > **Reversibility**: forward-fix-only (deletion after soak)
 > **Regression surfaces**: terminal auth, self-update flow
-> **Integration-test**: manual soak week + rollback rehearsal (launchctl getenv check)
+> **Integration-test**: manual soak (operator runs the new bridge terminal) then deletion + full suite
 
 ### A7 — A-spike: Tauri site-wrapper + adoption counter
 > **Goal**: disposable Tauri v2 app pointing WKWebView at the deployed tailnet URL (origin already allowlisted — zero backend changes); server logs per-head client-id on WS connect for the adoption counter.
@@ -119,7 +120,7 @@ A1 → A5; A3 → A4 → A5 → A6; A3 → A7. A2, A8 parallel-free.
 lib/protocol (A3) is consumed by Phase C — fingerprint gate guards it. PTY bridge untouched by B/C.
 
 ## Rollback rehearsal
-Phase-A close requires one rehearsed flag-flip: launchctl setenv CLAUDE_CONTROL_TERMINAL ttyd && kickstart, verify getenv + ttyd path serves, flip back.
+Phase-A rollback (operator decision 2026-07-16): `git revert <A4 41bccf2> <A5 924bc39> && npm ci && npm run build:web && launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control`. ttyd server code stays dormant until the operator's live soak signs off A6's deletion. No flag-flip rehearsal (CLAUDE_CONTROL_TERMINAL flag not built — the single-client rewrite made it dead code).
 
 ## Review sign-off checklist
 - [ ] AC1 latency budget met (direct path, vs baseline)
