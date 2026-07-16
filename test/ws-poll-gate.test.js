@@ -41,9 +41,9 @@ function fakeResources() {
 // server.js's main() already calls registry.start()/resources.start()
 // unconditionally at boot, BEFORE any WS client ever connects. The gate must
 // reflect that as its initial state, or the very first client to ever
-// connect would trigger a redundant .start() call — and registry.start() has
-// no re-entrancy guard, so a redundant call would leak a second set of
-// setIntervals rather than being a harmless no-op.
+// connect would trigger a redundant .start() call. SessionRegistry.start()
+// is now idempotent as a defense-in-depth guard, but the gate still avoids
+// unnecessary resume work when polling is already active.
 
 test('onConnect(): no-op when not paused (boot state — registry/resources already running)', () => {
   const registry = fakeRegistry();
@@ -243,9 +243,9 @@ test('a push subscriber appearing after the gate is already paused does not retr
 });
 
 // ── teeth: without the `if (!paused) return` guard, a redundant connect
-// would double-start — this is exactly the leak the guard exists to prevent.
+// would still issue extra resume work — this is exactly what the gate avoids.
 
-test('teeth: calling start() twice without the guard is the failure mode the gate prevents', () => {
+test('teeth: calling start() twice without the gate guard is redundant resume work', () => {
   const registry = fakeRegistry();
   // Simulate the un-guarded scenario directly: two connects, no gate.
   registry.start();

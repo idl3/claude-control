@@ -3,6 +3,11 @@ import { TerminalView } from './TerminalView';
 import { useTerminalRelay } from '../hooks/useTerminalRelay';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 
+// Compatibility shim for the in-progress TerminalView active-prop optimization:
+// spread avoids a hard dependency on that prop in clean checkouts, while current
+// worktrees that require it still receive active=true for full terminal panes.
+const terminalViewActiveProps = { active: true };
+
 interface TerminalPaneProps {
   /** Selected pane id (tmux target) — re-arms capture on change. */
   sessionId: string;
@@ -57,6 +62,7 @@ export function TerminalPane({
     <div className="thread-root terminal-pane-root" ref={rootRef}>
       <TerminalView
         key={sessionId}
+        {...terminalViewActiveProps}
         output={capture}
         requestCapture={pollCapture}
         clearOutput={clearCapture}

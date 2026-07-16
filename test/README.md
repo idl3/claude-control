@@ -4,7 +4,7 @@ Two suites, both run in CI (`.github/workflows/ci.yml`) on every PR and push to 
 
 | Suite | Run locally | Runner |
 |-------|-------------|--------|
-| Backend (`test/*.test.js`) | `npm test` (= `node --test`) | Node built-in test runner |
+| Backend (`test/*.test.js`) | `npm test` (= `node --test test/*.test.js`) | Node built-in test runner |
 | Web (`web/src/**/*.vitest.ts`) | `cd web && npm test` (= `vitest run`) | Vitest |
 
 The web build (`cd web && npm run build`) runs `tsc -b` first, so type errors fail CI too.
