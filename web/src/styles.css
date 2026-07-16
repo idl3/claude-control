@@ -220,10 +220,17 @@ body {
      the repeating tile's position parallaxes the stars without revealing an
      edge and leaves the drift transform below free to animate independently. */
   background-position: 0 var(--cosmos-shift, 0px);
-  will-change: transform, background-position;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .cosmos-backdrop::after { animation: cosmos-drift var(--star-drift) linear infinite alternate; }
+  .cosmos-backdrop::after {
+    animation: cosmos-drift var(--star-drift) linear infinite alternate;
+    /* GPU-layer promotion belongs ONLY where the drift animation + the scroll
+       parallax (both no-preference-gated; parallax listener at App.tsx) actually
+       run. Declaring it in the base rule made reduced-motion sessions pay a
+       standing compositor cost on this always-mounted full-viewport backdrop for
+       zero animation. */
+    will-change: transform, background-position;
+  }
 }
 @keyframes cosmos-drift { to { transform: translate3d(0, -16px, 0); } }
 
@@ -337,6 +344,17 @@ body {
 }
 .rail {
   width: 100%;
+  /* Explicit height, not just inherited flex stretch: .rail carries its own
+     backdrop-filter below, which promotes it to its own compositing layer.
+     Safari has a known class of bug where a flex item on its own compositing
+     layer (backdrop-filter/transform/will-change) fails to resolve
+     `align-items: stretch` correctly and collapses to content height instead
+     of the parent's cross-size — leaving .rail-foot (this element's last
+     flex child) floating above the true bottom of .app's 100dvh, with a dead
+     band of .app's background showing beneath it. height:100% resolves
+     against .app-body's definite height (a flex-grow child of .app's
+     100dvh) and sidesteps the stretch computation entirely. */
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -816,7 +834,6 @@ body.is-external-display .rail {
 }
 @media (prefers-reduced-motion: reduce) {
   .session-item, .session-meta { transition: none; }
-  .session-row-meta > * { animation: none; }
 }
 .meta-model {
   font-size: var(--txt-meta);
@@ -848,8 +865,13 @@ body.is-external-display .rail {
    One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
    cycle every 10s (SessionRail.tsx useMetaCyclePhase/paneMetaFields), or the
    tmux pane name while ⌘ is held (overrides the cycle — see PaneRow). The
-   `key`-per-swap in PaneRow remounts the child span on every change so this
-   mount-only keyframe replays as a subtle crossfade instead of a hard cut. */
+   text transition itself is the slot-text package's <SlotText> (a
+   dependency-free CSS text-roll — see node_modules/slot-text/style.css for
+   its .slot-text/.char-slot/.char-face rules); PaneRow keeps ONE persistent
+   SlotText instance across every state so its roll animates on each swap
+   instead of a hard cut. This wrapper only owns the slot's reserved
+   width/clipping, not the child's display/white-space (slot-text needs
+   `.slot-text`'s own inline-flex + pre for its per-character layout). */
 .session-row-meta {
   flex: 0 0 auto;
   max-width: 108px;
@@ -860,13 +882,9 @@ body.is-external-display .rail {
   font-size: var(--txt-meta);
 }
 .session-row-meta > * {
-  display: inline-block;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   vertical-align: bottom;
-  animation: meta-swap-in 0.28s var(--ease);
 }
 /* Local single-slot usage isn't flex-wrapped like RemoteRow's multi-chip
    .session-meta row, so it can use the slot's full reserved width instead
@@ -880,10 +898,6 @@ body.is-external-display .rail {
   border-radius: 5px;
   background: var(--bg-2);
   color: var(--text-dim);
-}
-@keyframes meta-swap-in {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 .session-empty {
   list-style: none;
@@ -1122,6 +1136,12 @@ body.is-external-display .rail {
   50% {
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
   }
+}
+/* The running-agents glow was the one infinite animation missing a reduced-motion
+   gate (its siblings mic-pulse / cosmos-drift are gated). Hold the accent state,
+   drop the continuous pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .detail-action[data-running='true'] { animation: none; }
 }
 .detail-name {
   font-weight: 700;
@@ -2703,7 +2723,11 @@ details.block-tool[open] > summary .tool-arrow,
    above it, so we tighten (not zero) the padding there instead. */
 @media (max-width: 760px) {
   .composer {
-    padding-bottom: env(safe-area-inset-bottom);
+    /* Match the rail-foot clearance: the full ~34px inset floated the input
+       too high off the bottom in the installed PWA (linked to the same
+       "footer not flush / too much padding" report). Keep just enough to
+       clear the home-indicator line. */
+    padding-bottom: max(8px, calc(env(safe-area-inset-bottom) - 12px));
     transition: padding-bottom 120ms ease;
   }
   body.kbd-up .composer {
@@ -3337,7 +3361,8 @@ body.is-external-display .composer {
   justify-content: center;
   transition:
     background var(--ease) 0.15s,
-    color var(--ease) 0.15s;
+    color var(--ease) 0.15s,
+    opacity var(--ease) 0.15s;
 }
 .composer-attach:hover {
   background: var(--bg-hover);
@@ -3377,7 +3402,11 @@ body.is-external-display .composer {
 .composer-send[data-terminal]:hover {
   filter: brightness(1.08);
 }
-/* STOP button: shown when the agent is actively generating. */
+/* STOP button: rendered (in Composer.tsx) only while the agent is generating,
+   positioned to the LEFT of both send buttons. The send cluster is
+   right-aligned (the toolbar spacer is flex-grow), so Stop grows leftward into
+   the spacer when it mounts — the send buttons never shift, and there's no
+   reserved empty slot when idle. */
 .composer-send[data-stop="true"] {
   background: var(--red);
   color: oklch(98% 0.01 25);
@@ -3394,17 +3423,6 @@ body.is-external-display .composer {
 @keyframes stop-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
-}
-/* The optimise/send button animates in beside Stop when text is typed while the
-   agent is still working (so you can stop AND queue a new message). */
-@media (prefers-reduced-motion: no-preference) {
-  .composer-send[data-queue="true"] {
-    animation: queue-in 0.18s var(--ease) both;
-  }
-}
-@keyframes queue-in {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
 }
 .composer-input {
   width: 100%;
@@ -4486,41 +4504,43 @@ body.is-external-display .composer {
    background notch beyond the curve. Inner corners (top, and the two
    touching in the middle) stay at the base 8px — only the true device-edge
    corner is pronounced.
-   Bottom clearance uses max(), not +: the real home-indicator inset
-   (~34px on a notched phone) already clears the gesture area on its own, so
-   adding a flat cushion on TOP of it (the previous `10px + safe-bottom`)
-   just inflated the pill with dead space below the icon/label. max() picks
-   whichever is larger — the 14px floor only kicks in on non-notched phones
-   that report 0 inset. Both buttons set every padding side explicitly here
-   (rather than leaning on the desktop `.rail-filter`/`.rail-new` shorthand
-   for whichever side isn't overridden) so the touching middle edge lines up
-   at a matching 14px on both sides instead of leaking the desktop 8px/10px
-   asymmetry through. */
+   Bottom clearance (proven in the iOS-26-sim standalone emulation, 2026-07):
+   in the installed PWA env(safe-area-inset-bottom) is ~34px, and the OLD
+   `max(14px, safe-bottom)` = 34px painted 34px of near-black button bg BELOW
+   the label — which reads on an OLED phone as "the footer isn't flush / too
+   much padding below" even though the bar IS pinned to the screen bottom. We
+   only need ENOUGH clearance to sit above the home-indicator line, not the
+   full inset: `max(12px, safe-bottom - 12px)` → ~22px on a notched phone, 12px
+   on a flat one. The two buttons now have an 8px gap between them (no longer
+   touching), so the hairline seam is gone and each gets its own inner-corner
+   radius. */
 @media (max-width: 759px) {
   .rail-foot {
     align-items: stretch;
-    gap: 0;
+    gap: 8px; /* visible separation between the filter + New session actions */
     padding: 0;
   }
   .rail-foot .rail-filter,
   .rail-foot .rail-new {
     height: auto;
-    padding-top: 14px;
-    padding-bottom: max(14px, var(--safe-bottom));
+    padding-top: 12px;
+    padding-bottom: max(12px, calc(var(--safe-bottom) - 12px));
   }
   .rail-foot .rail-filter {
     padding-left: 16px;
     padding-right: 14px;
     border-bottom-left-radius: 24px;
+    /* inner (right) corners — the 8px gap now separates the two buttons */
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
   }
   .rail-foot .rail-new {
     padding-left: 14px;
     padding-right: 16px;
     border-bottom-right-radius: 24px;
-    /* Hairline seam at the touching edge: a deliberate divider between the
-       two actions instead of two mismatched paddings butting together with
-       no definition. */
-    border-left: 1px solid var(--line);
+    /* inner (left) corners; no hairline seam — the gap is the divider now */
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
   }
 }
 .rail-gear {
@@ -7384,10 +7404,11 @@ select.config-input {
   background: var(--bg-hover);
 }
 
-/* ── Sub-agent toggle (right cluster, pill button) ────────────── */
+/* ── Sub-agent toggle (left cluster, pill button) ────────────── */
 /* ── Sub-agent checkbox label ──────────────────────────────────── */
-/* The outer <label> acts as the hit target; it sits in the right toolbar
-   cluster and wraps the real <input type="checkbox"> + the text. */
+/* The outer <label> acts as the hit target; it sits in the LEFT toolbar
+   cluster (beside attach/mic/terminal) and wraps the real
+   <input type="checkbox"> + the text -- deliberately far from Send. */
 .composer-subagent-toggle {
   flex: 0 0 auto;
   display: inline-flex;
@@ -7403,8 +7424,8 @@ select.config-input {
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  /* Allow the label to wrap onto 2 compact lines so the toggle parks tightly
-     beside the raw-send button instead of running as one long single line. */
+  /* Allow the label to wrap onto 2 compact lines so the toggle stays compact
+     in the left cluster instead of running as one long single line. */
   white-space: normal;
   user-select: none;
   transition: color var(--ease) 0.15s;
@@ -7471,12 +7492,12 @@ select.config-input {
   text-align: right;
   min-width: 0;
 }
-/* Mobile: keep the toggle INLINE beside the send buttons (no own row); instead
+/* Mobile: keep the toggle INLINE in the left cluster (no own row); instead
    wrap the LABEL onto 2 compact lines so it stays narrow and the row height grows
    by one line rather than the toggle taking a whole new row. */
 @media (max-width: 760px) {
   .composer-subagent-toggle {
-    flex: 0 1 auto; /* may shrink to share the row with the send buttons */
+    flex: 0 1 auto; /* may shrink to share the row with the other left-cluster controls */
   }
   .composer-subagent-label {
     white-space: normal;

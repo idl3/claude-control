@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { reportClientError } from './lib/reportError';
+import 'slot-text/style.css';
 import './styles.css';
 import './highlight-theme.css';
 
