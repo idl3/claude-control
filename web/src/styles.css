@@ -4586,12 +4586,12 @@ body.is-external-display .composer {
   .rail-foot .rail-filter {
     padding-left: 16px;
     padding-right: 14px;
-    border-bottom-left-radius: 28px; /* hug the phone's bottom-left corner */
+    border-bottom-left-radius: 32px; /* hug the phone's bottom-left corner */
   }
   .rail-foot .rail-new {
     padding-left: 14px;
     padding-right: 16px;
-    border-bottom-right-radius: 28px; /* hug the phone's bottom-right corner */
+    border-bottom-right-radius: 32px; /* hug the phone's bottom-right corner */
   }
 }
 .rail-gear {
