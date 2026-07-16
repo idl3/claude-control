@@ -1001,6 +1001,40 @@ function AppInner() {
   // Desktop focus mode: collapse the sidebar (persisted). On mobile the rail is
   // the master pane (handled by data-detail), so focus mode is desktop-only.
   const narrow = useIsNarrow();
+
+  // ── Mobile back-gesture (SPA nav): the iOS edge-swipe-back / browser Back
+  // should move detail → rail IN-APP, not reload/leave the page. Push a history
+  // entry when the detail pane opens on mobile; intercept popstate to return to
+  // the rail. The Back button routes through backToRail() → history.back() so it
+  // takes the same path (keeping history in sync). Mobile only — desktop shows
+  // both panes, so there is nothing to go "back" from.
+  const detailOpen = (cockpit.selectedId != null || draftOpen) && !railOpenMobile;
+  const pushedDetailEntry = useRef(false);
+  useEffect(() => {
+    if (narrow && detailOpen && !pushedDetailEntry.current) {
+      window.history.pushState({ ccDetail: true }, '');
+      pushedDetailEntry.current = true;
+    }
+  }, [narrow, detailOpen]);
+  useEffect(() => {
+    const onPop = () => {
+      pushedDetailEntry.current = false;
+      if ((cockpit.selectedId != null || draftOpen) && !railOpenMobile) {
+        setRailOpenMobile(true);
+        setDraftOpen(false);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [cockpit.selectedId, draftOpen, railOpenMobile]);
+  const backToRail = useCallback(() => {
+    if (pushedDetailEntry.current) window.history.back();
+    else {
+      setRailOpenMobile(true);
+      setDraftOpen(false);
+    }
+  }, []);
+
   const railRef = useRef<HTMLElement>(null);
   const detailBodyRef = useRef<HTMLDivElement>(null);
   const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
@@ -2203,7 +2237,7 @@ function AppInner() {
                 type="button"
                 className="back-btn"
                 aria-label="Back to sessions"
-                onClick={() => setRailOpenMobile(true)}
+                onClick={backToRail}
               >
                 ‹
               </button>
