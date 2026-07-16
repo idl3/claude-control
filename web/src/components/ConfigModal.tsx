@@ -12,6 +12,7 @@ import {
   type ModelsInfo,
 } from '../lib/api';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
+import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
 import { TypeIcon, TerminalSquareIcon } from './icons';
 
 interface ConfigModalProps {
@@ -75,6 +76,12 @@ interface GeneralSectionProps {
   setTranscriptFontSize: (n: number) => void;
   externalFontSize: number;
   setExternalFontSize: (n: number) => void;
+  cosmosBackground: boolean;
+  setCosmosBackground: (b: boolean) => void;
+  cosmosParallax: boolean;
+  setCosmosParallax: (b: boolean) => void;
+  cosmosShootingStars: boolean;
+  setCosmosShootingStars: (b: boolean) => void;
   loading: boolean;
   iconBust: number;
   iconBusy: boolean;
@@ -83,12 +90,18 @@ interface GeneralSectionProps {
   onResetIcon: () => void;
 }
 
-/** Display/appearance: font sizes (with a live preview), app icon. */
+/** Display/appearance: font sizes (with a live preview), app icon, cosmos backdrop toggles. */
 function GeneralSection({
   transcriptFontSize,
   setTranscriptFontSize,
   externalFontSize,
   setExternalFontSize,
+  cosmosBackground,
+  setCosmosBackground,
+  cosmosParallax,
+  setCosmosParallax,
+  cosmosShootingStars,
+  setCosmosShootingStars,
   loading,
   iconBust,
   iconBusy,
@@ -160,6 +173,43 @@ function GeneralSection({
             Sample transcript at the size above — updates instantly, no need to save first.
           </span>
         </div>
+
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosBackground}
+            disabled={loading}
+            onChange={(e) => setCosmosBackground(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Background cosmos</span>
+            <span className="config-hint">Starfield/nebula backdrop. Off shows a flat dark background.</span>
+          </span>
+        </label>
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosParallax}
+            disabled={loading}
+            onChange={(e) => setCosmosParallax(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Parallax scrolling</span>
+            <span className="config-hint">Star planes shift depth while you scroll. Off keeps the backdrop still on scroll.</span>
+          </span>
+        </label>
+        <label className="config-checkbox-field">
+          <input
+            type="checkbox"
+            checked={cosmosShootingStars}
+            disabled={loading}
+            onChange={(e) => setCosmosShootingStars(e.target.checked)}
+          />
+          <span className="config-checkbox-text">
+            <span className="config-label">Shooting stars</span>
+            <span className="config-hint">A rare ambient streak, plus one whenever an agent finishes a turn.</span>
+          </span>
+        </label>
 
         <div className="config-field config-field--wide">
           <span className="config-label">App icon</span>
@@ -600,6 +650,11 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   // 0 = CSS default (auto); non-zero = user-chosen px value.
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
+  // Device-local only (no server counterpart) — loaded straight from
+  // localStorage below, not from getConfig(). See lib/cosmosPrefs.ts.
+  const [cosmosBackground, setCosmosBackground] = useState(true);
+  const [cosmosParallax, setCosmosParallax] = useState(true);
+  const [cosmosShootingStars, setCosmosShootingStars] = useState(true);
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
@@ -634,6 +689,14 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // Cosmos toggles have no server counterpart — load once from this
+  // device's localStorage (see lib/cosmosPrefs.ts).
+  useEffect(() => {
+    setCosmosBackground(loadCosmosPref('background'));
+    setCosmosParallax(loadCosmosPref('parallax'));
+    setCosmosShootingStars(loadCosmosPref('shootingStars'));
   }, []);
 
   useEffect(() => {
@@ -756,6 +819,16 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
           },
         }),
       );
+      // Cosmos toggles are device-local only — persist directly (no server
+      // round-trip) and apply LIVE the same way as font size.
+      saveCosmosPref('background', cosmosBackground);
+      saveCosmosPref('parallax', cosmosParallax);
+      saveCosmosPref('shootingStars', cosmosShootingStars);
+      window.dispatchEvent(
+        new CustomEvent('cockpit:cosmosprefs', {
+          detail: { cosmosBackground, cosmosParallax, cosmosShootingStars },
+        }),
+      );
       // If the MLX model isn't downloaded yet, the server fetches it in the
       // background — tell the user the enhancer falls back to claude meanwhile.
       const chosen = models?.mlxModels.find((m) => m.id === saved.mlxModel);
@@ -857,6 +930,12 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setTranscriptFontSize={setTranscriptFontSize}
                 externalFontSize={externalFontSize}
                 setExternalFontSize={setExternalFontSize}
+                cosmosBackground={cosmosBackground}
+                setCosmosBackground={setCosmosBackground}
+                cosmosParallax={cosmosParallax}
+                setCosmosParallax={setCosmosParallax}
+                cosmosShootingStars={cosmosShootingStars}
+                setCosmosShootingStars={setCosmosShootingStars}
                 loading={loading}
                 iconBust={iconBust}
                 iconBusy={iconBusy}
