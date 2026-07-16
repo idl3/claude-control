@@ -7,7 +7,13 @@ import { TerminalSquareIcon, CloudIcon, PencilIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
-import { loadRailTokens, orderMetaFields, type RailToken } from '../lib/railTokenPrefs';
+import {
+  loadRailTokens,
+  orderMetaFields,
+  MIN_RAIL_INTERVAL_MS,
+  type RailToken,
+  type RailTokenPrefs,
+} from '../lib/railTokenPrefs';
 
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
@@ -399,10 +405,11 @@ export const META_CYCLE_PERIOD_MS = 10_000;
  */
 export function useMetaCyclePhase(periodMs = META_CYCLE_PERIOD_MS): number {
   const [tick, setTick] = useState(0);
+  const period = Math.max(MIN_RAIL_INTERVAL_MS, periodMs);
   useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), periodMs);
+    const timer = setInterval(() => setTick((t) => t + 1), period);
     return () => clearInterval(timer);
-  }, [periodMs]);
+  }, [period]);
   return tick;
 }
 
@@ -770,24 +777,29 @@ export function SessionRail({
   onToast,
   cmdHeld,
 }: SessionRailProps) {
-  // Shared cycle phase for every row's right-hand meta slot — see
-  // useMetaCyclePhase / paneMetaFields.
-  const metaTick = useMetaCyclePhase();
-
-  // Operator-configured meta-slot token order (Settings → Rail tokens, see
-  // lib/railTokenPrefs.ts). SessionRail is the only consumer, so it owns the
-  // load + live-update listener directly (mirrors the cosmos-prefs pattern
-  // in App.tsx, just scoped to the component that actually renders the
-  // affected UI instead of threaded through App.tsx).
-  const [railTokens, setRailTokens] = useState<RailToken[]>(loadRailTokens);
+  // Operator-configured meta-slot token order + rotation interval (Settings →
+  // Rail tokens, see lib/railTokenPrefs.ts). SessionRail is the only
+  // consumer, so it owns the load + live-update listener directly (mirrors
+  // the cosmos-prefs pattern in App.tsx, just scoped to the component that
+  // actually renders the affected UI instead of threaded through App.tsx).
+  const [railPrefs, setRailPrefs] = useState<RailTokenPrefs>(loadRailTokens);
+  const railTokens = railPrefs.tokens;
   useEffect(() => {
     const onPrefs = (e: Event) => {
-      const d = (e as CustomEvent<{ railTokens?: RailToken[] }>).detail;
-      if (d?.railTokens) setRailTokens(d.railTokens);
+      const d = (e as CustomEvent<{ railTokens?: RailToken[]; intervalMs?: number }>).detail;
+      setRailPrefs((prev) => ({
+        tokens: d?.railTokens ?? prev.tokens,
+        intervalMs: typeof d?.intervalMs === 'number' ? d.intervalMs : prev.intervalMs,
+      }));
     };
     window.addEventListener('cockpit:railtokenprefs', onPrefs);
     return () => window.removeEventListener('cockpit:railtokenprefs', onPrefs);
   }, []);
+
+  // Shared cycle phase for every row's right-hand meta slot — see
+  // useMetaCyclePhase / paneMetaFields. Driven by the operator-configured
+  // interval so a change applies live to every row.
+  const metaTick = useMetaCyclePhase(railPrefs.intervalMs);
 
   // Inline tmux-session rename (the group header, e.g. "0") — double-click the
   // name or use the hover-reveal pencil button. Only one group can be renaming

@@ -1,13 +1,15 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SlotText } from 'slot-text/react';
 import {
   insertToken,
   orderMetaFields,
   poolTokens,
   removeToken,
+  RAIL_INTERVAL_CHOICES_MS,
   type RailToken,
 } from '../lib/railTokenPrefs';
-import { META_CYCLE_PERIOD_MS, effortClass, formatModel, useMetaCyclePhase } from './SessionRail';
+import { effortClass, formatModel, useMetaCyclePhase } from './SessionRail';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { CodexIcon } from './CodexIcon';
 
@@ -39,16 +41,36 @@ interface DragState {
   pointerId: number;
   x: number;
   y: number;
+  /** Pointer position relative to the grabbed pill's top-left at pointerdown
+   *  — subtracted back out when positioning the ghost so it stays glued to
+   *  the exact spot the operator grabbed, instead of snapping to center. */
+  grabX: number;
+  grabY: number;
 }
 
 function isPointInRect(r: DOMRect, x: number, y: number): boolean {
   return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
+/** Small inline-SVG chevron marking the rotation transition between the
+ *  interval control and each pill (and between pills) — replaces the old
+ *  ASCII `--[10s]-->` separator with a real designed indicator. */
+function RailArrow() {
+  return (
+    <span className="railcfg-arrow" aria-hidden="true">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+        <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 // --- Live preview -----------------------------------------------------------
 // Fabricated per-cycle data for 2 fake rows (Claude, Codex), rendered with the
-// exact meta-slot markup SessionRail uses for real rows (see PaneRow's
-// `rightSlot` — session-row-meta + SlotText + the same slotOpts).
+// exact tmux-group / pane-row markup SessionRail uses for real rows (see
+// PaneRow's `.session-item` / `.pane-icon` / `rightSlot` — session-row-meta +
+// SlotText + the same slotOpts) so the preview looks like an actual rail
+// group, not an approximation of one.
 
 const CLAUDE_MODELS = ['opus-4.8', 'sonnet-5', 'fable-5'];
 const CODEX_MODELS = ['gpt-5.5', 'gpt-5.6'];
@@ -87,15 +109,16 @@ function randomPreviewFields(isCodex: boolean): PreviewField[] {
 
 const PREVIEW_SLOT_OPTS = { direction: 'up' as const, skipUnchanged: true, duration: 300 };
 
-function PreviewRow({
+/** Reproduces PaneRow's `.session-item` markup exactly (same classes + real
+ *  icons) over fabricated per-tick data, so the preview renders visually
+ *  identical to a real rail row instead of an approximation. */
+function PreviewPaneRow({
   label,
-  Icon,
   isCodex,
   tick,
   railTokens,
 }: {
   label: string;
-  Icon: (props: { size?: number }) => React.ReactElement;
   isCodex: boolean;
   tick: number;
   railTokens: RailToken[];
@@ -110,21 +133,32 @@ function PreviewRow({
   );
   const active = fields.length > 0 ? fields[tick % fields.length] : null;
   return (
-    <div className="railcfg-preview-row">
-      <span className="railcfg-preview-icon" aria-hidden="true">
-        <Icon size={15} />
-      </span>
-      <span className="railcfg-preview-label">{label}</span>
-      {active ? (
-        <span className="session-row-meta" title={active.text}>
-          <SlotText text={active.text} className={active.className} options={PREVIEW_SLOT_OPTS} />
+    <li className="session-item" data-kind={isCodex ? 'codex' : 'claude'} data-active="true">
+      <div className="session-top">
+        <span
+          className="pane-icon"
+          data-kind={isCodex ? 'codex' : 'claude'}
+          data-active="true"
+          data-state="sleeping"
+          aria-hidden="true"
+        >
+          {isCodex ? <CodexIcon size={15} /> : <ClaudeRobotIcon size={17} />}
+          <span className="pane-icon-badge pane-icon-zzz" aria-hidden="true">
+            z
+          </span>
         </span>
-      ) : (
-        <span className="session-row-meta railcfg-preview-empty" aria-hidden="true">
-          —
-        </span>
-      )}
-    </div>
+        <span className="session-name">{label}</span>
+        {active ? (
+          <span className="session-row-meta" title={active.text}>
+            <SlotText text={active.text} className={active.className} options={PREVIEW_SLOT_OPTS} />
+          </span>
+        ) : (
+          <span className="session-row-meta" aria-hidden="true">
+            —
+          </span>
+        )}
+      </div>
+    </li>
   );
 }
 
@@ -135,16 +169,25 @@ function PreviewRow({
 // pill unmounting mid-gesture when it's spliced out of the bar's flow (see
 // `displayBarTokens` below). All array mutation goes through the pure,
 // independently-tested helpers in lib/railTokenPrefs.ts — this component only
-// computes *where* to apply them from pointer position.
+// computes *where* to apply them from pointer position. The ghost pill itself
+// is portaled to document.body (see the `drag &&` block below) — .config-
+// overlay has `backdrop-filter`, which makes it the containing block for
+// `position:fixed` descendants, so a non-portaled fixed-position ghost would
+// resolve its coordinates against the overlay box (incl. its padding)
+// instead of the viewport and drift off the pointer.
 
 export function RailTokenConfig({
   railTokens,
   setRailTokens,
+  intervalMs,
+  setIntervalMs,
 }: {
   railTokens: RailToken[];
   setRailTokens: (tokens: RailToken[]) => void;
+  intervalMs: number;
+  setIntervalMs: (ms: number) => void;
 }) {
-  const tick = useMetaCyclePhase();
+  const tick = useMetaCyclePhase(intervalMs);
   const pool = poolTokens(railTokens);
 
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -177,8 +220,20 @@ export function RailTokenConfig({
   }
 
   function startDrag(e: React.PointerEvent, token: RailToken, origin: 'pool' | 'bar') {
+    // currentTarget is the `.railcfg-pill` the handler is bound to, for both
+    // pool and bar pills — its rect gives the exact grab offset so the ghost
+    // stays glued to where the pointer actually grabbed it.
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     dndRootRef.current?.setPointerCapture(e.pointerId);
-    setDrag({ token, origin, pointerId: e.pointerId, x: e.clientX, y: e.clientY });
+    setDrag({
+      token,
+      origin,
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      grabX: e.clientX - r.left,
+      grabY: e.clientY - r.top,
+    });
     updateInsertIndex(e.clientX, e.clientY, token);
   }
 
@@ -246,19 +301,28 @@ export function RailTokenConfig({
         </div>
 
         <div className="railcfg-bar" ref={barRef}>
-          <span className="railcfg-bracket" aria-hidden="true">
-            [
-          </span>
+          <div className="railcfg-interval-wrap">
+            <span className="railcfg-interval-label">every</span>
+            <select
+              className="railcfg-interval"
+              aria-label="Rotation interval"
+              value={intervalMs}
+              onChange={(e) => setIntervalMs(Number(e.target.value))}
+            >
+              {RAIL_INTERVAL_CHOICES_MS.map((ms) => (
+                <option key={ms} value={ms}>
+                  {`${ms / 1000}s`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <RailArrow />
           {barItems.length === 0 ? (
             <span className="railcfg-bar-empty">Drag a token here</span>
           ) : (
             barItems.map((item, i) => (
               <Fragment key={item === PLACEHOLDER ? `placeholder-${i}` : item}>
-                {i > 0 && (
-                  <span className="railcfg-sep" aria-hidden="true">
-                    --[{META_CYCLE_PERIOD_MS / 1000}s]--&gt;
-                  </span>
-                )}
+                {i > 0 && <RailArrow />}
                 {item === PLACEHOLDER ? (
                   <div className="railcfg-pill railcfg-pill--placeholder" aria-hidden="true" />
                 ) : (
@@ -285,26 +349,39 @@ export function RailTokenConfig({
               </Fragment>
             ))
           )}
-          <span className="railcfg-bracket" aria-hidden="true">
-            ]
-          </span>
         </div>
 
-        {drag && (
-          <div
-            className="railcfg-ghost"
-            aria-hidden="true"
-            style={{ transform: `translate(${drag.x}px, ${drag.y}px) translate(-50%, -50%)` }}
-          >
-            <span className={TOKEN_SAMPLE_CLASS[drag.token]}>{TOKEN_LABEL[drag.token]}</span>
-          </div>
-        )}
+        {drag &&
+          createPortal(
+            <div
+              className="railcfg-ghost"
+              aria-hidden="true"
+              style={{ left: drag.x - drag.grabX, top: drag.y - drag.grabY }}
+            >
+              <span className={TOKEN_SAMPLE_CLASS[drag.token]}>{TOKEN_LABEL[drag.token]}</span>
+            </div>,
+            document.body,
+          )}
       </div>
 
       <div className="railcfg-preview">
         <span className="config-label">Preview</span>
-        <PreviewRow label="Claude session" Icon={ClaudeRobotIcon} isCodex={false} tick={tick} railTokens={railTokens} />
-        <PreviewRow label="Codex session" Icon={CodexIcon} isCodex tick={tick} railTokens={railTokens} />
+        <section className="session-group" aria-hidden="true">
+          <div className="session-group-head">
+            <button type="button" className="session-group-toggle" tabIndex={-1}>
+              <span className="session-group-chevron" aria-hidden="true">
+                ▾
+              </span>
+              <span className="session-group-name">preview</span>
+            </button>
+          </div>
+          <div className="session-window">
+            <ul className="session-pane-list">
+              <PreviewPaneRow label="Claude session" isCodex={false} tick={tick} railTokens={railTokens} />
+              <PreviewPaneRow label="Codex session" isCodex tick={tick} railTokens={railTokens} />
+            </ul>
+          </div>
+        </section>
       </div>
     </>
   );
