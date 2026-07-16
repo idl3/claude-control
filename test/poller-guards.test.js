@@ -213,6 +213,43 @@ test('_pollCtx: idle session (gated, like _pollThinking) makes zero capturePane 
   assert.equal(thinkingCaptureCalls, 0, '_pollThinking must skip capturePane for the same idle session (sibling parity)');
 });
 
+test('_pollCtx: recently-active Claude pane with no effort backfills (one scrape); ancient one stays gated', async () => {
+  let backfillCalls = 0;
+  let ancientCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async (target) => {
+        if (target === 'bf:0.0') backfillCalls++;
+        if (target === 'old:0.0') ancientCalls++;
+        return '';
+      },
+    },
+  });
+  const now = Date.now();
+  reg._sessions = [
+    // Idle by the 20s scrape window (5 min old) but recently-active within the
+    // effort-backfill window AND missing effort → should be scraped once.
+    {
+      target: 'bf:0.0', kind: 'claude', transcriptPath: '/p/bf.jsonl',
+      thinking: false, compacting: false, pending: false, errored: false,
+      lastActivityMs: now - 5 * 60_000, effort: null,
+    },
+    // Ancient (2h old) + missing effort → stays gated (battery invariant).
+    {
+      target: 'old:0.0', kind: 'claude', transcriptPath: '/p/old.jsonl',
+      thinking: false, compacting: false, pending: false, errored: false,
+      lastActivityMs: now - 2 * 60 * 60_000, effort: null,
+    },
+  ];
+
+  await reg._pollCtx();
+  assert.equal(backfillCalls, 1, 'recently-active Claude pane missing effort is backfill-scraped');
+  assert.equal(ancientCalls, 0, 'long-idle pane stays gated even when missing effort');
+});
+
 test('_pollCtx: active session (recent transcript activity) still calls capturePane', async () => {
   let captureCalls = 0;
   const reg = new SessionRegistry({
