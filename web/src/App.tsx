@@ -42,6 +42,7 @@ import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { NewSessionDraft } from './components/NewSessionDraft';
 import { TerminalPanel } from './components/TerminalPanel';
+import { getTerminalPanelFocused } from './components/terminalFocus';
 import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
@@ -832,59 +833,26 @@ function AppInner() {
   // In-transcript search (⌘/).
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Raw-terminal escape hatch with an LRU of warm ttyd panels. To avoid
-  // leaving background ttyd/tmux attaches around when the terminal is closed,
-  // we only keep panels mounted while the raw terminal is actually visible.
-  // Switching sessions while terminalShown=true can still keep a small warm
-  // set for instant reopen, but closing the surface drops the cache so the
-  // server can reap the processes promptly.
-  const TERM_WARM_MAX = 4;
-  const [warmTerms, setWarmTerms] = useState<string[]>([]);
+  // Raw-terminal overlay (A5: xterm.js + the A4 PTY bridge). The panel is now
+  // mounted only while open (matching every other useModalTransition
+  // consumer — CommandPalette, ConfigModal, …), not kept warm-but-hidden the
+  // way the old ttyd-iframe cache was: the A4 bridge's own server-side
+  // idle-grace (~30s) + reuse-by-sessionId already makes a reopen within that
+  // window a fast reattach to the still-live tmux pty, so the old N-warm-
+  // panel client-side cache (built specifically to avoid re-spawning ttyd,
+  // which node-pty's centrally-managed registry doesn't need) is gone.
   const [terminalShown, setTerminalShown] = useState(false);
 
-  // Bump `id` to most-recently-used; cap the warm set at 4 (drop the oldest).
-  const touchWarm = useCallback((id: string) => {
-    setWarmTerms((w) => {
-      const next = [...w.filter((x) => x !== id), id];
-      return next.length > TERM_WARM_MAX ? next.slice(next.length - TERM_WARM_MAX) : next;
-    });
-  }, []);
-
-  // Keep only the visible terminal hot. When the terminal is closed, clear the
-  // warm cache so hidden ttyd iframes don't keep consuming resources.
-  useEffect(() => {
-    if (!terminalShown) {
-      setWarmTerms([]);
-      return;
-    }
-    const id = cockpit.selectedId;
-    if (!id) return;
-    const t = setTimeout(() => {
-      setWarmTerms((w) => {
-        if (w.includes(id)) return [...w.filter((x) => x !== id), id]; // refresh recency
-        if (w.length < TERM_WARM_MAX) return [...w, id];
-        return w; // full → leave it; openTerminal will evict-and-load on demand
-      });
-    }, 500);
-    return () => clearTimeout(t);
-  }, [cockpit.selectedId, terminalShown]);
-
-  // Open: ensure the current session's panel is warm + visible. Toggle: same key
-  // (⌘J) flips it back out. Close keeps it warm for an instant reopen.
+  // Open: show the current session's panel. Toggle: same key (⌘J) flips it
+  // back out.
   const openTerminal = useCallback(() => {
-    const id = cockpit.selectedId;
-    if (!id) return;
-    touchWarm(id);
+    if (!cockpit.selectedId) return;
     setTerminalShown(true);
-  }, [cockpit.selectedId, touchWarm]);
+  }, [cockpit.selectedId]);
   const toggleTerminal = useCallback(() => {
-    const id = cockpit.selectedId;
-    if (!id) return;
-    setTerminalShown((v) => {
-      if (!v) touchWarm(id);
-      return !v;
-    });
-  }, [cockpit.selectedId, touchWarm]);
+    if (!cockpit.selectedId) return;
+    setTerminalShown((v) => !v);
+  }, [cockpit.selectedId]);
 
   // Sub-agent side panel, process monitor, and locally-hidden pane prompt
   // (keyed by JSON signature so it re-shows when the prompt changes). Reset the
@@ -1627,9 +1595,13 @@ function AppInner() {
   );
 
   // ⌘K / Ctrl-K toggles the command palette (swap sessions/terminals, jump to
-  // the raw tmux window, run global actions) from anywhere.
+  // the raw tmux window, run global actions) from anywhere. Collision #2 (A1
+  // design, "Terminal panel design" §2): readline's own Ctrl+K (kill-to-end)
+  // must reach the PTY, not this handler, while the terminal has focus — the
+  // meta-only routing rule's guard line excludes the Ctrl-only variant.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (getTerminalPanelFocused() && !e.metaKey) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
@@ -1660,8 +1632,13 @@ function AppInner() {
   // Detail-head shortcuts (these mirror the header icon buttons + their reveal
   // badges): ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar. (Rename has
   // NO shortcut — ⌘/Ctrl+E is left free; Ctrl+E is end-of-line in the shell.)
+  // Collisions #1/#3/#4 (A1 design §2): tmux's Ctrl+B prefix, readline's
+  // Ctrl+U (kill-line-backward), and a shell's raw-LF Ctrl+J must all reach
+  // the PTY, not this handler, while the terminal has focus — the meta-only
+  // routing rule's guard line excludes every Ctrl-only variant here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (getTerminalPanelFocused() && !e.metaKey) return;
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (k === 'b') {
@@ -1728,19 +1705,18 @@ function AppInner() {
       if (target) {
         e.preventDefault();
         e.stopPropagation();
-        // Release a stuck ttyd iframe first (it swallows keydowns in its own
-        // document, so the window listener wouldn't fire while it holds focus).
-        const ae = document.activeElement as HTMLElement | null;
-        if (ae && ae.tagName === 'IFRAME') ae.blur();
-        // Close any open ttyd overlay BEFORE select() so React batches both state
-        // updates — otherwise the new session's TerminalPanel can briefly see
-        // visible=true and steal focus into its iframe.
+        // Close any open terminal panel BEFORE select() so React batches both
+        // state updates — this is collision #6's deliberate exception (A1
+        // design §2): ⌘1-9 wins even while the terminal has focus, and
+        // closing first avoids remounting a panel for the new session while
+        // this switch is still in flight. (The old "blur a stuck ttyd
+        // iframe first" workaround is gone — xterm.js has no iframe
+        // document boundary to get stuck behind.)
         setTerminalShown(false);
         select(target.id);
         // Land focus in the composer so you can type immediately (the default on
         // every switch). For terminal sessions there's no .composer-input, so the
-        // visible terminal pane keeps its own focus. The hidden-terminal focus
-        // steal is handled separately (TerminalPanel's in-iframe guard).
+        // visible terminal pane keeps its own focus.
         const focusComposer = () => {
           document
             .querySelector<HTMLTextAreaElement>('.composer-input')
@@ -1952,31 +1928,10 @@ function AppInner() {
   // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
   const cmdHeld = useModifierHeld(500);
 
-  // Focus-steal guard: warm/hidden ttyd panels keep their <iframe> loaded, and
-  // ttyd/xterm INSIDE the iframe calls .focus() on itself (on load + on poll).
-  // `inert` + delayed `visibility:hidden` don't reliably stop an iframe's own
-  // document from grabbing focus, so a hidden terminal can silently steal it —
-  // popping the keyboard and eating every hotkey. Catch focus landing on any
-  // term iframe whose overlay isn't currently visible and bounce it back out.
-  useEffect(() => {
-    const onFocusIn = (e: FocusEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (!t || t.tagName !== 'IFRAME' || !t.classList.contains('term-frame')) return;
-      const overlay = t.closest('.term-overlay');
-      if (overlay && overlay.getAttribute('data-visible') === 'true') return; // legit, visible
-      (t as HTMLIFrameElement).blur();
-      // Land in the composer (ready to type) rather than parking on the body.
-      const ci = document.querySelector<HTMLTextAreaElement>('.composer-input');
-      if (ci) ci.focus({ preventScroll: true });
-      else {
-        const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-        host.setAttribute('tabindex', '-1');
-        host.focus({ preventScroll: true });
-      }
-    };
-    document.addEventListener('focusin', onFocusIn, true);
-    return () => document.removeEventListener('focusin', onFocusIn, true);
-  }, []);
+  // The old iframe focus-steal guard (ttyd's warm/hidden <iframe> silently
+  // grabbing focus) is gone: the terminal panel is no longer kept mounted
+  // while hidden (see the terminalShown state comment), and xterm.js has no
+  // separate document to steal focus from in the first place.
 
   // Mobile soft-keyboard gap: the composer keeps a constant
   // safe-area-inset-bottom clearance for the home indicator (styles.css
@@ -2391,15 +2346,8 @@ function AppInner() {
             <ShellContext.Provider value={shellApi}>
             {selectedSession && selectedSession.kind === 'terminal' ? (
               // Plain (non-Claude) pane: a fully interactive live terminal —
-              // ANSI view + key bar + keystroke relay. No transcript, by design.
-              <TerminalPane
-                sessionId={selectedSession.id}
-                capture={cockpit.capture}
-                requestCapture={cockpit.requestCapture}
-                clearCapture={cockpit.clearCapture}
-                sendText={cockpit.sendPaneText}
-                sendKey={cockpit.sendPaneKey}
-              />
+              // an xterm.js canvas fed by the A4 PTY bridge. No transcript, by design.
+              <TerminalPane sessionId={selectedSession.id} />
             ) : (
               <div className="detail-split">
                 {cockpit.degraded?.degraded ? (
@@ -2555,19 +2503,19 @@ function AppInner() {
           />
         ) : null}
 
-        {/* Up to 4 warm ttyd panels stay mounted (LRU); only the current
-            session's, when shown, is visible — `visible` fades+zooms it in/out
-            so opening never waits on a fresh ttyd load. */}
-        {warmTerms.map((id) => (
+        {/* Mounted only while open (useModalTransition owns enter/exit) — see
+            the terminalShown state comment above for why this dropped the
+            old N-warm-panel client-side cache. `key` on the session id
+            forces a fresh XtermHost + PTY attach on session switch. */}
+        {terminalShown && cockpit.selectedId ? (
           <TerminalPanel
-            key={id}
-            sessionId={id}
-            visible={id === cockpit.selectedId && terminalShown}
-            label={cockpit.sessions.find((s) => s.id === id)?.name ?? id}
+            key={cockpit.selectedId}
+            sessionId={cockpit.selectedId}
+            label={cockpit.sessions.find((s) => s.id === cockpit.selectedId)?.name ?? cockpit.selectedId}
             sendKey={cockpit.sendPaneKey}
             onClose={() => setTerminalShown(false)}
           />
-        ))}
+        ) : null}
 
         <SubAgentPanel
           subagents={cockpit.subagents}
