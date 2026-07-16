@@ -414,3 +414,79 @@ test('WS promptselect: empty labels → ack ok=false with error', async () => {
   assert.equal(ack.op, 'promptselect');
   assert.equal(ack.ok, false);
 });
+
+// ===========================================================================
+// 5. R8: registry/resources pause on last WS disconnect, resume on reconnect
+//
+// test/ws-poll-gate.test.js proves the gate's call-count contract against fake
+// registry/resources spies. This is the black-box complement: drive the REAL
+// server.js process (real SessionRegistry + real ResourceMonitor instances)
+// through an actual last-client-disconnects -> new-client-connects cycle, and
+// prove the server survives it — the reconnecting client still gets a normal
+// initial snapshot, and the process stays fully responsive afterward. This is
+// the only way to catch a real registry.stop()/start() round-trip bug that a
+// fake-spy unit test structurally cannot see (e.g. stop() leaving state that
+// makes a subsequent start() throw).
+// ===========================================================================
+
+/** Open an authed WS connection and wait for its first message of `type`. */
+function wsConnectAndWaitForType(port, type, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/`, ['claude-control', TEST_TOKEN]);
+    const timer = setTimeout(() => {
+      ws.terminate();
+      reject(new Error(`timeout waiting for initial type=${type} message`));
+    }, timeoutMs);
+    ws.on('error', (err) => { clearTimeout(timer); reject(err); });
+    ws.on('message', (raw) => {
+      let parsed;
+      try { parsed = JSON.parse(raw.toString()); } catch { return; }
+      if (parsed.type === type) {
+        clearTimeout(timer);
+        resolve({ ws, msg: parsed });
+      }
+    });
+  });
+}
+
+function closeAndWait(ws) {
+  return new Promise((resolve) => {
+    ws.on('close', () => resolve());
+    ws.close(1000);
+  });
+}
+
+test('R8: server survives a full disconnect (0 clients) and a new client still gets a normal initial snapshot', async () => {
+  // First client connects — normal initial push.
+  const { ws: ws1, msg: sessionsMsg1 } = await wsConnectAndWaitForType(port, 'sessions');
+  assert.ok(Array.isArray(sessionsMsg1.sessions), 'first client must get a sessions array');
+
+  // Disconnect — wss.clients.size drops to 0 server-side; wsPollGate.onDisconnect(0)
+  // fires registry.stop()/resources.stop() against the REAL instances.
+  await closeAndWait(ws1);
+
+  // Give the server's close handler (and the fire-and-forget stop() calls) a
+  // moment to fully run before reconnecting.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  // A new client connects — wsPollGate.onConnect() must resume both without
+  // throwing, and this client must get a completely normal initial snapshot,
+  // proving the real registry/resources came back healthy from the stop()
+  // round-trip (a fake-spy test can't observe this — the fakes never actually
+  // hold state that a stop()/start() cycle could corrupt).
+  const { ws: ws2, msg: sessionsMsg2 } = await wsConnectAndWaitForType(port, 'sessions');
+  assert.ok(Array.isArray(sessionsMsg2.sessions), 'reconnecting client must get a sessions array, not a stale/broken value');
+  await closeAndWait(ws2);
+
+  // Every connect unconditionally sends a 'resources' snapshot too (server.js's
+  // wss.on('connection') handler) — open a fresh socket to confirm that side
+  // of the resume path (resources.start()/refreshNow()) is also healthy.
+  const { ws: ws3, msg: resourcesMsg } = await wsConnectAndWaitForType(port, 'resources');
+  assert.ok(resourcesMsg.snapshot, 'reconnecting client must get a resources snapshot after resume');
+  await closeAndWait(ws3);
+
+  // Server must still be fully alive and answering plain HTTP after the whole
+  // pause/resume round-trip — the strongest possible "did not crash" proof.
+  const followUp = await req(port, '/api/agents', { headers: AUTH_HEADER });
+  assert.equal(followUp.status, 200, 'server must still be alive and responsive after a pause/resume cycle');
+});

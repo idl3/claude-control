@@ -17,8 +17,18 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { SessionRegistry } from '../lib/sessions.js';
+import { parseCodexPrompt } from '../lib/codex.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CODEX_EXEC_APPROVAL_CAPTURE = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'codex', 'pane-exec-approval.txt'),
+  'utf8',
+);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -164,6 +174,73 @@ test('_pollThinking: skips body when flag is already set', async () => {
   assert.equal(captureCalls, 1, '_pollThinking must call capturePane once when flag is clear');
 });
 
+// ── _pollCtx: shouldScrapePane idle gate (R7) ────────────────────────────────
+//
+// _pollCtx used to capture-pane unconditionally for every discovered session.
+// It now shares _pollThinking's shouldScrapePane/_activeUntil gate, so an idle
+// session (no thinking/compacting/pending/errored flag, transcript present but
+// stale, no fresh fs.watch window) must be skipped by BOTH pollers. This test
+// proves parity: same idle session, same zero-capture result, on both workers.
+
+test('_pollCtx: idle session (gated, like _pollThinking) makes zero capturePane calls', async () => {
+  let ctxCaptureCalls = 0;
+  let thinkingCaptureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { ctxCaptureCalls++; thinkingCaptureCalls++; return ''; },
+    },
+  });
+  // Idle session: has a transcriptPath (so the gate can evaluate it) but no
+  // live flags and no recent activity anywhere (_activeUntil map empty,
+  // lastActivityMs unset) — shouldScrapePane must resolve to "skip".
+  reg._sessions = [{
+    target: 'test:0.0',
+    kind: 'claude',
+    transcriptPath: '/p/idle-session.jsonl',
+    thinking: false,
+    compacting: false,
+    pending: false,
+    errored: false,
+  }];
+
+  await reg._pollCtx();
+  assert.equal(ctxCaptureCalls, 0, '_pollCtx must skip capturePane for an idle-gated session');
+
+  await reg._pollThinking();
+  assert.equal(thinkingCaptureCalls, 0, '_pollThinking must skip capturePane for the same idle session (sibling parity)');
+});
+
+test('_pollCtx: active session (recent transcript activity) still calls capturePane', async () => {
+  let captureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { captureCalls++; return ''; },
+    },
+  });
+  const transcriptPath = '/p/active-session.jsonl';
+  reg._sessions = [{
+    target: 'test:0.0',
+    kind: 'claude',
+    transcriptPath,
+    thinking: false,
+    compacting: false,
+    pending: false,
+    errored: false,
+  }];
+  // Seed _activeUntil as _syncTranscriptWatchers would for a recently-changed
+  // transcript, so the gate sees this pane as live.
+  reg._activeUntil.set(transcriptPath, Date.now() + 20_000);
+
+  await reg._pollCtx();
+  assert.equal(captureCalls, 1, '_pollCtx must still capture an active-gated session');
+});
+
 test('_pollCtx: flag resets after rejection so next call runs', async () => {
   let callCount = 0;
   let shouldThrow = true;
@@ -220,4 +297,78 @@ test('teeth: _doRefresh() called twice concurrently increments callCount to 2 (g
   await Promise.all([p1, p2]);
 
   assert.equal(callCount, 2, 'without guard, both concurrent _doRefresh() calls reach the stub');
+});
+
+// ── getPanePrompt(): codex prompt cache reuse (R9 dedup) ────────────────────
+//
+// server.js's startPromptPoller runs a SEPARATE per-subscription 2 s timer
+// that, for codex sessions, used to run its OWN `tmux capture-pane -p -t
+// <target>` — byte-identical to the one _pollThinking already runs on the
+// SessionRegistry's own 2 s cadence. getPanePrompt() lets startPromptPoller
+// reuse _pollThinking's result instead of re-capturing. These tests exercise
+// getPanePrompt() directly (the exact contract startPromptPoller consumes)
+// rather than server.js's un-exported startPromptPoller function itself.
+
+test('getPanePrompt: absent entry (never captured) → not fresh, null prompt', () => {
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: { listWindows: async () => [], isValidTarget: () => true },
+  });
+  const result = reg.getPanePrompt('test:0.0');
+  assert.deepEqual(result, { prompt: null, fresh: false });
+});
+
+test('getPanePrompt: fresh entry after one _pollThinking capture → dedup makes ZERO additional capturePane calls', async () => {
+  let captureCalls = 0;
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: {
+      listWindows: async () => [],
+      isValidTarget: () => true,
+      capturePane: async () => { captureCalls++; return CODEX_EXEC_APPROVAL_CAPTURE; },
+    },
+  });
+  reg._sessions = [{
+    target: 'test:0.0',
+    kind: 'codex',
+    transcriptPath: null, // no transcript to gate on → shouldScrapePane scrapes it
+  }];
+
+  // Simulate _pollThinking's own 2 s tick — this is the ONE capturePane call
+  // that both the old code (startPromptPoller re-capturing) and the new code
+  // (startPromptPoller reading the cache) both depend on having happened.
+  await reg._pollThinking();
+  assert.equal(captureCalls, 1, '_pollThinking made exactly one capturePane call');
+
+  // startPromptPoller's codex branch, post-R9, does exactly this read instead
+  // of its own capture-pane call:
+  const cached = reg.getPanePrompt('test:0.0');
+  assert.equal(cached.fresh, true, 'entry captured moments ago must read as fresh');
+  assert.deepEqual(
+    cached.prompt,
+    parseCodexPrompt(CODEX_EXEC_APPROVAL_CAPTURE),
+    'cached prompt must exactly match what a fresh parseCodexPrompt(cap) would have produced',
+  );
+  assert.ok(cached.prompt.options?.length > 0, 'options must survive the cache (dropped by the reduced _panePromptMap rec)');
+
+  // The critical dedup assertion: reading the cache made NO further capturePane calls.
+  assert.equal(captureCalls, 1, 'getPanePrompt() must not trigger any additional capturePane calls');
+});
+
+test('getPanePrompt: stale entry (older than the freshness window) → fresh:false, caller must fall back', () => {
+  const reg = new SessionRegistry({
+    projectsRoot: '/tmp/nonexistent',
+    tmux: { listWindows: async () => [], isValidTarget: () => true },
+  });
+  const prompt = parseCodexPrompt(CODEX_EXEC_APPROVAL_CAPTURE);
+  // Directly seed a stale entry — as if _pollThinking captured it 10s ago
+  // (well past the freshness window, e.g. the pane went idle and
+  // shouldScrapePane has been skipping it on recent _pollThinking ticks).
+  reg._codexPromptCache.set('test:0.0', { prompt, at: Date.now() - 10_000 });
+
+  const result = reg.getPanePrompt('test:0.0');
+  assert.equal(result.fresh, false, 'a 10s-old entry must read as stale so the caller re-captures');
+  // The stale prompt value is still returned (caller ignores it when !fresh);
+  // this just documents the accessor does not silently null it out.
+  assert.deepEqual(result.prompt, prompt);
 });

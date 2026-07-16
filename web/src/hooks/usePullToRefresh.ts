@@ -31,6 +31,9 @@ export function usePullToRefresh(
   const pullingRef = useRef(false);
   const startYRef = useRef(0);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  // Deferred hard-reload timer — captured so an unmount within the 150ms paint
+  // window clears it (no post-unmount onRefresh for a custom callback).
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setPull = (v: number) => {
     pullRef.current = v;
@@ -80,7 +83,7 @@ export function usePullToRefresh(
         setPull(THRESHOLD);
         setRefreshing(true);
         // Let the spinner paint, then hard-reload.
-        setTimeout(onRefresh, 150);
+        refreshTimerRef.current = setTimeout(onRefresh, 150);
       } else {
         setPull(0);
       }
@@ -95,6 +98,7 @@ export function usePullToRefresh(
       root.removeEventListener('touchmove', onMove);
       root.removeEventListener('touchend', onEnd);
       root.removeEventListener('touchcancel', onEnd);
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, [rootRef, onRefresh]);
 

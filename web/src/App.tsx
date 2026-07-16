@@ -183,6 +183,16 @@ function saveSubAgentModes(modes: Record<string, SubAgentMode>): void {
 const INITIAL_VISIBLE = 150;
 const LOAD_EARLIER_STEP = 150;
 
+// Identity converter for useExternalStoreRuntime: we feed the runtime
+// already-converted ThreadMessageLike[] (see fullConverted), so conversion is a
+// no-op. MUST be a stable module-level reference — assistant-ui resets its
+// per-message ThreadMessageConverter cache whenever `convertMessage`'s identity
+// changes (external-store-thread-runtime-core.js), so an inline arrow here would
+// wipe that cache on EVERY render (every WS frame, incl. resources ticks and
+// other-session frames) and re-normalize the whole transcript. A stable ref lets
+// the runtime take its fast-path bail when `messages` is referentially unchanged.
+const identityConvertMessage = (msg: ThreadMessageLike): ThreadMessageLike => msg;
+
 // Extract the plain text the user typed in the composer.
 function appendMessageText(message: AppendMessage): string {
   if (typeof message.content === 'string') return message.content;
@@ -738,12 +748,18 @@ function AppInner() {
     setVisibleCount((c) => c + LOAD_EARLIER_STEP);
   }, []);
 
+  // Stable adapters object so the runtime doesn't see a fresh attachments
+  // adapter identity every render (attachmentAdapter is already memoized).
+  const runtimeAdapters = useMemo(
+    () => ({ attachments: attachmentAdapter }),
+    [attachmentAdapter],
+  );
   const runtime = useExternalStoreRuntime({
     messages: convertedMessages,
     isDisabled: !cockpit.selectedId,
-    convertMessage: (msg: ThreadMessageLike) => msg,
+    convertMessage: identityConvertMessage,
     onNew,
-    adapters: { attachments: attachmentAdapter },
+    adapters: runtimeAdapters,
   });
 
   // Per-session sub-agent mode. Defaults to true for unseen sessions.
@@ -1570,7 +1586,7 @@ function AppInner() {
   const handleStop = useCallback(() => {
     cockpit.sendPromptKey('Escape');
     showToast('Canceled →');
-  }, [cockpit, showToast]);
+  }, [cockpit.sendPromptKey, showToast]);
 
   // Free-text reply from the inline prompt: same path as a normal composer send.
   const onInlineReply = useCallback((text: string) => {
@@ -1580,7 +1596,62 @@ function AppInner() {
     // server's open-question reply guard must allow it through.
     cockpit.sendReply(text, 0, true);
     markAnswered();
-  }, [cockpit, markAnswered]);
+  }, [cockpit.sendReply, markAnswered]);
+
+  // Thread handler + derived-prop stabilization. Thread is wrapped in React.memo,
+  // so it re-renders only when a prop changes identity. These depend on STABLE
+  // cockpit action refs / primitives (never the whole `cockpit` store object,
+  // which is a fresh identity every render) so a WS frame for ANOTHER session — or
+  // the 5s resources tick — no longer re-renders the transcript + composer subtree.
+  const onThreadRetry = useCallback(() => {
+    const ok = cockpit.sendReply('Continue');
+    showToast(ok ? 'Retry → Continue' : 'Not connected', ok ? 'ok' : 'error');
+  }, [cockpit.sendReply, showToast]);
+  const onThreadAnswer = useCallback(
+    (toolUseId: string, selections: string[][]) => {
+      cockpit.sendAnswer(toolUseId, selections);
+      cockpit.clearCapture();
+      markAnswered();
+      if (cockpit.selectedId) {
+        setAnswering({
+          sessionId: cockpit.selectedId,
+          baseCount: cockpit.messages.length,
+        });
+      }
+    },
+    [cockpit.sendAnswer, cockpit.clearCapture, markAnswered, cockpit.selectedId, cockpit.messages.length],
+  );
+  const onThreadKey = useCallback(
+    (key: string) => {
+      cockpit.sendPromptKey(key);
+      markAnswered();
+    },
+    [cockpit.sendPromptKey, markAnswered],
+  );
+  const onThreadSelect = useCallback(
+    (labels: string[]) => {
+      markAnswered();
+      return cockpit.selectedId
+        ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
+        : false;
+    },
+    [markAnswered, cockpit.selectedId, cockpit.sendPromptSelect],
+  );
+  // Stable identities for the two remaining inline-object Thread props.
+  const threadEmptyState = useMemo(
+    () =>
+      selectedSession?.kind === 'remote'
+        ? { heading: 'No transcript yet — waiting for the agent' }
+        : null,
+    [selectedSession?.kind],
+  );
+  const viewingAgent = useMemo(
+    () =>
+      viewingAgentId
+        ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)
+        : null,
+    [viewingAgentId, cockpit.subagents],
+  );
 
   // Active session's sub-agent mode (default true for unseen sessions).
   const activeSubAgentMode: SubAgentMode =
@@ -2421,11 +2492,7 @@ function AppInner() {
                     hasSelection={!!cockpit.selectedId}
                     agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
                     loading={!cockpit.messagesLoaded}
-                    emptyState={
-                      selectedSession?.kind === 'remote'
-                        ? { heading: 'No transcript yet — waiting for the agent' }
-                        : null
-                    }
+                    emptyState={threadEmptyState}
                     sessionId={cockpit.selectedId}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}
@@ -2434,48 +2501,28 @@ function AppInner() {
                     onTerminalModeChange={onTerminalModeChange}
                     subagents={cockpit.subagents}
                     onOpenAgent={openAgent}
-                    viewingAgent={
-                      viewingAgentId
-                        ? (cockpit.subagents.find((a) => a.agentId === viewingAgentId) ?? null)
-                        : null
-                    }
+                    viewingAgent={viewingAgent}
                     onCloseAgent={closeAgent}
                     working={agentWorking}
                     compacting={!!selectedSession?.compacting}
                     resuming={resuming?.sessionId === cockpit.selectedId}
                     errored={!!selectedSession?.errored}
-                    onRetry={() => {
-                      const ok = cockpit.sendReply('Continue');
-                      showToast(ok ? 'Retry → Continue' : 'Not connected', ok ? 'ok' : 'error');
-                    }}
+                    onRetry={onThreadRetry}
                     onStop={handleStop}
                     askActive={askActive}
                     activePrompt={activePrompt}
                     incomingAsk={incomingAsk}
-                    onAnswer={(toolUseId, selections) => {
-                      cockpit.sendAnswer(toolUseId, selections);
-                      cockpit.clearCapture();
-                      markAnswered();
-                      if (cockpit.selectedId) {
-                        setAnswering({
-                          sessionId: cockpit.selectedId,
-                          baseCount: cockpit.messages.length,
-                        });
-                      }
-                    }}
-                    onKey={(key) => { cockpit.sendPromptKey(key); markAnswered(); }}
-                    onSelect={(labels) => {
-                      markAnswered();
-                      return cockpit.selectedId
-                        ? cockpit.sendPromptSelect(cockpit.selectedId, labels)
-                        : false;
-                    }}
+                    onAnswer={onThreadAnswer}
+                    onKey={onThreadKey}
+                    onSelect={onThreadSelect}
                     onReply={onInlineReply}
                   />
                   </ErrorBoundary>
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
-                <ArtifactPanel />
+                <ErrorBoundary label="Artifact panel failed to render">
+                  <ArtifactPanel />
+                </ErrorBoundary>
                 <ArtifactGallery transcriptText={transcriptText} open={galleryOpen} onCountChange={setArtifactCount} />
                 {rawOpen ? (
                   <RawEventPanel
@@ -2517,21 +2564,25 @@ function AppInner() {
           />
         ) : null}
 
-        <SubAgentPanel
-          subagents={cockpit.subagents}
-          open={panelOpen && cockpit.subagents.length > 0}
-          onClose={() => setPanelOpen(false)}
-          onLoadAgent={cockpit.requestSubagent}
-          focusAgentId={panelAgentId}
-        />
+        <ErrorBoundary label="Sub-agent panel failed to render">
+          <SubAgentPanel
+            subagents={cockpit.subagents}
+            open={panelOpen && cockpit.subagents.length > 0}
+            onClose={() => setPanelOpen(false)}
+            onLoadAgent={cockpit.requestSubagent}
+            focusAgentId={panelAgentId}
+          />
+        </ErrorBoundary>
 
         {processOpen ? (
-          <ProcessPanel
-            power={cockpit.resources.snapshot?.power ?? null}
-            history={cockpit.resourceHistory}
-            onClose={() => setProcessOpen(false)}
-            onToast={showToast}
-          />
+          <ErrorBoundary label="Process monitor failed to render">
+            <ProcessPanel
+              power={cockpit.resources.snapshot?.power ?? null}
+              history={cockpit.resourceHistory}
+              onClose={() => setProcessOpen(false)}
+              onToast={showToast}
+            />
+          </ErrorBoundary>
         ) : null}
 
         {paletteOpen ? (
@@ -2539,7 +2590,11 @@ function AppInner() {
         ) : null}
 
         <HotkeyHints />
-        <AppFrameLayer />
+        {/* AppFrameLayer runs its geometry/hoist loop on every render — isolate a
+            crash in its own helpers so embedded-app hosting can't take down the app. */}
+        <ErrorBoundary label="Embedded apps failed to render">
+          <AppFrameLayer />
+        </ErrorBoundary>
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>
@@ -2557,7 +2612,13 @@ function AppInner() {
 // regardless of auth state or which session is active.
 function AppChrome() {
   useHotkeySuppressionInterceptor();
-  return <StudioModal />;
+  // Studio is a self-mounting secondary tool — isolate a render crash here so it
+  // can never white-screen the whole app / the working session behind it.
+  return (
+    <ErrorBoundary label="Studio failed to render">
+      <StudioModal />
+    </ErrorBoundary>
+  );
 }
 
 // Root: gate the whole app behind the token login. TokenGate probes
