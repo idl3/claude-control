@@ -219,6 +219,15 @@ function RemoteRow({
 }) {
   const label = remoteRowLabel(s);
   const phase = s.phase ?? (s.halted ? 'halted' : null);
+  // Remote (olam) sessions have no `kind: 'codex'` — they're always
+  // `kind: 'remote'` regardless of harness — so isCodex isn't readable off
+  // s.kind here. Derive it from which effort source resolved: s.effort is
+  // ONLY ever populated by the Claude statusLine scrape (lib/sessions.js), so
+  // its presence means Claude; falling back to parsing the model id suffix
+  // means the harness is Codex (the only convention that embeds effort
+  // there).
+  const remoteEffort = s.effort ?? (s.model ? parseEffort(s.model) : null);
+  const remoteIsCodex = s.effort == null;
   return (
     <li>
       <button
@@ -267,8 +276,8 @@ function RemoteRow({
         {s.model || s.ctxPct != null ? (
           <div className="session-meta">
             {s.model ? <span className="meta-model">{formatModel(s.model)}</span> : null}
-            {s.model && parseEffort(s.model) ? (
-              <span className="meta-effort">{parseEffort(s.model)}</span>
+            {remoteEffort ? (
+              <span className={effortClass(remoteEffort, remoteIsCodex)}>{remoteEffort}</span>
             ) : null}
             {s.ctxPct != null ? (
               <span className="meta-ctx">ctx:{Math.round(s.ctxPct)}%</span>
@@ -437,17 +446,57 @@ function parseEffort(model: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Harness-aware color class for the effort chip. The two harnesses' tier
+ *  ladders don't line up: Claude has a dedicated `max` tier above `xhigh`
+ *  (statusLine `.effort.level`, surfaced via `s.effort`), while Codex tops
+ *  out AT `xhigh` (no `max`) — so the "rainbow" top-tier treatment (borrowed
+ *  from .ultrathink-text) lands on a different level per harness, and
+ *  Claude's `xhigh` (one below its ceiling) reads as red rather than
+ *  rainbow. Everything below that is shared: amber → yellow → gray. */
+function effortClass(effort: string, isCodex: boolean): string {
+  const level = effort.toLowerCase();
+  if (isCodex) {
+    switch (level) {
+      case 'xhigh':
+        return 'meta-effort meta-effort-rainbow';
+      case 'high':
+        return 'meta-effort meta-effort-amber';
+      case 'medium':
+        return 'meta-effort meta-effort-yellow';
+      case 'low':
+      case 'minimal':
+      default:
+        return 'meta-effort meta-effort-gray';
+    }
+  }
+  switch (level) {
+    case 'max':
+      return 'meta-effort meta-effort-rainbow';
+    case 'xhigh':
+      return 'meta-effort meta-effort-red';
+    case 'high':
+      return 'meta-effort meta-effort-amber';
+    case 'medium':
+      return 'meta-effort meta-effort-yellow';
+    case 'low':
+    default:
+      return 'meta-effort meta-effort-gray';
+  }
+}
+
 function paneMetaFields(s: Session, isTerminal: boolean, isCodex: boolean): MetaField[] {
   if (isTerminal) {
     return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
   }
   const fields: MetaField[] = [];
   if (s.model) fields.push({ key: 'model', text: formatModel(s.model), className: 'meta-model' });
-  // Effort is a third rotating dimension, present only when the model reports it
-  // (Codex reasoning effort); absent for Claude models, so it simply doesn't join
-  // the rotation there.
-  const effort = s.model ? parseEffort(s.model) : null;
-  if (effort) fields.push({ key: 'effort', text: effort, className: 'meta-effort' });
+  // Effort is a third rotating dimension: Claude reports it natively
+  // (s.effort, from the statusLine's `.effort.level`); Codex has no dedicated
+  // field so it stays parsed out of the model id suffix. Absent entirely for
+  // models/harnesses that don't report a tier, so it simply doesn't join the
+  // rotation there.
+  const effort = s.effort ?? (s.model ? parseEffort(s.model) : null);
+  if (effort) fields.push({ key: 'effort', text: effort, className: effortClass(effort, isCodex) });
   if (s.ctxPct != null) {
     fields.push({ key: 'ctx', text: `ctx:${Math.round(s.ctxPct)}%`, className: 'meta-ctx' });
   }
