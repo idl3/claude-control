@@ -5,7 +5,6 @@
 
 import http from 'node:http';
 import https from 'node:https';
-import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +17,6 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
-import * as terminal from './lib/terminal.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import * as shell from './lib/shell.js';
 import { TranscriptTailer } from './lib/transcript.js';
@@ -70,7 +68,7 @@ import { deriveProjectsRoots } from './lib/projects-roots.js';
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
 // handleProtocols here. checkWsToken just verifies the token is among the offers.
-import { checkToken as authCheckToken, checkWsToken, safeTokenEqual } from './lib/auth.js';
+import { checkToken as authCheckToken, checkWsToken } from './lib/auth.js';
 import { pruneDeadClients } from './lib/ws-heartbeat.js';
 import { createWsPollGate } from './lib/ws-poll-gate.js';
 import { encodeWsMessage, sendWsMessage, websocketBackpressureLimitBytes } from './lib/ws-backpressure.js';
@@ -292,21 +290,6 @@ function checkToken(req) {
 // process.exit(0) would just kill it with no respawn.
 function isServiceManaged() {
   return process.env.CLAUDE_CONTROL_MANAGED === '1' || process.ppid === 1;
-}
-
-// ttyd exception: the raw-terminal surface is opened with `window.open` to a
-// separately-proxied URL and CANNOT send an Authorization header, so it keeps a
-// `?token=` in its own URL. This gate reads the token from the query string for
-// /term/* requests ONLY — the rest of the app is header/subprotocol-based.
-// Tokenless server → always authorized.
-function checkTerminalToken(reqUrl) {
-  if (!CONFIG.token) return true;
-  try {
-    const u = new URL(reqUrl, 'http://localhost');
-    return safeTokenEqual(u.searchParams.get('token'), CONFIG.token);
-  } catch {
-    return false;
-  }
 }
 
 // Reject cross-origin WebSocket upgrades. A page at any origin can open
@@ -671,14 +654,6 @@ const _handler = (req, res) => {
       return handleIconReset(res);
     }
     return handleServeIcon(res, u);
-  }
-
-  // Raw-terminal escape hatch: token-gated reverse proxy to an on-demand,
-  // loopback-bound ttyd attached to this session's tmux pane. ttyd itself runs
-  // with no auth; this branch (and the matching upgrade branch) is the gate.
-  if (u.pathname.startsWith('/term/')) {
-    if (!checkTerminalToken(req.url)) return endJson(res, 401, { error: 'unauthorized' });
-    return proxyTerminalHttp(req, res, u);
   }
 
   // Public presentation artifacts (screenshots, videos, one-off demos) live
@@ -1570,60 +1545,6 @@ async function handleCollab(req, res, u) {
   }
 }
 
-// Extract and validate the session id (== tmux target) from a /term/ path.
-// The id is the first path segment after /term/, percent-decoded. Returns the
-// decoded id only if it is both a known session AND a valid tmux target;
-// otherwise null (caller responds 404/401). This is the injection guard: an id
-// never reaches `spawn` unless it matches the CONTRACT target pattern.
-function termIdFromPath(pathname) {
-  const m = /^\/term\/([^/]+)/.exec(pathname);
-  if (!m) return null;
-  let id;
-  try { id = decodeURIComponent(m[1]); } catch { return null; }
-  if (!tmux.isValidTarget(id)) return null;
-  const session = sessionById(id);
-  if (!session) return null;
-  return { id, target: session.target };
-}
-
-// HTTP pass-through to a session's ttyd. Ensures the process is up, then pipes
-// the request/response verbatim. Registers the response socket as a client for
-// idle ref-counting (the long-lived ttyd HTTP keep-alive / SSE keeps the proc
-// warm; the WS upgrade is the real liveness signal).
-async function proxyTerminalHttp(req, res, u) {
-  const parsed = termIdFromPath(u.pathname);
-  if (!parsed) { res.writeHead(404); return res.end('unknown terminal'); }
-
-  let port;
-  try {
-    ({ port } = await terminal.ensureTerminal(parsed.id, parsed.target));
-  } catch (err) {
-    res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
-    return res.end(`terminal unavailable: ${err?.message || err}`);
-  }
-
-  // Forward the original path+query unchanged; ttyd was started with `-b` set to
-  // /term/<encoded-id> so its own asset/WS links already match this prefix.
-  const proxyReq = http.request(
-    {
-      host: '127.0.0.1',
-      port,
-      method: req.method,
-      path: u.pathname + (u.search || ''),
-      headers: req.headers,
-    },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
-      proxyRes.pipe(res);
-    },
-  );
-  proxyReq.on('error', (err) => {
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
-    res.end(`terminal proxy error: ${err.message}`);
-  });
-  req.pipe(proxyReq);
-}
-
 // Serve a previously-uploaded file back to the UI by absolute path (used by the
 // in-transcript image previews / lightbox). Coexists with /api/uploads/<basename>
 // above; both confine strictly to uploadsDir.
@@ -1894,12 +1815,13 @@ function runSerial(target, fn) {
 // forcing a multi-hundred-MB string allocation in the cockpit process.
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
-// The binary PTY bridge (A4 — replaces ttyd, see lib/pty-bridge.js). Its own
-// WebSocketServer + resource-model instance; `resolveTarget` looks a client's
-// session id up in the SAME registry /term/'s termIdFromPath uses, so a
-// sessionId the bridge accepts must be BOTH a syntactically valid tmux target
-// AND a session the registry currently knows about (defense-in-depth beyond
-// the bridge's own isValidTarget check).
+// The binary PTY bridge (A4 — replaces ttyd, see lib/pty-bridge.js; the ttyd
+// surface itself was fully retired in A6). Its own WebSocketServer +
+// resource-model instance; `resolveTarget` looks a client's session id up in
+// the SAME registry sessionById() uses elsewhere, so a sessionId the bridge
+// accepts must be BOTH a syntactically valid tmux target AND a session the
+// registry currently knows about (defense-in-depth beyond the bridge's own
+// isValidTarget check).
 const ptyWss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 const ptyBridge = createPtyBridge({
   resolveTarget: (sessionId) => {
@@ -1918,21 +1840,6 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
   const upgradePath = new URL(req.url, 'http://localhost').pathname;
-
-  // Raw-terminal escape hatch: relay /term/* WS upgrades to the session's ttyd
-  // via a raw TCP pipe (ttyd speaks its own WS protocol; we are a transparent
-  // byte relay, not a `ws` endpoint). Browsers can't set headers on the ttyd
-  // WebSocket, so this surface authenticates via the `?token=` it keeps in its
-  // URL. All other upgrades go to the existing claude-control WebSocketServer.
-  if (upgradePath.startsWith('/term/')) {
-    if (!checkTerminalToken(req.url)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    relayTerminalUpgrade(req, socket, head);
-    return;
-  }
 
   // A4's binary PTY bridge: bearer-gated identically to the main cockpit WS
   // (checkWsToken / WS_PROTOCOL subprotocol — see lib/auth.js). Auth +
@@ -1955,50 +1862,6 @@ server.on('upgrade', (req, socket, head) => {
   }
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
-
-// Relay a /term/* WebSocket upgrade to the session's loopback ttyd as a raw
-// TCP byte pipe. We reconstruct the upgrade request line + headers verbatim and
-// replay them (plus any bytes already buffered in `head`) onto a fresh socket
-// to 127.0.0.1:<port>, then pipe both directions. Auth was already enforced by
-// the origin+token checks above; this inherits it.
-async function relayTerminalUpgrade(req, socket, head) {
-  const upgradePath = new URL(req.url, 'http://localhost').pathname;
-  const parsed = termIdFromPath(upgradePath);
-  if (!parsed) {
-    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
-  let port;
-  try {
-    ({ port } = await terminal.ensureTerminal(parsed.id, parsed.target));
-  } catch {
-    socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
-  const upstream = net.connect(port, '127.0.0.1', () => {
-    // Replay the original upgrade request to ttyd verbatim.
-    const headerLines = [`${req.method} ${req.url} HTTP/1.1`];
-    const h = req.rawHeaders;
-    for (let i = 0; i < h.length; i += 2) headerLines.push(`${h[i]}: ${h[i + 1]}`);
-    upstream.write(headerLines.join('\r\n') + '\r\n\r\n');
-    if (head && head.length) upstream.write(head);
-    socket.pipe(upstream);
-    upstream.pipe(socket);
-  });
-
-  // Ref-count this connection for idle teardown; release on either end closing.
-  terminal.addClient(parsed.id, socket);
-  const release = () => terminal.removeClient(parsed.id, socket);
-
-  upstream.on('error', () => { socket.destroy(); });
-  socket.on('error', () => { upstream.destroy(); });
-  upstream.on('close', () => { release(); socket.destroy(); });
-  socket.on('close', () => { release(); upstream.destroy(); });
-}
 
 function send(ws, obj) {
   sendWsMessage(ws, encodeWsMessage(obj), { limitBytes: CONFIG.wsBufferLimitBytes });
@@ -3396,7 +3259,6 @@ async function main() {
 function shutdown() {
   clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
-  terminal.shutdownAll();
   ptyBridge.shutdownAll();
   mlx.shutdown();
   registry.stop();

@@ -1,5 +1,6 @@
 // Regression tests for PLE-47: crash-safe request handler + endJson double-send
-// guard + unknown /api/* JSON 404.
+// guard + unknown /api/* JSON 404. Also covers the A6 ttyd retirement: /term/
+// is no longer a special route and its ?token= URL-auth exception is gone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -9,6 +10,11 @@ import { endJson, _handler } from '../server.js';
 
 function mockRes() {
   const written = [];
+  let resolveDone;
+  // `done` resolves once `end()` fires — needed by tests below that exercise
+  // the static/SPA fallback path, which reads the file with async fs.readFile
+  // (unlike the synchronous JSON endpoints the other tests here cover).
+  const done = new Promise((resolve) => { resolveDone = resolve; });
   return {
     headersSent: false,
     writableEnded: false,
@@ -24,8 +30,10 @@ function mockRes() {
       this.writableEnded = true;
       this._body = body;
       written.push({ type: 'end', body });
+      resolveDone();
     },
     written,
+    done,
   };
 }
 
@@ -104,4 +112,59 @@ test('GET /api/does-not-exist returns 404 application/json, not 200 text/html', 
     const parsed = JSON.parse(res._body);
     assert.equal(parsed.error, 'not found');
   }
+});
+
+// ── ttyd retirement (A6): the /term/ surface + its ?token= exception are GONE ──
+// A5 replaced the ttyd-iframe raw terminal with the in-app xterm.js panel over
+// /pty (a normal subprotocol-bearer-gated WebSocket — no special-casing). A6
+// deleted the ttyd lifecycle module, the `/term/` HTTP route + WS-upgrade
+// branch, and `checkTerminalToken` (the one place a `?token=` query string was
+// ever honored). These tests assert that exception is actually gone: `/term/*`
+// is no longer a distinguishable route at all — it falls through to the exact
+// same static/SPA handling as any other unknown path — and appending a
+// `?token=` query string has zero effect on the response, proving no
+// query-string-token auth bypass remains anywhere in the app.
+
+test('GET /term/<id> is no longer a special route — identical to any other unknown path', async () => {
+  const termRes = mockRes();
+  _handler(mockReq('/term/some-session'), termRes);
+  await termRes.done;
+
+  const otherRes = mockRes();
+  _handler(mockReq('/totally-unrelated-deep-link'), otherRes);
+  await otherRes.done;
+
+  // Both are non-/api/ extensionless paths, so both fall through to the exact
+  // same serveStatic()/SPA-fallback code — no ttyd-specific branch exists to
+  // treat /term/ differently (previously this branch called checkTerminalToken
+  // + proxyTerminalHttp instead of ever reaching serveStatic).
+  assert.equal(termRes._code, otherRes._code, '/term/ must respond exactly like any other unknown path');
+  assert.equal(
+    termRes._headers['content-type'],
+    otherRes._headers['content-type'],
+    '/term/ must get the same content-type as any other unknown path',
+  );
+});
+
+test('GET /term/<id>?token=... — the query-string token has NO effect (no URL-token bypass remains)', async () => {
+  const withoutToken = mockRes();
+  _handler(mockReq('/term/some-session'), withoutToken);
+  await withoutToken.done;
+
+  const withBogusToken = mockRes();
+  _handler(mockReq('/term/some-session?token=totally-bogus-value'), withBogusToken);
+  await withBogusToken.done;
+
+  // checkTerminalToken (the only code that ever read a `?token=` query param)
+  // is deleted. Appending one must be a complete no-op on this path.
+  assert.equal(
+    withBogusToken._code,
+    withoutToken._code,
+    'a ?token= query param must not change the /term/ response code',
+  );
+  assert.equal(
+    withBogusToken._headers['content-type'],
+    withoutToken._headers['content-type'],
+    'a ?token= query param must not change the /term/ response content-type',
+  );
 });
