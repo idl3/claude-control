@@ -7,7 +7,8 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
-import type { Pending, PendingQuestion, PendingOption, PanePrompt } from '../lib/types';
+import type { AnswerSelection, Pending, PendingQuestion, PendingOption, PanePrompt } from '../lib/types';
+import { FLAG_PENDING_TOOL_USE_ID } from '../lib/answerSettle';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ export interface AskInlineProps {
   activePrompt: ActivePrompt | null;
   /** Ref passed down from Composer so the morph driver can read/write display. */
   bodyRef: React.RefObject<HTMLDivElement>;
-  onAnswer: (toolUseId: string, selections: string[][]) => void;
+  onAnswer: (toolUseId: string, selections: AnswerSelection[]) => void;
   onKey: (key: string) => void;
   onSelect: (labels: string[]) => void;
   /** Called to send a normal freeform reply (for "type something" options). */
@@ -153,7 +154,7 @@ function PlanReview({ markdown }: { markdown: string }) {
 interface AskBodyProps {
   pending: Pending;
   bodyRef: React.RefObject<HTMLDivElement>;
-  onAnswer: (toolUseId: string, selections: string[][]) => void;
+  onAnswer: (toolUseId: string, selections: AnswerSelection[]) => void;
   onReply: (text: string) => void;
 }
 
@@ -232,15 +233,28 @@ function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
 
   const submitFreeText = () => {
     const text = freeTextValue.trim();
-    if (!text || submitting) return;
+    if (!text || submitting || freeTextQIdx === null) return;
     setSubmitting(true);
-    // Include the free-text option label in selections for its question.
-    if (freeTextQIdx !== null) {
-      const sels = selections.map((s) => new Set(s));
-      sels[freeTextQIdx] = new Set([freeTextOptLabel]);
-      onAnswer(pending.toolUseId, sels.map((s) => [...s]));
+    // Synthesized (tailer-less) ask: the server has no real pending to navigate for
+    // the sentinel toolUseId, so route the typed text through the plain reply path
+    // (the historical fallback). The structured directive path below would fail
+    // server-side ("no pending question") for this id.
+    if (pending.toolUseId === FLAG_PENDING_TOOL_USE_ID) {
+      onReply(text);
+      return;
     }
-    onReply(text);
+    // Real ask: send a DISTINCT free-text/chat directive for THIS question so the
+    // server types the literal text into the picker's "Type something" /
+    // "Chat about this" row. Other questions keep their normal option-label arrays.
+    //
+    // The OLD path sent the free-text OPTION LABEL as a fake selection AND fired a
+    // separate onReply(text); that reply (viaAnswer=true, so not refused) pasted the
+    // text + Enter into a picker still in navigation mode — selecting the highlighted
+    // option 0 and dropping the typed text. We must NOT call onReply here.
+    const kind: 'text' | 'chat' = /chat about this/i.test(freeTextOptLabel) ? 'chat' : 'text';
+    const sels: AnswerSelection[] = selections.map((s) => [...s]);
+    sels[freeTextQIdx] = { kind, text };
+    onAnswer(pending.toolUseId, sels);
   };
 
   // Free-text mode: keep the question context (header) for consistency; the
@@ -789,15 +803,26 @@ export function AskInline({
         </button>
       ) : activePrompt ? (
         <div className="ask-inline-full">
-          <button
-            type="button"
-            className="ask-min-btn"
-            aria-label="Minimise question"
-            title="Minimise"
-            onClick={minimize}
-          >
-            <span aria-hidden="true" />
-          </button>
+          {/* Sticky, zero-height header: `.ask-inline-body` (the bodyRef div)
+              is the actual overflow-y:auto scroller, so pinning the button
+              needs `position: sticky` on something INSIDE it, not `fixed` —
+              `.ask-inline-full` itself is a normal in-flow child of that
+              scroller, so the old plain `position: absolute` button (relative
+              to `.ask-inline-full`) scrolled away with the rest of the
+              question. This wrapper sticks to the scroller's top edge;
+              height:0 + overflow:visible keeps it from adding layout height
+              or pushing the question content down. */}
+          <div className="ask-min-header">
+            <button
+              type="button"
+              className="ask-min-btn"
+              aria-label="Minimise question"
+              title="Minimise"
+              onClick={minimize}
+            >
+              <span aria-hidden="true" />
+            </button>
+          </div>
           {activePrompt.kind === 'ask' ? (
             <AskBody
               key={activePrompt.pending.toolUseId}

@@ -100,10 +100,10 @@
   --space-base:   oklch(12% 0.02 265);   /* near-black deep-space base */
   --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
   --space-edge:   oklch(7%  0.015 265);  /* darkest, viewport edges — deepened a touch */
-  --star:         oklch(93% 0.02 250);   /* soft blue-white star */
-  --star-near:    0.88;                   /* near plane — biggest/brightest, fastest drift + strongest parallax */
-  --star-mid:     0.50;                   /* mid plane — the original starfield */
-  --star-far:     0.32;                   /* far plane — dense, tiny, dim; barely moves (depth cue) */
+  --star:         oklch(88% 0.08 250);   /* blue star (raised chroma for a clearer blue tint) */
+  --star-near:    0.62;                   /* near plane — biggest/brightest, fastest drift + strongest parallax (~30% dimmer, same hue) */
+  --star-mid:     0.35;                   /* mid plane — the original starfield (~30% dimmer, same hue) */
+  --star-far:     0.22;                   /* far plane — dense, tiny, dim; barely moves (depth cue) (~30% dimmer, same hue) */
   --nebula-1:     oklch(55% 0.12 285);   /* desaturated indigo/violet */
   --nebula-2:     oklch(58% 0.10 200);   /* desaturated teal (echoes --accent) */
   --nebula-alpha:      0.06;              /* resting wash alpha — still very low, must recede */
@@ -112,8 +112,11 @@
   --star-drift:      70s;                 /* mid plane drift; near/far derive their own below */
   --star-drift-near: 40s;                 /* fastest — closest plane */
   --star-drift-far:  160s;                /* slowest — barely perceptible (depth cue) */
-  --shoot-cycle:  11s;                     /* avg interval scale for a rare shooting-star streak */
-  --shoot-alpha:  0.85;                    /* streak peak brightness */
+  /* Shooting stars are now one-shot, JS/GSAP-triggered (rare ambient timer +
+     turn-completion event — see lib/shootingStars.ts + App.tsx's
+     fireShootingStar), not an always-on CSS @keyframes loop, so the old
+     --shoot-cycle/--shoot-alpha* tokens are gone; per-depth numbers live in
+     shootingStars.ts's PRESETS instead. */
 
   /* Composer-active boost — cosmos leans in + tints toward --accent while the
      composer is focused/typing (".composer-card:focus-within" via :has(),
@@ -127,10 +130,18 @@
   --cosmos-active-scale:      1.018;  /* whole-backdrop "lean in" nudge */
   --cosmos-active-ease:       650ms;  /* breathe-in/out duration */
 
+  /* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint
+     while typing (see .cosmos-aurora below). Blur radius is fixed/static
+     (never animated, only transform/opacity move) and alpha stays low/dark
+     so it reads as a subtle organic wash, not a light show. */
+  --aurora-alpha: 0.10;   /* peak opacity while composer-active (dialed back) */
+  --aurora-blur:  40px;   /* static blur radius */
+  --aurora-drift: 15s;    /* one flowing drift+skew cycle (~50% faster) */
+
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
   --glass-chrome:       oklch(20% 0.014 260 / 0.55);  /* chrome (no long text) */
-  --glass-panel:        oklch(18% 0.014 260 / 0.70);  /* text-bearing panels */
+  --glass-panel:        oklch(0.12 0.04 268.24 / 0.7);  /* text-bearing panels (sidebar/top-bar chrome — darker) */
   --glass-panel-strong: oklch(16% 0.014 260 / 0.82);  /* dense text / floating popovers */
   --glass-border:       oklch(100% 0 0 / 0.06);       /* hairline top edge */
 
@@ -311,18 +322,38 @@ html.pwa-fill body.kbd-up .app {
      mid  — the original starfield, medium everything
      near — few, big, bright, fastest drift + strongest scroll parallax
    Scroll parallax: App sets --cosmos-shift-far/-mid/-near from the
-   transcript scrollTop (one rAF handler, three writes). Shifting each
-   plane's background-position by a different multiplier is what actually
-   sells the depth — near moves the most, far almost not at all — and never
-   reveals a tile edge since it's a repeating pattern, not a moving box. */
+   transcript scrollTop (one rAF handler, three writes — coalesced to a
+   single write per animation frame regardless of how many scroll events
+   fire in between). The shift is applied as a `translate3d` on the OUTER
+   plane element (compositor-only: transform is never a paint property), NOT
+   `background-position` (a paint property — shifting a viewport-sized tiled
+   radial-gradient background every frame forces a repaint per frame, which
+   is what actually caused the choppy/steppy feel during scroll). The tiled
+   background + its own ambient drift keyframe live on an inner `::before`
+   instead, so the JS-driven scroll transform (outer element) and the CSS
+   keyframe-driven ambient drift transform (inner ::before) are two
+   independent `transform` values on two different elements — they compose
+   visually without one clobbering the other's animated value. Never reveals
+   a tile edge since it's a repeating pattern, not a moving box. */
 .cosmos-stars-far,
 .cosmos-stars-mid,
 .cosmos-stars-near {
   position: absolute;
   inset: -40px;              /* bleed so drift/parallax never reveals an edge */
+  will-change: transform;
+}
+.cosmos-stars-far  { opacity: var(--star-far);  transform: translate3d(0, var(--cosmos-shift-far, 0px), 0); }
+.cosmos-stars-mid  { opacity: var(--star-mid);  transform: translate3d(0, var(--cosmos-shift, 0px), 0); }
+.cosmos-stars-near { opacity: var(--star-near); transform: translate3d(0, var(--cosmos-shift-near, 0px), 0); }
+.cosmos-stars-far::before,
+.cosmos-stars-mid::before,
+.cosmos-stars-near::before {
+  content: '';
+  position: absolute;
+  inset: 0;
   background-repeat: repeat;
 }
-.cosmos-stars-far {
+.cosmos-stars-far::before {
   background-image:
     radial-gradient(0.75px 0.75px at 20px 30px,  var(--star), transparent),
     radial-gradient(0.75px 0.75px at 70px 110px, var(--star), transparent),
@@ -331,10 +362,8 @@ html.pwa-fill body.kbd-up .app {
     radial-gradient(1px 1px at 160px 150px,      var(--star), transparent),
     radial-gradient(0.75px 0.75px at 100px 20px, var(--star), transparent);
   background-size: 180px 180px, 180px 180px, 150px 150px, 150px 150px, 210px 210px, 210px 210px;
-  opacity: var(--star-far);
-  background-position: 0 var(--cosmos-shift-far, 0px);
 }
-.cosmos-stars-mid {
+.cosmos-stars-mid::before {
   background-image:
     radial-gradient(1px 1px at 30px 40px,   var(--star), transparent),
     radial-gradient(1px 1px at 120px 150px, var(--star), transparent),
@@ -345,10 +374,8 @@ html.pwa-fill body.kbd-up .app {
     radial-gradient(1.5px 1.5px at 300px 160px, var(--star), transparent),
     radial-gradient(1px 1px at 90px 300px,  var(--star), transparent);
   background-size: 320px 320px, 320px 320px, 270px 270px, 270px 270px, 400px 400px, 400px 400px, 220px 220px, 220px 220px;
-  opacity: var(--star-mid);
-  background-position: 0 var(--cosmos-shift, 0px);
 }
-.cosmos-stars-near {
+.cosmos-stars-near::before {
   background-image:
     radial-gradient(2px 2px at 60px 80px,    var(--star), transparent),
     radial-gradient(1.5px 1.5px at 260px 200px, var(--star), transparent),
@@ -356,13 +383,11 @@ html.pwa-fill body.kbd-up .app {
     radial-gradient(1.5px 1.5px at 150px 320px, var(--star), transparent),
     radial-gradient(2px 2px at 400px 260px,  var(--star), transparent);
   background-size: 460px 460px, 460px 460px, 400px 400px, 400px 400px, 520px 520px;
-  opacity: var(--star-near);
-  background-position: 0 var(--cosmos-shift-near, 0px);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .cosmos-stars-far  { animation: cosmos-drift-far  var(--star-drift-far)  linear infinite alternate; will-change: transform, background-position; }
-  .cosmos-stars-mid  { animation: cosmos-drift-mid  var(--star-drift)      linear infinite alternate; will-change: transform, background-position; }
-  .cosmos-stars-near { animation: cosmos-drift-near var(--star-drift-near) linear infinite alternate; will-change: transform, background-position; }
+  .cosmos-stars-far::before  { animation: cosmos-drift-far  var(--star-drift-far)  linear infinite alternate; will-change: transform; }
+  .cosmos-stars-mid::before  { animation: cosmos-drift-mid  var(--star-drift)      linear infinite alternate; will-change: transform; }
+  .cosmos-stars-near::before { animation: cosmos-drift-near var(--star-drift-near) linear infinite alternate; will-change: transform; }
 }
 @keyframes cosmos-drift-far  { to { transform: translate3d(0, -7px, 0); } }
 @keyframes cosmos-drift-mid  { to { transform: translate3d(0, -22px, 0); } }
@@ -400,45 +425,46 @@ html.pwa-fill body.kbd-up .app {
 }
 @keyframes cosmos-twinkle { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.58; } }
 
-/* shooting stars — two long-cycle streaks (transform + opacity only, no
-   filter) so a rare diagonal flash crosses the sky every so often instead
-   of a constant sprinkle of motion. Entirely declared inside the
-   no-preference block (nothing in the base rule, matching .cosmos-twinkle
-   above) so reduced-motion drops them completely rather than freezing a
-   streak mid-flight. box-shadow supplies the glow; it's static relative to
-   the element (baked into the layer once, moves as a unit with the
-   transform) — never recomputed per frame. */
-.cosmos-shooting { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-shooting::before,
-  .cosmos-shooting::after {
-    content: '';
-    position: absolute;
-    width: 90px;
-    height: 1.5px;
-    top: 16%;
-    left: -12%;
-    border-radius: 999px;
-    background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
-    box-shadow: 0 0 6px 0.5px color-mix(in oklch, var(--star) 65%, transparent);
-    opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(18deg);
-    will-change: transform, opacity;
-    animation: cosmos-shoot var(--shoot-cycle) linear infinite;
-  }
-  .cosmos-shooting::after {
-    top: 64%;
-    left: -12%;
-    width: 70px;
-    transform: translate3d(0, 0, 0) rotate(13deg);
-    animation-duration: calc(var(--shoot-cycle) * 1.7);
-    animation-delay: calc(var(--shoot-cycle) * -0.55);
-  }
+/* shooting stars — a pool of real (ref-able) elements, one-shot fired from
+   JS via GSAP (App.tsx's fireShootingStar), NOT an always-on CSS @keyframes
+   loop: CSS pseudo-elements can't be targeted by GSAP/DOM APIs, which is
+   exactly why this used to be three infinite-loop ::before/::after streaks
+   (see git history) — now each slot is idle (opacity: 0, no motion) until
+   JS drives it. Firing itself is rare by construction: at most once a
+   minute ambient (lib/shootingStars.ts's nextAmbientDelayMs) plus one shot
+   per agent turn completing (detectTurnCompletions), both gated behind the
+   Feature-B "shooting stars" setting AND prefers-reduced-motion — so no
+   media query is needed here (JS never fires a tween when reduced-motion is
+   on, and an idle slot with opacity 0 paints nothing either way). transform
+   + opacity only (box-shadow is static relative to the element, baked into
+   the layer once, moves as a unit with the transform — never recomputed per
+   frame), matching the compositor-only constraint on every other cosmos
+   layer. Depth ([data-depth]) reuses the retired streaks' exact look: near
+   = biggest/brightest, far = thinnest/dimmest; per-shot angle/travel/
+   duration/start-row are randomized in JS (buildShot's jitter). */
+.cosmos-shoot-stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.cosmos-shoot-slot {
+  position: absolute;
+  left: -14%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
+  opacity: 0;
+  will-change: transform, opacity;
 }
-@keyframes cosmos-shoot {
-  0%, 91%  { opacity: 0; transform: translate3d(0, 0, 0) rotate(18deg); }
-  92%      { opacity: var(--shoot-alpha); }
-  97%, 100% { opacity: 0; transform: translate3d(135vw, 60px, 0) rotate(18deg); }
+.cosmos-shoot-slot[data-depth='near'] {
+  width: 110px;
+  height: 2px;
+  box-shadow: 0 0 7px 0.5px color-mix(in oklch, var(--star) 70%, transparent);
+}
+.cosmos-shoot-slot[data-depth='mid'] {
+  width: 70px;
+  height: 1.3px;
+  box-shadow: 0 0 5px 0.5px color-mix(in oklch, var(--star) 55%, transparent);
+}
+.cosmos-shoot-slot[data-depth='far'] {
+  width: 40px;
+  height: 0.8px;
+  box-shadow: 0 0 3px 0.4px color-mix(in oklch, var(--star) 40%, transparent);
 }
 
 /* Composer-active boost — the cosmos leans in + tints toward the composer's
@@ -475,6 +501,78 @@ html.pwa-fill body.kbd-up .app {
 }
 .app:has(.composer-card:focus-within) .cosmos-active-tint {
   opacity: var(--cosmos-active-tint-alpha);
+}
+
+/* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint,
+   active only while the composer is focused/typing (same :has() signal).
+   Two low-alpha, blurred bands (--accent + --nebula-2, echoing the nebula
+   wash's two-hue trick) independently drift/skew/scale so the glow feels
+   like real northern-lights motion rather than a static gradient, while
+   staying compositor-only: only transform/opacity animate, and the blur
+   radius (--aurora-blur) is fixed, applied once via `filter`, never itself
+   animated. Concentrated toward the bottom of the viewport, right behind
+   the composer (inset biased downward). The opacity fade-in/out is a short
+   ~600ms bounded transition tied directly to focus — per this file's own
+   convention (see .cosmos-active-tint above), that's NOT gated behind
+   reduced-motion. Only the continuous drift loop is gated, and simply
+   omitting its `animation` under reduced-motion leaves the glow visible but
+   motionless (freeze), matching the composer-boost precedent exactly. */
+.cosmos-aurora {
+  position: absolute;
+  inset: -20% -10% -35% -10%;
+  filter: blur(var(--aurora-blur));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cosmos-active-ease) var(--ease);
+  /* Localise the glow to the composer (bottom) + top of the page — fade it out
+     across the transcript middle so it doesn't wash the whole viewport. */
+  -webkit-mask-image: linear-gradient(to bottom,
+    black 0%, transparent 34%, transparent 66%, black 100%);
+          mask-image: linear-gradient(to bottom,
+    black 0%, transparent 34%, transparent 66%, black 100%);
+}
+.app:has(.composer-card:focus-within) .cosmos-aurora {
+  opacity: var(--aurora-alpha);
+}
+.cosmos-aurora::before,
+.cosmos-aurora::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+}
+.cosmos-aurora::before {
+  background: linear-gradient(100deg,
+    transparent 5%, var(--accent) 35%, transparent 60%,
+    var(--nebula-2) 78%, transparent 95%);
+  opacity: 0.8;
+}
+.cosmos-aurora::after {
+  background: linear-gradient(115deg,
+    transparent 10%, var(--nebula-2) 40%, transparent 65%,
+    var(--accent) 82%, transparent 98%);
+  opacity: 0.55;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app:has(.composer-card:focus-within) .cosmos-aurora::before,
+  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
+    animation: cosmos-aurora-1 var(--aurora-drift) ease-in-out infinite;
+    will-change: transform;
+  }
+  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
+    animation-name: cosmos-aurora-2;
+    animation-delay: calc(var(--aurora-drift) / -2.4);
+  }
+}
+@keyframes cosmos-aurora-1 {
+  0%, 100% { transform: translate3d(-4%, 0, 0) scaleY(1) skewX(0deg); }
+  33%      { transform: translate3d(3%, -3%, 0) scaleY(1.18) skewX(-4deg); }
+  66%      { transform: translate3d(-2%, 2%, 0) scaleY(0.92) skewX(3deg); }
+}
+@keyframes cosmos-aurora-2 {
+  0%, 100% { transform: translate3d(4%, 0, 0) scaleY(1) skewX(0deg); }
+  33%      { transform: translate3d(-3%, 3%, 0) scaleY(0.9) skewX(4deg); }
+  66%      { transform: translate3d(2%, -2%, 0) scaleY(1.15) skewX(-3deg); }
 }
 
 /* ── Resource HUD ─────────────────────────────────────────────── */
@@ -528,6 +626,19 @@ html.pwa-fill body.kbd-up .app {
 .hud-warn-text {
   color: var(--amber);
   font-weight: 600;
+}
+/* Warn state: the dim grays (metric labels + icon buttons) are illegible on the
+   amber background — lift them to the warn-text amber so the whole bar reads. */
+.hud[data-warn='true'] .hud-k {
+  color: var(--amber);
+}
+.hud[data-warn='true'] .notify-bell {
+  color: var(--amber);
+  border-color: color-mix(in oklab, var(--amber) 45%, transparent);
+}
+.hud[data-warn='true'] .notify-bell:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--amber);
 }
 
 .conn-dot {
@@ -737,6 +848,19 @@ body.is-external-display .rail {
   border-radius: 999px;
   background: var(--bg-2);
   color: var(--text-dim);
+}
+/* Desktop: hide rename button by default, show on hover. */
+@media (min-width: 760px) {
+  .session-group-rename-btn {
+    opacity: 0;
+    transition: opacity 150ms var(--ease);
+  }
+  .session-group-head:hover .session-group-rename-btn {
+    opacity: 1;
+  }
+  .session-group-rename-btn:focus-visible {
+    opacity: 1;
+  }
 }
 .session-window {
   display: flex;
@@ -1095,6 +1219,61 @@ body.is-external-display .rail {
   margin-left: auto; /* right-align within the meta row */
   opacity: 0.85;
 }
+.meta-effort {
+  /* Reasoning-effort chip (minimal/low/medium/high/xhigh/max) — distinct hue
+     from model (accent-2) and ctx (dim), so the three dimensions read apart.
+     Color comes from a harness-aware modifier (.meta-effort-*, below), NOT
+     this base rule — SessionRail's effortClass() picks the modifier since
+     Claude and Codex tier ladders don't line up (see effortClass jsdoc). */
+  font-size: var(--txt-meta);
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  letter-spacing: 0.02em;
+}
+.meta-effort-gray {
+  color: var(--text-faint);
+}
+.meta-effort-yellow {
+  /* No --yellow/--warn token exists in this palette yet — same hue family as
+     the Dracula yellow used by the statusline script this data is sourced
+     from (#f1fa8c ≈ oklch(85% 0.16 100)). */
+  color: oklch(85% 0.16 100);
+}
+.meta-effort-amber {
+  color: var(--amber);
+}
+.meta-effort-red {
+  color: var(--red);
+}
+/* Top-tier effort ("max" for Claude, "xhigh" for Codex — see effortClass) —
+   same rainbow text-clip recipe as .ultrathink-text / .block-cot's live
+   thinking flash (reused verbatim: gradient stops, background-size, clip,
+   thinking-flash keyframe), just sized down to fit the small meta chip. */
+.meta-effort-rainbow {
+  background-image: linear-gradient(
+    90deg,
+    oklch(70% 0.25 20),
+    oklch(75% 0.2 80),
+    oklch(78% 0.2 140),
+    oklch(72% 0.2 200),
+    oklch(68% 0.24 260),
+    oklch(70% 0.25 320),
+    oklch(70% 0.25 20)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-flash 2.2s linear infinite;
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) {
+  .meta-effort-rainbow {
+    animation: none;
+  }
+}
 /* ── Session row right-hand meta slot (local rows only) ──────────────────
    One slot, one reserved width, no reflow: model ⟷ context (⟷ Codex usage)
    cycle every 10s (SessionRail.tsx useMetaCyclePhase/paneMetaFields), or the
@@ -1133,6 +1312,23 @@ body.is-external-display .rail {
   background: var(--bg-2);
   color: var(--text-dim);
 }
+/* ⌘-held session-id slot is a click-to-copy button — strip button chrome so it
+   reads as the same chip, and flash green on "Copied!". */
+.session-row-meta-copy {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.session-row-meta-copy:hover .session-row-meta-pane {
+  color: var(--text);
+}
+.session-row-meta-copy[data-copied='true'] .session-row-meta-pane {
+  color: var(--green);
+}
 .session-empty {
   list-style: none;
   padding: 16px;
@@ -1149,7 +1345,7 @@ body.is-external-display .rail {
   min-height: 48px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-1);
+  background: var(--bg);
   flex: 0 0 auto;
   /* A3 audit follow-up (CP3-A, FIX 1): outrank .embed-app-hoist's
      position:fixed hoisted iframes (z-index 1) — this header sits outside
@@ -1759,9 +1955,12 @@ body.is-external-display .rail {
   color: var(--accent);
 }
 /* Transcript loading state — shown while the server delivers the messages frame.
-   Centered spinner using the same cockpit-spin keyframe. Fades out once loaded. */
+   Centered spinner using the same cockpit-spin keyframe. Fades out once loaded.
+   width:100% (not an auto-shrink box) so .thread-skeleton's own width:100% below
+   resolves against the real message column instead of collapsing to content size. */
 .thread-loading {
-  margin: auto;
+  margin: auto 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1786,28 +1985,36 @@ body.is-external-display .rail {
   }
 }
 /* Skeleton rows — message-shaped shimmer placeholders shown alongside the
-   spinner above while a transcript is loading (primarily the remote/olam
-   backfill window; local sessions resolve near-instantly). Rows alternate
-   alignment to loosely suggest a user/assistant exchange without implying
-   real content. */
+   spinner above while a transcript is loading. Sized to the SAME column as
+   real messages (.thread-viewport's padded content box, .msg-row's 92% cap)
+   rather than a fixed narrow box, so it reads as an actual conversation
+   skeleton instead of a small generic stub. Rows alternate alignment to
+   loosely suggest a user/assistant exchange without implying real content;
+   the end-aligned row mirrors .msg-row[data-role='user']'s bubble treatment. */
 .thread-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  width: min(420px, 80vw);
+  gap: calc(16px * var(--ui-scale)); /* mirrors .thread-viewport's inter-turn gap */
+  width: 100%;
 }
 .thread-skeleton-row {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(10px * var(--ui-scale)); /* mirrors .msg-body's line gap */
+  max-width: 92%; /* mirrors .msg-row */
 }
 .thread-skeleton-row[data-align='end'] {
   align-items: flex-end;
+  align-self: flex-end; /* mirrors .msg-row[data-role='user']'s self alignment */
+  background: var(--user);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px;
 }
 .thread-skeleton-bar {
   display: block;
-  height: 10px;
+  height: 12px;
   border-radius: 6px;
   background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-hover) 50%, var(--bg-2) 75%);
   background-size: 200% 100%;
@@ -2923,6 +3130,37 @@ details.block-tool[open] > summary .tool-arrow,
   color: var(--text);
 }
 
+/* ExitPlanMode → rendered-markdown "Plan" card (see MessageParts' ExitPlanPart).
+   Keeps the .block-tool chrome (arrow + name row) but the body is a bordered,
+   accent-toned surface holding real GFM markdown instead of a JSON <pre>. */
+details.block-plan > summary.block-tool-use {
+  border-left: 2px solid var(--accent);
+}
+.block-plan-body {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-1);
+  padding: 10px 12px;
+}
+.block-plan-body .aui-md {
+  font-size: calc(13px * var(--ui-scale));
+}
+.block-plan-body .aui-md > :first-child {
+  margin-top: 0;
+}
+.block-plan-body .aui-md > :last-child {
+  margin-bottom: 0;
+}
+.block-plan-path {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text-faint, var(--text-dim));
+  overflow-wrap: anywhere;
+}
+
 /* ── Composer ─────────────────────────────────────────────────── */
 .composer {
   display: flex;
@@ -2959,13 +3197,28 @@ details.block-tool[open] > summary .tool-arrow,
   .composer {
     /* Unfocused: sit ~8px higher off the bottom contour (matches the rail-foot
        clearance so both bottom bars read consistently above the home indicator). */
-    padding-bottom: max(16px, calc(env(safe-area-inset-bottom) - 4px));
+    padding-bottom: max(12px, calc(env(safe-area-inset-bottom) - 10px));
     transition: padding-bottom 120ms ease;
   }
   body.kbd-up .composer {
     /* Focused: .app is pinned to just above the keyboard, so the composer already
        hugs it — drop the bottom padding entirely (keyboard covers the home bar). */
     padding-bottom: 0;
+  }
+  /* AskInline question card is taller than the normal input row — its rounded
+     bottom-right corner + "Send Answer" button sit right where the phone's
+     screen curvature starts, and the normal ~24px unfocused clearance isn't
+     enough to clear it. Lift only while a question is active (data-ask-active
+     set on .composer from Composer.tsx's `askActive` prop — the AskInline
+     body itself is always mounted/display:none when idle, so this can't be
+     driven by a plain :has() on content). Higher specificity than the bare
+     `.composer` rule above (attribute selector) so it wins without touching
+     the normal unfocused padding; `body.kbd-up .composer` still wins over
+     this when the on-screen keyboard is up (free-text answer), since the
+     keyboard already covers the curved corner in that state. */
+  .composer[data-ask-active='true'] {
+    padding-bottom: max(40px, calc(env(safe-area-inset-bottom) + 10px));
+    transition: padding-bottom 120ms ease;
   }
 }
 /* External display (iPad driving a monitor): no home indicator, so drop the
@@ -3027,6 +3280,10 @@ body.is-external-display .composer {
      rim itself. Without padding-top this clipped the rim's top arc flat. */
   padding-top: 2px;
   padding-bottom: 2px;
+  /* Same rim-overflow reasoning as padding-top: the first pill's running rim /
+     active ring draws ~1.4px outside its border box and the forced horizontal
+     clip would shave the left edge — a 1px left buffer keeps the border intact. */
+  padding-left: 1px;
   margin-top: -30px;
   position: relative;
   z-index: 1;
@@ -3070,7 +3327,7 @@ body.is-external-display .composer {
 }
 /* Running dot inside pill — steady for 'done', pulsing only while running. */
 .subagent-pill .sa-dot[data-status='running'] {
-  animation: pulse 1.4s var(--ease) infinite;
+  animation: pulse 0.82s var(--ease) infinite;
 }
 /* Working — reuses the composer's living animated rim (registered
    `--composer-ring-angle` custom property + `composer-ring-flow` keyframes +
@@ -3103,7 +3360,7 @@ body.is-external-display .composer {
 }
 @media (prefers-reduced-motion: no-preference) {
   .subagent-pill[data-status='running']::before {
-    animation: composer-ring-flow 12s linear infinite;
+    animation: composer-ring-flow 7s linear infinite;
   }
 }
 /* Done, waiting on the parent to respond/clear — steady muted green border,
@@ -4712,7 +4969,7 @@ body.is-external-display .composer {
   background: var(--bg-2);
   color: var(--text-dim);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 8px 8px 8px 14px; /* desktop (glass) default; mobile @media overrides the corners */
   cursor: pointer;
   transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
 }
@@ -4879,9 +5136,10 @@ select.rail-new-cwd {
   opacity: 0.6;
 }
 
-/* Agent/mode segmented controls. Unavailable agents stay selectable because
-   availability is advisory; submit still performs the authoritative server check. */
-.rail-new-agent-seg,
+/* Mode segmented control (Claude Interactive/Print, Codex RPC/TUI) — shown
+   only behind the draft screen's "Advanced" toggle. The sibling agent-select
+   segmented control this used to pair with (.rail-new-agent-seg*) was
+   replaced by a plain <select> in NewSessionDraft and removed below. */
 .rail-new-mode-seg {
   display: flex;
   align-items: stretch;
@@ -4891,11 +5149,8 @@ select.rail-new-cwd {
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 10px;
-}
-.rail-new-mode-seg {
   margin-top: -2px;
 }
-.rail-new-agent-seg-btn,
 .rail-new-mode-seg-btn {
   flex: 1 1 0;
   display: inline-flex;
@@ -4906,7 +5161,7 @@ select.rail-new-cwd {
   border-radius: 7px;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -4920,11 +5175,7 @@ select.rail-new-cwd {
   user-select: none;
   -webkit-user-select: none;
 }
-.rail-new-mode-seg-btn {
-  font-size: 11px;
-}
 /* ACTIVE — filled segment: accent bg, dark text, inner glow */
-.rail-new-agent-seg-btn[data-active='true'],
 .rail-new-mode-seg-btn[data-active='true'] {
   background: var(--accent);
   color: oklch(16% 0.012 260);
@@ -4932,37 +5183,24 @@ select.rail-new-cwd {
   box-shadow: 0 1px 3px oklch(0% 0 0 / 0.25);
 }
 /* HOVER on inactive segment */
-.rail-new-agent-seg-btn:not([data-active='true']):hover:not(:disabled),
 .rail-new-mode-seg-btn:not([data-active='true']):hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
   border-color: var(--line);
 }
 /* FOCUS ring — visible on inactive AND active */
-.rail-new-agent-seg-btn:focus-visible,
 .rail-new-mode-seg-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 /* DISABLED — faded, not clickable */
-.rail-new-agent-seg-btn:disabled,
 .rail-new-mode-seg-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.rail-new-agent-seg-btn[data-unavailable='true']:not(:disabled) {
-  color: var(--text-faint);
-}
+/* Shared by mode-pill button labels (name kept for history — also used to be
+   shared with the now-removed agent segmented control). */
 .rail-new-agent-seg-label {
-  line-height: 1;
-}
-/* "unavailable" micro-hint beside the label */
-.rail-new-agent-seg-hint {
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.7;
   line-height: 1;
 }
 
@@ -4979,32 +5217,26 @@ select.rail-new-cwd {
 }
 
 /* ── New-session draft screen (main content area) ────────────────
-   Replaces the old inline rail form: the same agent/transport/model/name/cwd
-   pickers (rail-new-* controls above, unchanged) plus a composer-styled
-   initial-prompt textarea, shown in place of the transcript. The root mirrors
-   .thread-root's flex/scroll shape so it fills the same space in .detail. */
+   Reads as the SAME view as a live session, not a page swap: the root
+   mirrors .thread-root's flex shape exactly (empty .new-session-draft-
+   placeholder standing in for .thread-viewport, above a .composer-classed
+   wrap), so the .composer-card sits in the identical bottom-anchored slot
+   the live composer occupies. It's then lifted to read as vertically
+   centered via a measured translateY on the .composer wrap (see
+   NewSessionDraft.tsx's centering effect) — a compositor-only transform, not
+   a different layout — and animates back to y:0 on submit for an in-place,
+   no-pop handoff into the live <Thread>. */
 .new-session-draft {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  position: relative;
 }
-.new-session-draft-scroll {
+.new-session-draft-placeholder {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.new-session-draft-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  max-width: calc(640px * var(--ui-scale));
-  margin-inline: auto;
-  padding: 24px 16px 32px;
-  box-sizing: border-box;
 }
 .new-session-draft-heading {
   margin: 0 0 4px;
@@ -5014,16 +5246,56 @@ select.rail-new-cwd {
   color: var(--text);
   letter-spacing: -0.02em;
 }
-/* Wraps the heading + agent/mode/model/name/cwd/tmux pickers, sitting above
-   the composer card. Same 8px field-to-field rhythm .new-session-draft-body
-   used before Create/Cancel moved into the composer's own toolbar. */
-.new-session-setup {
+/* Heading + option row + name field, wrapped so it can fade out (opacity
+   only) as the card slides to the bottom slot on submit. */
+.new-session-draft-head {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.new-session-draft-composer {
-  margin-top: 4px;
+.new-session-draft-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.new-session-draft-options-left,
+.new-session-draft-options-right {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.new-session-draft-options-right {
+  margin-left: auto;
+}
+/* Option-row dropdowns size to content instead of the full-width rail-new-cwd
+   default (this row holds several selects side by side, not one stacked field). */
+.new-session-draft-select {
+  width: auto;
+  min-width: 96px;
+  flex: 0 1 auto;
+}
+.new-session-draft-freetext {
+  flex: 1 1 160px;
+  width: auto;
+}
+.new-session-draft-advanced-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+.new-session-draft-advanced-toggle:hover {
+  color: var(--text-dim);
+}
+.new-session-draft-advanced-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Transcript inline attachment previews ────────────────────── */
@@ -5595,6 +5867,137 @@ select.config-input {
 .config-icon-actions {
   display: flex;
   gap: 8px;
+}
+/* Rail-token configurator: pool/bar drag-and-drop + live preview. Reuses the
+   real rail's meta-model / meta-effort / meta-ctx / meta-usage chip classes
+   and session-row-meta (see ~1196 / ~1288 above) inside the pills and
+   preview rows so they match the real rail exactly. */
+.railcfg-dnd-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.railcfg-pool,
+.railcfg-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.railcfg-bar {
+  background: var(--bg-hover);
+}
+.railcfg-pool-empty,
+.railcfg-bar-empty {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.railcfg-bracket {
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.railcfg-sep {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.railcfg-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+/* Show the full token label in the pill — .meta-model's 60% max-width (tuned for
+   the rail's multi-chip row) otherwise truncates "model" to "mo…" here. */
+.railcfg-pill .meta-model {
+  max-width: none;
+}
+.railcfg-pill--placeholder {
+  width: 48px;
+  height: 24px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.railcfg-pill-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.railcfg-pill-remove:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.railcfg-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  pointer-events: none;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+  opacity: 0.9;
+}
+.railcfg-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.railcfg-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.railcfg-preview-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.railcfg-preview-label {
+  flex: 1;
+  color: var(--text-dim);
+}
+.railcfg-preview-empty {
+  color: var(--text-faint);
+}
+@media (max-width: 640px) {
+  .railcfg-pool,
+  .railcfg-bar {
+    padding: 6px 8px;
+  }
 }
 /* Pinned footer: version on the left, actions on the right. */
 .config-foot {
@@ -7654,7 +8057,7 @@ select.config-input {
    <input type="checkbox"> + the text -- deliberately far from Send. */
 .composer-subagent-toggle {
   flex: 0 0 auto;
-  display: inline-flex;
+  display: none; /* superseded by the agent-icon button (.composer-subagent-btn) at ALL widths */
   align-items: center;
   gap: 7px;
   height: 34px;
@@ -7754,7 +8157,7 @@ select.config-input {
    swaps which one is visible per breakpoint so there's exactly one hit
    target at any given width. */
 .composer-subagent-btn {
-  display: none;
+  display: inline-flex; /* the agent-icon toggle — now shown at ALL widths (desktop + mobile) */
   flex: 0 0 auto;
   height: 34px;
   min-width: 34px;
@@ -7846,13 +8249,13 @@ select.config-input {
   display: none;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 0 0;
+  padding: 8px;
   max-height: 50vh;
   overflow-y: auto;
 }
 .ask-inline-body .question {
   /* Compact the question layout inside the inline body. */
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 /* ── Minimize / maximize ──────────────────────────────────────────────────
@@ -7865,6 +8268,19 @@ select.config-input {
 .ask-inline-full .question:first-child .q-header,
 .ask-inline-full .question:first-child .q-text {
   padding-right: 30px;
+}
+/* Sticky wrapper: pins .ask-min-btn to the top of .ask-inline-body (the
+   actual overflow-y:auto scroller) while the question content scrolls
+   underneath it. Zero height + overflow:visible so it never adds layout
+   height or pushes the question down — the button (still absolutely
+   positioned, now relative to THIS instead of .ask-inline-full) is the
+   only thing that actually paints. */
+.ask-min-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+  overflow: visible;
 }
 .ask-min-btn {
   position: absolute;

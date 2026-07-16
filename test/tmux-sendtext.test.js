@@ -78,6 +78,26 @@ test('sendText: sends Enter as soon as "Pasting…" clears (deterministic)', asy
   assert.equal(last[last.length - 1], 'Enter');
 });
 
+test('sendText: `--` precedes the payload so a leading-dash message is not a tmux flag', async () => {
+  // Regression: a message like "--glass-panel should be oklch(...)" made tmux
+  // reject `set-buffer`/`send-keys -l` with "invalid flag --" → nothing sent.
+  const msg = '--glass-panel should be oklch(0.12 0.04 268.24 / 0.7)';
+  const { _run, _delay, calls } = makeStub();
+  await sendText('0:1.1', msg, { _run, _delay });
+  const setBuf = calls.find((c) => c[0] === 'set-buffer');
+  assert.equal(setBuf[setBuf.length - 2], '--', 'set-buffer ends options with -- before the payload');
+  assert.equal(setBuf[setBuf.length - 1], msg, 'payload staged verbatim');
+});
+
+test('sendText: fallback literal path also inserts `--` before a leading-dash message', async () => {
+  const msg = '--foo';
+  const { _run, _delay, calls } = makeStub({ failOn: 'paste-buffer' });
+  await sendText('0:1.1', msg, { _run, _delay });
+  const literal = calls.find((c) => c[0] === 'send-keys' && c.includes('-l'));
+  assert.equal(literal[literal.length - 2], '--', 'literal send-keys ends options with -- before payload');
+  assert.equal(literal[literal.length - 1], msg);
+});
+
 test('sendText: falls back to literal send-keys path when paste-buffer fails', async () => {
   const { _run, _delay, calls } = makeStub({ failOn: 'paste-buffer' });
   await sendText('0:1.1', 'hi', { _run, _delay });

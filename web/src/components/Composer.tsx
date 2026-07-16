@@ -23,6 +23,7 @@ import { useShell } from './ShellContext';
 import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
+import type { AnswerSelection } from '../lib/types';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import { StopIcon, BotIcon } from './icons';
 import { AskInline, type ActivePrompt } from './AskInline';
@@ -127,7 +128,7 @@ interface ComposerProps {
    *  composer morphs to show the inline prompt body instead of the input. */
   askActive?: boolean;
   activePrompt?: ActivePrompt | null;
-  onAnswer?: (toolUseId: string, selections: string[][]) => void;
+  onAnswer?: (toolUseId: string, selections: AnswerSelection[]) => void;
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
@@ -1794,7 +1795,7 @@ export function Composer({
   }, [text]);
 
   return (
-    <ComposerPrimitive.Root className="composer">
+    <ComposerPrimitive.Root className="composer" data-ask-active={askActive ? 'true' : undefined}>
       {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
           keyboard is below). Populated from the live session skill list. */}
       {acOpen ? (
@@ -2134,17 +2135,6 @@ export function Composer({
               >
                 <PlusIcon />
               </ComposerPrimitive.AddAttachment>
-              <button
-                type="button"
-                className="composer-mic"
-                aria-label="Voice input"
-                title="Voice input"
-                disabled={disabled}
-                data-hotkey="⌘S"
-                onClick={openVoice}
-              >
-                <MicIcon />
-              </button>
             </>
           ) : null}
           {/* Terminal-mode toggle (>_): hidden while voice mode is active. */}
@@ -2225,6 +2215,20 @@ export function Composer({
               onClick={() => onStop?.()}
             >
               <StopIcon size={14} />
+            </button>
+          ) : null}
+          {/* Voice input mic — sits just LEFT of the Raw Send (bypass) button. */}
+          {!terminal && !voice ? (
+            <button
+              type="button"
+              className="composer-mic"
+              aria-label="Voice input"
+              title="Voice input"
+              disabled={disabled}
+              data-hotkey="⌘S"
+              onClick={openVoice}
+            >
+              <MicIcon />
             </button>
           ) : null}
           {/* Secondary: bypass — send the raw composer text without optimising. */}
