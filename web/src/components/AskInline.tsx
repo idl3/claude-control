@@ -24,7 +24,7 @@ export type ActivePrompt =
 export interface AskInlineProps {
   activePrompt: ActivePrompt | null;
   /** Ref passed down from Composer so the morph driver can read/write display. */
-  bodyRef: React.RefObject<HTMLDivElement>;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   onAnswer: (toolUseId: string, selections: AnswerSelection[]) => void;
   onKey: (key: string) => void;
   onSelect: (labels: string[]) => void;
@@ -81,7 +81,7 @@ function withFreeText(q: PendingQuestion): PendingOption[] {
  * click handler BEFORE setState, then FLIP from it after the re-render.
  * Returns `capture()` to call synchronously before the state change.
  */
-function useHeightFlip(bodyRef: React.RefObject<HTMLElement>, dep: unknown) {
+function useHeightFlip(bodyRef: React.RefObject<HTMLElement | null>, dep: unknown) {
   const beforeRef = useRef<number | null>(null);
   const capture = () => {
     beforeRef.current = bodyRef.current?.offsetHeight ?? null;
@@ -153,7 +153,7 @@ function PlanReview({ markdown }: { markdown: string }) {
 
 interface AskBodyProps {
   pending: Pending;
-  bodyRef: React.RefObject<HTMLDivElement>;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   onAnswer: (toolUseId: string, selections: AnswerSelection[]) => void;
   onReply: (text: string) => void;
 }
@@ -459,7 +459,7 @@ interface PromptBodyProps {
   prompt: PanePrompt;
   planMarkdown: string | null;
   agentName: string;
-  bodyRef: React.RefObject<HTMLDivElement>;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   onKey: (key: string) => void;
   onSelect: (labels: string[]) => void;
   onReply: (text: string) => void;

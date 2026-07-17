@@ -51,7 +51,7 @@ export interface UseVoiceRecorderResult {
   status: VoiceStatus;
   errorMsg: string | null;
   /** Ref forwarded to the <canvas> the hook drives with waveform data. */
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   pauseResume: () => void;
   /** Stop recording and kick off transcription → onCommit. */
   stop: () => void;

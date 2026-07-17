@@ -65,7 +65,7 @@ const NATURAL_RECT = {
 
 async function renderReady(
   overrides: { imageDataUrl?: string; onReady?: (ready: boolean) => void; onError?: () => void } = {},
-  ref?: React.RefObject<StudioAnnotateHandle>,
+  ref?: React.RefObject<StudioAnnotateHandle | null>,
 ) {
   stubImageLoad();
   const onReady = overrides.onReady ?? vi.fn<(ready: boolean) => void>();
