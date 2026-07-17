@@ -790,7 +790,31 @@ describe('NewSessionDraft cancel / escape', () => {
     vi.unstubAllGlobals();
   });
 
-  it('Cancel button calls onCancel', async () => {
+  // The mobile-only top-left back button (styled/marked-up like the session
+  // detail's own back button — see .new-session-draft-head in styles.css)
+  // replaces the old bottom-right "Cancel" text button. It routes through
+  // onBack (App.tsx's backToRail), NOT onCancel, so tapping it returns to the
+  // mobile rail instead of leaving a blank detail pane.
+  it('back button calls onBack, not onCancel, when onBack is supplied', async () => {
+    stubApi();
+    const onCancel = vi.fn();
+    const onBack = vi.fn();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel,
+      onBack,
+      onCreated: () => {},
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel new session' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  // onBack is optional (see the prop doc in NewSessionDraft.tsx) — callers
+  // that don't pass it get the old draft-close-only behavior instead of a
+  // runtime error.
+  it('back button falls back to onCancel when onBack is not supplied', async () => {
     stubApi();
     const onCancel = vi.fn();
     render(createElement(NewSessionDraft, {
@@ -799,22 +823,25 @@ describe('NewSessionDraft cancel / escape', () => {
       onCancel,
       onCreated: () => {},
     }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel new session' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('Escape key calls onCancel', async () => {
+  it('Escape key calls onCancel, not onBack', async () => {
     stubApi();
     const onCancel = vi.fn();
+    const onBack = vi.fn();
     const { container } = render(createElement(NewSessionDraft, {
       filter: 'all',
       onToast: () => {},
       onCancel,
+      onBack,
       onCreated: () => {},
     }));
-    await screen.findByRole('button', { name: 'Cancel' });
+    await screen.findByRole('button', { name: 'Cancel new session' });
     fireEvent.keyDown(container.querySelector('.new-session-draft') as Element, { key: 'Escape' });
     expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onBack).not.toHaveBeenCalled();
   });
 });
 

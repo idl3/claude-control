@@ -2462,6 +2462,7 @@ function AppInner() {
                 filter={sessionFilter}
                 onToast={showToast}
                 onCancel={closeDraft}
+                onBack={backToRail}
                 onCreated={onDraftCreated}
               />
             ) : (
