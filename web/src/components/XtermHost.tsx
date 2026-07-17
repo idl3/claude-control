@@ -70,7 +70,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       cursorBlink: true,
       scrollback: 10000,
       fontFamily: TERMINAL_FONT_FAMILY,
-      fontSize: 13,
+      fontSize: 12,
       allowProposedApi: true,
     });
 
