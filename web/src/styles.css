@@ -3390,31 +3390,126 @@ body.is-external-display .composer {
 .subagent-pill-name {
   letter-spacing: -0.01em;
 }
-/* Activity caption below pills for the focused agent */
+/* Activity caption below pills for the focused agent — resting state is a
+   single truncated line; hover/focus expands to the last-5 quick view (see
+   `.subagent-strip-caption-wrap` block below). Replaced the old SlotText
+   per-character roll (too busy/distracting for a line that updates this
+   often) with a plain-text feed-style slide-up + fade, driven by keying
+   `.subagent-progress-text` on the text itself (SubAgentStrip.tsx) so React
+   remounts a fresh span — and therefore replays `subagent-caption-in` below
+   — on every change, instead of animating one persistent node. */
 .subagent-strip-caption {
   margin: 0;
   padding: 0 2px;
   font-size: calc(var(--txt-meta) - 1px);
   color: var(--text-dim);
   line-height: 1.4;
+  /* Fixed to one line's height; clips the incoming span while it slides up
+     from just below this box, so the motion actually reads as "rising into
+     view" rather than animating somewhere already fully visible. */
   overflow: hidden;
+  max-width: 100%;
+}
+.subagent-progress-text {
+  /* display:block (not the default inline) so `transform` actually applies —
+     CSS transforms have no effect on non-replaced inline boxes — and so this
+     element, not just its `<p>` ancestor, owns the ellipsis truncation
+     below (text-overflow requires the overflow/nowrap to live on the box
+     that contains the text run itself). */
+  display: block;
   white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  animation: subagent-caption-in 240ms var(--ease) both;
 }
-/* SlotText wrapper for the caption above — same containment convention as
-   .session-row-meta > * (SessionRail.tsx): the slot-text span is inline-flex
-   with its own per-character layout, so it needs its own overflow/max-width
-   rather than relying on the ancestor's ellipsis to reach inside it. */
-.subagent-strip-caption .subagent-progress-text {
-  max-width: 100%;
-  overflow: hidden;
-  vertical-align: bottom;
+@keyframes subagent-caption-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-/* Progress activity line: SlotText's roll animation only — no shimmer/gradient
-   color (it read as ugly + illegible); text uses the caption's normal color. */
 @media (prefers-reduced-motion: reduce) {
   .subagent-pill .sa-dot { animation: none; }
+  /* Reduced motion: swap instantly, no slide/fade — the text is still
+     correct the instant it remounts, this only removes the motion. */
+  .subagent-progress-text { animation: none; }
+}
+
+/* ── Hover-expand quick view: last (up to) 5 distinct activity lines ────
+   (SubAgentStrip.tsx's `recentAgentSummaries`, most recent LAST), revealed
+   on hover/focus of the caption row. `.subagent-strip-caption-wrap` is the
+   hover/focus target AND the positioning anchor for the panel; it adds no
+   width of its own beyond the caption line already had, so at rest this is
+   pixel-identical to the old single-line layout. */
+.subagent-strip-caption-wrap {
+  position: relative;
+}
+.subagent-strip-caption-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Absolutely positioned + bottom-anchored to the wrap (i.e. to the resting
+   caption line's own box): growing taller therefore extends UPWARD over the
+   transcript above it — the same overhang idea already used by the pill row
+   overlapping the transcript's last line — rather than pushing `.composer`
+   down when it expands. Full width of `.subagent-strip-caption-wrap`, which
+   is already the same width as `.subagent-strip` (matches the composer
+   card's own max-width — see `.subagent-strip` above), so "hover ->
+   full composer width" falls out of the existing container for free. Same
+   raised-card tokens as `.dropdown-menu` above (bg-2 / line-strong / 10px
+   radius / 0 8px 24px shadow) for a consistent popover look. */
+.subagent-quickview-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity var(--ease) 0.2s, max-height var(--ease) 0.2s;
+}
+.subagent-strip-caption-wrap:hover .subagent-quickview-panel,
+.subagent-strip-caption-wrap:focus-within .subagent-quickview-panel {
+  opacity: 1;
+  /* min(): generous fixed cap for the common case (5 short lines never get
+     close to this), but a viewport-relative ceiling too so wrapped lines on
+     a narrow phone composer (~375-430px, where each line can wrap to 2-3
+     rows) can't push the panel taller than the screen — it scrolls
+     internally (overflow-y: auto below) instead of ever being clipped
+     silently. */
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+.subagent-quickview-line {
+  margin: 0;
+  font-size: calc(var(--txt-meta) - 1px);
+  line-height: 1.4;
+  color: var(--text-dim);
+  /* Opposite of the resting caption: no truncation, wraps freely — this is
+     the "no truncation, full width" quick view. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 0.62;
+}
+/* Most recent line reads at full strength; older lines stay dimmer — a
+   lightweight recency cue without extra markup. */
+.subagent-quickview-line[data-latest='true'] {
+  opacity: 1;
+  color: var(--text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .subagent-quickview-panel { transition: none; }
 }
 
 /* Inline agent transcript view — rendered inside .thread-root, replacing the

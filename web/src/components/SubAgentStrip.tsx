@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { SlotText } from 'slot-text/react';
 import type { SubAgent } from '../lib/types';
-import { latestAgentSummary } from '../lib/agentSummary';
+import { latestAgentSummary, recentAgentSummaries } from '../lib/agentSummary';
 
 interface SubAgentStripProps {
   subagents: SubAgent[];
@@ -73,12 +72,13 @@ export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId, working 
     : null;
   const captionAgent = focused ?? visible.find((a) => a.status === 'running') ?? visible[0];
   const caption = latestAgentSummary(captionAgent);
-  // Same roll-in treatment as SessionRail's right-hand meta slot: ONE
-  // persistent SlotText instance (no `key`, so switching agents or a new
-  // activity line updates `text` in place) plays the roll on every change
-  // instead of a hard text swap. `.subagent-progress-text` additionally
-  // carries the shimmer sweep (styles.css) while the caption is live.
-  const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 30 };
+  // Last (up to) 5 distinct activity lines for the captionAgent, oldest
+  // first / most recent last — pulled straight from the agent's own
+  // transcript (agentSummary.ts) rather than a component-local rolling
+  // buffer, so switching the focused agent or losing/regaining a batch
+  // never leaves the quick-view panel showing a stale/foreign agent's
+  // history. Feeds the hover-expand quick view below.
+  const recentLines = recentAgentSummaries(captionAgent, 5);
 
   const ariaLabel =
     runningCount > 0 && doneCount > 0
@@ -127,9 +127,41 @@ export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId, working 
         ))}
       </div>
       {caption ? (
-        <p className="subagent-strip-caption" aria-live="polite">
-          <SlotText text={caption} className="subagent-progress-text" options={slotOpts} />
-        </p>
+        // Hover/focus wrapper: resting state shows only the single truncated
+        // `.subagent-strip-caption` line; `.subagent-quickview-panel` sits
+        // absolutely positioned on top of it (bottom-anchored, grows upward —
+        // same overhang idea as the pill row above) and is revealed by pure
+        // CSS on `:hover`/`:focus-within` (styles.css), so it never pushes
+        // the composer down. tabIndex makes it keyboard-reachable too.
+        <div className="subagent-strip-caption-wrap" tabIndex={0}>
+          <p className="subagent-strip-caption" aria-live="polite">
+            {/* Keyed on the text itself: each change remounts this span, so
+                the CSS `subagent-caption-in` keyframe (styles.css) plays a
+                fresh slide-up + fade every time the activity line changes —
+                a smooth, compositor-only replacement for the old SlotText
+                char-roll, which read as too busy/distracting here. */}
+            <span key={caption} className="subagent-progress-text">
+              {caption}
+            </span>
+          </p>
+          {recentLines.length > 1 ? (
+            <div
+              className="subagent-quickview-panel"
+              role="group"
+              aria-label="Recent activity"
+            >
+              {recentLines.map((line, i) => (
+                <p
+                  key={i}
+                  className="subagent-quickview-line"
+                  data-latest={i === recentLines.length - 1 ? 'true' : undefined}
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
