@@ -684,7 +684,7 @@ test('computeSubAgentActivity (claude, sync): active until the parent tool_resul
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complete; <task-notification> does', () => {
+test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complete; <task-notification> after quiet does', () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
@@ -693,13 +693,10 @@ test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complet
   const agentId = 'async-agent-1';
   const toolUseId = `tu-${agentId}`;
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
-  // Quiesce the agent's own file -- an async background agent keeps writing
-  // long after the launch-ack, but here we simulate the file having gone
-  // quiet to prove the "stays running" call is driven by the missing
-  // completion signal, not by mtime freshness.
+  // The agent's own file went quiet 60 s ago (its last write).
   const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
-  const sixtySecondsAgo = new Date(Date.now() - 60_000);
-  fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
+  const lastWrite = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonlPath, lastWrite, lastWrite);
 
   // The launch-ack: a tool_result with toolUseResult.isAsync === true.
   fs.appendFileSync(parentPath, `${JSON.stringify({
@@ -712,17 +709,87 @@ test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complet
   assert.equal(act.active, true, 'async launch-ack alone must not read as completion');
   assert.equal(act.count, 1);
 
-  // The real async completion: a user record whose content is a STRING
-  // carrying a <task-notification> with a <status> tag.
-  const notification = `<task-notification><task-id>${agentId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>completed</status></task-notification>`;
+  // The real async completion: a STRING <task-notification> with a TERMINAL
+  // <status>, timestamped AFTER the agent's last write (so it has genuinely
+  // stopped — no activity since the notification).
   fs.appendFileSync(parentPath, `${JSON.stringify({
     type: 'user',
-    message: { content: notification },
+    timestamp: new Date().toISOString(), // after the 60 s-ago last write
+    message: { content: `<task-notification><task-id>${agentId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>completed</status></task-notification>` },
   })}\n`);
 
   act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
-  assert.equal(act.active, false, '<task-notification> completion -> not active');
+  assert.equal(act.active, false, 'terminal <task-notification> after the last write -> not active');
   assert.equal(act.count, 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// REGRESSION (P1, from #289): a <task-notification> with a NON-TERMINAL status
+// (e.g. running / in_progress / "...") is a progress ping, NOT a completion —
+// it must not mark the agent done. Live transcripts carry <status>running</status>.
+test('computeSubAgentActivity (claude, async): <status>running</status> must NOT complete the agent', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'progress-agent';
+  const toolUseId = `tu-${agentId}`;
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+  // Quiet file so the call can only be driven by the (non-)completion signal.
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+  const quiet = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonlPath, quiet, quiet);
+
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    timestamp: new Date().toISOString(),
+    message: { content: `<task-notification><task-id>${agentId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>running</status></task-notification>` },
+  })}\n`);
+
+  const act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, true, '<status>running</status> is a progress ping, not a completion');
+  assert.deepEqual(act.runningIds, [agentId]);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// REGRESSION (P1, from #289): the LIVE failure. A background agent COMPLETES,
+// then is resumed via SendMessage and its OWN transcript gets fresh appends
+// AFTER the terminal notification. Background agents REUSE their agentId, so the
+// stale completion must NOT keep it done — activity newer than the notification
+// timestamp flips it back to running.
+test('computeSubAgentActivity (claude, async): fresh transcript appends AFTER a completion flip back to running', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'resumed-agent';
+  const toolUseId = `tu-${agentId}`;
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+
+  // Terminal notification 5 minutes ago; the agent then stopped.
+  const notifTs = new Date(Date.now() - 300_000);
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    timestamp: notifTs.toISOString(),
+    message: { content: `<task-notification><task-id>${agentId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>completed</status></task-notification>` },
+  })}\n`);
+
+  // Case 1: no activity since the notification (last write BEFORE it) -> done.
+  const beforeNotif = new Date(notifTs.getTime() - 10_000);
+  fs.utimesSync(jsonlPath, beforeNotif, beforeNotif);
+  let act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, false, 'quiet since the completion -> done');
+
+  // Case 2: the agent was resumed and is writing NOW (mtime AFTER the notif)
+  //         -> running again, even though the completion is still in the scan.
+  const afterNotif = new Date(); // now, well after notifTs
+  fs.utimesSync(jsonlPath, afterNotif, afterNotif);
+  act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, true, 'fresh appends AFTER the completion -> resumed/running');
+  assert.deepEqual(act.runningIds, [agentId]);
 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
