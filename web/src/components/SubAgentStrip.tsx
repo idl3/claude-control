@@ -78,7 +78,7 @@ export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId, working 
   // activity line updates `text` in place) plays the roll on every change
   // instead of a hard text swap. `.subagent-progress-text` additionally
   // carries the shimmer sweep (styles.css) while the caption is live.
-  const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 100 };
+  const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 30 };
 
   const ariaLabel =
     runningCount > 0 && doneCount > 0
