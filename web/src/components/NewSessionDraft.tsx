@@ -12,6 +12,7 @@ import {
 } from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
 import { WelcomeHero } from './WelcomeHero';
+import { Dropdown, type DropdownOption } from './Dropdown';
 
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
@@ -27,32 +28,16 @@ interface NewSessionDraftProps {
   onCreated: (result: CreateSessionResult) => void;
 }
 
+/** Fallback label for the model dropdown's default row before /api/models
+ *  resolves (see modelDropdownOptions below) — real usage always prefers
+ *  modelOptions[0]?.label once the fetch lands. */
 const DEFAULT_MODEL_OPTION: ClaudeModelInfo = { id: 'default', label: 'Default' };
 
-/** Sentinel value for the tmux-session <select>'s "New tmux session…" option. */
+/** Sentinel value for the tmux-session dropdown's "New tmux session…" option. */
 const NEW_TMUX_SESSION = '__new__';
 
 /** Matches SessionRail.tsx's own default-directory heuristic for this workspace. */
 const DEFAULT_DIR_HINT = /pleri-org/i;
-
-/**
- * Mirrors SessionRail.tsx's module-private `formatModel()` (condenses a model
- * label to the compact lowercase-hyphenated form used throughout the rail's
- * model chips, e.g. "Opus 4.8" → "opus-4.8"). Duplicated rather than imported
- * — pulling in the whole SessionRail component module (icons, SlotText,
- * olamLabel, api.renameTmuxSession) here and into this file's tests just for
- * one pure string helper isn't worth the coupling.
- * ponytail: 8-line duplication over a cross-module import; promote both to a
- * shared lib/format.ts if a third consumer needs this normalization.
- */
-function formatModel(model: string): string {
-  return model
-    .replace(/\s*\([^)]*\)\s*$/, '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/^claude-/, '');
-}
 
 /**
  * New-chat draft screen, shown in the main content area in place of the
@@ -75,8 +60,8 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   // Single model slot shared by both agents — switching harness re-defaults
   // it to 'default' (see the agent-change effect below) rather than
-  // remembering a separate choice per agent, matching the option-row's
-  // single Model <select>.
+  // remembering a separate choice per agent, matching the toolbar's single
+  // Model Dropdown.
   const [model, setModel] = useState<ClaudeModel>('default');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [name, setName] = useState('');
@@ -339,6 +324,34 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const codexInfo = agentInfo('codex');
   const modelOptions = agent === 'claude' ? claudeModels : codexModels;
 
+  // ASSUMPTION: modelOptions[0] is the harness default (flagship-first
+  // ordering in lib/models.js — CLAUDE_MODELS[0]/CODEX_MODELS[0] are the ids
+  // the CLI itself falls back to when --model is omitted; see the file-level
+  // comment there). The 'default' sentinel row is labeled with that real
+  // model name (not the literal word "Default") plus a muted "Default" tag,
+  // and modelOptions[0] is sliced off the rest of the list below so it never
+  // appears twice.
+  const defaultModelLabel = modelOptions[0]?.label ?? DEFAULT_MODEL_OPTION.label;
+  const modelDropdownOptions: DropdownOption[] = [
+    { value: 'default', label: defaultModelLabel, badge: 'Default' },
+    ...modelOptions.slice(1).map((m) => ({ value: m.id, label: m.label })),
+  ];
+
+  const cwdDropdownOptions: DropdownOption[] = [
+    { value: '', label: `(default) ${defaultCwd}`, caption: defaultCwd },
+    ...projectDirs.map((d) => ({ value: d.path, label: d.label, caption: d.path })),
+    { value: 'custom', label: 'Custom…' },
+  ];
+
+  const tmuxDropdownOptions: DropdownOption[] = [
+    { value: '', label: '(default) — existing session, or new if none' },
+    ...tmuxSessions.map((s) => ({
+      value: s.name,
+      label: `${s.name} (${s.windows} window${s.windows === 1 ? '' : 's'})${s.grouped ? ` · shared (${s.groupSize} linked)` : ''}`,
+    })),
+    { value: NEW_TMUX_SESSION, label: 'New tmux session…' },
+  ];
+
   return (
     <div
       ref={rootRef}
@@ -377,204 +390,6 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             void submit();
           }}
         >
-          {/* Option row — baked into the card, fades out on submit (see
-              submit()'s slideToBottom) so the card reads as the plain live
-              composer once it lands in the bottom slot. */}
-          <div className="new-session-draft-head" ref={fadeRef}>
-            <div className="new-session-draft-options">
-              <div className="new-session-draft-options-left">
-                <select
-                  className="rail-new-cwd new-session-draft-select"
-                  value={agent}
-                  disabled={creating}
-                  onChange={(e) => setAgent(e.target.value as 'claude' | 'codex')}
-                  aria-label="Agent"
-                >
-                  <option
-                    value="claude"
-                    disabled={claudeInfo?.available === false}
-                    title={claudeInfo?.available === false ? claudeInfo.reason : undefined}
-                  >
-                    Claude{claudeInfo?.available === false ? ' (unavailable)' : ''}
-                  </option>
-                  <option
-                    value="codex"
-                    disabled={codexInfo?.available === false}
-                    title={codexInfo?.available === false ? codexInfo.reason : undefined}
-                  >
-                    Codex{codexInfo?.available === false ? ' (unavailable)' : ''}
-                  </option>
-                </select>
-
-                {/* Model picker — sourced from /api/models (via getModels())
-                    so lib/models.js stays the single source of truth for the
-                    exact model ids the CLI accepts. Options + default reset
-                    whenever the harness above changes (see the agent-change
-                    effect). */}
-                <select
-                  className="rail-new-cwd new-session-draft-select"
-                  value={model}
-                  disabled={creating}
-                  onChange={(e) => setModel(e.target.value)}
-                  aria-label="Model"
-                >
-                  <option value={DEFAULT_MODEL_OPTION.id}>{formatModel(DEFAULT_MODEL_OPTION.label)}</option>
-                  {modelOptions.map((m) => (
-                    <option key={m.id} value={m.id}>{formatModel(m.label)}</option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  className="new-session-draft-advanced-toggle"
-                  aria-expanded={showAdvanced}
-                  onClick={() => setShowAdvanced((v) => !v)}
-                >
-                  {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
-                </button>
-              </div>
-
-              <div className="new-session-draft-options-right">
-                {/* tmux session target: host the new window in an existing
-                    tmux session, or spin up a brand-new one. Defaults to the
-                    first fetched session once the list arrives (see the
-                    tmuxSessions effect); '' still means "no session sent". */}
-                <select
-                  className="rail-new-cwd new-session-draft-select"
-                  value={tmuxChoice}
-                  disabled={creating}
-                  onChange={(e) => setTmuxChoice(e.target.value)}
-                  aria-label="Tmux session"
-                >
-                  <option value="">(default) — existing session, or new if none</option>
-                  {tmuxSessions.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name} ({s.windows} window{s.windows === 1 ? '' : 's'})
-                      {s.grouped ? ` · shared (${s.groupSize} linked)` : ''}
-                    </option>
-                  ))}
-                  <option value={NEW_TMUX_SESSION}>New tmux session…</option>
-                </select>
-                {tmuxChoice === NEW_TMUX_SESSION ? (
-                  <input
-                    className="rail-new-cwd new-session-draft-freetext"
-                    type="text"
-                    value={newTmuxSessionName}
-                    placeholder="my-new-session"
-                    disabled={creating}
-                    onChange={(e) => setNewTmuxSessionName(e.target.value)}
-                    aria-label="New tmux session name"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                ) : null}
-
-                {/* Directory: dropdown of project directories + Custom…
-                    option. Defaults to the first entry that looks like this
-                    workspace once projectDirs arrive (see the effect above). */}
-                <select
-                  className="rail-new-cwd new-session-draft-select"
-                  value={cwdChoice}
-                  disabled={creating}
-                  onChange={(e) => setCwdChoice(e.target.value)}
-                  aria-label="Working directory"
-                >
-                  <option value="">(default) {defaultCwd}</option>
-                  {projectDirs.map((d) => (
-                    <option key={d.path} value={d.path}>
-                      {d.label}
-                    </option>
-                  ))}
-                  <option value="custom">Custom…</option>
-                </select>
-                {cwdChoice === 'custom' ? (
-                  <input
-                    className="rail-new-cwd new-session-draft-freetext"
-                    type="text"
-                    value={cwdCustom}
-                    placeholder="~/Projects/my-project"
-                    disabled={creating}
-                    onChange={(e) => setCwdCustom(e.target.value)}
-                    aria-label="Custom working directory"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                ) : null}
-              </div>
-            </div>
-
-            {/* Harness-mode pills — hidden by default (most sessions want the
-                default transport); the "Advanced" toggle above reveals them. */}
-            {showAdvanced && agent === 'claude' ? (
-              <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
-                {([
-                  ['tmux', 'Interactive'],
-                  ['print', 'Print mode'],
-                ] as const).map(([id, label]) => {
-                  const isActive = claudeTransport === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className="rail-new-mode-seg-btn"
-                      data-active={isActive ? 'true' : 'false'}
-                      disabled={creating}
-                      aria-pressed={isActive}
-                      onClick={() => setClaudeTransport(id)}
-                    >
-                      <span className="rail-new-agent-seg-label">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-            {showAdvanced && agent === 'codex' ? (
-              <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
-                {([
-                  ['rpc', 'RPC'],
-                  ['tmux', 'TUI'],
-                ] as const).map(([id, label]) => {
-                  const isActive = codexTransport === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className="rail-new-mode-seg-btn"
-                      data-active={isActive ? 'true' : 'false'}
-                      disabled={creating}
-                      aria-pressed={isActive}
-                      onClick={() => setCodexTransport(id)}
-                    >
-                      <span className="rail-new-agent-seg-label">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {/* Name field — Claude only; Codex has no --name flag */}
-            {agent === 'claude' ? (
-              <input
-                className="rail-new-name"
-                type="text"
-                value={name}
-                placeholder={placeholder}
-                disabled={creating}
-                onChange={(e) => setName(e.target.value)}
-                aria-label="Session name"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            ) : (
-              <div className="rail-new-name-note" aria-live="polite">
-                Codex has no session name
-              </div>
-            )}
-          </div>
-
           {/* Composer-styled initial prompt. Plain controlled textarea — NOT
               ComposerPrimitive.Input, which is wired to a live assistant-ui
               runtime this draft doesn't have. Matches the live composer's
@@ -599,7 +414,199 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               aria-label="Initial prompt"
             />
           </div>
+
+          {/* Bottom toolbar — reuses the live Composer.tsx's own
+              `.composer-toolbar`/`.composer-toolbar-spacer`/`.composer-send`
+              classes so the new-session options read as an INTEGRATED
+              composer toolbar, not form fields stacked above the input. The
+              lead wrapper (harness/model/dir/tmux/Advanced/name) fades out
+              on submit (see submit()'s slideToBottom) so the card reads as
+              the plain live composer once it lands in the bottom slot; Cancel
+              + Send stay outside the fade — they're the two controls that
+              still make sense once the card is in its live position. */}
           <div className="composer-toolbar">
+            <div className="new-session-draft-toolbar-lead" ref={fadeRef}>
+              {/* Harness — segmented pill (reuses the same
+                  .rail-new-mode-seg/-btn classes as the Advanced mode pills
+                  below), matching the reference's primary "Chat | Cowork"
+                  pill language. Availability + auto-switch logic unchanged
+                  from the old <select>: a genuinely unavailable agent stays
+                  visible but disabled, with the reason as its title. */}
+              <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
+                {([
+                  ['claude', 'Claude', claudeInfo],
+                  ['codex', 'Codex', codexInfo],
+                ] as const).map(([id, label, info]) => {
+                  const isActive = agent === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="rail-new-mode-seg-btn"
+                      data-active={isActive ? 'true' : 'false'}
+                      disabled={creating || info?.available === false}
+                      title={info?.available === false ? info.reason : undefined}
+                      aria-pressed={isActive}
+                      onClick={() => setAgent(id)}
+                    >
+                      <span className="rail-new-agent-seg-label">
+                        {label}{info?.available === false ? ' (unavailable)' : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Model picker — sourced from /api/models (via getModels())
+                  so lib/models.js stays the single source of truth for the
+                  exact model ids the CLI accepts. Options + default reset
+                  whenever the harness above changes (see the agent-change
+                  effect). */}
+              <Dropdown
+                value={model}
+                onChange={setModel}
+                options={modelDropdownOptions}
+                disabled={creating}
+                ariaLabel="Model"
+              />
+
+              {/* Directory: dropdown of project directories + Custom…
+                  option. Defaults to the first entry that looks like this
+                  workspace once projectDirs arrive (see the effect above). */}
+              <Dropdown
+                value={cwdChoice}
+                onChange={setCwdChoice}
+                options={cwdDropdownOptions}
+                disabled={creating}
+                ariaLabel="Working directory"
+              />
+              {cwdChoice === 'custom' ? (
+                <input
+                  className="rail-new-cwd new-session-draft-freetext"
+                  type="text"
+                  value={cwdCustom}
+                  placeholder="~/Projects/my-project"
+                  disabled={creating}
+                  onChange={(e) => setCwdCustom(e.target.value)}
+                  aria-label="Custom working directory"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              ) : null}
+
+              {/* tmux session target: host the new window in an existing
+                  tmux session, or spin up a brand-new one. Defaults to the
+                  first fetched session once the list arrives (see the
+                  tmuxSessions effect); '' still means "no session sent". */}
+              <Dropdown
+                value={tmuxChoice}
+                onChange={setTmuxChoice}
+                options={tmuxDropdownOptions}
+                disabled={creating}
+                ariaLabel="Tmux session"
+              />
+              {tmuxChoice === NEW_TMUX_SESSION ? (
+                <input
+                  className="rail-new-cwd new-session-draft-freetext"
+                  type="text"
+                  value={newTmuxSessionName}
+                  placeholder="my-new-session"
+                  disabled={creating}
+                  onChange={(e) => setNewTmuxSessionName(e.target.value)}
+                  aria-label="New tmux session name"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              ) : null}
+
+              <button
+                type="button"
+                className="new-session-draft-advanced-toggle"
+                aria-expanded={showAdvanced}
+                onClick={() => setShowAdvanced((v) => !v)}
+              >
+                {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
+              </button>
+
+              {/* Name field — Claude only; Codex has no --name flag. Compact
+                  auto-width (not a stretched full-width field) via
+                  new-session-draft-name-compact. */}
+              {agent === 'claude' ? (
+                <input
+                  className="rail-new-name new-session-draft-name-compact"
+                  type="text"
+                  value={name}
+                  placeholder={placeholder}
+                  disabled={creating}
+                  onChange={(e) => setName(e.target.value)}
+                  aria-label="Session name"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              ) : (
+                <div className="rail-new-name-note" aria-live="polite">
+                  Codex has no session name
+                </div>
+              )}
+
+              {/* Harness-mode pills — hidden by default (most sessions want
+                  the default transport); the "Advanced" toggle above reveals
+                  them. Forced onto their own line (see
+                  .new-session-draft-toolbar-lead .rail-new-mode-seg in
+                  styles.css) since they're a second, secondary segmented
+                  choice rather than part of the primary control row. */}
+              {showAdvanced && agent === 'claude' ? (
+                <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
+                  {([
+                    ['tmux', 'Interactive'],
+                    ['print', 'Print mode'],
+                  ] as const).map(([id, label]) => {
+                    const isActive = claudeTransport === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className="rail-new-mode-seg-btn"
+                        data-active={isActive ? 'true' : 'false'}
+                        disabled={creating}
+                        aria-pressed={isActive}
+                        onClick={() => setClaudeTransport(id)}
+                      >
+                        <span className="rail-new-agent-seg-label">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {showAdvanced && agent === 'codex' ? (
+                <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
+                  {([
+                    ['rpc', 'RPC'],
+                    ['tmux', 'TUI'],
+                  ] as const).map(([id, label]) => {
+                    const isActive = codexTransport === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className="rail-new-mode-seg-btn"
+                        data-active={isActive ? 'true' : 'false'}
+                        disabled={creating}
+                        aria-pressed={isActive}
+                        onClick={() => setCodexTransport(id)}
+                      >
+                        <span className="rail-new-agent-seg-label">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+
+            <span className="composer-toolbar-spacer" />
             <button
               type="button"
               className="rail-new-cancel"
@@ -608,7 +615,6 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             >
               Cancel
             </button>
-            <span className="composer-toolbar-spacer" />
             <button
               type="submit"
               className="composer-send"
