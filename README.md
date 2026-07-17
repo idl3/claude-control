@@ -14,6 +14,25 @@ talks to tmux. Bind is localhost-only by default.
 
 ## Install (npm)
 
+**Clean machine?** One command installs the prerequisites (Node + tmux), the
+published package, a generated auth token, and a launchd service on port 4317:
+
+```bash
+# from a checkout of this repo:
+./scripts/install.sh
+# …or pipe it straight from GitHub:
+curl -fsSL https://raw.githubusercontent.com/idl3/claude-control/main/scripts/install.sh | bash
+```
+
+The installer is idempotent (re-run it to update). It prefers an existing
+Homebrew for Node, falls back to **nvm** (no `sudo`, works headless over SSH) on
+a bare machine, generates `~/.claude-control/token`, and prints the token + URL
+at the end. Flags: `--no-service`, `--foreground` (nohup instead of launchd),
+`--tokenless`. Pin a version with
+`CC_PACKAGE_SPEC=@idl3/claude-control@1.12.1 ./scripts/install.sh`.
+
+Prefer to install by hand? The manual steps:
+
 ```bash
 npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 ```
