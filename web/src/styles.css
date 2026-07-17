@@ -143,7 +143,7 @@
      while typing (see .cosmos-aurora below). Blur radius is fixed/static
      (never animated, only transform/opacity move) and alpha stays low/dark
      so it reads as a subtle organic wash, not a light show. */
-  --aurora-alpha: 0.10;   /* peak opacity while composer-active (dialed back) */
+  --aurora-alpha: 0.05;   /* peak opacity while composer-active (dialed back further — text legibility) */
   --aurora-blur:  40px;   /* static blur radius */
   --aurora-drift: 15s;    /* one flowing drift+skew cycle (~50% faster) */
 
@@ -580,6 +580,28 @@ html.pwa-fill body.kbd-up .app {
   background: linear-gradient(115deg,
     transparent 10%, var(--term-glow-yellow) 40%, transparent 65%,
     var(--term-glow-red) 82%, transparent 98%);
+}
+/* Terminal mode must SNAP open, not ease/drift in. Freeze every ambient
+   background animation the instant terminal mode engages: the aurora's own
+   drift keyframes, the whole cosmos-backdrop's nebula-breathe/starfield-drift/
+   twinkle loops (all `animation-play-state: paused` — a no-op on any layer
+   that isn't animating, e.g. under reduced-motion), and collapse the
+   red/yellow recolor + tint/backdrop transitions above to 0ms so the palette
+   swap is instant rather than the ambient 650ms cross-fade. Composer-card's
+   own ring recolor is unaffected (display:none card swap is already instant;
+   see .composer-term-canvas). */
+.app[data-terminal-mode='true'] .cosmos-aurora::before,
+.app[data-terminal-mode='true'] .cosmos-aurora::after {
+  animation: none;
+}
+.app[data-terminal-mode='true'] .cosmos-backdrop *,
+.app[data-terminal-mode='true'] .cosmos-backdrop {
+  animation-play-state: paused;
+}
+.app[data-terminal-mode='true'] .cosmos-aurora,
+.app[data-terminal-mode='true'] .cosmos-active-tint,
+.app[data-terminal-mode='true'] .cosmos-backdrop {
+  transition-duration: 0ms;
 }
 @media (prefers-reduced-motion: no-preference) {
   .app:has(.composer-card:focus-within) .cosmos-aurora::before,
@@ -3275,6 +3297,39 @@ details.block-plan > summary.block-tool-use {
      matching comment above for the full invariant. */
   z-index: 2;
 }
+/* Terminal (>_) mode: the composer must visually cover the top bars (.hud,
+   z-index:auto/0; .detail-head, z-index:2; .app-top-fade, z-index:40) and any
+   45/50-tier chrome (.ptr-indicator, .modal-backdrop) while the terminal is
+   open, since .composer resolves its z-index in the ROOT stacking context
+   (verified: none of .thread-root/.detail/.app-body/.app establish a stacking
+   context of their own — .app is position:relative/fixed with z-index:auto,
+   which does not create one — so this composites directly against all page
+   chrome). 881 clears every one of those, and stays below true modals
+   (.sa-backdrop 899 / .sa-panel 900 / .lightbox 1000) so those still win if
+   co-active. The lift alone doesn't visually cover the bars (the composer
+   sits at the bottom of the viewport) — the fixed, full-viewport scrim on
+   .composer::after below is what actually paints over them. */
+.app[data-terminal-mode='true'] .composer {
+  z-index: 881;
+}
+/* Full-viewport translucent scrim, painted behind the terminal card but in
+   front of all page chrome (it's inside .composer's z:881 group in the root
+   stacking context; -1 here only orders it under .composer's own card within
+   that group). position:fixed anchors to the viewport, not .composer itself —
+   .app's position:fixed does NOT trap fixed descendants (no other ancestor
+   creates a containing block for fixed position either), so `inset:0` really
+   is the full viewport regardless of where .composer sits in the layout.
+   pointer-events:none keeps this purely visual (no tap-target change). */
+.app[data-terminal-mode='true'] .composer::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: oklch(8% 0.01 260 / 0.32);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
 /* Mobile: keep the system home-indicator inset at rest (0 in a browser tab).
    A previous :focus-within override dropped it to 0 while typing (keyboard
    covers the home bar), but on iOS tapping any composer button (mic, +)
@@ -3400,6 +3455,10 @@ body.is-external-display .composer {
   white-space: nowrap;
   /* Containing block for the running-state ::before ring below. */
   position: relative;
+  /* Own stacking context so the label/dot z-index below reliably wins
+     against the running-state ring pseudo, independent of any DOM-order
+     tie-break (defensive — see .subagent-pill-name / .sa-dot below). */
+  isolation: isolate;
   /* Dimmed by default; the actively-viewed pill (data-active, below) is the
      only one that reads at full strength — opacity applies to the whole
      pill box (including its running-state ::before ring), which is the
@@ -3450,9 +3509,19 @@ body.is-external-display .composer {
     var(--accent)
   );
   padding: 1.4px;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  /* Longhand mask (not the `mask: ... content-box, ...; mask-composite: exclude;`
+     shorthand pairing) — the Vite 8 / Rolldown lightningcss minifier was
+     silently dropping the standalone unprefixed `mask-composite: exclude`
+     declaration during minification (confirmed via computed-style diff:
+     built CSS resolved to the initial `mask-composite: add`, not `exclude`),
+     which un-confines this from a rim into a full fill over the pill's
+     interior/label. Splitting mask-image/mask-clip/mask-composite into their
+     own explicit longhand declarations survives minification intact. */
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-clip: content-box, border-box;
   mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-clip: content-box, border-box;
   -webkit-mask-composite: xor;
   pointer-events: none;
 }
@@ -3476,9 +3545,22 @@ body.is-external-display .composer {
   opacity: 0.9;
 }
 .subagent-pill-nested::before { content: none; }
-/* Agent name label */
+/* Agent name label — lifted above the running-state ::before ring (z-index:1
+   inside .subagent-pill's isolated stacking context above) with a solid
+   --text color + drop shadow, so the label reads clearly against the
+   conic-gradient rim in BOTH the running and done states, independent of
+   whether the ring mask is confined to a thin rim or (if a future build
+   regresses it again) bleeds across the pill's interior. */
 .subagent-pill-name {
   letter-spacing: -0.01em;
+  position: relative;
+  z-index: 1;
+  color: var(--text);
+  text-shadow: 0 1px 2px oklch(0% 0 0 / 0.55);
+}
+.subagent-pill .sa-dot {
+  position: relative;
+  z-index: 1;
 }
 /* Activity caption below pills for the focused agent — resting state is a
    single truncated line; hover/focus expands to the last-5 quick view (see
@@ -3792,6 +3874,13 @@ body.is-external-display .composer {
      not by any z-index/stacking arrangement here, so this rule has no
      bearing on the ring's containment. */
   position: relative;
+  /* Own stacking context so composer-input-wrap's z-index (below) reliably
+     lifts the textarea/overlay above the ::before ring, independent of the
+     ring's own paint order — defensive, in case a future build regresses the
+     ring's mask again (see the ::before block's comment for the confirmed
+     Vite 8 / Rolldown minifier bug that dropped this build's mask-composite,
+     which is separately repaired below). */
+  isolation: isolate;
   /* Floor: matches the single-row composer resting height (96px). Prevents the
      card from collapsing to near-zero during a voice-morph height tween if the
      voice-body measurement returns a low value. The JS morph clamps its tween
@@ -3906,11 +3995,25 @@ body.is-external-display .composer {
   /* Confine the gradient to a rim by masking its own interior away — see the
      block comment above for why this (not z-index/DOM order) is the only
      thing that actually prevents the ring from bleeding into the card. The
-     content-box layer carves out everything but a `padding`-wide band. */
+     content-box layer carves out everything but a `padding`-wide band.
+
+     Longhand mask (mask-image/mask-clip/mask-composite as three separate
+     declarations), NOT the `mask: <image> content-box, <image>;` + standalone
+     `mask-composite: exclude;` shorthand pairing this used to use — the
+     Vite 8 / Rolldown lightningcss minifier silently drops the standalone
+     unprefixed `mask-composite: exclude` declaration during minification.
+     Confirmed via Playwright computed-style diff against the built (not
+     source) CSS: the shipped bundle resolved `mask-composite` to its initial
+     value `add` instead of `exclude`, which un-confines the ring from a rim
+     into a full conic-gradient wash over the card's entire interior —
+     drowning the composer text and toolbar underneath it. Explicit longhand
+     survives minification intact (verified the same way, post-fix). */
   padding: 2px;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-clip: content-box, border-box;
   mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-clip: content-box, border-box;
   -webkit-mask-composite: xor;
   opacity: calc(0.16 * var(--composer-ring-pulse));
   pointer-events: none;
@@ -4121,6 +4224,17 @@ body.is-external-display .composer {
 /* Terminal (>_) mode — dark-red affordances: card outline, toggle, run button. */
 .composer-card[data-terminal] {
   border-color: var(--red);
+  /* Translucent card frame so the page (and the fixed scrim behind it) shows
+     through around the terminal, instead of the card reading as another
+     fully-opaque plate. Safe re: the fit-loop (doesn't touch
+     .composer-term-canvas's own height/background) and re: the ring (the
+     conic ::before hues are untouched by this) — the terminal TEXT itself
+     still sits on the opaque #0b0d10 .composer-term-canvas beneath, so only
+     the card's own frame/padding gains translucency, never the terminal
+     glyphs' contrast. */
+  background: color-mix(in oklch, var(--space-base) 62%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 .composer-card[data-terminal]:focus-within {
   border-color: var(--red);
@@ -4303,6 +4417,11 @@ body.is-external-display .composer {
    through, and is revealed only while the input shows its (blank) placeholder. */
 .composer-input-wrap {
   position: relative;
+  /* Lifts the textarea + placeholder overlay above .composer-card::before's
+     ring (defensive — pairs with .composer-card's isolation above). Even
+     with the ring's mask repaired to a proper thin rim, this guarantees
+     typed text is never occluded under any future paint-order regression. */
+  z-index: 1;
   display: flex;
 }
 .composer-input-wrap .composer-input {
