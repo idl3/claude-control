@@ -1194,7 +1194,7 @@ describe('StudioModal — D1/D3: Screenshot capture + save (mounted with AppFram
   }
 
   function captureRequestId(postSpy: ReturnType<typeof vi.spyOn>): string {
-    const call = postSpy.mock.calls.find((c) => (c[0] as { type?: string })?.type === 'cc-capture-request');
+    const call = postSpy.mock.calls.find((c: unknown[]) => (c[0] as { type?: string })?.type === 'cc-capture-request');
     return (call?.[0] as { requestId: string }).requestId;
   }
 

@@ -39,7 +39,6 @@ export default defineConfig({
     // dozen Vite/esbuild workers, amplifying memory pressure on the same host
     // that runs the cockpit and agent sessions. Two workers proved faster and
     // substantially leaner under load.
-    minWorkers: 1,
     maxWorkers: 2,
   },
 });
