@@ -23,6 +23,17 @@ export interface XtermHostProps {
    * the routing table's "canvas OR inline pane" wording).
    */
   onEscapeElsewhere?: () => void;
+  /**
+   * Exit affordance for surfaces where xterm OWNS focus and would otherwise trap
+   * every key (the composer's terminal mode). Wired to a keyboard escape hatch
+   * via xterm's `attachCustomKeyEventHandler`: **Cmd+Esc** (primary) or
+   * **Ctrl+Esc** (non-mac fallback) fires this and is NOT forwarded to the pty,
+   * so the user can always leave terminal mode from the keyboard. Bare `Esc` is
+   * left alone and reaches the shell (vim/readline/the key-bar Esc).
+   */
+  onExit?: () => void;
+  /** Focus the terminal on mount (so the user can just start typing on open). */
+  autoFocus?: boolean;
 }
 
 const TYPED_ERROR_FRAME =
@@ -43,9 +54,13 @@ const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, monospace";
  * — that omission IS the T6 "OSC-52 disabled by default" mitigation (a
  * decision to withhold code, not a config flag; see A1 §3).
  */
-export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHostProps) {
+export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, autoFocus }: XtermHostProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connState, setConnState] = useState<PtyConnState>('connecting');
+  // Keep the latest onExit callable without re-running the attach effect (its
+  // sole dep is sessionId — the custom key handler is installed once per attach).
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -77,6 +92,30 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHost
       term.loadAddon(webgl);
     } catch {
       /* WebGL unsupported — xterm's default DOM renderer handles it. */
+    }
+
+    // Keyboard escape hatch. Once focused, xterm forwards keydown to the pty, so
+    // a user in the composer's terminal mode has no keyboard way out. This
+    // handler runs BEFORE xterm forwards the key: Cmd+Esc (primary) / Ctrl+Esc
+    // (non-mac fallback) exits terminal mode and is NOT sent to the shell
+    // (return false). Bare Esc — and every other key — returns true and flows to
+    // the pty normally (vim/readline/the key-bar Esc keep working).
+    term.attachCustomKeyEventHandler((e) => {
+      if (
+        e.type === 'keydown' &&
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === 'Escape' || e.code === 'Escape')
+      ) {
+        onExitRef.current?.();
+        return false;
+      }
+      return true;
+    });
+
+    // Focus on open so the user can start typing immediately (composer terminal
+    // mode). Focuses xterm's hidden input; harmless for hosts that omit it.
+    if (autoFocus) {
+      try { term.focus(); } catch { /* not ready — ResizeObserver/attach will settle it */ }
     }
 
     const client = new PtyClient(sessionId);
