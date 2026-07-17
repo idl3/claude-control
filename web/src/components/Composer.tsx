@@ -509,6 +509,42 @@ export function Composer({
   const [voiceMicOn, setVoiceMicOn] = useState(false);
   // Ref for the .composer-card so we can reach into it for animation targets.
   const composerCardRef = useRef<HTMLDivElement>(null);
+
+  // Terminal mode + mobile soft keyboard: keep the special-keys row scrolled
+  // above the keyboard instead of letting it get covered. Reuses the
+  // visualViewport tracking App.tsx already maintains (--vv-top/--vv-h +
+  // body.kbd-up) rather than standing up a second tracker here — this effect
+  // just reacts to the same resize/scroll signal to scroll the key bar into
+  // view. Double-guarded to be a no-op outside terminal mode and on desktop
+  // (no window.visualViewport soft-keyboard resize signal there).
+  useEffect(() => {
+    if (!terminal) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let rafId = 0;
+    const scrollKeyBarIntoView = () => {
+      rafId = 0;
+      const toolbar = composerCardRef.current
+        ?.querySelector<HTMLElement>('.composer-toolbar:not(.voice-toolbar)');
+      toolbar?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    };
+    const onViewportChange = () => {
+      // Coalesce the resize/scroll burst fired during the keyboard's slide
+      // animation into one scroll per frame (mirrors App.tsx's visualViewport
+      // effect's rafId pattern).
+      if (rafId) return;
+      rafId = requestAnimationFrame(scrollKeyBarIntoView);
+    };
+    scrollKeyBarIntoView();
+    vv.addEventListener('resize', onViewportChange);
+    vv.addEventListener('scroll', onViewportChange);
+    return () => {
+      vv.removeEventListener('resize', onViewportChange);
+      vv.removeEventListener('scroll', onViewportChange);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [terminal]);
+
   // Guard: only one in-flight timeline at a time (avoids enter/exit overlap).
   const voiceAnimRef = useRef<gsap.core.Timeline | null>(null);
   // Ref to the always-mounted voice-inline-body so we can toggle display:none

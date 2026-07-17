@@ -1725,7 +1725,7 @@ body.is-external-display .rail {
      with the shell prompt stranded at the top = the "black screen". A fixed
      height makes fit() read a stable box; bounded so a long scrollback never
      covers the whole viewport. */
-  height: min(48dvh, 460px);
+  height: min(38dvh, 340px);
   border: 1px solid var(--red);
   border-radius: 12px;
   background: var(--bg);
@@ -3984,7 +3984,7 @@ body.is-external-display .composer {
    `.term-canvas { position:absolute; inset:0 }` (terminal block above) keep the
    box bounded — this is the no-fit-loop fix from the render PR, preserved. */
 .composer-term-canvas {
-  height: min(46dvh, 440px);
+  height: min(38dvh, 340px);
   border-radius: 10px;
   background: #0b0d10;
 }
