@@ -1860,7 +1860,7 @@ body.is-external-display .rail {
 /* Extra bottom room while the sub-agent strip / Working indicator shows, so the
    last transcript line clears the overhanging pills at max scroll (Thread adds
    `.has-subagents` only when agents are present — no phantom padding otherwise). */
-.thread-viewport.has-subagents { padding-bottom: 64px; }
+.thread-viewport.has-subagents { padding-bottom: 104px; }
 .thread-empty {
   margin: auto;
   color: var(--text-faint);
@@ -3409,44 +3409,10 @@ body.is-external-display .composer {
   overflow: hidden;
   vertical-align: bottom;
 }
-/* Shimmer sweep on the live activity line — reuses the shimmer-sweep
-   gradient/keyframe (.shimmer-text / "Working…" indicator, above), but
-   scoped to SlotText's per-character `.char-face` spans rather than the
-   outer `.slot-text` container. Those faces are `position: absolute` (see
-   slot-text's style.css) — background-clip:text only clips a box's OWN
-   painted background against ITS OWN glyphs, and a positioned descendant
-   paints in its own layer outside that clip, so putting the gradient on the
-   ancestor renders the text fully invisible (verified empirically). Scoping
-   it to `.char-face` keeps SlotText's roll (its own transform animation)
-   and this shimmer compositing together on the same glyphs.
-   Verified as ACTUALLY ANIMATING (not a static gradient): computed
-   `background-position` on a `.char-face` sampled at 400ms intervals moves
-   continuously through the sweep, matching `.shimmer-text`'s own timing. */
-.subagent-progress-text .char-face {
-  background-image: linear-gradient(
-    90deg,
-    var(--text-faint) 0%,
-    var(--text) 50%,
-    var(--text-faint) 100%
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer-sweep 1.6s linear infinite;
-}
+/* Progress activity line: SlotText's roll animation only — no shimmer/gradient
+   color (it read as ugly + illegible); text uses the caption's normal color. */
 @media (prefers-reduced-motion: reduce) {
   .subagent-pill .sa-dot { animation: none; }
-  /* No sweeping for reduced-motion users — settle to the caption's normal
-     inherited color (var(--text-dim) via .subagent-strip-caption), same
-     resting-state convention as .shimmer-text's reduced-motion fallback. */
-  .subagent-progress-text .char-face {
-    animation: none;
-    background-image: none;
-    -webkit-text-fill-color: currentColor;
-    color: inherit;
-  }
 }
 
 /* Inline agent transcript view — rendered inside .thread-root, replacing the
