@@ -64,11 +64,11 @@ const NATURAL_RECT = {
 } as DOMRect;
 
 async function renderReady(
-  overrides: { imageDataUrl?: string; onReady?: ReturnType<typeof vi.fn>; onError?: ReturnType<typeof vi.fn> } = {},
+  overrides: { imageDataUrl?: string; onReady?: (ready: boolean) => void; onError?: () => void } = {},
   ref?: React.RefObject<StudioAnnotateHandle>,
 ) {
   stubImageLoad();
-  const onReady = overrides.onReady ?? vi.fn();
+  const onReady = overrides.onReady ?? vi.fn<(ready: boolean) => void>();
   const utils = render(
     createElement(StudioAnnotate, { imageDataUrl: overrides.imageDataUrl ?? IMG_URL, onReady, onError: overrides.onError, ref }),
   );
