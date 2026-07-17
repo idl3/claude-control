@@ -5408,7 +5408,9 @@ body.is-external-display .composer {
   border: 1px solid var(--line);
   background: transparent;
   color: var(--text-dim);
-  font-size: var(--control-font);
+  /* Smaller than the composer-sized --control-font — the dropdown label read
+     too big/jarring next to the compact control row. */
+  font-size: calc(13px * var(--ui-scale));
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -5472,7 +5474,7 @@ body.is-external-display .composer {
   gap: 1px;
   padding: 6px 8px;
   border-radius: 7px;
-  font-size: var(--control-font);
+  font-size: calc(13px * var(--ui-scale)); /* match .dropdown-trigger */
   color: var(--text);
   cursor: pointer;
 }
