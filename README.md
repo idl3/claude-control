@@ -68,6 +68,35 @@ token in `~/.claude-control/token`), the app **prompts for it on first load** an
 stores it in your browser — the token is never placed in the URL. With no token
 set, it runs open on `127.0.0.1` / your tailnet.
 
+### Post-install (macOS, optional)
+
+`./scripts/install.sh` covers these — **the server and web UI already work
+fully without either of them.** Skip both unless you hit the specific case
+they cover.
+
+- **Full Disk Access** — only needed if your agents/sessions read
+  macOS-protected folders (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud
+  Drive). Ordinary dev work under `~/Projects` etc. does not need this. Run
+  interactively, the installer asks for your primary project folder and
+  auto-detects whether it lives under a protected location (symlinks —
+  e.g. iCloud Desktop & Documents sync — are resolved before comparing) — it
+  only shows the Full Disk Access warning when your folder actually needs it,
+  and otherwise prints a one-line "not required" confirmation. Piped /
+  non-interactive installs (`curl | bash`, CI, SSH with no TTY) skip the
+  prompt and print the general guidance instead, since there's no folder to
+  check. If you hit `Operation not permitted` in a pane: grant Full Disk
+  Access to the exact `node` the service runs (the installer prints the
+  resolved path) via **System Settings → Privacy & Security → Full Disk
+  Access**, then restart the service. Full walkthrough + why: [macOS Full
+  Disk Access](#macos-full-disk-access) below.
+- **Tailscale HTTPS** — optional pretty URL. Remote access already works with
+  no setup via `http://<host>.<tailnet>.ts.net:4317/` (the installer prints
+  your actual URL) or an SSH tunnel (`ssh -L 4318:localhost:4317 <user>@<host> -N`,
+  then open `http://localhost:4318`). For a tidy `https://<host>/` URL
+  instead, enable **MagicDNS + HTTPS Certificates** once in the [Tailscale
+  admin console](https://login.tailscale.com/admin/dns), then run
+  `tailscale serve --https=443 http://localhost:4317`.
+
 ---
 
 ## Quick start (from source)
