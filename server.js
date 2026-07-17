@@ -3503,9 +3503,27 @@ process.on('uncaughtException', (e) => {
   process.exit(1);
 });
 
-// Guard: only run the server when executed directly, not when imported for testing.
-const _isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+// Guard: only auto-run the server when server.js is executed directly
+// (`node server.js` — the source-run + launchd path). When bin/cli.js imports
+// this module to boot the `claude-control` bin, process.argv[1] is cli.js (a
+// *different* file), so _isMain is false here and cli.js calls the exported
+// main() explicitly instead — which prevents a double-boot. Resolve argv[1]
+// through realpathSync so a symlinked entrypoint (e.g. the global npm bin, or
+// `--preserve-symlinks-main`) still compares equal to the module's real path.
+function _resolveArgvPath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+const _isMain =
+  !!process.argv[1] &&
+  fileURLToPath(import.meta.url) === _resolveArgvPath(process.argv[1]);
 if (_isMain) main();
 
-// Exported for unit testing only — not part of the public API.
-export { endJson, _handler, runSerial, staticCacheControl };
+// `main` is exported so bin/cli.js can start the server explicitly when the
+// process is launched as the `claude-control` bin (argv[1] is cli.js, not this
+// file, so the _isMain guard above is false). The remaining exports are for
+// unit testing only — not part of the public API.
+export { endJson, _handler, runSerial, staticCacheControl, main };
