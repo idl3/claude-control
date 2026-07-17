@@ -1860,7 +1860,7 @@ body.is-external-display .rail {
 /* Extra bottom room while the sub-agent strip / Working indicator shows, so the
    last transcript line clears the overhanging pills at max scroll (Thread adds
    `.has-subagents` only when agents are present — no phantom padding otherwise). */
-.thread-viewport.has-subagents { padding-bottom: 104px; }
+.thread-viewport.has-subagents { padding-bottom: 64px; }
 .thread-empty {
   margin: auto;
   color: var(--text-faint);
@@ -2590,8 +2590,10 @@ body.is-external-display .rail {
   flex-direction: column;
   gap: 8px;
   /* Mirror .thread-viewport centering: 800 px column with a 12 px gutter on
-     mobile. Keeps the inline agent transcript aligned with the main chat. */
-  padding: 12px max(12px, calc((100% - 800px * var(--ui-scale)) / 2)) 20px;
+     mobile. Keeps the inline agent transcript aligned with the main chat.
+     Bottom padding clears the overhanging sub-agent pill strip (pills + caption)
+     so the sub-agent transcript's last line isn't covered by it. */
+  padding: 12px max(12px, calc((100% - 800px * var(--ui-scale)) / 2)) 104px;
 }
 .sa-item {
   border: 1px solid var(--line);
