@@ -2264,7 +2264,7 @@ interface VoiceInlineProps {
   /** Gates mic acquisition — true only when voice mode is actually active. */
   active: boolean;
   /** Ref placed on the wrapper div so Composer can set display:none/'' directly. */
-  bodyRef: React.RefObject<HTMLDivElement>;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   onCommit: (text: string) => void;
   onClose: () => void;
   stopRef: React.MutableRefObject<(() => void) | null>;

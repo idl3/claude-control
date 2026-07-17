@@ -116,7 +116,7 @@ interface GeneralSectionProps {
   loading: boolean;
   iconBust: number;
   iconBusy: boolean;
-  iconInputRef: React.RefObject<HTMLInputElement>;
+  iconInputRef: React.RefObject<HTMLInputElement | null>;
   onPickIcon: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onResetIcon: () => void;
 }

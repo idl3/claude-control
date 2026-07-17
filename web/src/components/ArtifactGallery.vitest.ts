@@ -14,7 +14,7 @@
 // of the open/closed choice moved to lib/sessionArtifacts.ts
 // (loadGalleryOpen/saveGalleryOpen), tested directly in
 // sessionArtifacts.vitest.ts.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { createElement } from 'react';
 import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ArtifactGallery } from './ArtifactGallery';
@@ -60,12 +60,12 @@ const REACT: SessionArtifact = {
 };
 
 let dispatchSpy: ReturnType<typeof vi.fn>;
-let onCountChange: ReturnType<typeof vi.fn>;
+let onCountChange: Mock<(count: number) => void>;
 
 beforeEach(() => {
   resolveSessionArtifactsMock.mockReset();
   openMock.mockReset();
-  onCountChange = vi.fn();
+  onCountChange = vi.fn<(count: number) => void>();
   dispatchSpy = vi.fn(window.dispatchEvent.bind(window));
   window.dispatchEvent = dispatchSpy as unknown as typeof window.dispatchEvent;
 });
