@@ -3974,6 +3974,36 @@ body.is-external-display .composer {
   flex: 1 1 auto;
 }
 
+/* ── Composer terminal mode — the composer window IS the terminal ─────────── */
+/* xterm takes the input region; the normal text input is hidden (xterm owns
+   keystrokes → pty). */
+.composer-card[data-terminal] .composer-input-wrap {
+  display: none;
+}
+/* Embedded xterm host in the composer card's input slot. DEFINITE height +
+   `.term-canvas { position:absolute; inset:0 }` (terminal block above) keep the
+   box bounded — this is the no-fit-loop fix from the render PR, preserved. */
+.composer-term-canvas {
+  height: min(46dvh, 440px);
+  border-radius: 10px;
+  background: #0b0d10;
+}
+/* Special-keys bar hoisted INTO the composer action row (inline, next to `>_`)
+   — not a separate panel strip. Fills the row and scrolls horizontally; the
+   panel-strip chrome (top border / dark fill / padding) is dropped here. */
+.terminal-key-bar.composer-key-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border-top: none;
+  background: transparent;
+}
+/* The key bar fills the row, so the flex spacer isn't needed; dropping it keeps
+   the Enter (send) button pinned to the right edge. */
+.composer-card[data-terminal] .composer-toolbar-spacer {
+  display: none;
+}
+
 /* attachment chips below the input */
 .composer-attachments {
   display: flex;
@@ -9252,21 +9282,10 @@ select.config-input {
 /* Mounted + polling while hidden so re-opening is flash-free; GSAP fades+zooms
    it in/out. Starts hidden (opacity 0) to avoid a first-paint flash before the
    show tween runs. */
-.term-warm {
-  /* Float the terminal ABOVE the composer, overlaying the transcript, instead
-     of sitting in-flow (which pushed the transcript up and forced an expensive
-     transcript redraw on every open/close). Absolutely positioned against
-     `.composer` (position:relative), anchored just above it (bottom:100%), so
-     opening/closing the terminal never reflows the transcript underneath. The
-     fixed-height child (`.terminal-view`) bounds the xterm box. */
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  z-index: 3;
-  opacity: 0;
-  pointer-events: auto;
-}
+/* (.term-warm removed — the composer terminal is no longer a floating overlay.
+   In terminal mode the xterm lives INSIDE the composer card's input region
+   (.composer-term-canvas) and the special keys hoist into the action row
+   (.composer-key-bar); see the "Composer terminal mode" block above.) */
 
 /* The OLD rail foot bar (Settings/Reload/Processes) was removed here — those
    buttons now live in the top HUD bar (.hud-reload / .hud-settings /
