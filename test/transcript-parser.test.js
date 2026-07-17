@@ -95,6 +95,57 @@ test('parseRecord: non-human / non-prompt queued_command is ignored', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1c. Image attachment content blocks become a `kind:'image'` marker block —
+//     NOT the base64 payload — so the client can tell "an attachment landed"
+//     without carrying the (potentially huge) image data over the WS. This is
+//     what lets pendingSend.ts's echoMatches reconcile an image-only send
+//     (see web/src/lib/pendingSend.vitest.ts for the client-side half).
+// ---------------------------------------------------------------------------
+
+test('parseRecord: an image-only user message yields a single image block, no text block', () => {
+  const rec = JSON.stringify({
+    type: 'user',
+    uuid: 'img-1',
+    timestamp: '2026-07-17T00:00:00.000Z',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      ],
+    },
+  });
+  const msg = parseRecord(rec);
+  assert.ok(msg, 'image-only record yields a message');
+  assert.equal(msg.role, 'user');
+  assert.equal(msg.blocks.length, 1);
+  assert.equal(msg.blocks[0].kind, 'image');
+  // No base64 payload leaks into the normalized block.
+  assert.equal(msg.blocks[0].data, undefined);
+  assert.equal(msg.blocks[0].source, undefined);
+});
+
+test('parseRecord: a text+image user message keeps its text block alongside the image marker', () => {
+  const rec = JSON.stringify({
+    type: 'user',
+    uuid: 'img-2',
+    timestamp: '2026-07-17T00:00:01.000Z',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'check this screenshot' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BBBB' } },
+      ],
+    },
+  });
+  const msg = parseRecord(rec);
+  assert.ok(msg);
+  assert.equal(msg.blocks.length, 2);
+  assert.equal(msg.blocks[0].kind, 'text');
+  assert.equal(msg.blocks[0].text, 'check this screenshot');
+  assert.equal(msg.blocks[1].kind, 'image');
+});
+
+// ---------------------------------------------------------------------------
 // 2. Custom parser (parseCodexRecord) routes codex lines correctly.
 // ---------------------------------------------------------------------------
 
