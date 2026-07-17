@@ -4,6 +4,7 @@ import {
   buildAnswerKeys,
   buildAnswerProgram,
   nextSubmitAction,
+  confirmSubmit,
   parsePicker,
   planTextStep,
   isTextDirective,
@@ -182,6 +183,163 @@ test('nextSubmitAction: picker up but cursor on an option (mid-render) → wait 
     confidence: 'ok',
   };
   assert.equal(nextSubmitAction(parsed), 'wait');
+});
+
+// ── parsePicker: the multi-question review screen ────────────────────────────
+// Live-style capture of the "Review your answers … Ready to submit your answers?"
+// screen that appears after the final question's Submit. This is the frame the
+// confirm loop must Enter — and the frame whose ghost in scrollback caused the P1.
+const REVIEW_SCREEN = [
+  'Review your answers',
+  '',
+  'Ready to submit your answers?',
+  '',
+  '❯ 1. Submit answers',
+  '  2. Cancel',
+  '',
+  'Enter to select · ↑/↓ to navigate · Esc to cancel',
+].join('\n');
+
+// Same screen but the cursor has (somehow) landed on Cancel — the confirm loop
+// must step Up to Submit before Enter, never activating Cancel.
+const REVIEW_SCREEN_ON_CANCEL = [
+  'Review your answers',
+  '',
+  'Ready to submit your answers?',
+  '',
+  '  1. Submit answers',
+  '❯ 2. Cancel',
+].join('\n');
+
+// The visible pane AFTER the picker submitted: Claude is streaming its reply, no
+// picker rows and no review headers → parsePicker returns low confidence.
+const PICKER_GONE = [
+  '● Got it — proceeding with your selections now.',
+  '',
+  '  Working through the changes…',
+].join('\n');
+
+test('parsePicker: review-screen fixture → isReview, review-submit cursor, review-cancel', () => {
+  const parsed = parsePicker(REVIEW_SCREEN);
+  assert.equal(parsed.isReview, true);
+  assert.equal(parsed.confidence, 'ok');
+  const submit = parsed.rows.find((r) => r.kind === 'review-submit');
+  const cancel = parsed.rows.find((r) => r.kind === 'review-cancel');
+  assert.ok(submit, 'review-submit row parsed');
+  assert.ok(cancel, 'review-cancel row parsed');
+  assert.equal(submit.cursor, true, 'cursor defaults to Submit answers');
+  assert.equal(cancel.cursor, false);
+  assert.equal(nextSubmitAction(parsed), 'enter');
+});
+
+test('parsePicker: PICKER_GONE (streaming reply) → low confidence, nextSubmitAction done', () => {
+  const parsed = parsePicker(PICKER_GONE);
+  assert.equal(parsed.confidence, 'low');
+  assert.equal(nextSubmitAction(parsed), 'done');
+});
+
+// ── confirmSubmit: the post-answer submit-confirmation loop ───────────────────
+// A test IO harness: `capture()` yields the next queued frame (repeating the last
+// once exhausted — models a state that persists); sendEnter/sendUp record calls;
+// delay is instant so tests run fast.
+function makeIo(frames) {
+  const calls = { enters: 0, ups: 0, captures: 0 };
+  let i = 0;
+  const io = {
+    capture: async () => {
+      calls.captures += 1;
+      const f = frames[Math.min(i, frames.length - 1)];
+      i += 1;
+      return f;
+    },
+    sendEnter: async () => { calls.enters += 1; },
+    sendUp: async () => { calls.ups += 1; },
+    delay: async () => {},
+  };
+  return { io, calls };
+}
+
+test('confirmSubmit: review screen up → one Enter → picker gone → true', async () => {
+  const { io, calls } = makeIo([REVIEW_SCREEN, PICKER_GONE]);
+  const ok = await confirmSubmit({ ...io, tries: 6 });
+  assert.equal(ok, true);
+  assert.equal(calls.enters, 1, 'exactly one Enter to submit the review screen');
+  assert.equal(calls.ups, 0, 'no Up needed — cursor already on Submit');
+});
+
+// REGRESSION (the P1 root cause): if the capture is polluted by the just-submitted
+// review screen frozen in scrollback (the "ghost"), it never clears, so confirmSubmit
+// keeps Entering and correctly FAILS LOUD instead of hanging — which is exactly why
+// the driver MUST feed it a VISIBLE-ONLY capture (server wires visibleOnly:true), so
+// that after the real submit the frame is gone and this returns true (prior test).
+test('confirmSubmit: capture never clears (scrollback ghost) → exhausts budget → false', async () => {
+  const { io, calls } = makeIo([REVIEW_SCREEN]); // repeats forever
+  const ok = await confirmSubmit({ ...io, tries: 5 });
+  assert.equal(ok, false, 'never confirmed gone → fail loud');
+  assert.ok(calls.enters >= 1, 'did try to submit');
+});
+
+// Transition-blank guard: the FIRST visible capture can be a blank mid-transition
+// frame (question erased, review not yet drawn). That must NOT be mistaken for a
+// submitted picker — confirmSubmit must wait, see the review, Enter it, then confirm.
+test('confirmSubmit: transition-blank first frame is not a false "done"', async () => {
+  const { io, calls } = makeIo(['', REVIEW_SCREEN, PICKER_GONE]);
+  const ok = await confirmSubmit({ ...io, tries: 6 });
+  assert.equal(ok, true);
+  assert.equal(calls.enters, 1, 'entered the review only after it actually appeared');
+});
+
+// A single multi-select question (its own Submit action row) whose action Enter
+// already submitted: no review screen, picker already gone → two consecutive gone
+// captures confirm without sending any stray Enter.
+test('confirmSubmit: already gone (no review) → two gone reads → true, no Enter', async () => {
+  const { io, calls } = makeIo([PICKER_GONE, PICKER_GONE]);
+  const ok = await confirmSubmit({ ...io, tries: 6 });
+  assert.equal(ok, true);
+  assert.equal(calls.enters, 0, 'nothing to submit — never Enter into the composer');
+});
+
+// Dropped last-action Enter: the picker is parked with the cursor on its Submit
+// action row. confirmSubmit re-fires Enter → review screen → Enter → gone.
+test('confirmSubmit: parked action row (dropped Enter) → Enter → review → Enter → gone → true', async () => {
+  // The picker is parked with the cursor on its BARE "Submit" action row (the real
+  // multi-select picker renders the action row un-numbered; a numbered "N. Submit"
+  // would parse as an option, not an action).
+  const PARKED_ON_ACTION = [
+    '? Pick fruit',
+    '  1. Apple',
+    '  2. Banana',
+    '  Type something',
+    '❯ Submit',
+    '  Chat about this',
+    'Enter to select · ↑/↓ to navigate · Esc to cancel',
+  ].join('\n');
+  const parsedParked = parsePicker(PARKED_ON_ACTION);
+  assert.equal(nextSubmitAction(parsedParked), 'enter', 'cursor on action row → enter');
+  const { io, calls } = makeIo([PARKED_ON_ACTION, REVIEW_SCREEN, PICKER_GONE]);
+  const ok = await confirmSubmit({ ...io, tries: 6 });
+  assert.equal(ok, true);
+  assert.equal(calls.enters, 2, 'one Enter to leave the parked row, one on the review screen');
+});
+
+// Cursor-on-Cancel safety: never activate "Cancel". confirmSubmit steps Up first.
+test('confirmSubmit: review cursor on Cancel → steps Up before Enter', async () => {
+  const { io, calls } = makeIo([REVIEW_SCREEN_ON_CANCEL, PICKER_GONE]);
+  const ok = await confirmSubmit({ ...io, tries: 6 });
+  assert.equal(ok, true);
+  assert.equal(calls.ups, 1, 'stepped Up off Cancel');
+  assert.equal(calls.enters, 1, 'then Entered Submit');
+});
+
+test('confirmSubmit: capture throws → false (cannot confirm, fail loud)', async () => {
+  const ok = await confirmSubmit({
+    capture: async () => { throw new Error('tmux gone'); },
+    sendEnter: async () => {},
+    sendUp: async () => {},
+    delay: async () => {},
+    tries: 6,
+  });
+  assert.equal(ok, false);
 });
 
 // ── free-text / chat directive discriminator ─────────────────────────────────
