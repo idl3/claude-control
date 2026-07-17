@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   echoMatches,
   hasDeliveredEcho,
+  msgHasImage,
   msgText,
   parsePendingKey,
   PENDING_SENDS_LS_KEY,
@@ -39,6 +40,38 @@ describe('msgText', () => {
 
   it('returns "" for a message with no blocks', () => {
     expect(msgText({ uuid: 'u1', role: 'user', blocks: [] })).toBe('');
+  });
+
+  it('returns "" for an image-only message (no text block at all)', () => {
+    const m: Msg = { uuid: 'u1', role: 'user', blocks: [{ kind: 'image' }] };
+    expect(msgText(m)).toBe('');
+  });
+});
+
+// ── msgHasImage ──────────────────────────────────────────────────────────────
+
+describe('msgHasImage', () => {
+  it('is true when the message contains an image block', () => {
+    const m: Msg = { uuid: 'u1', role: 'user', blocks: [{ kind: 'image' }] };
+    expect(msgHasImage(m)).toBe(true);
+  });
+
+  it('is true when an image block accompanies typed text', () => {
+    const m: Msg = {
+      uuid: 'u1',
+      role: 'user',
+      blocks: [{ kind: 'text', text: 'check this out' }, { kind: 'image' }],
+    };
+    expect(msgHasImage(m)).toBe(true);
+  });
+
+  it('is false for a text-only message', () => {
+    const m: Msg = { uuid: 'u1', role: 'user', blocks: [{ kind: 'text', text: 'hi' }] };
+    expect(msgHasImage(m)).toBe(false);
+  });
+
+  it('is false for a message with no blocks', () => {
+    expect(msgHasImage({ uuid: 'u1', role: 'user', blocks: [] })).toBe(false);
   });
 });
 
@@ -96,6 +129,39 @@ describe('echoMatches', () => {
   it('collapses whitespace before comparing', () => {
     expect(echoMatches(entry, '  hello   world  ', 10_100)).toBe(true);
   });
+
+  // ── image-only reconciliation (the "stuck Queued forever" bug) ────────────
+  // An image-only send (no typed text) never gets a text block in the real
+  // transcript record — Claude Code strips the path token and represents the
+  // attachment as its own content block — so the echo's normalized text is
+  // always ''. Reconciling that case requires the 4th `echoHasAttachment` arg.
+
+  it('reconciles an image-only send via the attachment fallback (empty echo text + image block + attachments>0)', () => {
+    const imageOnly = { text: '/tmp/uploads/screenshot.png', label: '📎 1 attachment(s)', at: 10_000, attachments: 1 };
+    expect(echoMatches(imageOnly, '', 10_100, true)).toBe(true);
+  });
+
+  it('still honors the clock-skew cutoff for the attachment fallback', () => {
+    const imageOnly = { text: '/tmp/uploads/screenshot.png', label: '📎 1 attachment(s)', at: 10_000, attachments: 1 };
+    expect(echoMatches(imageOnly, '', 10_000 - 6_000, true)).toBe(false);
+  });
+
+  it('does NOT reconcile via the attachment fallback when the echo has no image (empty text, no attachment)', () => {
+    const imageOnly = { text: '/tmp/uploads/screenshot.png', label: '📎 1 attachment(s)', at: 10_000, attachments: 1 };
+    // echoHasAttachment omitted (defaults to false) — an unrelated empty-text
+    // echo (if one could even occur) must not falsely resolve an image send.
+    expect(echoMatches(imageOnly, '', 10_100)).toBe(false);
+  });
+
+  it('does NOT reconcile a plain text-only entry (attachments 0/undefined) via an unrelated image echo', () => {
+    // Guards against a stray image landing in an unrelated turn falsely
+    // resolving a plain-text queued bubble that has no attachments of its own.
+    expect(echoMatches(entry, '', 10_100, true)).toBe(false);
+  });
+
+  it('plain text-only reconciliation is unaffected by the new 4th arg (still matches on text as before)', () => {
+    expect(echoMatches(entry, 'hello world', 10_100, false)).toBe(true);
+  });
 });
 
 // ── hasDeliveredEcho / parsePendingKey (retry decision surface) ──────────────
@@ -139,6 +205,21 @@ describe('hasDeliveredEcho', () => {
     const zeroAtEntry = { text: 'ping', label: 'ping', at: 0 };
     const msgs: Msg[] = [{ uuid: 'm1', role: 'user', blocks: [{ kind: 'text', text: 'ping' }] }];
     expect(hasDeliveredEcho(zeroAtEntry, msgs)).toBe(true);
+  });
+
+  // Regression: an image-only Retry (no typed text) must promote instead of
+  // re-sending once its image-only transcript echo lands — this is the same
+  // "Queued forever" bug, exercised through the Retry decision surface.
+  it('resolves (true) for an image-only send against an image-only transcript echo', () => {
+    const imageOnly = { text: '/tmp/uploads/screenshot.png', label: '📎 1 attachment(s)', at: 50_000, attachments: 1 };
+    const msgs: Msg[] = [{ uuid: 'm1', role: 'user', blocks: [{ kind: 'image' }], ts: 50_100 }];
+    expect(hasDeliveredEcho(imageOnly, msgs)).toBe(true);
+  });
+
+  it('does not resolve an image-only send with no attachments-bearing echo in the transcript', () => {
+    const imageOnly = { text: '/tmp/uploads/screenshot.png', label: '📎 1 attachment(s)', at: 50_000, attachments: 1 };
+    const msgs: Msg[] = [{ uuid: 'm1', role: 'user', blocks: [{ kind: 'text', text: 'unrelated' }], ts: 50_100 }];
+    expect(hasDeliveredEcho(imageOnly, msgs)).toBe(false);
   });
 });
 
