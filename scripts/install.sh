@@ -235,6 +235,62 @@ verify_health() {
 }
 
 # -----------------------------------------------------------------------------
+# Optional post-install steps — neither is needed for the server or web UI to
+# work; both are macOS-only conveniences for edge cases. Never fatal, never
+# blocks the install.
+# -----------------------------------------------------------------------------
+tailscale_dnsname() {
+  command -v tailscale >/dev/null 2>&1 || return 1
+  local json
+  json="$(tailscale status --json 2>/dev/null)" || return 1
+  printf '%s' "$json" | node -e '
+    let d = "";
+    process.stdin.on("data", c => d += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(d);
+        const n = j.Self && j.Self.DNSName;
+        if (n) process.stdout.write(String(n).replace(/\.$/, ""));
+      } catch (e) {}
+    });
+  ' 2>/dev/null
+}
+
+print_optional_next_steps() {
+  [ "$OS" = "Darwin" ] || return 0
+  local node_bin ts_host
+  node_bin="$(command -v node)"
+  ts_host="$(tailscale_dnsname || true)"
+
+  echo ""
+  ok "optional next steps — skip either; the server + web UI already work fully without them"
+  echo ""
+  echo "  1) Full Disk Access — only if your agents/sessions read macOS-protected"
+  echo "     folders (~/Documents, ~/Desktop, ~/Downloads, iCloud Drive). Ordinary"
+  echo "     dev work under ~/Projects etc. does NOT need this — skip it."
+  echo "     If you hit it: System Settings → Privacy & Security → Full Disk Access"
+  echo "     → + → ⌘⇧G → paste this exact node path → enable it:"
+  echo "       $node_bin"
+  echo "     Then restart the service so node relaunches with the grant:"
+  echo "       launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control"
+  echo "     (why + full walkthrough: README → \"macOS Full Disk Access\")"
+  echo ""
+  echo "  2) Tailscale HTTPS — optional pretty URL. Remote access already works"
+  echo "     right now with no extra setup:"
+  if [ -n "$ts_host" ]; then
+    echo "       http://$ts_host:$PORT/"
+  else
+    echo "       http://<this-host>.<your-tailnet>.ts.net:$PORT/   (run 'tailscale status' for the exact name)"
+  fi
+  echo "     …or an SSH tunnel, no Tailscale required:"
+  echo "       ssh -L 4318:localhost:$PORT <user>@<host> -N   # then open http://localhost:4318"
+  echo "     For a tidy https://<host>/ URL instead of the .ts.net:$PORT form: enable"
+  echo "     MagicDNS + HTTPS Certificates once in the Tailscale admin console, then:"
+  echo "       tailscale serve --https=443 http://localhost:$PORT"
+  echo ""
+}
+
+# -----------------------------------------------------------------------------
 # Run
 # -----------------------------------------------------------------------------
 log "claude-control installer — package: $PKG_SPEC, port: $PORT, mode: $START_MODE"
@@ -259,3 +315,5 @@ else
 fi
 echo "  local URL: http://127.0.0.1:$PORT/"
 echo "  health:    curl -H \"Authorization: Bearer <token>\" http://127.0.0.1:$PORT/api/health"
+
+print_optional_next_steps
