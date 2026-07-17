@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement } from 'react';
 import { NewSessionDraft } from './NewSessionDraft';
@@ -168,16 +168,42 @@ function stubApi({
   createResponse,
   tmuxSessions,
   projectDirs,
+  uploadPath,
+  transcribeText,
+  uploadGate,
 }: {
   claudeAvailable?: boolean;
   codexAvailable?: boolean;
   createResponse?: (body: Record<string, unknown>) => Response;
   tmuxSessions?: { name: string; windows: number; grouped?: boolean; groupSize?: number }[];
   projectDirs?: { label: string; path: string }[];
+  /** Absolute path /api/upload returns — mirrors the live server's uploadFile() contract. */
+  uploadPath?: string;
+  /** Text /api/transcribe returns — exercises useVoiceRecorder's stop()->onCommit path. */
+  transcribeText?: string;
+  /** When set, /api/upload awaits this before responding — lets a test hold an
+   *  upload "in flight" to assert submit() stays gated on it. */
+  uploadGate?: Promise<void>;
 } = {}) {
   const createCalls: Record<string, unknown>[] = [];
+  const uploadCalls: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.includes('/api/upload')) {
+      const name = new URL(url, 'http://localhost').searchParams.get('name') || 'file';
+      uploadCalls.push(name);
+      if (uploadGate) await uploadGate;
+      return new Response(JSON.stringify({ ok: true, path: uploadPath ?? `/tmp/uploads/${name}`, name }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.includes('/api/transcribe')) {
+      return new Response(JSON.stringify({ ok: true, text: transcribeText ?? 'transcribed text' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     if (url.endsWith('/api/tmux/sessions')) {
       return new Response(JSON.stringify({ sessions: tmuxSessions ?? [] }), {
         status: 200,
@@ -234,7 +260,7 @@ function stubApi({
     }
     return new Response('{}', { status: 404 });
   }));
-  return { createCalls };
+  return { createCalls, uploadCalls };
 }
 
 describe('NewSessionDraft harness segmented control + model dropdown', () => {
@@ -821,5 +847,257 @@ describe('NewSessionDraft agent default from filter', () => {
     const group = await screen.findByRole('group', { name: 'Harness' });
     expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('true');
     expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+// ── Bottom action bar: [attach] [mic] [raw] [send], shared leaves from
+// ComposerActionBar.tsx — same cluster the live Composer.tsx renders. See
+// NewSessionDraft.tsx's bottom `.composer-toolbar`.
+describe('NewSessionDraft bottom action bar', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders attach, mic, raw-send, and send buttons', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voice input' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create session (raw)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeTruthy();
+  });
+
+  it('send stays enabled with an empty prompt — starting a session does not require a message', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+    const sendBtn = screen.getByRole('button', { name: 'Create session' }) as HTMLButtonElement;
+    const rawBtn = screen.getByRole('button', { name: 'Create session (raw)' }) as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(false);
+    expect(rawBtn.disabled).toBe(false);
+  });
+
+  it('raw-send also creates a session (best-effort: same submit() as primary send)', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Create session (raw)' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+  });
+
+  it('attach uploads the picked file via uploadFile() and renders a chip', async () => {
+    const { uploadCalls } = stubApi({ uploadPath: '/tmp/uploads/notes.txt' });
+    const { container } = render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput).toBeTruthy();
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(uploadCalls).toEqual(['notes.txt']));
+    await waitFor(() => expect(screen.getByText('notes.txt')).toBeTruthy());
+    // Chip clears its pending state once the upload resolves.
+    const chip = container.querySelector('.attach-chip') as HTMLElement;
+    await waitFor(() => expect(chip.getAttribute('data-pending')).toBeNull());
+  });
+
+  it('rides the uploaded absolute path along on the initial createSession prompt — same convention as the live composer onNew', async () => {
+    const { createCalls } = stubApi({ uploadPath: '/tmp/uploads/notes.txt' });
+    const { container } = render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('notes.txt')).toBeTruthy());
+
+    fireEvent.change(textarea, { target: { value: 'please review' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].prompt).toBe('please review /tmp/uploads/notes.txt');
+  });
+
+  it('submit is disabled while an attachment upload is still in flight — prevents silently dropping the path', async () => {
+    let resolveUpload!: () => void;
+    const uploadGate = new Promise<void>((resolve) => { resolveUpload = resolve; });
+    stubApi({ uploadGate, uploadPath: '/tmp/uploads/slow.txt' });
+    const { container } = render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'slow.txt', { type: 'text/plain' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(container.querySelector('.attach-chip')).toBeTruthy());
+
+    const sendBtn = screen.getByRole('button', { name: 'Create session' }) as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(true);
+
+    resolveUpload();
+    await waitFor(() => expect(sendBtn.disabled).toBe(false));
+  });
+
+  it('mic click starts recording, and an environment error (no getUserMedia in jsdom) surfaces via onToast and resets to idle', async () => {
+    stubApi();
+    const onToast = vi.fn();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast,
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    const micBtn = screen.getByRole('button', { name: 'Voice input' });
+    expect(micBtn.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(micBtn);
+
+    // jsdom has no getUserMedia, so useVoiceRecorder rejects almost
+    // immediately; the draft surfaces the error via onToast and resets the
+    // mic back to idle rather than leaving it stuck "recording" with no way
+    // out — proving the mic is wired to a real recorder, not a stub.
+    await waitFor(() => {
+      expect(onToast).toHaveBeenCalledWith(expect.any(String), 'error');
+    });
+    expect(screen.getByRole('button', { name: 'Voice input' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+// ── Voice dictation renders the REAL waveform, not a bare toggled button ────
+// Mirrors the MediaRecorder/getUserMedia stub pattern from
+// useVoiceRecorder.vitest.ts: with a working mic, useVoiceRecorder reaches
+// 'recording' and the draft's inline panel (SAME `.voice-*` classes as
+// Composer.tsx's VoiceInline) renders the canvas + status + stop control.
+class FakeMediaRecorder {
+  ondataavailable: ((e: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+  private stopped = false;
+  constructor(_stream: unknown) {}
+  start() {
+    this.stopped = false;
+  }
+  // Real MediaRecorder.stop() on an already-inactive recorder is a no-op
+  // (spec: throws InvalidStateError, never re-fires 'stop') — guard the same
+  // way so a later cleanup-triggered stop() (see the mic-lifecycle effect in
+  // useVoiceRecorder.ts, which calls recorderRef.current?.stop() again once
+  // `active` flips false after onCommit) can't re-dispatch onstop and
+  // double-commit the transcript.
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.ondataavailable) this.ondataavailable({ data: new Blob(['x'], { type: 'audio/webm' }) });
+    this.onstop?.();
+  }
+  pause() {}
+  resume() {}
+  static isTypeSupported() {
+    return false;
+  }
+}
+class FakeMediaStream {
+  getTracks() {
+    return [{ stop: vi.fn() }];
+  }
+}
+
+describe('NewSessionDraft voice dictation waveform', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'MediaRecorder', { value: FakeMediaRecorder, writable: true, configurable: true });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn().mockResolvedValue(new FakeMediaStream()) },
+      writable: true,
+      configurable: true,
+    });
+    // AudioContext left undefined: pickMime/draw() degrade gracefully (same
+    // as useVoiceRecorder.vitest.ts) — this test asserts the canvas element
+    // and status text render, not that jsdom's 2D context paints pixels.
+    Object.defineProperty(globalThis, 'AudioContext', { value: undefined, writable: true, configurable: true });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: () => 0, writable: true, configurable: true });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: () => {}, writable: true, configurable: true });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder;
+    delete (globalThis as unknown as { AudioContext?: unknown }).AudioContext;
+  });
+
+  it('mic click renders the inline voice panel — status line + live waveform canvas + stop control', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Voice input' }));
+
+    await waitFor(() => expect(screen.getByText('Listening…')).toBeTruthy());
+    expect(document.querySelector('.new-session-draft .voice-wave-inline')).toBeTruthy();
+    expect(document.querySelector('.new-session-draft .voice-status')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop recording and transcribe' })).toBeTruthy();
+    // The idle mic button is swapped out while the voice panel is showing —
+    // Stop lives in the panel now, not a second control on the same button.
+    expect(screen.queryByRole('button', { name: 'Voice input' })).toBeNull();
+  });
+
+  it('Stop & Transcribe commits the transcribed text into the draft textarea (onCommit -> setPrompt) and closes the panel', async () => {
+    stubApi({ transcribeText: 'add a login page' });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Voice input' }));
+    await waitFor(() => expect(screen.getByText('Listening…')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording and transcribe' }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    await waitFor(() => expect(textarea.value).toBe('add a login page'));
+    // Panel closes back to the normal composer body once dictation commits.
+    expect(document.querySelector('.new-session-draft .voice-wave-inline')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Voice input' })).toBeTruthy();
   });
 });

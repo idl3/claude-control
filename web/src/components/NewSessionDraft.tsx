@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels } from '../lib/api';
+import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels, uploadFile } from '../lib/api';
 import type { ClaudeModelInfo, CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
+import { ATTACH_ACCEPT } from '../lib/attachments';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import {
   defaultAgentForFilter,
@@ -13,10 +14,27 @@ import {
 import type { SessionFilter } from './SessionRail';
 import { WelcomeHero } from './WelcomeHero';
 import { Dropdown, type DropdownOption } from './Dropdown';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { MicIcon } from './icons';
+import {
+  ComposerAttachButton,
+  ComposerMicButton,
+  ComposerRawSendButton,
+  ComposerSendButton,
+} from './ComposerActionBar';
 
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
 export type ClaudeModel = 'default' | string;
+
+/** A file attached to the draft. `path` is null while the eager upload
+ *  (see handleFilesPicked below) is still in flight — submit() waits for
+ *  every attachment to resolve before it will fire (see `uploadingActive`). */
+interface DraftAttachment {
+  id: string;
+  name: string;
+  path: string | null;
+}
 
 interface NewSessionDraftProps {
   /** Rail filter at the time the draft was opened — seeds the default agent. */
@@ -100,6 +118,70 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   // Last-computed centered translateY, in px (negative = lifted up). Read by
   // submit()'s error-path reverse animation to slide back to the same spot.
   const liftRef = useRef(0);
+
+  // Voice input: gates useVoiceRecorder's mic acquisition (no getUserMedia
+  // call until true). While active, the draft swaps its normal
+  // input+attachments+toolbar block for an inline `.voice-inline-body` panel
+  // built from the SAME `.voice-*` classes Composer.tsx's VoiceInline uses
+  // (status line + waveform canvas + Cancel/Stop toolbar) — see the render
+  // below. No GSAP morph/overlay: this is a plain conditional render swap,
+  // not the live composer's animated reveal. Errors surface via onToast and
+  // auto-reset.
+  const [micActive, setMicActive] = useState(false);
+  const voice = useVoiceRecorder({
+    active: micActive,
+    onCommit: (text) => {
+      if (text) setPrompt((p) => (p ? p.replace(/\s*$/, '') + ' ' + text : text));
+      setMicActive(false);
+    },
+    onClose: () => setMicActive(false),
+  });
+  useEffect(() => {
+    if (voice.status === 'error' && voice.errorMsg) {
+      onToast(voice.errorMsg, 'error');
+      setMicActive(false);
+    }
+  }, [voice.status, voice.errorMsg, onToast]);
+
+  // File attach: mirrors the live composer's attachment adapter
+  // (lib/attachments.ts createCockpitAttachmentAdapter) — upload happens
+  // EAGERLY on pick (not deferred to submit) via the same uploadFile() call,
+  // so the chip reaches an "uploaded" state immediately. Rides along on the
+  // initial prompt at submit time (see submit() below), exactly like the
+  // live composer's onNew appends each attachment's uploaded absolute path
+  // to the outgoing message text.
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // True while at least one attachment's upload hasn't resolved yet — gates
+  // submit() so a file mid-upload can't be silently dropped from the prompt.
+  const uploadingActive = attachments.some((a) => a.path == null);
+
+  const handleFilesPicked = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      Array.from(files).forEach((file) => {
+        const id = `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
+        setAttachments((prev) => [...prev, { id, name: file.name, path: null }]);
+        onToast(`Uploading ${file.name}…`);
+        uploadFile(file)
+          .then((res) => {
+            setAttachments((prev) =>
+              prev.map((a) => (a.id === id ? { ...a, name: res.name, path: res.path } : a)),
+            );
+            onToast(`Attached ${res.name}`, 'ok');
+          })
+          .catch((err) => {
+            setAttachments((prev) => prev.filter((a) => a.id !== id));
+            onToast(`Attach failed: ${(err as Error).message}`, 'error');
+          });
+      });
+    },
+    [onToast],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   // Fetch agent availability + config once on mount, and focus the composer
   // so the user can start typing the prompt immediately.
@@ -212,8 +294,15 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   }, [creating, agent, showAdvanced, cwdChoice, tmuxChoice]);
 
   const submit = useCallback(async () => {
-    if (creating) return;
+    if (creating || uploadingActive) return;
     setCreating(true);
+    // Same convention as the live composer's onNew (App.tsx): outgoing text
+    // = [typedText, ...uploadedAbsolutePaths].filter(Boolean).join(' '). The
+    // textarea itself never shows the paths — they're appended only here, at
+    // submit time — so a file picked mid-typing rides along on the initial
+    // prompt the spawned agent receives.
+    const attachmentPaths = attachments.map((a) => a.path).filter((p): p is string => !!p);
+    const finalPrompt = [prompt.trim(), ...attachmentPaths].filter(Boolean).join(' ');
     // Required-with-default: blank name field falls back to the shown placeholder.
     const resolvedName = agent === 'codex' ? undefined : (name.trim() || placeholder);
     // Resolve the effective cwd: '' = use server default; 'custom' = free-text;
@@ -281,7 +370,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
           codexTransport: agent === 'codex' ? codexTransport : undefined,
           model: agent === 'claude' && model !== 'default' ? model : undefined,
           codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
-          prompt: prompt.trim() || undefined,
+          prompt: finalPrompt || undefined,
           tmuxSession: resolvedTmuxSession,
           newTmuxSession: resolvedNewTmuxSession,
         }),
@@ -300,11 +389,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     }
   }, [
     creating,
+    uploadingActive,
     agent,
     claudeTransport,
     codexTransport,
     model,
     prompt,
+    attachments,
     name,
     cwdChoice,
     cwdCustom,
@@ -352,6 +443,18 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     { value: NEW_TMUX_SESSION, label: 'New tmux session…' },
   ];
 
+  // Mirrors VoiceInline's statusLabel switch in Composer.tsx, for parity.
+  const voiceStatusLabel =
+    voice.status === 'error'
+      ? 'Microphone unavailable'
+      : voice.status === 'transcribing'
+        ? 'Transcribing…'
+        : voice.status === 'paused'
+          ? 'Paused'
+          : voice.status === 'starting'
+            ? 'Starting…'
+            : 'Listening…';
+
   return (
     <div
       ref={rootRef}
@@ -395,252 +498,378 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               runtime this draft doesn't have. Matches the live composer's
               exact input-wrap + toolbar structure so the handoff reads as
               the same surface, not a swap. */}
-          <div className="composer-input-wrap">
-            <textarea
-              ref={promptRef}
-              className="composer-input"
-              value={prompt}
-              disabled={creating}
-              placeholder="Message to start the session with (optional)…"
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                // ⌘/Ctrl+Enter submits, same convention as the real composer's
-                // send shortcut. Plain Enter inserts a newline (textarea default).
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              aria-label="Initial prompt"
-            />
-          </div>
+          {/* Option row — harness/model/dir/tmux/Advanced/name — sits ABOVE
+              the input so it reads as a settings strip anchoring the compose
+              box, not part of the send-time action bar below (which now
+              matches the live composer's own bar exactly). Single fadeRef
+              target: submit()'s slideToBottom fades this whole row out
+              (opacity only) so the card reads as the plain live composer
+              once it lands in the bottom slot; slideBackToCenter reverses it
+              on a failed submit. Cancel travels with it (trailing,
+              margin-left:auto — see .new-session-draft-cancel in
+              styles.css); Esc still cancels too (see the root's onKeyDown
+              above). */}
+          <div className="new-session-draft-options" ref={fadeRef}>
+            {/* Harness — segmented pill (reuses the same
+                .rail-new-mode-seg/-btn classes as the Advanced mode pills
+                below), matching the reference's primary "Chat | Cowork"
+                pill language. Availability + auto-switch logic unchanged
+                from the old <select>: a genuinely unavailable agent stays
+                visible but disabled, with the reason as its title. */}
+            <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
+              {([
+                ['claude', 'Claude', claudeInfo],
+                ['codex', 'Codex', codexInfo],
+              ] as const).map(([id, label, info]) => {
+                const isActive = agent === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className="rail-new-mode-seg-btn"
+                    data-active={isActive ? 'true' : 'false'}
+                    disabled={creating || info?.available === false}
+                    title={info?.available === false ? info.reason : undefined}
+                    aria-pressed={isActive}
+                    onClick={() => setAgent(id)}
+                  >
+                    <span className="rail-new-agent-seg-label">
+                      {label}{info?.available === false ? ' (unavailable)' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Bottom toolbar — reuses the live Composer.tsx's own
-              `.composer-toolbar`/`.composer-toolbar-spacer`/`.composer-send`
-              classes so the new-session options read as an INTEGRATED
-              composer toolbar, not form fields stacked above the input. The
-              lead wrapper (harness/model/dir/tmux/Advanced/name) fades out
-              on submit (see submit()'s slideToBottom) so the card reads as
-              the plain live composer once it lands in the bottom slot; Cancel
-              + Send stay outside the fade — they're the two controls that
-              still make sense once the card is in its live position. */}
-          <div className="composer-toolbar">
-            <div className="new-session-draft-toolbar-lead" ref={fadeRef}>
-              {/* Harness — segmented pill (reuses the same
-                  .rail-new-mode-seg/-btn classes as the Advanced mode pills
-                  below), matching the reference's primary "Chat | Cowork"
-                  pill language. Availability + auto-switch logic unchanged
-                  from the old <select>: a genuinely unavailable agent stays
-                  visible but disabled, with the reason as its title. */}
-              <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
+            {/* Model picker — sourced from /api/models (via getModels())
+                so lib/models.js stays the single source of truth for the
+                exact model ids the CLI accepts. Options + default reset
+                whenever the harness above changes (see the agent-change
+                effect). */}
+            <Dropdown
+              value={model}
+              onChange={setModel}
+              options={modelDropdownOptions}
+              disabled={creating}
+              ariaLabel="Model"
+            />
+
+            {/* Directory: dropdown of project directories + Custom…
+                option. Defaults to the first entry that looks like this
+                workspace once projectDirs arrive (see the effect above). */}
+            <Dropdown
+              value={cwdChoice}
+              onChange={setCwdChoice}
+              options={cwdDropdownOptions}
+              disabled={creating}
+              ariaLabel="Working directory"
+            />
+            {cwdChoice === 'custom' ? (
+              <input
+                className="rail-new-cwd new-session-draft-freetext"
+                type="text"
+                value={cwdCustom}
+                placeholder="~/Projects/my-project"
+                disabled={creating}
+                onChange={(e) => setCwdCustom(e.target.value)}
+                aria-label="Custom working directory"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : null}
+
+            {/* tmux session target: host the new window in an existing
+                tmux session, or spin up a brand-new one. Defaults to the
+                first fetched session once the list arrives (see the
+                tmuxSessions effect); '' still means "no session sent". */}
+            <Dropdown
+              value={tmuxChoice}
+              onChange={setTmuxChoice}
+              options={tmuxDropdownOptions}
+              disabled={creating}
+              ariaLabel="Tmux session"
+            />
+            {tmuxChoice === NEW_TMUX_SESSION ? (
+              <input
+                className="rail-new-cwd new-session-draft-freetext"
+                type="text"
+                value={newTmuxSessionName}
+                placeholder="my-new-session"
+                disabled={creating}
+                onChange={(e) => setNewTmuxSessionName(e.target.value)}
+                aria-label="New tmux session name"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : null}
+
+            <button
+              type="button"
+              className="new-session-draft-advanced-toggle"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
+            </button>
+
+            {/* Name field — Claude only; Codex has no --name flag. Compact
+                auto-width (not a stretched full-width field) via
+                new-session-draft-name-compact. */}
+            {agent === 'claude' ? (
+              <input
+                className="rail-new-name new-session-draft-name-compact"
+                type="text"
+                value={name}
+                placeholder={placeholder}
+                disabled={creating}
+                onChange={(e) => setName(e.target.value)}
+                aria-label="Session name"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : (
+              <div className="rail-new-name-note" aria-live="polite">
+                Codex has no session name
+              </div>
+            )}
+
+            {/* Harness-mode pills — hidden by default (most sessions want
+                the default transport); the "Advanced" toggle above reveals
+                them. Forced onto their own line (see
+                .new-session-draft-options .rail-new-mode-seg in styles.css)
+                since they're a second, secondary segmented choice rather
+                than part of the primary control row. */}
+            {showAdvanced && agent === 'claude' ? (
+              <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
                 {([
-                  ['claude', 'Claude', claudeInfo],
-                  ['codex', 'Codex', codexInfo],
-                ] as const).map(([id, label, info]) => {
-                  const isActive = agent === id;
+                  ['tmux', 'Interactive'],
+                  ['print', 'Print mode'],
+                ] as const).map(([id, label]) => {
+                  const isActive = claudeTransport === id;
                   return (
                     <button
                       key={id}
                       type="button"
                       className="rail-new-mode-seg-btn"
                       data-active={isActive ? 'true' : 'false'}
-                      disabled={creating || info?.available === false}
-                      title={info?.available === false ? info.reason : undefined}
+                      disabled={creating}
                       aria-pressed={isActive}
-                      onClick={() => setAgent(id)}
+                      onClick={() => setClaudeTransport(id)}
                     >
-                      <span className="rail-new-agent-seg-label">
-                        {label}{info?.available === false ? ' (unavailable)' : ''}
-                      </span>
+                      <span className="rail-new-agent-seg-label">{label}</span>
                     </button>
                   );
                 })}
               </div>
+            ) : null}
+            {showAdvanced && agent === 'codex' ? (
+              <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
+                {([
+                  ['rpc', 'RPC'],
+                  ['tmux', 'TUI'],
+                ] as const).map(([id, label]) => {
+                  const isActive = codexTransport === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="rail-new-mode-seg-btn"
+                      data-active={isActive ? 'true' : 'false'}
+                      disabled={creating}
+                      aria-pressed={isActive}
+                      onClick={() => setCodexTransport(id)}
+                    >
+                      <span className="rail-new-agent-seg-label">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
 
-              {/* Model picker — sourced from /api/models (via getModels())
-                  so lib/models.js stays the single source of truth for the
-                  exact model ids the CLI accepts. Options + default reset
-                  whenever the harness above changes (see the agent-change
-                  effect). */}
-              <Dropdown
-                value={model}
-                onChange={setModel}
-                options={modelDropdownOptions}
-                disabled={creating}
-                ariaLabel="Model"
-              />
-
-              {/* Directory: dropdown of project directories + Custom…
-                  option. Defaults to the first entry that looks like this
-                  workspace once projectDirs arrive (see the effect above). */}
-              <Dropdown
-                value={cwdChoice}
-                onChange={setCwdChoice}
-                options={cwdDropdownOptions}
-                disabled={creating}
-                ariaLabel="Working directory"
-              />
-              {cwdChoice === 'custom' ? (
-                <input
-                  className="rail-new-cwd new-session-draft-freetext"
-                  type="text"
-                  value={cwdCustom}
-                  placeholder="~/Projects/my-project"
-                  disabled={creating}
-                  onChange={(e) => setCwdCustom(e.target.value)}
-                  aria-label="Custom working directory"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : null}
-
-              {/* tmux session target: host the new window in an existing
-                  tmux session, or spin up a brand-new one. Defaults to the
-                  first fetched session once the list arrives (see the
-                  tmuxSessions effect); '' still means "no session sent". */}
-              <Dropdown
-                value={tmuxChoice}
-                onChange={setTmuxChoice}
-                options={tmuxDropdownOptions}
-                disabled={creating}
-                ariaLabel="Tmux session"
-              />
-              {tmuxChoice === NEW_TMUX_SESSION ? (
-                <input
-                  className="rail-new-cwd new-session-draft-freetext"
-                  type="text"
-                  value={newTmuxSessionName}
-                  placeholder="my-new-session"
-                  disabled={creating}
-                  onChange={(e) => setNewTmuxSessionName(e.target.value)}
-                  aria-label="New tmux session name"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : null}
-
-              <button
-                type="button"
-                className="new-session-draft-advanced-toggle"
-                aria-expanded={showAdvanced}
-                onClick={() => setShowAdvanced((v) => !v)}
-              >
-                {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
-              </button>
-
-              {/* Name field — Claude only; Codex has no --name flag. Compact
-                  auto-width (not a stretched full-width field) via
-                  new-session-draft-name-compact. */}
-              {agent === 'claude' ? (
-                <input
-                  className="rail-new-name new-session-draft-name-compact"
-                  type="text"
-                  value={name}
-                  placeholder={placeholder}
-                  disabled={creating}
-                  onChange={(e) => setName(e.target.value)}
-                  aria-label="Session name"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : (
-                <div className="rail-new-name-note" aria-live="polite">
-                  Codex has no session name
-                </div>
-              )}
-
-              {/* Harness-mode pills — hidden by default (most sessions want
-                  the default transport); the "Advanced" toggle above reveals
-                  them. Forced onto their own line (see
-                  .new-session-draft-toolbar-lead .rail-new-mode-seg in
-                  styles.css) since they're a second, secondary segmented
-                  choice rather than part of the primary control row. */}
-              {showAdvanced && agent === 'claude' ? (
-                <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
-                  {([
-                    ['tmux', 'Interactive'],
-                    ['print', 'Print mode'],
-                  ] as const).map(([id, label]) => {
-                    const isActive = claudeTransport === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="rail-new-mode-seg-btn"
-                        data-active={isActive ? 'true' : 'false'}
-                        disabled={creating}
-                        aria-pressed={isActive}
-                        onClick={() => setClaudeTransport(id)}
-                      >
-                        <span className="rail-new-agent-seg-label">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {showAdvanced && agent === 'codex' ? (
-                <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
-                  {([
-                    ['rpc', 'RPC'],
-                    ['tmux', 'TUI'],
-                  ] as const).map(([id, label]) => {
-                    const isActive = codexTransport === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="rail-new-mode-seg-btn"
-                        data-active={isActive ? 'true' : 'false'}
-                        disabled={creating}
-                        aria-pressed={isActive}
-                        onClick={() => setCodexTransport(id)}
-                      >
-                        <span className="rail-new-agent-seg-label">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-
-            <span className="composer-toolbar-spacer" />
             <button
               type="button"
-              className="rail-new-cancel"
+              className="rail-new-cancel new-session-draft-cancel"
               onClick={onCancel}
               disabled={creating}
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              className="composer-send"
-              disabled={creating}
-              aria-label={creating ? 'Creating session…' : 'Create session'}
-              title="Create session (⌘/Ctrl+↵)"
-            >
-              {creating ? <span className="composer-enhance-spinner" aria-hidden="true" /> : <ArrowUpIcon />}
-            </button>
           </div>
+
+          {/* Voice recording panel — swaps in for the input+attachments+
+              toolbar block below while micActive, using the SAME
+              `.voice-status` / `.voice-wave-inline` / `.voice-toolbar`
+              classes as Composer.tsx's VoiceInline, so a dictating draft
+              reads as the real voice control (status line + live waveform +
+              Cancel/Stop), not a bare toggled button. Plain conditional
+              render (no GSAP morph) — see the class doc-comment above. */}
+          {micActive ? (
+            <div className="voice-inline-body" style={{ display: 'flex' }} aria-live="polite">
+              <div className="voice-status">
+                <span className="voice-dot" data-on={voice.status === 'recording' ? 'true' : undefined} />
+                {voiceStatusLabel}
+              </div>
+              <canvas
+                ref={voice.canvasRef}
+                className="voice-wave voice-wave-inline"
+                height={64}
+                data-paused={voice.status !== 'recording' ? 'true' : undefined}
+              />
+              {voice.status === 'error' ? (
+                <div className="voice-error">{voice.errorMsg || 'Could not start recording.'}</div>
+              ) : voice.status !== 'transcribing' ? (
+                <div className="voice-hint">Speak, then Stop &amp; Transcribe (or ⌘/Ctrl+↵) to insert.</div>
+              ) : null}
+              <div className="composer-toolbar voice-toolbar">
+                <button
+                  type="button"
+                  className="btn-secondary voice-btn-cancel"
+                  onClick={() => voice.cancel()}
+                  disabled={voice.status === 'transcribing'}
+                  aria-label="Cancel voice recording"
+                >
+                  Cancel
+                </button>
+                <span className="composer-toolbar-spacer" />
+                <button
+                  type="button"
+                  className="composer-send voice-btn-stop"
+                  onClick={() => voice.stop()}
+                  disabled={voice.status === 'error' || voice.status === 'transcribing' || voice.status === 'starting'}
+                  aria-label="Stop recording and transcribe"
+                  title="Stop & Transcribe (⌘/Ctrl+↵)"
+                >
+                  {voice.status === 'transcribing' ? (
+                    <span className="composer-enhance-spinner" aria-hidden="true" />
+                  ) : (
+                    <MicIcon />
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="composer-input-wrap">
+                <textarea
+                  ref={promptRef}
+                  className="composer-input"
+                  value={prompt}
+                  disabled={creating}
+                  placeholder="Message to start the session with (optional)…"
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    // ⌘/Ctrl+Enter submits, same convention as the real composer's
+                    // send shortcut. Plain Enter inserts a newline (textarea default).
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  aria-label="Initial prompt"
+                />
+              </div>
+
+              {/* Attachment chips — SAME position as the live composer's own
+                  `.composer-attachments` row (between the input and the
+                  toolbar; see Composer.tsx). A minimal draft-local chip
+                  (name + remove), not the live AttachmentChip (that's
+                  coupled to assistant-ui's Attachment type) — the shared
+                  pipeline being reused is uploadFile() + the
+                  [prompt, ...paths].join(' ') convention, not the chip
+                  markup itself. */}
+              {attachments.length > 0 ? (
+                <div className="composer-attachments">
+                  {attachments.map((a) => (
+                    <span key={a.id} className="attach-chip" data-pending={a.path == null ? 'true' : undefined}>
+                      <span className="chip-icon" aria-hidden="true">📎</span>
+                      <span className="chip-name" title={a.name}>{a.name}</span>
+                      {a.path == null ? <span className="chip-spinner" aria-hidden="true" /> : null}
+                      <button
+                        type="button"
+                        className="chip-remove"
+                        aria-label={`Remove ${a.name}`}
+                        disabled={creating}
+                        onClick={() => removeAttachment(a.id)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Bottom action bar — byte-identical to the live composer's own
+                  [attach] [mic] [raw] [send] cluster: same .composer-toolbar/
+                  -toolbar-spacer classes, same shared leaf buttons
+                  (ComposerActionBar.tsx), so the card reads as the SAME composer
+                  once it lands in the live slot, not a swap. Unlike the live
+                  composer, send/raw-send stay ENABLED on an empty prompt —
+                  starting a session doesn't require an initial message; only
+                  `creating`/`uploadingActive` disable them. */}
+              <div className="composer-toolbar">
+                {/* Attach — functional: opens a hidden file input; each pick
+                    uploads via the same uploadFile() the live composer's
+                    attachment adapter uses (lib/attachments.ts), and rides
+                    along on the initial prompt at submit() (see above). */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ATTACH_ACCEPT}
+                  multiple
+                  hidden
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    handleFilesPicked(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+                <ComposerAttachButton
+                  aria-label="Attach a file"
+                  title="Attach a file"
+                  disabled={creating}
+                  onClick={() => fileInputRef.current?.click()}
+                />
+                <span className="composer-toolbar-spacer" />
+                {/* Mic — functional: clicking activates useVoiceRecorder and
+                    swaps in the voice panel above (Cancel/Stop live there —
+                    this button doesn't double as the stop control anymore). */}
+                <ComposerMicButton
+                  ariaLabel="Voice input"
+                  title="Voice input"
+                  disabled={creating}
+                  active={micActive}
+                  onClick={() => setMicActive(true)}
+                />
+                {/* Raw send — best-effort: no optimiser exists pre-session, so
+                    this converges on the exact same submit() as the primary
+                    Send button below (same handler shape as the live composer's
+                    bypass button, which also just calls the send path raw). */}
+                <ComposerRawSendButton
+                  ariaLabel="Create session (raw)"
+                  title="Create session — same as Send (⌘/Ctrl+⇧+↵)"
+                  disabled={creating || uploadingActive}
+                  onClick={() => void submit()}
+                />
+                {/* Primary send — functional: type="submit" so the form's own
+                    onSubmit (preventDefault + submit()) still owns it, keeping
+                    Enter-to-submit in the freetext inputs above working exactly
+                    as before. */}
+                <ComposerSendButton
+                  type="submit"
+                  ariaLabel={creating ? 'Creating session…' : 'Create session'}
+                  title="Create session (⌘/Ctrl+↵)"
+                  disabled={creating || uploadingActive}
+                  busy={creating}
+                />
+              </div>
+            </>
+          )}
         </form>
       </div>
     </div>
-  );
-}
-
-function ArrowUpIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 19V5M6 11l6-6 6 6"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
