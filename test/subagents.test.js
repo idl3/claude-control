@@ -8,6 +8,9 @@ import {
   CodexSubAgentsWatcher,
   hasActiveSubAgents,
   listAgents,
+  computeSubAgentActivity,
+  scanClaudeParentChunk,
+  scanCodexRolloutChunk,
   _agentsCacheSizeForTest,
   _bustAgentsCache,
 } from '../lib/subagents.js';
@@ -108,20 +111,54 @@ test('agent with recently-written jsonl shows status=running', async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-// PLE-57 regression: finished agents (quiet file > RUNNING_WINDOW = 45 s, no
-// doneByParent) must show 'done' promptly — NOT 'running' for 10 minutes.
-// This test FAILS against the old 600 s RUNNING_WINDOW_MS and passes with 45 s.
-test('finished agent (quiet file 60 s, doneByParent=false) shows status=done (PLE-57 teeth)', async () => {
+// PLE-57 regression: canonical-first detection. A finished agent's completion
+// must be recognized PROMPTLY via the parent transcript's sync tool_result —
+// not by waiting for a quiet-file timeout (that's now only a 10 min fallback).
+test('finished agent (canonical sync tool_result in parent) shows status=done (PLE-57 teeth)', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
 
   const subDir = path.join(tmp, 'session', 'subagents');
   const agentId = 'stale0000001';
+  const toolUseId = `tu-${agentId}`;
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
 
-  // Back-date the jsonl mtime to 60 s ago (> RUNNING_WINDOW 45 s, doneByParent never set).
-  // With the old 600 s window this reads 'running'; with 45 s it correctly reads 'done'.
+  // Quiesce the file (as a finished agent's transcript does) — but the done
+  // signal here is the canonical sync tool_result, not the clock.
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+  const sixtySecondsAgo = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+  })}\n`);
+
+  const watcher = new SubAgentsWatcher(parentPath);
+  watcher.poll();
+
+  const snap = watcher.snapshot();
+  assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
+  assert.equal(snap[0].status, 'done',
+    `finished agent with a canonical sync tool_result should be 'done', got '${snap[0].status}'`);
+
+  watcher.stop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// THE FIX: a quiet file with NO canonical completion signal must stay running
+// — this is the direct regression guard for the original bug (a genuinely
+// running-but-idle sub-agent flickering to "done" just because its transcript
+// went quiet for a bit).
+test('quiet agent (60 s, no canonical completion signal) stays RUNNING', async () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, ''); // no tool_result / task-notification ever written
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'quietbutalive';
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+
   const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
   const sixtySecondsAgo = new Date(Date.now() - 60_000);
   fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
@@ -131,14 +168,14 @@ test('finished agent (quiet file 60 s, doneByParent=false) shows status=done (PL
 
   const snap = watcher.snapshot();
   assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
-  assert.equal(snap[0].status, 'done',
-    `finished agent (60 s quiet, no doneByParent) should be 'done' within 45 s window, got '${snap[0].status}'`);
+  assert.equal(snap[0].status, 'running',
+    `quiet agent with no canonical signal should stay 'running' under the generous fallback, got '${snap[0].status}'`);
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('agent with very stale jsonl (>45 s old) shows status=done', async () => {
+test('agent with very stale jsonl (past FALLBACK_IDLE_MS, no canonical signal) shows status=done', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
@@ -147,9 +184,10 @@ test('agent with very stale jsonl (>45 s old) shows status=done', async () => {
   const agentId = 'ancient00001';
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
 
-  // Back-date to 601 s ago — well beyond RUNNING_WINDOW (45 s).
+  // Back-date past FALLBACK_IDLE_MS (600 s) — the generous mtime fallback's
+  // own outer boundary, exercised here with no canonical signal at all.
   const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
-  const old = new Date(Date.now() - 601_000);
+  const old = new Date(Date.now() - 650_000);
   fs.utimesSync(jsonlPath, old, old);
 
   const watcher = new SubAgentsWatcher(parentPath);
@@ -158,15 +196,15 @@ test('agent with very stale jsonl (>45 s old) shows status=done', async () => {
   const snap = watcher.snapshot();
   assert.equal(snap.length, 1, 'expected 1 sub-agent in snapshot');
   assert.equal(snap[0].status, 'done',
-    `agent 601 s stale should be 'done', got '${snap[0].status}'`);
+    `agent 650 s stale (past FALLBACK_IDLE_MS) should be 'done', got '${snap[0].status}'`);
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-// Agent quiet for 30 s (> ACTIVE_WINDOW 20 s, < RUNNING_WINDOW 45 s) stays running.
-// This guards against over-eager expiry for slow-but-still-running agents.
-test('agent quiet for 30 s (inside RUNNING_WINDOW of 45 s) stays running', async () => {
+// Agent quiet for 30 s (> ACTIVE_WINDOW 20 s, well inside FALLBACK_IDLE_MS 600 s)
+// stays running. Guards against over-eager expiry for slow-but-still-running agents.
+test('agent quiet for 30 s (well inside the FALLBACK_IDLE_MS fallback) stays running', async () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
@@ -395,7 +433,10 @@ test('historical agents stay summary-only and load one bounded transcript on dem
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
   const subDir = path.join(tmp, 'session', 'subagents');
-  const old = new Date(Date.now() - 120_000);
+  // Past FALLBACK_IDLE_MS (600s) so these read as 'done' with no canonical
+  // signal — otherwise _reconcileFollowers would treat them as running and
+  // start real followers, breaking the tailer-count assertions below.
+  const old = new Date(Date.now() - 650_000);
   for (let i = 0; i < 80; i++) {
     const id = `historical-${i}`;
     writeAgentFiles(subDir, id, {
@@ -423,7 +464,7 @@ test('large historical discovery defers transcript, nested, and definition enric
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
   const subDir = path.join(tmp, 'session', 'subagents');
-  const old = new Date(Date.now() - 120_000);
+  const old = new Date(Date.now() - 650_000); // past FALLBACK_IDLE_MS -> done, no followers started
   for (let i = 0; i < 400; i++) {
     const id = `archived-${i}`;
     writeAgentFiles(subDir, id, { jsonlContent: '{}\n' });
@@ -453,7 +494,7 @@ test('historical transcript loads are globally limited to four at a time', async
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
   const subDir = path.join(tmp, 'session', 'subagents');
-  const old = new Date(Date.now() - 120_000);
+  const old = new Date(Date.now() - 650_000); // past FALLBACK_IDLE_MS -> done, no followers started
   for (let i = 0; i < 12; i++) {
     const id = `queued-${i}`;
     writeAgentFiles(subDir, id, { jsonlContent: '{}\n' });
@@ -508,21 +549,23 @@ test('poll discovers nested agents created after a live parent was tracked', () 
 });
 
 // ---------------------------------------------------------------------------
-// Regression: poll() must PUSH a purely time-based running->done transition.
+// Regression: poll() must PUSH a running->done transition once the parent
+// transcript's canonical completion signal lands.
 //
-// A finishing agent's transcript goes quiet -- no more 'append' events ever
-// fire -- so nothing re-emits a 'change' frame when the freshness threshold
-// later crosses from 'running' to 'done'. Without the _emitChange sweep at the
-// end of poll(), this test fails: no 'change' event carries status 'done' for
-// this agentId even though snapshot() correctly reports it as done.
+// A finishing agent's OWN transcript goes quiet -- no more 'append' events
+// ever fire on it -- so nothing re-emits a 'change' frame when the canonical
+// scan later flips canonicalDone. Without the _emitChange sweep at the end of
+// poll(), this test fails: no 'change' event carries status 'done' for this
+// agentId even though snapshot() correctly reports it as done.
 // ---------------------------------------------------------------------------
-test('poll emits a change event when a running agent silently goes done (time-based transition)', () => {
+test('poll emits a change event when a running agent completes (canonical transition)', () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');
   fs.writeFileSync(parentPath, '');
 
   const subDir = path.join(tmp, 'session', 'subagents');
   const agentId = 'finishing0001';
+  const toolUseId = `tu-${agentId}`;
   writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
 
   const watcher = new SubAgentsWatcher(parentPath);
@@ -537,11 +580,13 @@ test('poll emits a change event when a running agent silently goes done (time-ba
   assert.equal(watcher.snapshot()[0].status, 'running', 'fresh agent should poll as running');
   assert.equal(changes.length, 0, 'discovery itself does not emit a change');
 
-  // Back-date the jsonl mtime past RUNNING_WINDOW_MS (45s) so the agent goes
-  // quiet -- the file itself never changes again, only the clock does.
-  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
-  const sixtySecondsAgo = new Date(Date.now() - 60_000);
-  fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
+  // The agent's OWN jsonl never appends again (it went quiet at completion, as
+  // real sub-agent transcripts do) -- only the PARENT transcript gets the
+  // canonical sync tool_result that marks it done.
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+  })}\n`);
 
   watcher.poll();
   assert.equal(watcher.snapshot()[0].status, 'done', 'agent should now read as done');
@@ -566,7 +611,7 @@ test('poll prunes done agents whose jsonl has been deleted, keeps _agents bounde
   fs.writeFileSync(parentPath, '');
   const subDir = path.join(tmp, 'session', 'subagents');
 
-  const old = new Date(Date.now() - 120_000); // past RUNNING_WINDOW_MS (45s) -> done
+  const old = new Date(Date.now() - 650_000); // past FALLBACK_IDLE_MS (600s) -> done
   const goneIds = [];
   for (let i = 0; i < 20; i++) {
     const id = `gone-${i}`;
@@ -605,4 +650,119 @@ test('poll prunes done agents whose jsonl has been deleted, keeps _agents bounde
 
   watcher.stop();
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// computeSubAgentActivity — canonical-first, harness-agnostic "is a sub-agent
+// running right now" probe (used for EVERY session on every poll, both kinds).
+// ---------------------------------------------------------------------------
+
+test('computeSubAgentActivity (claude, sync): active until the parent tool_result lands', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'sync-agent-1';
+  const toolUseId = `tu-${agentId}`;
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+
+  let act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, true, 'no completion signal yet -> active');
+  assert.equal(act.count, 1);
+  assert.deepEqual(act.runningIds, [agentId]);
+
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+  })}\n`);
+
+  act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, false, 'sync tool_result landed -> not active');
+  assert.equal(act.count, 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complete; <task-notification> does', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'async-agent-1';
+  const toolUseId = `tu-${agentId}`;
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+  // Quiesce the agent's own file -- an async background agent keeps writing
+  // long after the launch-ack, but here we simulate the file having gone
+  // quiet to prove the "stays running" call is driven by the missing
+  // completion signal, not by mtime freshness.
+  const jsonlPath = path.join(subDir, `agent-${agentId}.jsonl`);
+  const sixtySecondsAgo = new Date(Date.now() - 60_000);
+  fs.utimesSync(jsonlPath, sixtySecondsAgo, sixtySecondsAgo);
+
+  // The launch-ack: a tool_result with toolUseResult.isAsync === true.
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+    toolUseResult: { isAsync: true, status: 'async_launched', agentId },
+  })}\n`);
+
+  let act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, true, 'async launch-ack alone must not read as completion');
+  assert.equal(act.count, 1);
+
+  // The real async completion: a user record whose content is a STRING
+  // carrying a <task-notification> with a <status> tag.
+  const notification = `<task-notification><task-id>${agentId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>completed</status></task-notification>`;
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: notification },
+  })}\n`);
+
+  act = computeSubAgentActivity({ kind: 'claude', transcriptPath: parentPath });
+  assert.equal(act.active, false, '<task-notification> completion -> not active');
+  assert.equal(act.count, 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('computeSubAgentActivity (codex): active from spawn_agent output until close_agent', () => {
+  const tmp = makeTmpDir();
+  const rolloutPath = path.join(tmp, 'rollout.jsonl');
+  const agentId = 'c1111111-1111-1111-1111-111111111111';
+
+  const spawnCall = { type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', arguments: '{}' } };
+  const spawnOutput = {
+    type: 'response_item',
+    payload: { type: 'function_call_output', output: JSON.stringify({ agent_id: agentId }) },
+  };
+  fs.writeFileSync(rolloutPath, `${JSON.stringify(spawnCall)}\n${JSON.stringify(spawnOutput)}\n`);
+
+  let act = computeSubAgentActivity({ kind: 'codex', transcriptPath: rolloutPath });
+  assert.equal(act.active, true, 'spawned with no close_agent yet -> active');
+  assert.equal(act.count, 1);
+  assert.deepEqual(act.runningIds, [agentId]);
+
+  const closeCall = {
+    type: 'response_item',
+    payload: { type: 'function_call', name: 'close_agent', arguments: JSON.stringify({ target: agentId }) },
+  };
+  fs.appendFileSync(rolloutPath, `${JSON.stringify(closeCall)}\n`);
+
+  act = computeSubAgentActivity({ kind: 'codex', transcriptPath: rolloutPath });
+  assert.equal(act.active, false, 'close_agent landed -> not active');
+  assert.equal(act.count, 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('scanClaudeParentChunk / scanCodexRolloutChunk are pure folds over an accumulator', () => {
+  const claudeAcc = { completedToolUseIds: new Set(), completedAgentIds: new Set(), asyncLaunchedToolUseIds: new Set() };
+  scanClaudeParentChunk('not json\n', claudeAcc);
+  assert.equal(claudeAcc.completedToolUseIds.size, 0, 'malformed lines must not throw or pollute state');
+
+  const codexAcc = { spawnedAgentIds: new Set(), doneAgentIds: new Set() };
+  scanCodexRolloutChunk('not json\n', codexAcc);
+  assert.equal(codexAcc.spawnedAgentIds.size, 0, 'malformed lines must not throw or pollute state');
 });
