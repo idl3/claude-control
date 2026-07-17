@@ -1908,6 +1908,44 @@ body.is-external-display .rail {
 .term-conn-pill.conn-reconnecting {
   background: var(--amber);
 }
+/* Mobile copy affordance — the ONLY copy path touch users have (no physical
+   Cmd key, and the WebGL canvas has no native selection→copy). Floats above
+   `.term-canvas` whenever XtermHost's `onSelectionChange` reports an active
+   selection; shares `.term-conn-pill`'s top-right corner (the two are
+   practically mutually exclusive — the pill only shows before a selection is
+   even possible), one z-index higher so it wins if they ever do overlap. */
+.term-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg-hover);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.term-copy-btn:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+.term-copy-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.term-copy-btn:active {
+  transform: scale(0.96);
+}
+.term-copy-btn[data-copied='true'] {
+  border-color: var(--green);
+  color: var(--green);
+}
 
 /* ── Thread ───────────────────────────────────────────────────── */
 .thread-root {
