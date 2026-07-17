@@ -78,10 +78,16 @@ Requires: Node >=20 and tmux on PATH.`);
   }
 
   case undefined:
-  case 'start':
-    // server.js executes main() on import.
-    await import(path.join(ROOT, 'server.js'));
+  case 'start': {
+    // Start the server. server.js only auto-runs main() when executed directly
+    // (`node server.js`); imported here its _isMain guard is false (argv[1] is
+    // this cli.js, not server.js), so we must call the exported main()
+    // explicitly. Without this, `claude-control` / `claude-control start` would
+    // import the module and silently exit 0 without ever binding the port.
+    const { main } = await import(path.join(ROOT, 'server.js'));
+    await main();
     break;
+  }
 
   default:
     console.error(`unknown command: ${cmd}\nrun "claude-control --help"`);
