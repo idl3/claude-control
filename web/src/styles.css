@@ -1090,6 +1090,10 @@ body.is-external-display .rail {
 }
 .terminal-pane-root .terminal-view {
   flex: 1 1 auto;
+  /* Fill the pane via flex — override the composer overlay's fixed height. The
+     pane parent (.terminal-pane-root) has a definite height, so the flex child
+     resolves definite and `.term-canvas` (absolute/inset:0) fills it correctly. */
+  height: auto;
   max-height: none;
   min-height: 0;
   margin-bottom: 0;
@@ -1714,9 +1718,14 @@ body.is-external-display .rail {
   max-width: calc(880px * var(--ui-scale));
   margin-inline: auto;
   margin-bottom: 8px;
-  /* Hug content (so the latest line sits flush above the composer), capped so a
-     long scrollback never pushes the input off-screen. */
-  max-height: 48dvh;
+  /* DEFINITE, bounded height. Was `max-height: 48dvh` (hug-content), which left
+     the inner xterm host with an INDEFINITE parent height → `.term-canvas`'s
+     `height:100%` resolved to `auto` → FitAddon.fit() measured the xterm's own
+     growing content and re-fit forever, ballooning `.xterm-screen` to 6000px+
+     with the shell prompt stranded at the top = the "black screen". A fixed
+     height makes fit() read a stable box; bounded so a long scrollback never
+     covers the whole viewport. */
+  height: min(48dvh, 460px);
   border: 1px solid var(--red);
   border-radius: 12px;
   background: var(--bg);
@@ -1849,8 +1858,13 @@ body.is-external-display .rail {
   overflow: hidden;
 }
 .term-canvas {
-  width: 100%;
-  height: 100%;
+  /* Absolutely fill the (definite-height) wrap. Being OUT OF FLOW is
+     load-bearing: the xterm canvas can never contribute to — and therefore
+     never push taller — its container's height, so the ResizeObserver -> fit ->
+     grow feedback loop that caused the unbounded 6000px black screen is
+     structurally impossible. */
+  position: absolute;
+  inset: 0;
   padding: 8px;
 }
 .term-conn-pill {
@@ -9239,8 +9253,19 @@ select.config-input {
    it in/out. Starts hidden (opacity 0) to avoid a first-paint flash before the
    show tween runs. */
 .term-warm {
-  width: 100%;
+  /* Float the terminal ABOVE the composer, overlaying the transcript, instead
+     of sitting in-flow (which pushed the transcript up and forced an expensive
+     transcript redraw on every open/close). Absolutely positioned against
+     `.composer` (position:relative), anchored just above it (bottom:100%), so
+     opening/closing the terminal never reflows the transcript underneath. The
+     fixed-height child (`.terminal-view`) bounds the xterm box. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 3;
   opacity: 0;
+  pointer-events: auto;
 }
 
 /* The OLD rail foot bar (Settings/Reload/Processes) was removed here — those
