@@ -34,6 +34,8 @@ LOG_DIR="$CONFIG_DIR/logs"
 
 START_MODE="service"   # service | foreground | none
 GEN_TOKEN=1
+PROJECT_DIR=""   # set by configure_project_dir()
+INTERACTIVE=0    # 1 when stdin is a TTY (configure_project_dir() prompted)
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -150,12 +152,80 @@ install_pkg() {
 }
 
 # -----------------------------------------------------------------------------
+# Primary project folder — asked once, interactively, so the FDA check below
+# (and the starter config's defaultCwd) reflect where this operator actually
+# works. Piped/non-interactive installs (curl | bash, CI, SSH with no TTY)
+# skip the prompt and fall back to the same default without blocking.
+# -----------------------------------------------------------------------------
+configure_project_dir() {
+  local default_dir="$HOME/Projects"
+  if [ -t 0 ]; then
+    INTERACTIVE=1
+    local input=""
+    printf '\033[1;36m▸ Primary project folder? [%s]: \033[0m' "$default_dir"
+    IFS= read -r input || true
+    input="${input:-$default_dir}"
+    case "$input" in
+      "~")   input="$HOME" ;;
+      "~/"*) input="$HOME/${input#\~/}" ;;
+    esac
+    PROJECT_DIR="$input"
+  else
+    INTERACTIVE=0
+    PROJECT_DIR="$default_dir"
+  fi
+}
+
+# Resolve a path to its physical (symlink-free) form without relying on GNU
+# `readlink -f` (macOS's BSD readlink doesn't support it). Works even when
+# the path (or part of it) doesn't exist yet — walks up to the nearest
+# existing ancestor, resolves that, and reattaches the missing remainder.
+resolve_path() {
+  local p="$1"
+  case "$p" in
+    /*)    : ;;
+    "~")   p="$HOME" ;;
+    "~/"*) p="$HOME/${p#\~/}" ;;
+    *)     p="$PWD/$p" ;;
+  esac
+  p="${p%/}"
+  [ -z "$p" ] && p="/"
+  local remainder="" cur="$p"
+  while [ ! -e "$cur" ] && [ "$cur" != "/" ]; do
+    remainder="/$(basename "$cur")$remainder"
+    cur="$(dirname "$cur")"
+  done
+  if [ -e "$cur" ]; then
+    cur="$(cd "$cur" 2>/dev/null && pwd -P)" || cur="$p"
+  fi
+  printf '%s%s' "$cur" "$remainder"
+}
+
+# True (exit 0) when $1 resolves under a macOS TCC-protected location that a
+# launchd-spawned node has no Full Disk Access to by default.
+fda_required_for() {
+  local resolved_dir resolved_root root
+  resolved_dir="$(resolve_path "$1")"
+  for root in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Library/Mobile Documents"; do
+    resolved_root="$(resolve_path "$root")"
+    case "$resolved_dir" in
+      "$resolved_root"|"$resolved_root"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# -----------------------------------------------------------------------------
 # Bootstrap ~/.claude-control — token + minimal config (the package does NOT
 # auto-generate either; a clean machine defaults to tokenless with no config).
 # -----------------------------------------------------------------------------
 gen_token() {
   if command -v openssl >/dev/null 2>&1; then openssl rand -hex 24; return; fi
   node -e 'process.stdout.write(require("crypto").randomBytes(24).toString("hex"))'
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 bootstrap_data() {
@@ -173,11 +243,15 @@ bootstrap_data() {
   fi
 
   if [ ! -f "$CONFIG_FILE" ]; then
+    # defaultCwd: the chosen project folder when it already exists, else $HOME
+    # (server.js/lib/config.js reads this as the cwd new sessions launch in).
+    local default_cwd="$HOME"
+    [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] && default_cwd="$PROJECT_DIR"
     # Minimal, valid config; server merges its own defaults over anything absent.
     cat > "$CONFIG_FILE" <<JSON
 {
   "launchCommand": "claude",
-  "defaultCwd": "$HOME"
+  "defaultCwd": "$(json_escape "$default_cwd")"
 }
 JSON
     chmod 600 "$CONFIG_FILE"
@@ -256,6 +330,41 @@ tailscale_dnsname() {
   ' 2>/dev/null
 }
 
+print_fda_status() {
+  local node_bin="$1"
+  if [ "$INTERACTIVE" = "1" ]; then
+    if fda_required_for "$PROJECT_DIR"; then
+      printf '\033[1;33m'
+      echo "     ⚠ REQUIRED for your project folder:"
+      echo "     ⚠   $PROJECT_DIR"
+      echo "     ⚠ macOS treats this as a TCC-protected location (Documents, Desktop,"
+      echo "     ⚠ Downloads, or iCloud Drive). claude-control runs as a launchd service,"
+      echo "     ⚠ which does NOT inherit your terminal's Full Disk Access grant — agents"
+      echo "     ⚠ will hit \"Operation not permitted\" reading files there until this is fixed."
+      echo "     ⚠"
+      echo "     ⚠ Fix: System Settings → Privacy & Security → Full Disk Access → + →"
+      echo "     ⚠ press ⌘⇧G, paste this exact node path, add it, and toggle it on:"
+      echo "     ⚠   $node_bin"
+      echo "     ⚠"
+      echo "     ⚠ Then restart the service:"
+      echo "     ⚠   launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control"
+      printf '\033[0m'
+    else
+      printf '     \033[1;32m✓ FDA not required for %s\033[0m\n' "$PROJECT_DIR"
+    fi
+  else
+    echo "     only if your agents/sessions read macOS-protected folders"
+    echo "     (~/Documents, ~/Desktop, ~/Downloads, iCloud Drive). Ordinary dev"
+    echo "     work under ~/Projects etc. does NOT need this — skip it."
+    echo "     If you hit it: System Settings → Privacy & Security → Full Disk Access"
+    echo "     → + → ⌘⇧G → paste this exact node path → enable it:"
+    echo "       $node_bin"
+    echo "     Then restart the service so node relaunches with the grant:"
+    echo "       launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control"
+    echo "     (why + full walkthrough: README → \"macOS Full Disk Access\")"
+  fi
+}
+
 print_optional_next_steps() {
   [ "$OS" = "Darwin" ] || return 0
   local node_bin ts_host
@@ -263,17 +372,10 @@ print_optional_next_steps() {
   ts_host="$(tailscale_dnsname || true)"
 
   echo ""
-  ok "optional next steps — skip either; the server + web UI already work fully without them"
+  ok "optional next steps — skip what doesn't apply; the server + web UI already work fully without them"
   echo ""
-  echo "  1) Full Disk Access — only if your agents/sessions read macOS-protected"
-  echo "     folders (~/Documents, ~/Desktop, ~/Downloads, iCloud Drive). Ordinary"
-  echo "     dev work under ~/Projects etc. does NOT need this — skip it."
-  echo "     If you hit it: System Settings → Privacy & Security → Full Disk Access"
-  echo "     → + → ⌘⇧G → paste this exact node path → enable it:"
-  echo "       $node_bin"
-  echo "     Then restart the service so node relaunches with the grant:"
-  echo "       launchctl kickstart -k gui/$(id -u)/com.ernest.claude-control"
-  echo "     (why + full walkthrough: README → \"macOS Full Disk Access\")"
+  echo "  1) Full Disk Access"
+  print_fda_status "$node_bin"
   echo ""
   echo "  2) Tailscale HTTPS — optional pretty URL. Remote access already works"
   echo "     right now with no extra setup:"
@@ -294,6 +396,7 @@ print_optional_next_steps() {
 # Run
 # -----------------------------------------------------------------------------
 log "claude-control installer — package: $PKG_SPEC, port: $PORT, mode: $START_MODE"
+configure_project_dir
 ensure_node
 ensure_tmux
 install_pkg
