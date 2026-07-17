@@ -20,6 +20,7 @@ import { WebSocketServer } from 'ws';
 import * as tmux from './lib/tmux.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
+import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
@@ -1916,6 +1917,37 @@ function runSerial(target, fn) {
 // forcing a multi-hundred-MB string allocation in the cockpit process.
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
+// Embedded xterm.js terminal: a dedicated `/pty` WS carrying the binary
+// node-pty bridge (lib/pty-bridge.js), replacing the poll+send-keys capture
+// terminal. `resolveTarget` maps the app-level session id (`cc-shell:<id>`)
+// to the underlying cc-shell tmux window target, lazily creating that shell
+// window via shell.ensureSessionShell (idempotent — a repeat call for the
+// same session/cwd reuses the existing window).
+const ptyWss = new WebSocketServer({ noServer: true });
+const ptyBridge = createPtyBridge({
+  resolveTarget: async (sessionId) => {
+    if (typeof sessionId !== 'string') return null;
+    // Composer >_ mode: the session's sister cc-shell window (lazily created,
+    // idempotent for a repeat attach on the same session/cwd).
+    if (sessionId.startsWith('cc-shell:')) {
+      const s = sessionById(sessionId.slice('cc-shell:'.length));
+      if (!s) return null;
+      return { target: await shell.ensureSessionShell(s.target, s.cwd) };
+    }
+    // Plain terminal-kind session (TerminalPane): attach to the pane itself —
+    // the same pane the ttyd /term/ escape hatch already exposes, so no new
+    // surface. `s.target` is a tmux target the app already tracks; the bridge
+    // re-validates isValidTarget before it ever reaches spawn.
+    if (sessionId.startsWith('pane:')) {
+      const s = sessionById(sessionId.slice('pane:'.length));
+      if (!s || !tmux.isValidTarget(s.target)) return null;
+      return { target: s.target };
+    }
+    return null;
+  },
+});
+ptyWss.on('connection', (ws, req) => ptyBridge.handleConnection(ws, req));
+
 server.on('upgrade', (req, socket, head) => {
   // Origin check first (403) — applies to every upgrade regardless of path.
   if (!isAllowedOrigin(req.headers.origin)) {
@@ -1937,6 +1969,13 @@ server.on('upgrade', (req, socket, head) => {
       return;
     }
     relayTerminalUpgrade(req, socket, head);
+    return;
+  }
+
+  // Embedded xterm.js terminal's binary pty bridge — same bearer-auth
+  // mechanism as the main cockpit WS (checkWsToken / WS_PROTOCOL subprotocol).
+  if (upgradePath === '/pty') {
+    handlePtyUpgrade(req, socket, head, { wss: ptyWss, token: CONFIG.token });
     return;
   }
 
@@ -3475,6 +3514,7 @@ function shutdown() {
   clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   terminal.shutdownAll();
+  ptyBridge.shutdownAll();
   mlx.shutdown();
   registry.stop();
   resources.stop();
