@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels } from '../lib/api';
+import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels, uploadFile } from '../lib/api';
 import type { ClaudeModelInfo, CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
+import { ATTACH_ACCEPT } from '../lib/attachments';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
 import {
   defaultAgentForFilter,
@@ -14,6 +15,7 @@ import type { SessionFilter } from './SessionRail';
 import { WelcomeHero } from './WelcomeHero';
 import { Dropdown, type DropdownOption } from './Dropdown';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { MicIcon } from './icons';
 import {
   ComposerAttachButton,
   ComposerMicButton,
@@ -24,6 +26,15 @@ import {
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
 export type ClaudeModel = 'default' | string;
+
+/** A file attached to the draft. `path` is null while the eager upload
+ *  (see handleFilesPicked below) is still in flight — submit() waits for
+ *  every attachment to resolve before it will fire (see `uploadingActive`). */
+interface DraftAttachment {
+  id: string;
+  name: string;
+  path: string | null;
+}
 
 interface NewSessionDraftProps {
   /** Rail filter at the time the draft was opened — seeds the default agent. */
@@ -109,9 +120,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   const liftRef = useRef(0);
 
   // Voice input: gates useVoiceRecorder's mic acquisition (no getUserMedia
-  // call until true). No heavy morph/overlay like Composer.tsx's VoiceInline
-  // — the mic button itself doubles as the stop control (click again to
-  // stop + transcribe); errors surface via onToast and auto-reset.
+  // call until true). While active, the draft swaps its normal
+  // input+attachments+toolbar block for an inline `.voice-inline-body` panel
+  // built from the SAME `.voice-*` classes Composer.tsx's VoiceInline uses
+  // (status line + waveform canvas + Cancel/Stop toolbar) — see the render
+  // below. No GSAP morph/overlay: this is a plain conditional render swap,
+  // not the live composer's animated reveal. Errors surface via onToast and
+  // auto-reset.
   const [micActive, setMicActive] = useState(false);
   const voice = useVoiceRecorder({
     active: micActive,
@@ -127,6 +142,46 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
       setMicActive(false);
     }
   }, [voice.status, voice.errorMsg, onToast]);
+
+  // File attach: mirrors the live composer's attachment adapter
+  // (lib/attachments.ts createCockpitAttachmentAdapter) — upload happens
+  // EAGERLY on pick (not deferred to submit) via the same uploadFile() call,
+  // so the chip reaches an "uploaded" state immediately. Rides along on the
+  // initial prompt at submit time (see submit() below), exactly like the
+  // live composer's onNew appends each attachment's uploaded absolute path
+  // to the outgoing message text.
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // True while at least one attachment's upload hasn't resolved yet — gates
+  // submit() so a file mid-upload can't be silently dropped from the prompt.
+  const uploadingActive = attachments.some((a) => a.path == null);
+
+  const handleFilesPicked = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      Array.from(files).forEach((file) => {
+        const id = `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
+        setAttachments((prev) => [...prev, { id, name: file.name, path: null }]);
+        onToast(`Uploading ${file.name}…`);
+        uploadFile(file)
+          .then((res) => {
+            setAttachments((prev) =>
+              prev.map((a) => (a.id === id ? { ...a, name: res.name, path: res.path } : a)),
+            );
+            onToast(`Attached ${res.name}`, 'ok');
+          })
+          .catch((err) => {
+            setAttachments((prev) => prev.filter((a) => a.id !== id));
+            onToast(`Attach failed: ${(err as Error).message}`, 'error');
+          });
+      });
+    },
+    [onToast],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   // Fetch agent availability + config once on mount, and focus the composer
   // so the user can start typing the prompt immediately.
@@ -239,8 +294,15 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   }, [creating, agent, showAdvanced, cwdChoice, tmuxChoice]);
 
   const submit = useCallback(async () => {
-    if (creating) return;
+    if (creating || uploadingActive) return;
     setCreating(true);
+    // Same convention as the live composer's onNew (App.tsx): outgoing text
+    // = [typedText, ...uploadedAbsolutePaths].filter(Boolean).join(' '). The
+    // textarea itself never shows the paths — they're appended only here, at
+    // submit time — so a file picked mid-typing rides along on the initial
+    // prompt the spawned agent receives.
+    const attachmentPaths = attachments.map((a) => a.path).filter((p): p is string => !!p);
+    const finalPrompt = [prompt.trim(), ...attachmentPaths].filter(Boolean).join(' ');
     // Required-with-default: blank name field falls back to the shown placeholder.
     const resolvedName = agent === 'codex' ? undefined : (name.trim() || placeholder);
     // Resolve the effective cwd: '' = use server default; 'custom' = free-text;
@@ -308,7 +370,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
           codexTransport: agent === 'codex' ? codexTransport : undefined,
           model: agent === 'claude' && model !== 'default' ? model : undefined,
           codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
-          prompt: prompt.trim() || undefined,
+          prompt: finalPrompt || undefined,
           tmuxSession: resolvedTmuxSession,
           newTmuxSession: resolvedNewTmuxSession,
         }),
@@ -327,11 +389,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     }
   }, [
     creating,
+    uploadingActive,
     agent,
     claudeTransport,
     codexTransport,
     model,
     prompt,
+    attachments,
     name,
     cwdChoice,
     cwdCustom,
@@ -378,6 +442,18 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
     })),
     { value: NEW_TMUX_SESSION, label: 'New tmux session…' },
   ];
+
+  // Mirrors VoiceInline's statusLabel switch in Composer.tsx, for parity.
+  const voiceStatusLabel =
+    voice.status === 'error'
+      ? 'Microphone unavailable'
+      : voice.status === 'transcribing'
+        ? 'Transcribing…'
+        : voice.status === 'paused'
+          ? 'Paused'
+          : voice.status === 'starting'
+            ? 'Starting…'
+            : 'Listening…';
 
   return (
     <div
@@ -623,81 +699,175 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             </button>
           </div>
 
-          <div className="composer-input-wrap">
-            <textarea
-              ref={promptRef}
-              className="composer-input"
-              value={prompt}
-              disabled={creating}
-              placeholder="Message to start the session with (optional)…"
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                // ⌘/Ctrl+Enter submits, same convention as the real composer's
-                // send shortcut. Plain Enter inserts a newline (textarea default).
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              aria-label="Initial prompt"
-            />
-          </div>
+          {/* Voice recording panel — swaps in for the input+attachments+
+              toolbar block below while micActive, using the SAME
+              `.voice-status` / `.voice-wave-inline` / `.voice-toolbar`
+              classes as Composer.tsx's VoiceInline, so a dictating draft
+              reads as the real voice control (status line + live waveform +
+              Cancel/Stop), not a bare toggled button. Plain conditional
+              render (no GSAP morph) — see the class doc-comment above. */}
+          {micActive ? (
+            <div className="voice-inline-body" style={{ display: 'flex' }} aria-live="polite">
+              <div className="voice-status">
+                <span className="voice-dot" data-on={voice.status === 'recording' ? 'true' : undefined} />
+                {voiceStatusLabel}
+              </div>
+              <canvas
+                ref={voice.canvasRef}
+                className="voice-wave voice-wave-inline"
+                height={64}
+                data-paused={voice.status !== 'recording' ? 'true' : undefined}
+              />
+              {voice.status === 'error' ? (
+                <div className="voice-error">{voice.errorMsg || 'Could not start recording.'}</div>
+              ) : voice.status !== 'transcribing' ? (
+                <div className="voice-hint">Speak, then Stop &amp; Transcribe (or ⌘/Ctrl+↵) to insert.</div>
+              ) : null}
+              <div className="composer-toolbar voice-toolbar">
+                <button
+                  type="button"
+                  className="btn-secondary voice-btn-cancel"
+                  onClick={() => voice.cancel()}
+                  disabled={voice.status === 'transcribing'}
+                  aria-label="Cancel voice recording"
+                >
+                  Cancel
+                </button>
+                <span className="composer-toolbar-spacer" />
+                <button
+                  type="button"
+                  className="composer-send voice-btn-stop"
+                  onClick={() => voice.stop()}
+                  disabled={voice.status === 'error' || voice.status === 'transcribing' || voice.status === 'starting'}
+                  aria-label="Stop recording and transcribe"
+                  title="Stop & Transcribe (⌘/Ctrl+↵)"
+                >
+                  {voice.status === 'transcribing' ? (
+                    <span className="composer-enhance-spinner" aria-hidden="true" />
+                  ) : (
+                    <MicIcon />
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="composer-input-wrap">
+                <textarea
+                  ref={promptRef}
+                  className="composer-input"
+                  value={prompt}
+                  disabled={creating}
+                  placeholder="Message to start the session with (optional)…"
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    // ⌘/Ctrl+Enter submits, same convention as the real composer's
+                    // send shortcut. Plain Enter inserts a newline (textarea default).
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  aria-label="Initial prompt"
+                />
+              </div>
 
-          {/* Bottom action bar — byte-identical to the live composer's own
-              [attach] [mic] [raw] [send] cluster: same .composer-toolbar/
-              -toolbar-spacer classes, same shared leaf buttons
-              (ComposerActionBar.tsx), so the card reads as the SAME composer
-              once it lands in the live slot, not a swap. Unlike the live
-              composer, send/raw-send stay ENABLED on an empty prompt —
-              starting a session doesn't require an initial message; only
-              `creating` disables them. */}
-          <div className="composer-toolbar">
-            {/* Attach — best-effort: createSession has no attachment field
-                (confirmed in lib/api.ts), so there's nothing to upload to
-                yet. Surface that instead of silently no-opping. */}
-            <ComposerAttachButton
-              aria-label="Attach a file"
-              title="Attachments available once the session starts"
-              disabled={creating}
-              onClick={() => {
-                onToast('Attachments available once the session starts');
-                promptRef.current?.focus();
-              }}
-            />
-            <span className="composer-toolbar-spacer" />
-            {/* Mic — functional: useVoiceRecorder direct (no heavy morph
-                overlay needed here). Click starts recording; click again
-                (or the same button, now in its "stop" state) stops +
-                transcribes, appending the result to the prompt. */}
-            <ComposerMicButton
-              ariaLabel={micActive ? 'Stop recording' : 'Voice input'}
-              title={micActive ? 'Stop & transcribe' : 'Voice input'}
-              disabled={creating || voice.status === 'transcribing'}
-              active={micActive}
-              onClick={() => (micActive ? voice.stop() : setMicActive(true))}
-            />
-            {/* Raw send — best-effort: no optimiser exists pre-session, so
-                this converges on the exact same submit() as the primary
-                Send button below (same handler shape as the live composer's
-                bypass button, which also just calls the send path raw). */}
-            <ComposerRawSendButton
-              ariaLabel="Create session (raw)"
-              title="Create session — same as Send (⌘/Ctrl+⇧+↵)"
-              disabled={creating}
-              onClick={() => void submit()}
-            />
-            {/* Primary send — functional: type="submit" so the form's own
-                onSubmit (preventDefault + submit()) still owns it, keeping
-                Enter-to-submit in the freetext inputs above working exactly
-                as before. */}
-            <ComposerSendButton
-              type="submit"
-              ariaLabel={creating ? 'Creating session…' : 'Create session'}
-              title="Create session (⌘/Ctrl+↵)"
-              disabled={creating}
-              busy={creating}
-            />
-          </div>
+              {/* Attachment chips — SAME position as the live composer's own
+                  `.composer-attachments` row (between the input and the
+                  toolbar; see Composer.tsx). A minimal draft-local chip
+                  (name + remove), not the live AttachmentChip (that's
+                  coupled to assistant-ui's Attachment type) — the shared
+                  pipeline being reused is uploadFile() + the
+                  [prompt, ...paths].join(' ') convention, not the chip
+                  markup itself. */}
+              {attachments.length > 0 ? (
+                <div className="composer-attachments">
+                  {attachments.map((a) => (
+                    <span key={a.id} className="attach-chip" data-pending={a.path == null ? 'true' : undefined}>
+                      <span className="chip-icon" aria-hidden="true">📎</span>
+                      <span className="chip-name" title={a.name}>{a.name}</span>
+                      {a.path == null ? <span className="chip-spinner" aria-hidden="true" /> : null}
+                      <button
+                        type="button"
+                        className="chip-remove"
+                        aria-label={`Remove ${a.name}`}
+                        disabled={creating}
+                        onClick={() => removeAttachment(a.id)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Bottom action bar — byte-identical to the live composer's own
+                  [attach] [mic] [raw] [send] cluster: same .composer-toolbar/
+                  -toolbar-spacer classes, same shared leaf buttons
+                  (ComposerActionBar.tsx), so the card reads as the SAME composer
+                  once it lands in the live slot, not a swap. Unlike the live
+                  composer, send/raw-send stay ENABLED on an empty prompt —
+                  starting a session doesn't require an initial message; only
+                  `creating`/`uploadingActive` disable them. */}
+              <div className="composer-toolbar">
+                {/* Attach — functional: opens a hidden file input; each pick
+                    uploads via the same uploadFile() the live composer's
+                    attachment adapter uses (lib/attachments.ts), and rides
+                    along on the initial prompt at submit() (see above). */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ATTACH_ACCEPT}
+                  multiple
+                  hidden
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    handleFilesPicked(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+                <ComposerAttachButton
+                  aria-label="Attach a file"
+                  title="Attach a file"
+                  disabled={creating}
+                  onClick={() => fileInputRef.current?.click()}
+                />
+                <span className="composer-toolbar-spacer" />
+                {/* Mic — functional: clicking activates useVoiceRecorder and
+                    swaps in the voice panel above (Cancel/Stop live there —
+                    this button doesn't double as the stop control anymore). */}
+                <ComposerMicButton
+                  ariaLabel="Voice input"
+                  title="Voice input"
+                  disabled={creating}
+                  active={micActive}
+                  onClick={() => setMicActive(true)}
+                />
+                {/* Raw send — best-effort: no optimiser exists pre-session, so
+                    this converges on the exact same submit() as the primary
+                    Send button below (same handler shape as the live composer's
+                    bypass button, which also just calls the send path raw). */}
+                <ComposerRawSendButton
+                  ariaLabel="Create session (raw)"
+                  title="Create session — same as Send (⌘/Ctrl+⇧+↵)"
+                  disabled={creating || uploadingActive}
+                  onClick={() => void submit()}
+                />
+                {/* Primary send — functional: type="submit" so the form's own
+                    onSubmit (preventDefault + submit()) still owns it, keeping
+                    Enter-to-submit in the freetext inputs above working exactly
+                    as before. */}
+                <ComposerSendButton
+                  type="submit"
+                  ariaLabel={creating ? 'Creating session…' : 'Create session'}
+                  title="Create session (⌘/Ctrl+↵)"
+                  disabled={creating || uploadingActive}
+                  busy={creating}
+                />
+              </div>
+            </>
+          )}
         </form>
       </div>
     </div>
