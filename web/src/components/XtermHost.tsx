@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { PtyClient, type PtyConnState } from '../lib/pty-client';
 import { setTerminalPanelFocused, getTerminalPanelFocused } from './terminalFocus';
+import { copyText, isCopyShortcut } from '../lib/terminalClipboard';
 
 export interface XtermHostProps {
   /** Session id == tmux target (e.g. `name:0`); a fresh mount per id re-attaches. */
@@ -61,6 +63,16 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
   // sole dep is sessionId — the custom key handler is installed once per attach).
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  // Live Terminal instance, reachable from the Copy button's click handler
+  // (rendered outside the mount effect's closure). null while unmounted/torn
+  // down between session attaches.
+  const termRef = useRef<Terminal | null>(null);
+  // Mobile copy affordance: xterm canvases have no native selection→copy, and
+  // touch users have no physical Cmd key, so `term.onSelectionChange` drives a
+  // floating button that's the ONLY copy path they have. null hides it;
+  // 'Copy' / 'Copied ✓' otherwise.
+  const [copyButtonLabel, setCopyButtonLabel] = useState<string | null>(null);
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -73,6 +85,14 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       fontSize: 12,
       allowProposedApi: true,
     });
+
+    termRef.current = term;
+    // E2E hook: expose the live Terminal instance on its mounted DOM node so a
+    // Playwright test can drive `container.xtermInstance.selectAll()` /
+    // inspect `.buffer` directly (verifying WebGL-rendered link/selection
+    // behavior needs a real handle — there's no other way in from outside).
+    // Never read by app code; purely additive, torn down on unmount below.
+    (container as HTMLDivElement & { xtermInstance?: Terminal }).xtermInstance = term;
 
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -94,6 +114,19 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       /* WebGL unsupported — xterm's default DOM renderer handles it. */
     }
 
+    // Clickable URLs. registerLinkProvider (what WebLinksAddon uses under the
+    // hood) is a core Terminal API that does its own buffer-coordinate hit
+    // testing independent of the active renderer — xterm's `.xterm-viewport`
+    // element (not the canvas) captures the pointer events for hover/click, so
+    // this works unmodified whether the WebGL or DOM renderer is active. Opens
+    // in a new tab; `noopener,noreferrer` matches the security posture of every
+    // other external-link open in this app.
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        window.open(uri, '_blank', 'noopener,noreferrer');
+      }),
+    );
+
     // Keyboard escape hatch. Once focused, xterm forwards keydown to the pty, so
     // a user in the composer's terminal mode has no keyboard way out. This
     // handler runs BEFORE xterm forwards the key: Cmd+Esc (primary) / Ctrl+Esc
@@ -107,6 +140,15 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
         (e.key === 'Escape' || e.code === 'Escape')
       ) {
         onExitRef.current?.();
+        return false;
+      }
+      // Keyboard copy. Cmd/Ctrl+C is xterm's default forward-to-pty key (^C /
+      // SIGINT) — that's still correct with NO selection (interrupting a
+      // running command must keep working). But WITH an active selection,
+      // Cmd/Ctrl+C means "copy", same as every other app: swallow it here and
+      // copy instead of sending ^C.
+      if (isCopyShortcut(e, term.hasSelection())) {
+        copyText(term.getSelection());
         return false;
       }
       return true;
@@ -171,6 +213,13 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       client.write(data);
     });
 
+    // Mobile copy affordance: show/hide the floating Copy button as the
+    // in-canvas drag-selection changes. Any new selection resets a stale
+    // "Copied ✓" label back to "Copy".
+    const disposeSelectionChange = term.onSelectionChange(() => {
+      setCopyButtonLabel(term.hasSelection() ? 'Copy' : null);
+    });
+
     const resizeObserver = new ResizeObserver(scheduleFit);
     resizeObserver.observe(container);
 
@@ -187,16 +236,36 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       offData();
       offState();
       disposeOnData.dispose();
+      disposeSelectionChange.dispose();
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
       resizeObserver.disconnect();
       term.textarea?.removeEventListener('focus', onFocus);
       term.textarea?.removeEventListener('blur', onBlur);
       client.close();
       term.dispose();
+      delete (container as HTMLDivElement & { xtermInstance?: Terminal }).xtermInstance;
+      termRef.current = null;
+      setCopyButtonLabel(null);
       setTerminalPanelFocused(false);
     };
     // sessionId is the sole trigger for a fresh mount — attach is per-session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // Copy button click: copy the current selection, flash "Copied ✓" for
+  // ~1.2s, then revert — but only if the selection is still the one just
+  // copied (an in-between onSelectionChange already hid/reset the button
+  // otherwise, so this timer no-ops rather than fighting fresher state).
+  const handleCopyButtonClick = () => {
+    const term = termRef.current;
+    if (!term || !term.hasSelection()) return;
+    copyText(term.getSelection());
+    setCopyButtonLabel('Copied ✓');
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = setTimeout(() => {
+      setCopyButtonLabel((label) => (label === 'Copied ✓' ? 'Copy' : label));
+    }, 1200);
+  };
 
   // Escape focus-target split (A1 §1): only wired when the host wants a
   // close affordance (TerminalPanel). Canvas-focused Escape is left alone —
@@ -220,6 +289,16 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
         </span>
       )}
       <div ref={containerRef} className="term-canvas" tabIndex={0} />
+      {copyButtonLabel && (
+        <button
+          type="button"
+          className="term-copy-btn"
+          data-copied={copyButtonLabel === 'Copied ✓' ? 'true' : undefined}
+          onClick={handleCopyButtonClick}
+        >
+          {copyButtonLabel}
+        </button>
+      )}
     </div>
   );
 }
