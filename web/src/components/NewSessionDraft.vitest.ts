@@ -823,3 +823,99 @@ describe('NewSessionDraft agent default from filter', () => {
     expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
+
+// ── Bottom action bar: [attach] [mic] [raw] [send], shared leaves from
+// ComposerActionBar.tsx — same cluster the live Composer.tsx renders. See
+// NewSessionDraft.tsx's bottom `.composer-toolbar`.
+describe('NewSessionDraft bottom action bar', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders attach, mic, raw-send, and send buttons', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voice input' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create session (raw)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeTruthy();
+  });
+
+  it('send stays enabled with an empty prompt — starting a session does not require a message', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+    const sendBtn = screen.getByRole('button', { name: 'Create session' }) as HTMLButtonElement;
+    const rawBtn = screen.getByRole('button', { name: 'Create session (raw)' }) as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(false);
+    expect(rawBtn.disabled).toBe(false);
+  });
+
+  it('raw-send also creates a session (best-effort: same submit() as primary send)', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Create session (raw)' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+  });
+
+  it('attach is best-effort — surfaces a toast instead of silently no-opping (createSession has no attachment field)', async () => {
+    stubApi();
+    const onToast = vi.fn();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast,
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Attach a file' }));
+    expect(onToast).toHaveBeenCalledWith('Attachments available once the session starts');
+  });
+
+  it('mic click starts recording, and an environment error (no getUserMedia in jsdom) surfaces via onToast and resets to idle', async () => {
+    stubApi();
+    const onToast = vi.fn();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast,
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    const micBtn = screen.getByRole('button', { name: 'Voice input' });
+    expect(micBtn.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(micBtn);
+
+    // jsdom has no getUserMedia, so useVoiceRecorder rejects almost
+    // immediately; the draft surfaces the error via onToast and resets the
+    // mic back to idle rather than leaving it stuck "recording" with no way
+    // out — proving the mic is wired to a real recorder, not a stub.
+    await waitFor(() => {
+      expect(onToast).toHaveBeenCalledWith(expect.any(String), 'error');
+    });
+    expect(screen.getByRole('button', { name: 'Voice input' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});

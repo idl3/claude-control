@@ -13,6 +13,13 @@ import {
 import type { SessionFilter } from './SessionRail';
 import { WelcomeHero } from './WelcomeHero';
 import { Dropdown, type DropdownOption } from './Dropdown';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import {
+  ComposerAttachButton,
+  ComposerMicButton,
+  ComposerRawSendButton,
+  ComposerSendButton,
+} from './ComposerActionBar';
 
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
@@ -100,6 +107,26 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
   // Last-computed centered translateY, in px (negative = lifted up). Read by
   // submit()'s error-path reverse animation to slide back to the same spot.
   const liftRef = useRef(0);
+
+  // Voice input: gates useVoiceRecorder's mic acquisition (no getUserMedia
+  // call until true). No heavy morph/overlay like Composer.tsx's VoiceInline
+  // — the mic button itself doubles as the stop control (click again to
+  // stop + transcribe); errors surface via onToast and auto-reset.
+  const [micActive, setMicActive] = useState(false);
+  const voice = useVoiceRecorder({
+    active: micActive,
+    onCommit: (text) => {
+      if (text) setPrompt((p) => (p ? p.replace(/\s*$/, '') + ' ' + text : text));
+      setMicActive(false);
+    },
+    onClose: () => setMicActive(false),
+  });
+  useEffect(() => {
+    if (voice.status === 'error' && voice.errorMsg) {
+      onToast(voice.errorMsg, 'error');
+      setMicActive(false);
+    }
+  }, [voice.status, voice.errorMsg, onToast]);
 
   // Fetch agent availability + config once on mount, and focus the composer
   // so the user can start typing the prompt immediately.
@@ -395,6 +422,207 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               runtime this draft doesn't have. Matches the live composer's
               exact input-wrap + toolbar structure so the handoff reads as
               the same surface, not a swap. */}
+          {/* Option row — harness/model/dir/tmux/Advanced/name — sits ABOVE
+              the input so it reads as a settings strip anchoring the compose
+              box, not part of the send-time action bar below (which now
+              matches the live composer's own bar exactly). Single fadeRef
+              target: submit()'s slideToBottom fades this whole row out
+              (opacity only) so the card reads as the plain live composer
+              once it lands in the bottom slot; slideBackToCenter reverses it
+              on a failed submit. Cancel travels with it (trailing,
+              margin-left:auto — see .new-session-draft-cancel in
+              styles.css); Esc still cancels too (see the root's onKeyDown
+              above). */}
+          <div className="new-session-draft-options" ref={fadeRef}>
+            {/* Harness — segmented pill (reuses the same
+                .rail-new-mode-seg/-btn classes as the Advanced mode pills
+                below), matching the reference's primary "Chat | Cowork"
+                pill language. Availability + auto-switch logic unchanged
+                from the old <select>: a genuinely unavailable agent stays
+                visible but disabled, with the reason as its title. */}
+            <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
+              {([
+                ['claude', 'Claude', claudeInfo],
+                ['codex', 'Codex', codexInfo],
+              ] as const).map(([id, label, info]) => {
+                const isActive = agent === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className="rail-new-mode-seg-btn"
+                    data-active={isActive ? 'true' : 'false'}
+                    disabled={creating || info?.available === false}
+                    title={info?.available === false ? info.reason : undefined}
+                    aria-pressed={isActive}
+                    onClick={() => setAgent(id)}
+                  >
+                    <span className="rail-new-agent-seg-label">
+                      {label}{info?.available === false ? ' (unavailable)' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Model picker — sourced from /api/models (via getModels())
+                so lib/models.js stays the single source of truth for the
+                exact model ids the CLI accepts. Options + default reset
+                whenever the harness above changes (see the agent-change
+                effect). */}
+            <Dropdown
+              value={model}
+              onChange={setModel}
+              options={modelDropdownOptions}
+              disabled={creating}
+              ariaLabel="Model"
+            />
+
+            {/* Directory: dropdown of project directories + Custom…
+                option. Defaults to the first entry that looks like this
+                workspace once projectDirs arrive (see the effect above). */}
+            <Dropdown
+              value={cwdChoice}
+              onChange={setCwdChoice}
+              options={cwdDropdownOptions}
+              disabled={creating}
+              ariaLabel="Working directory"
+            />
+            {cwdChoice === 'custom' ? (
+              <input
+                className="rail-new-cwd new-session-draft-freetext"
+                type="text"
+                value={cwdCustom}
+                placeholder="~/Projects/my-project"
+                disabled={creating}
+                onChange={(e) => setCwdCustom(e.target.value)}
+                aria-label="Custom working directory"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : null}
+
+            {/* tmux session target: host the new window in an existing
+                tmux session, or spin up a brand-new one. Defaults to the
+                first fetched session once the list arrives (see the
+                tmuxSessions effect); '' still means "no session sent". */}
+            <Dropdown
+              value={tmuxChoice}
+              onChange={setTmuxChoice}
+              options={tmuxDropdownOptions}
+              disabled={creating}
+              ariaLabel="Tmux session"
+            />
+            {tmuxChoice === NEW_TMUX_SESSION ? (
+              <input
+                className="rail-new-cwd new-session-draft-freetext"
+                type="text"
+                value={newTmuxSessionName}
+                placeholder="my-new-session"
+                disabled={creating}
+                onChange={(e) => setNewTmuxSessionName(e.target.value)}
+                aria-label="New tmux session name"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : null}
+
+            <button
+              type="button"
+              className="new-session-draft-advanced-toggle"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
+            </button>
+
+            {/* Name field — Claude only; Codex has no --name flag. Compact
+                auto-width (not a stretched full-width field) via
+                new-session-draft-name-compact. */}
+            {agent === 'claude' ? (
+              <input
+                className="rail-new-name new-session-draft-name-compact"
+                type="text"
+                value={name}
+                placeholder={placeholder}
+                disabled={creating}
+                onChange={(e) => setName(e.target.value)}
+                aria-label="Session name"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            ) : (
+              <div className="rail-new-name-note" aria-live="polite">
+                Codex has no session name
+              </div>
+            )}
+
+            {/* Harness-mode pills — hidden by default (most sessions want
+                the default transport); the "Advanced" toggle above reveals
+                them. Forced onto their own line (see
+                .new-session-draft-options .rail-new-mode-seg in styles.css)
+                since they're a second, secondary segmented choice rather
+                than part of the primary control row. */}
+            {showAdvanced && agent === 'claude' ? (
+              <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
+                {([
+                  ['tmux', 'Interactive'],
+                  ['print', 'Print mode'],
+                ] as const).map(([id, label]) => {
+                  const isActive = claudeTransport === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="rail-new-mode-seg-btn"
+                      data-active={isActive ? 'true' : 'false'}
+                      disabled={creating}
+                      aria-pressed={isActive}
+                      onClick={() => setClaudeTransport(id)}
+                    >
+                      <span className="rail-new-agent-seg-label">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            {showAdvanced && agent === 'codex' ? (
+              <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
+                {([
+                  ['rpc', 'RPC'],
+                  ['tmux', 'TUI'],
+                ] as const).map(([id, label]) => {
+                  const isActive = codexTransport === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="rail-new-mode-seg-btn"
+                      data-active={isActive ? 'true' : 'false'}
+                      disabled={creating}
+                      aria-pressed={isActive}
+                      onClick={() => setCodexTransport(id)}
+                    >
+                      <span className="rail-new-agent-seg-label">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              className="rail-new-cancel new-session-draft-cancel"
+              onClick={onCancel}
+              disabled={creating}
+            >
+              Cancel
+            </button>
+          </div>
+
           <div className="composer-input-wrap">
             <textarea
               ref={promptRef}
@@ -415,232 +643,63 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             />
           </div>
 
-          {/* Bottom toolbar — reuses the live Composer.tsx's own
-              `.composer-toolbar`/`.composer-toolbar-spacer`/`.composer-send`
-              classes so the new-session options read as an INTEGRATED
-              composer toolbar, not form fields stacked above the input. The
-              lead wrapper (harness/model/dir/tmux/Advanced/name) fades out
-              on submit (see submit()'s slideToBottom) so the card reads as
-              the plain live composer once it lands in the bottom slot; Cancel
-              + Send stay outside the fade — they're the two controls that
-              still make sense once the card is in its live position. */}
+          {/* Bottom action bar — byte-identical to the live composer's own
+              [attach] [mic] [raw] [send] cluster: same .composer-toolbar/
+              -toolbar-spacer classes, same shared leaf buttons
+              (ComposerActionBar.tsx), so the card reads as the SAME composer
+              once it lands in the live slot, not a swap. Unlike the live
+              composer, send/raw-send stay ENABLED on an empty prompt —
+              starting a session doesn't require an initial message; only
+              `creating` disables them. */}
           <div className="composer-toolbar">
-            <div className="new-session-draft-toolbar-lead" ref={fadeRef}>
-              {/* Harness — segmented pill (reuses the same
-                  .rail-new-mode-seg/-btn classes as the Advanced mode pills
-                  below), matching the reference's primary "Chat | Cowork"
-                  pill language. Availability + auto-switch logic unchanged
-                  from the old <select>: a genuinely unavailable agent stays
-                  visible but disabled, with the reason as its title. */}
-              <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
-                {([
-                  ['claude', 'Claude', claudeInfo],
-                  ['codex', 'Codex', codexInfo],
-                ] as const).map(([id, label, info]) => {
-                  const isActive = agent === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className="rail-new-mode-seg-btn"
-                      data-active={isActive ? 'true' : 'false'}
-                      disabled={creating || info?.available === false}
-                      title={info?.available === false ? info.reason : undefined}
-                      aria-pressed={isActive}
-                      onClick={() => setAgent(id)}
-                    >
-                      <span className="rail-new-agent-seg-label">
-                        {label}{info?.available === false ? ' (unavailable)' : ''}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Model picker — sourced from /api/models (via getModels())
-                  so lib/models.js stays the single source of truth for the
-                  exact model ids the CLI accepts. Options + default reset
-                  whenever the harness above changes (see the agent-change
-                  effect). */}
-              <Dropdown
-                value={model}
-                onChange={setModel}
-                options={modelDropdownOptions}
-                disabled={creating}
-                ariaLabel="Model"
-              />
-
-              {/* Directory: dropdown of project directories + Custom…
-                  option. Defaults to the first entry that looks like this
-                  workspace once projectDirs arrive (see the effect above). */}
-              <Dropdown
-                value={cwdChoice}
-                onChange={setCwdChoice}
-                options={cwdDropdownOptions}
-                disabled={creating}
-                ariaLabel="Working directory"
-              />
-              {cwdChoice === 'custom' ? (
-                <input
-                  className="rail-new-cwd new-session-draft-freetext"
-                  type="text"
-                  value={cwdCustom}
-                  placeholder="~/Projects/my-project"
-                  disabled={creating}
-                  onChange={(e) => setCwdCustom(e.target.value)}
-                  aria-label="Custom working directory"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : null}
-
-              {/* tmux session target: host the new window in an existing
-                  tmux session, or spin up a brand-new one. Defaults to the
-                  first fetched session once the list arrives (see the
-                  tmuxSessions effect); '' still means "no session sent". */}
-              <Dropdown
-                value={tmuxChoice}
-                onChange={setTmuxChoice}
-                options={tmuxDropdownOptions}
-                disabled={creating}
-                ariaLabel="Tmux session"
-              />
-              {tmuxChoice === NEW_TMUX_SESSION ? (
-                <input
-                  className="rail-new-cwd new-session-draft-freetext"
-                  type="text"
-                  value={newTmuxSessionName}
-                  placeholder="my-new-session"
-                  disabled={creating}
-                  onChange={(e) => setNewTmuxSessionName(e.target.value)}
-                  aria-label="New tmux session name"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : null}
-
-              <button
-                type="button"
-                className="new-session-draft-advanced-toggle"
-                aria-expanded={showAdvanced}
-                onClick={() => setShowAdvanced((v) => !v)}
-              >
-                {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
-              </button>
-
-              {/* Name field — Claude only; Codex has no --name flag. Compact
-                  auto-width (not a stretched full-width field) via
-                  new-session-draft-name-compact. */}
-              {agent === 'claude' ? (
-                <input
-                  className="rail-new-name new-session-draft-name-compact"
-                  type="text"
-                  value={name}
-                  placeholder={placeholder}
-                  disabled={creating}
-                  onChange={(e) => setName(e.target.value)}
-                  aria-label="Session name"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              ) : (
-                <div className="rail-new-name-note" aria-live="polite">
-                  Codex has no session name
-                </div>
-              )}
-
-              {/* Harness-mode pills — hidden by default (most sessions want
-                  the default transport); the "Advanced" toggle above reveals
-                  them. Forced onto their own line (see
-                  .new-session-draft-toolbar-lead .rail-new-mode-seg in
-                  styles.css) since they're a second, secondary segmented
-                  choice rather than part of the primary control row. */}
-              {showAdvanced && agent === 'claude' ? (
-                <div className="rail-new-mode-seg" role="group" aria-label="Claude mode">
-                  {([
-                    ['tmux', 'Interactive'],
-                    ['print', 'Print mode'],
-                  ] as const).map(([id, label]) => {
-                    const isActive = claudeTransport === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="rail-new-mode-seg-btn"
-                        data-active={isActive ? 'true' : 'false'}
-                        disabled={creating}
-                        aria-pressed={isActive}
-                        onClick={() => setClaudeTransport(id)}
-                      >
-                        <span className="rail-new-agent-seg-label">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {showAdvanced && agent === 'codex' ? (
-                <div className="rail-new-mode-seg" role="group" aria-label="Codex mode">
-                  {([
-                    ['rpc', 'RPC'],
-                    ['tmux', 'TUI'],
-                  ] as const).map(([id, label]) => {
-                    const isActive = codexTransport === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="rail-new-mode-seg-btn"
-                        data-active={isActive ? 'true' : 'false'}
-                        disabled={creating}
-                        aria-pressed={isActive}
-                        onClick={() => setCodexTransport(id)}
-                      >
-                        <span className="rail-new-agent-seg-label">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-
+            {/* Attach — best-effort: createSession has no attachment field
+                (confirmed in lib/api.ts), so there's nothing to upload to
+                yet. Surface that instead of silently no-opping. */}
+            <ComposerAttachButton
+              aria-label="Attach a file"
+              title="Attachments available once the session starts"
+              disabled={creating}
+              onClick={() => {
+                onToast('Attachments available once the session starts');
+                promptRef.current?.focus();
+              }}
+            />
             <span className="composer-toolbar-spacer" />
-            <button
-              type="button"
-              className="rail-new-cancel"
-              onClick={onCancel}
+            {/* Mic — functional: useVoiceRecorder direct (no heavy morph
+                overlay needed here). Click starts recording; click again
+                (or the same button, now in its "stop" state) stops +
+                transcribes, appending the result to the prompt. */}
+            <ComposerMicButton
+              ariaLabel={micActive ? 'Stop recording' : 'Voice input'}
+              title={micActive ? 'Stop & transcribe' : 'Voice input'}
+              disabled={creating || voice.status === 'transcribing'}
+              active={micActive}
+              onClick={() => (micActive ? voice.stop() : setMicActive(true))}
+            />
+            {/* Raw send — best-effort: no optimiser exists pre-session, so
+                this converges on the exact same submit() as the primary
+                Send button below (same handler shape as the live composer's
+                bypass button, which also just calls the send path raw). */}
+            <ComposerRawSendButton
+              ariaLabel="Create session (raw)"
+              title="Create session — same as Send (⌘/Ctrl+⇧+↵)"
               disabled={creating}
-            >
-              Cancel
-            </button>
-            <button
+              onClick={() => void submit()}
+            />
+            {/* Primary send — functional: type="submit" so the form's own
+                onSubmit (preventDefault + submit()) still owns it, keeping
+                Enter-to-submit in the freetext inputs above working exactly
+                as before. */}
+            <ComposerSendButton
               type="submit"
-              className="composer-send"
-              disabled={creating}
-              aria-label={creating ? 'Creating session…' : 'Create session'}
+              ariaLabel={creating ? 'Creating session…' : 'Create session'}
               title="Create session (⌘/Ctrl+↵)"
-            >
-              {creating ? <span className="composer-enhance-spinner" aria-hidden="true" /> : <ArrowUpIcon />}
-            </button>
+              disabled={creating}
+              busy={creating}
+            />
           </div>
         </form>
       </div>
     </div>
-  );
-}
-
-function ArrowUpIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 19V5M6 11l6-6 6 6"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

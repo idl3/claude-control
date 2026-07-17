@@ -5248,22 +5248,16 @@ body.is-external-display .composer {
   width: 100%;
   padding-bottom: var(--s-6);
 }
-/* Integrated toolbar layout — the harness/model/dir/tmux/Advanced/name
-   controls now live INSIDE the bottom .composer-toolbar (see
-   NewSessionDraft.tsx) instead of a stacked form-field row above the input,
-   so the draft reads as one composer with an options-rich toolbar rather
-   than a settings form bolted onto a chat box. `.new-session-draft` scopes
-   the wrap override to this screen only — `.composer-toolbar` itself is
-   shared with the live Composer.tsx, whose single-row toolbar must never
-   wrap. */
-.new-session-draft .composer-toolbar {
-  flex-wrap: wrap;
-  row-gap: var(--s-2);
-}
-/* The single fade target (see fadeRef in NewSessionDraft.tsx) — every option
-   control lives inside this one wrapper so submit()'s opacity fade covers
-   them all as one target, matching the pre-existing slideToBottom contract. */
-.new-session-draft-toolbar-lead {
+/* Option row — harness/model/dir/tmux/Advanced/name — sits ABOVE
+   `.composer-input-wrap` inside `.composer-card` (see NewSessionDraft.tsx),
+   its own horizontal wrap-flex strip anchoring the compose box from above.
+   `.composer-toolbar` below it is now byte-identical to the live
+   Composer.tsx's own bottom bar (never wraps, same classes) — this row is
+   what absorbs the draft-only settings instead. This is the single fade
+   target (see fadeRef in NewSessionDraft.tsx): every option control lives
+   inside this one wrapper so submit()'s opacity fade covers them all as one
+   target, matching the pre-existing slideToBottom contract. */
+.new-session-draft-options {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -5274,8 +5268,14 @@ body.is-external-display .composer {
 /* Advanced mode pill (Claude Interactive/Print, Codex RPC/TUI) is a second,
    secondary segmented choice — forced onto its own wrapped line so it never
    fights the primary harness/model/dir/tmux row for space. */
-.new-session-draft-toolbar-lead > .rail-new-mode-seg:not(.new-session-draft-agent-seg) {
+.new-session-draft-options > .rail-new-mode-seg:not(.new-session-draft-agent-seg) {
   flex: 1 1 100%;
+}
+/* Cancel travels with the option row (top, not the bottom action bar, which
+   must stay identical to the live composer's — no Cancel there). Pinned to
+   the row's trailing edge regardless of how much wraps above it. */
+.new-session-draft-cancel {
+  margin-left: auto;
 }
 /* Harness pill sizes to its two labels, not the full row. */
 .new-session-draft-agent-seg {
@@ -5453,17 +5453,33 @@ body.is-external-display .composer {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* Mobile: the toolbar-lead row already wraps (see .new-session-draft
-   .composer-toolbar above), so dropdown triggers just need a smaller cap so
-   two can share a row instead of each claiming the full width; the compact
-   name field is allowed to shrink toward its 140px floor instead of holding
-   a 240px max on a narrow screen. */
+/* Mobile: .new-session-draft-options already wraps (flex-wrap: wrap above),
+   so dropdown triggers just need a smaller cap so two can share a row
+   instead of each claiming the full width; the compact name field is
+   allowed to shrink toward its 140px floor instead of holding a 240px max
+   on a narrow screen. */
 @media (max-width: 480px) {
   .dropdown-trigger {
     max-width: min(160px, 70vw);
   }
   .new-session-draft-name-compact {
     flex-basis: 140px;
+  }
+}
+
+/* Mic "recording" state — shared .composer-mic button (ComposerActionBar.tsx),
+   used by both NewSessionDraft.tsx (data-active toggled locally) and, in
+   principle, Composer.tsx (which doesn't set `active` today). Reuses the
+   existing stop-pulse keyframes (see .composer-send[data-stop="true"] above)
+   rather than adding a second pulse animation. */
+.composer-mic[data-active='true'] {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .composer-mic[data-active='true'] {
+    animation: stop-pulse 1.4s ease-in-out infinite;
   }
 }
 
