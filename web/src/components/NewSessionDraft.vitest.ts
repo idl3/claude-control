@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement } from 'react';
 import { NewSessionDraft } from './NewSessionDraft';
 import type { SpawnAgentInfo } from '../lib/api';
@@ -22,6 +22,30 @@ vi.mock('gsap', () => {
 });
 
 afterEach(cleanup);
+
+// ── DOM helpers for the Dropdown/segmented-control chrome ───────────────────
+// The agent/model/cwd/tmux pickers are no longer native <select> elements
+// (see NewSessionDraft.tsx + Dropdown.tsx), so tests drive them by clicking
+// the trigger button (labeled via aria-label, same as a native select would
+// be via getByLabelText) and then the rendered `role="option"` row, scoped to
+// the open `role="listbox"` to avoid colliding with the trigger's own label
+// text (e.g. both can render "Opus 4.8" at once while the menu is open).
+
+/** Opens a Dropdown by its aria-label and returns the resulting listbox. */
+function openDropdown(ariaLabel: string): HTMLElement {
+  fireEvent.click(screen.getByLabelText(ariaLabel));
+  return screen.getByRole('listbox');
+}
+
+/** Clicks the option row (scoped to an open listbox) whose visible text is `labelText`. */
+function pickOption(menu: HTMLElement, labelText: string) {
+  fireEvent.click(within(menu).getByText(labelText).closest('[role="option"]') as HTMLElement);
+}
+
+/** The segmented Harness control (Claude | Codex). */
+function harnessGroup(): HTMLElement {
+  return screen.getByRole('group', { name: 'Harness' });
+}
 
 // ── SpawnAgentInfo type contract ─────────────────────────────────────────────
 // Light type-level smoke test that the shape NewSessionDraft consumes is
@@ -59,8 +83,8 @@ describe('NewSessionDraft welcome hero', () => {
 
     expect(screen.getByText('What are we shipping today?')).toBeTruthy();
     expect(screen.queryByText('New session')).toBeNull();
-    // Option row (agent/model selects etc.) still renders alongside the hero.
-    expect(await screen.findByLabelText('Agent')).toBeTruthy();
+    // Toolbar row (harness/model/etc.) still renders alongside the hero.
+    expect(await screen.findByRole('group', { name: 'Harness' })).toBeTruthy();
     expect(screen.getByLabelText('Model')).toBeTruthy();
   });
 
@@ -213,14 +237,13 @@ function stubApi({
   return { createCalls };
 }
 
-describe('NewSessionDraft agent + model selects', () => {
+describe('NewSessionDraft harness segmented control + model dropdown', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps unavailable agents selectable in the Agent dropdown, and shows Claude model options', async () => {
-    stubApi({ claudeAvailable: false, codexAvailable: false });
-
+  it('shows an unavailable agent disabled in the Harness control, with the reason as its title', async () => {
+    stubApi({ codexAvailable: false });
     render(createElement(NewSessionDraft, {
       filter: 'all',
       onToast: () => {},
@@ -228,46 +251,15 @@ describe('NewSessionDraft agent + model selects', () => {
       onCreated: () => {},
     }));
 
-    const agentSelect = await screen.findByLabelText('Agent') as HTMLSelectElement;
-    expect(agentSelect.disabled).toBe(false);
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Claude (unavailable)' })).toBeTruthy();
-    });
-    expect(screen.getByRole('option', { name: 'Codex (unavailable)' })).toBeTruthy();
-
-    // Model picker (Claude models, formatted+lowercased via formatModel())
-    // shows Default plus every fetched model, default selected.
-    const modelSelect = screen.getByLabelText('Model') as HTMLSelectElement;
-    expect(modelSelect.value).toBe('default');
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'opus-4.8' })).toBeTruthy();
-    });
-    expect(screen.getByRole('option', { name: 'sonnet-5' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'fable-5' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'haiku-4.5' })).toBeTruthy();
-
-    // Harness-mode pills are hidden until "Advanced" is revealed.
-    expect(screen.queryByRole('group', { name: 'Claude mode' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Advanced/ }));
-    expect(screen.getByRole('group', { name: 'Claude mode' })).toBeTruthy();
-
-    // Switching harness re-populates AND re-defaults the model select, and
-    // swaps the revealed mode group.
-    fireEvent.change(agentSelect, { target: { value: 'codex' } });
-    expect(modelSelect.value).toBe('default');
-    await waitFor(() => {
-      expect(screen.getByRole('group', { name: 'Codex mode' })).toBeTruthy();
-    });
-    expect(screen.queryByRole('group', { name: 'Claude mode' })).toBeNull();
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'gpt-5.5' })).toBeTruthy();
-    });
-    expect(screen.getByRole('option', { name: 'gpt-5.4' })).toBeTruthy();
-    expect(screen.queryByRole('option', { name: 'opus-4.8' })).toBeNull();
-    expect(screen.getByText('Codex has no session name')).toBeTruthy();
+    const group = harnessGroup();
+    const codexBtn = await waitFor(() => within(group).getByRole('button', { name: 'Codex (unavailable)' }));
+    expect((codexBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(codexBtn.getAttribute('title')).toBe('codex missing');
+    // Claude is the only available agent, so it stays selected.
+    expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('selecting a model updates the select value', async () => {
+  it('labels the default model row with the real flagship name plus a muted "Default" badge, never the literal word "Default", and never duplicates the flagship row', async () => {
     stubApi();
     render(createElement(NewSessionDraft, {
       filter: 'all',
@@ -275,15 +267,39 @@ describe('NewSessionDraft agent + model selects', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'opus-4.8' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'claude-opus-4-8' } });
-    expect(modelSelect.value).toBe('claude-opus-4-8');
+
+    // ASSUMPTION under test (see the same comment in NewSessionDraft.tsx):
+    // modelOptions[0] is the harness default — the trigger must show its
+    // real name, never the literal word "Default".
+    const trigger = await screen.findByLabelText('Model');
+    await waitFor(() => expect(trigger.textContent).toContain('Opus 4.8'));
+
+    const menu = openDropdown('Model');
+    const options = within(menu).getAllByRole('option');
+    // Default(Opus 4.8) + Sonnet 5 + Fable 5 + Haiku 4.5 — exactly 4 rows;
+    // Opus 4.8 appears ONCE, as the badged default row, never a second time.
+    expect(options).toHaveLength(4);
+    expect(within(menu).getByText('Default')).toBeTruthy();
+    expect(within(menu).getAllByText('Opus 4.8')).toHaveLength(1);
   });
 
-  it('offers the exact Claude model ids from /api/models, including Fable 5', async () => {
+  it('lists every fetched Claude model in the open dropdown', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    await screen.findByLabelText('Model');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('Sonnet 5')).toBeTruthy());
+    expect(within(menu).getByText('Fable 5')).toBeTruthy();
+    expect(within(menu).getByText('Haiku 4.5')).toBeTruthy();
+  });
+
+  it('selecting a non-default model updates the trigger label and submits its real id', async () => {
     const { createCalls } = stubApi();
     render(createElement(NewSessionDraft, {
       filter: 'all',
@@ -291,14 +307,42 @@ describe('NewSessionDraft agent + model selects', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'fable-5' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'claude-fable-5' } });
+
+    await screen.findByLabelText('Model');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('Fable 5')).toBeTruthy());
+    pickOption(menu, 'Fable 5');
+    expect(screen.getByLabelText('Model').textContent).toContain('Fable 5');
+
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].model).toBe('claude-fable-5');
+  });
+
+  it('switching harness from Claude to Codex re-defaults the model, swaps the revealed mode group, and swaps in the "no session name" note', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /Advanced/ }));
+    expect(screen.getByRole('group', { name: 'Claude mode' })).toBeTruthy();
+
+    // Pick a non-default model before switching, to prove the switch resets it.
+    let menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('Sonnet 5')).toBeTruthy());
+    pickOption(menu, 'Sonnet 5');
+    expect(screen.getByLabelText('Model').textContent).toContain('Sonnet 5');
+
+    fireEvent.click(within(harnessGroup()).getByRole('button', { name: 'Codex' }));
+
+    await waitFor(() => expect(screen.getByLabelText('Model').textContent).toContain('GPT-5.5'));
+    expect(screen.getByRole('group', { name: 'Codex mode' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Claude mode' })).toBeNull();
+    expect(screen.getByText('Codex has no session name')).toBeTruthy();
   });
 });
 
@@ -307,7 +351,7 @@ describe('NewSessionDraft Codex model options', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the Model select populated with Default + fetched Codex models, once Codex is the default agent', async () => {
+  it('shows the Model dropdown defaulted to the real flagship label (GPT-5.5), plus every fetched Codex model', async () => {
     stubApi();
     render(createElement(NewSessionDraft, {
       filter: 'codex',
@@ -316,12 +360,13 @@ describe('NewSessionDraft Codex model options', () => {
       onCreated: () => {},
     }));
 
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    expect(modelSelect.value).toBe('default');
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'gpt-5.5' })).toBeTruthy();
-    });
-    expect(screen.getByRole('option', { name: 'gpt-5.4' })).toBeTruthy();
+    const trigger = await screen.findByLabelText('Model');
+    await waitFor(() => expect(trigger.textContent).toContain('GPT-5.5'));
+
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
+    // GPT-5.5 appears once — as the badged default row, not duplicated.
+    expect(within(menu).getAllByText('GPT-5.5')).toHaveLength(1);
   });
 
   it('sends the selected codexModel id on create, and omits it when left at Default', async () => {
@@ -333,14 +378,13 @@ describe('NewSessionDraft Codex model options', () => {
       onCreated: () => {},
     }));
 
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'gpt-5.5' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'gpt-5.5' } });
+    await screen.findByLabelText('Model');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
+    pickOption(menu, 'GPT-5.4');
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
     await waitFor(() => expect(createCalls.length).toBe(1));
-    expect(createCalls[0].codexModel).toBe('gpt-5.5');
+    expect(createCalls[0].codexModel).toBe('gpt-5.4');
     expect(createCalls[0].agent).toBe('codex');
   });
 
@@ -368,12 +412,12 @@ describe('NewSessionDraft Codex model options', () => {
       onCreated: () => {},
     }));
 
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'gpt-5.4' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'gpt-5.4' } });
-    fireEvent.change(await screen.findByLabelText('Agent'), { target: { value: 'claude' } });
+    await screen.findByLabelText('Model');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
+    pickOption(menu, 'GPT-5.4');
+
+    fireEvent.click(within(harnessGroup()).getByRole('button', { name: 'Claude' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
@@ -397,11 +441,11 @@ describe('NewSessionDraft submit payload', () => {
       onCreated,
     }));
 
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'sonnet-5' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'claude-sonnet-5' } });
+    await screen.findByLabelText('Model');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('Sonnet 5')).toBeTruthy());
+    pickOption(menu, 'Sonnet 5');
+
     const textarea = screen.getByLabelText('Initial prompt');
     fireEvent.change(textarea, { target: { value: 'fix the failing test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
@@ -457,12 +501,15 @@ describe('NewSessionDraft submit payload', () => {
       onCreated: () => {},
     }));
 
-    const modelSelect = await screen.findByLabelText('Model') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'opus-4.8' })).toBeTruthy();
-    });
-    fireEvent.change(modelSelect, { target: { value: 'claude-opus-4-8' } });
-    fireEvent.change(await screen.findByLabelText('Agent'), { target: { value: 'codex' } });
+    await screen.findByLabelText('Model');
+    // Opus 4.8 is already the (badged) default row — pick a genuinely
+    // distinct, explicit model id instead, so a real value is in flight
+    // when we switch harness.
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('Haiku 4.5')).toBeTruthy());
+    pickOption(menu, 'Haiku 4.5');
+
+    fireEvent.click(within(harnessGroup()).getByRole('button', { name: 'Codex' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
@@ -513,15 +560,14 @@ describe('NewSessionDraft tmux target picker', () => {
       onCreated: () => {},
     }));
 
-    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'work (3 windows)' })).toBeTruthy();
-    });
-    expect(screen.getByRole('option', { name: 'claude-control (1 window)' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'New tmux session…' })).toBeTruthy();
+    const trigger = await screen.findByLabelText('Tmux session');
     // New default behavior: auto-selects the first fetched session (rather
     // than leaving the picker on "(default)").
-    await waitFor(() => expect(select.value).toBe('work'));
+    await waitFor(() => expect(trigger.textContent).toContain('work (3 windows)'));
+
+    const menu = openDropdown('Tmux session');
+    expect(within(menu).getByText('claude-control (1 window)')).toBeTruthy();
+    expect(within(menu).getByText('New tmux session…')).toBeTruthy();
   });
 
   it('appends a "shared (N linked)" hint for a collapsed session GROUP entry', async () => {
@@ -538,13 +584,12 @@ describe('NewSessionDraft tmux target picker', () => {
       onCreated: () => {},
     }));
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('option', { name: 'claude-control & olam (20 windows) · shared (4 linked)' }),
-      ).toBeTruthy();
-    });
+    const trigger = await screen.findByLabelText('Tmux session');
+    await waitFor(() => expect(trigger.textContent).toContain('claude-control & olam'));
+    const menu = openDropdown('Tmux session');
+    expect(within(menu).getByText('claude-control & olam (20 windows) · shared (4 linked)')).toBeTruthy();
     // Non-grouped entries render exactly as before, no hint appended.
-    expect(screen.getByRole('option', { name: 'cc_14517 (2 windows)' })).toBeTruthy();
+    expect(within(menu).getByText('cc_14517 (2 windows)')).toBeTruthy();
   });
 
   it('selecting "New tmux session…" reveals the name input; picking an existing session hides it', async () => {
@@ -556,14 +601,14 @@ describe('NewSessionDraft tmux target picker', () => {
       onCreated: () => {},
     }));
 
-    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('work'));
+    const trigger = await screen.findByLabelText('Tmux session');
+    await waitFor(() => expect(trigger.textContent).toContain('work (1 window)'));
     expect(screen.queryByLabelText('New tmux session name')).toBeNull();
 
-    fireEvent.change(select, { target: { value: '__new__' } });
+    pickOption(openDropdown('Tmux session'), 'New tmux session…');
     expect(await screen.findByLabelText('New tmux session name')).toBeTruthy();
 
-    fireEvent.change(select, { target: { value: 'work' } });
+    pickOption(openDropdown('Tmux session'), 'work (1 window)');
     expect(screen.queryByLabelText('New tmux session name')).toBeNull();
   });
 
@@ -575,8 +620,8 @@ describe('NewSessionDraft tmux target picker', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('work'));
+    const trigger = await screen.findByLabelText('Tmux session');
+    await waitFor(() => expect(trigger.textContent).toContain('work (1 window)'));
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
@@ -584,20 +629,21 @@ describe('NewSessionDraft tmux target picker', () => {
     expect(createCalls[0].newTmuxSession).toBeUndefined();
   });
 
-  it('selecting an existing session sends tmuxSession, not newTmuxSession', async () => {
-    const { createCalls } = stubApi({ tmuxSessions: [{ name: 'work', windows: 1 }] });
+  it('explicitly selecting an existing session sends tmuxSession, not newTmuxSession', async () => {
+    const { createCalls } = stubApi({ tmuxSessions: [{ name: 'work', windows: 1 }, { name: 'other', windows: 2 }] });
     render(createElement(NewSessionDraft, {
       filter: 'all',
       onToast: () => {},
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const select = await screen.findByLabelText('Tmux session');
-    fireEvent.change(select, { target: { value: 'work' } });
+    const trigger = await screen.findByLabelText('Tmux session');
+    await waitFor(() => expect(trigger.textContent).toContain('work (1 window)'));
+    pickOption(openDropdown('Tmux session'), 'other (2 windows)');
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
-    expect(createCalls[0].tmuxSession).toBe('work');
+    expect(createCalls[0].tmuxSession).toBe('other');
     expect(createCalls[0].newTmuxSession).toBeUndefined();
   });
 
@@ -609,8 +655,8 @@ describe('NewSessionDraft tmux target picker', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const select = await screen.findByLabelText('Tmux session');
-    fireEvent.change(select, { target: { value: '__new__' } });
+    await screen.findByLabelText('Tmux session');
+    pickOption(openDropdown('Tmux session'), 'New tmux session…');
     const nameInput = await screen.findByLabelText('New tmux session name');
     fireEvent.change(nameInput, { target: { value: 'my-feature' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
@@ -639,9 +685,10 @@ describe('NewSessionDraft tmux target picker', () => {
       onCreated: () => {},
     }));
 
-    const select = await screen.findByLabelText('Tmux session') as HTMLSelectElement;
-    expect(select.value).toBe('');
-    expect(screen.getByRole('option', { name: 'New tmux session…' })).toBeTruthy();
+    const trigger = await screen.findByLabelText('Tmux session');
+    expect(trigger.textContent).toContain('(default)');
+    const menu = openDropdown('Tmux session');
+    expect(within(menu).getByText('New tmux session…')).toBeTruthy();
   });
 });
 
@@ -650,7 +697,7 @@ describe('NewSessionDraft directory picker', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults the working-directory select to the entry matching this workspace', async () => {
+  it('defaults the working-directory dropdown to the entry matching this workspace', async () => {
     stubApi({
       projectDirs: [
         { label: 'other-project', path: '/Users/x/Projects/other-project' },
@@ -664,8 +711,8 @@ describe('NewSessionDraft directory picker', () => {
       onCreated: () => {},
     }));
 
-    const select = await screen.findByLabelText('Working directory') as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('/Users/x/Projects/pleri-org'));
+    const trigger = await screen.findByLabelText('Working directory');
+    await waitFor(() => expect(trigger.textContent).toContain('pleri-org'));
   });
 
   it('falls back to the (default) option when no directory matches this workspace', async () => {
@@ -677,11 +724,10 @@ describe('NewSessionDraft directory picker', () => {
       onCreated: () => {},
     }));
 
-    const select = await screen.findByLabelText('Working directory') as HTMLSelectElement;
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'other-project' })).toBeTruthy();
-    });
-    expect(select.value).toBe('');
+    const trigger = await screen.findByLabelText('Working directory');
+    await waitFor(() => expect(trigger.textContent).toContain('(default)'));
+    const menu = openDropdown('Working directory');
+    expect(within(menu).getByText('other-project')).toBeTruthy();
   });
 });
 
@@ -759,8 +805,9 @@ describe('NewSessionDraft agent default from filter', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const select = await screen.findByLabelText('Agent') as HTMLSelectElement;
-    expect(select.value).toBe('codex');
+    const group = await screen.findByRole('group', { name: 'Harness' });
+    expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('defaults to claude for every other filter', async () => {
@@ -771,7 +818,8 @@ describe('NewSessionDraft agent default from filter', () => {
       onCancel: () => {},
       onCreated: () => {},
     }));
-    const select = await screen.findByLabelText('Agent') as HTMLSelectElement;
-    expect(select.value).toBe('claude');
+    const group = await screen.findByRole('group', { name: 'Harness' });
+    expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
