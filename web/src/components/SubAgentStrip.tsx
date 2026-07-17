@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SlotText } from 'slot-text/react';
 import type { SubAgent } from '../lib/types';
 import { latestAgentSummary } from '../lib/agentSummary';
 
@@ -72,6 +73,12 @@ export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId, working 
     : null;
   const captionAgent = focused ?? visible.find((a) => a.status === 'running') ?? visible[0];
   const caption = latestAgentSummary(captionAgent);
+  // Same roll-in treatment as SessionRail's right-hand meta slot: ONE
+  // persistent SlotText instance (no `key`, so switching agents or a new
+  // activity line updates `text` in place) plays the roll on every change
+  // instead of a hard text swap. `.subagent-progress-text` additionally
+  // carries the shimmer sweep (styles.css) while the caption is live.
+  const slotOpts = { direction: 'up' as const, skipUnchanged: true, duration: 300 };
 
   const ariaLabel =
     runningCount > 0 && doneCount > 0
@@ -121,7 +128,7 @@ export function SubAgentStrip({ subagents, onOpenAgent, viewingAgentId, working 
       </div>
       {caption ? (
         <p className="subagent-strip-caption" aria-live="polite">
-          {caption}
+          <SlotText text={caption} className="subagent-progress-text" options={slotOpts} />
         </p>
       ) : null}
     </div>
