@@ -17,7 +17,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { createElement } from 'react';
 import type { NestedSubAgent, SubAgent } from '../lib/types';
 import { SubAgentStrip } from './SubAgentStrip';
@@ -226,8 +226,8 @@ describe('SubAgentStrip', () => {
     expect(container.querySelector('.subagent-pills-nested')).toBeNull();
   });
 
-  // ── CAPTION: SlotText roll + shimmer wiring on the live activity line. ──
-  it('renders the caption through a single persistent SlotText instance (roll-in, not a remount) and carries the shimmer class', async () => {
+  // ── CAPTION: plain-text feed-style animate-in (no SlotText char-roll). ──
+  it('renders the caption as plain text, keyed so a changed line remounts the inner span (plays the CSS slide-up-fade enter)', () => {
     const running = (text: string): SubAgent => ({
       agentId: 'a1',
       toolUseId: null,
@@ -246,44 +246,90 @@ describe('SubAgentStrip', () => {
 
     const caption = container.querySelector('.subagent-strip-caption');
     expect(caption).not.toBeNull();
-    const slot = caption!.querySelector<HTMLElement>('.subagent-progress-text');
-    expect(slot).not.toBeNull();
-    // SlotText's own effect (buildSlotText) turns the text into per-character
-    // .char-slot/.char-face spans — this is the roll-in machinery, not plain
-    // text content — and adds its own `.slot-text` class alongside ours.
-    expect(slot!.classList.contains('slot-text')).toBe(true);
-    expect(slot!.querySelectorAll('.char-slot').length).toBeGreaterThan(0);
-    // Read text off the `.char-face` glyphs specifically — `.slot-text` also
-    // renders an invisible `.char-sizer` twin per slot (see slot-text's
-    // style.css), so raw `.textContent` on the container double-counts every
-    // character.
-    const faceText = (el: Element) =>
-      [...el.querySelectorAll('.char-face')].map((f) => f.textContent).join('').replace(/ /g, ' ');
-    expect(faceText(slot!)).toBe('Inspecting redis-helm chart');
+    const span = caption!.querySelector<HTMLElement>('.subagent-progress-text');
+    expect(span).not.toBeNull();
+    // Plain text content — no per-character .char-slot/.char-face markup and
+    // no slot-text library class.
+    expect(span!.classList.contains('slot-text')).toBe(false);
+    expect(span!.querySelectorAll('.char-slot').length).toBe(0);
+    expect(span!.textContent).toBe('Inspecting redis-helm chart');
 
-    // Updating the activity text must update the SAME SlotText node in place
-    // (no `key`, no remount) so the roll animation actually plays on update —
-    // a keyed remount would swap in a fresh element and skip it.
+    // Updating the activity text swaps in a DIFFERENT span instance (keyed on
+    // the text) so the CSS enter-animation (subagent-caption-in, styles.css)
+    // plays fresh on every change — the opposite contract of the old
+    // persistent-SlotText-node approach.
     rerender(
       createElement(SubAgentStrip, {
         subagents: [running('Reviewing values.yaml diff')],
         onOpenAgent: () => {},
       }),
     );
-    const slotAfter = container.querySelector<HTMLElement>('.subagent-progress-text');
-    expect(slotAfter).toBe(slot);
-    // slot-text keeps both the outgoing and incoming `.char-face` per changed
-    // cell mounted side-by-side until each one's CSS transition ends (see
-    // node_modules/slot-text/dist/slotText.js `animateSlotText`) — jsdom
-    // never fires `transitionend`, so the roll only resolves to a pristine
-    // single-face DOM via the library's own timer-based safety-net settle.
-    // Wait for that, rather than asserting on the mid-roll DOM.
-    await waitFor(
-      () => {
-        expect(faceText(slotAfter!)).toBe('Reviewing values.yaml diff');
-      },
-      { timeout: 3000 },
+    const spanAfter = container.querySelector<HTMLElement>('.subagent-progress-text');
+    expect(spanAfter).not.toBe(span);
+    expect(spanAfter!.textContent).toBe('Reviewing values.yaml diff');
+  });
+
+  // ── QUICK VIEW: hover-expand panel showing the last (up to) 5 distinct
+  // activity lines, most recent last. ─────────────────────────────────────
+  it('renders a quick-view panel with the last 5 distinct lines (deduped, most recent last) when more than one line exists', () => {
+    const agentWithHistory = (): SubAgent => ({
+      agentId: 'a1',
+      toolUseId: null,
+      agentType: 'coder',
+      description: null,
+      status: 'running',
+      messages: [
+        { uuid: '1', role: 'assistant', blocks: [{ kind: 'text', text: 'Reading config.yaml' }] },
+        { uuid: '2', role: 'assistant', blocks: [{ kind: 'text', text: 'Reading config.yaml' }] }, // consecutive dup, collapses
+        { uuid: '3', role: 'assistant', blocks: [{ kind: 'text', text: 'Editing helm chart' }] },
+        { uuid: '4', role: 'assistant', blocks: [{ kind: 'text', text: 'Running tests' }] },
+        { uuid: '5', role: 'assistant', blocks: [{ kind: 'text', text: 'Tests passed' }] },
+      ],
+    });
+
+    const { container } = render(
+      createElement(SubAgentStrip, {
+        subagents: [agentWithHistory()],
+        onOpenAgent: () => {},
+      }),
     );
+
+    const wrap = container.querySelector('.subagent-strip-caption-wrap');
+    expect(wrap).not.toBeNull();
+    expect(wrap!.getAttribute('tabindex')).toBe('0');
+
+    const panel = container.querySelector('.subagent-quickview-panel');
+    expect(panel).not.toBeNull();
+    const lines = [...panel!.querySelectorAll('.subagent-quickview-line')].map((el) => el.textContent);
+    expect(lines).toEqual([
+      'Reading config.yaml',
+      'Editing helm chart',
+      'Running tests',
+      'Tests passed',
+    ]);
+    // Most recent line is flagged for the "slightly less dim than older
+    // lines" styling (styles.css `[data-latest='true']`).
+    const lastLine = panel!.querySelector('.subagent-quickview-line[data-latest="true"]');
+    expect(lastLine?.textContent).toBe('Tests passed');
+  });
+
+  it('does not render a quick-view panel when there is only a single activity line', () => {
+    const { container } = render(
+      createElement(SubAgentStrip, {
+        subagents: [
+          {
+            agentId: 'a1',
+            toolUseId: null,
+            agentType: 'coder',
+            description: null,
+            status: 'running',
+            messages: [{ uuid: '1', role: 'assistant', blocks: [{ kind: 'text', text: 'only line' }] }],
+          },
+        ],
+        onOpenAgent: () => {},
+      }),
+    );
+    expect(container.querySelector('.subagent-quickview-panel')).toBeNull();
   });
 
   // ── DONE-DOT: the testable contract for the done pill's dot. ────────────
