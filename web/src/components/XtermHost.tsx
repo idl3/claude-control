@@ -63,20 +63,52 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHost
     term.loadAddon(fit);
     term.open(container);
 
-    // Hardware-accelerated rendering (best-effort — falls back to xterm's
-    // default canvas renderer if WebGL is unavailable, e.g. headless/older
-    // browsers; never fatal to the terminal itself).
+    // Hardware-accelerated rendering — best-effort. WebGL contexts are flaky in
+    // some browsers (notably Brave's fingerprint protection / GPU-process
+    // recycling) and can be lost after init. On context loss, drop the addon so
+    // xterm reverts to its default DOM renderer, then force a repaint — without
+    // the refresh the fallback can leave a blank/black canvas.
     try {
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+        try { term.refresh(0, term.rows - 1); } catch { /* term may be disposing */ }
+      });
       term.loadAddon(webgl);
     } catch {
-      /* WebGL unsupported — canvas2D fallback xterm ships by default. */
+      /* WebGL unsupported — xterm's default DOM renderer handles it. */
     }
 
-    fit.fit();
-
     const client = new PtyClient(sessionId);
+
+    // Bounded, self-limiting fit. The host now lives in a container with a
+    // DEFINITE height (CSS: `.terminal-view` fixed height + `.term-canvas`
+    // position:absolute/inset:0), so `.term-canvas` can never be pushed taller
+    // by its own content and `fit()` always reads a stable box. We ALSO guard
+    // against a fit -> resize -> fit storm defensively: coalesce a burst of
+    // ResizeObserver callbacks into ONE rAF-batched fit, skip entirely while the
+    // box is zero-sized (kept-warm/hidden overlay mount — fitting a 0px box
+    // yields garbage rows and strands output off-screen), and only push a resize
+    // to the pty when cols/rows ACTUALLY change. This was the root cause of the
+    // unbounded-growth black screen (xterm grew to 6000px+ in a height:auto box).
+    let lastCols = 0;
+    let lastRows = 0;
+    let rafId = 0;
+    const applyFit = () => {
+      rafId = 0;
+      const el = containerRef.current;
+      if (!el || el.clientHeight < 2 || el.clientWidth < 2) return;
+      try { fit.fit(); } catch { /* renderer not ready yet */ }
+      if (term.cols !== lastCols || term.rows !== lastRows) {
+        lastCols = term.cols;
+        lastRows = term.rows;
+        client.resize(term.cols, term.rows);
+      }
+    };
+    const scheduleFit = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(applyFit);
+    };
 
     const offData = client.onData((bytes) => {
       term.write(bytes);
@@ -88,9 +120,10 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHost
         // own scrollback rather than a React overlay (A1 §4, state 3).
         term.write(TYPED_ERROR_FRAME);
       } else if (state === 'connected') {
-        // Once attach is confirmed, tell the server our real size — sending
-        // this any earlier races the server's async attach handshake (see
-        // pty-client.ts's `resize`/`write` queuing comment).
+        // Once attach is confirmed, re-fit and tell the server our real size —
+        // sending this any earlier races the server's async attach handshake
+        // (see pty-client.ts's `resize`/`write` queuing comment).
+        scheduleFit();
         client.resize(term.cols, term.rows);
       }
     });
@@ -99,10 +132,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHost
       client.write(data);
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
-      client.resize(term.cols, term.rows);
-    });
+    const resizeObserver = new ResizeObserver(scheduleFit);
     resizeObserver.observe(container);
 
     const onFocus = () => setTerminalPanelFocused(true);
@@ -110,9 +140,11 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere }: XtermHost
     term.textarea?.addEventListener('focus', onFocus);
     term.textarea?.addEventListener('blur', onBlur);
 
+    scheduleFit(); // initial fit, deferred one frame so layout has settled
     client.connect();
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       offData();
       offState();
       disposeOnData.dispose();
