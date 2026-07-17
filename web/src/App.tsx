@@ -71,6 +71,7 @@ import { hasOpenQuestion } from './lib/askGuard';
 import {
   echoMatches,
   hasDeliveredEcho,
+  msgHasImage,
   msgText,
   PENDING_SENDS_LS_KEY,
   removePendingSend,
@@ -592,14 +593,18 @@ function AppInner() {
     if (!sid || !pendingSends.some((e) => e.sessionId === sid)) return;
     const echoes = cockpit.messages
       .filter((m) => m.role === 'user')
-      .map((m) => ({ t: msgText(m), ts: toMs(m.ts) }))
-      .filter((e) => e.t.trim());
+      .map((m) => ({ t: msgText(m), ts: toMs(m.ts), hasImage: msgHasImage(m) }))
+      // Keep image-only echoes (empty text, e.g. an attachment sent with no
+      // caption) — echoMatches' own attachment fallback decides whether one
+      // of those reconciles a queued entry; dropping them here would make
+      // that fallback unreachable and leave image-only sends "Queued" forever.
+      .filter((e) => e.t.trim() || e.hasImage);
     setPendingSends((q) => {
       const claimed = new Set<number>();
       const next = q.filter((e) => {
         if (e.sessionId !== sid) return true; // leave other sessions untouched
         const idx = echoes.findIndex(
-          (ec, i) => !claimed.has(i) && echoMatches(e, ec.t, ec.ts),
+          (ec, i) => !claimed.has(i) && echoMatches(e, ec.t, ec.ts, ec.hasImage),
         );
         if (idx >= 0) {
           claimed.add(idx);

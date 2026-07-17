@@ -108,7 +108,12 @@ export type Block =
       input?: unknown;
       inputSummary?: string;
     }
-  | { kind: 'tool_result'; forId: string; text: string; isError?: boolean };
+  | { kind: 'tool_result'; forId: string; text: string; isError?: boolean }
+  // A pasted/typed image attachment. The server deliberately omits the base64
+  // payload (see lib/transcript.js parseRecord) — this is a presence marker
+  // only, used by pendingSend.ts's echoMatches to reconcile image-only sends
+  // (no accompanying text block at all).
+  | { kind: 'image' };
 
 export interface Msg {
   uuid: string;
