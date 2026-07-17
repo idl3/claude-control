@@ -357,6 +357,64 @@ export function ChevronDownIcon(p: IconProps) {
   );
 }
 
+// Composer action bar — shared by the live composer (Composer.tsx) and the
+// new-session draft (NewSessionDraft.tsx) via ComposerActionBar.tsx's leaf
+// buttons. Kept as raw inline <svg> (not the Svg helper above) since they
+// predate it and this move must not change a single rendered pixel.
+export function PlusIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function ArrowUpIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 19V5M6 11l6-6 6 6"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function MicIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
+      <path
+        d="M6 11a6 6 0 0 0 12 0M12 17v3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function SparkleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      {/* 4-point sparkle: vertical diamond + horizontal diamond */}
+      <path
+        d="M12 2 L13.5 9.5 L21 11 L13.5 12.5 L12 20 L10.5 12.5 L3 11 L10.5 9.5 Z"
+        fill="currentColor"
+        opacity="0.9"
+      />
+      <path
+        d="M19 2 L19.8 4.2 L22 5 L19.8 5.8 L19 8 L18.2 5.8 L16 5 L18.2 4.2 Z"
+        fill="currentColor"
+        opacity="0.6"
+      />
+    </svg>
+  );
+}
+
 export function BatteryIcon({ level = 1, charging = false, ...p }: IconProps & { level?: number; charging?: boolean }) {
   const w = Math.max(0, Math.min(1, level)) * 12; // inner track is x=4..16 (12 wide)
   return (
