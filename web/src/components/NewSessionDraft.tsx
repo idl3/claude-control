@@ -40,8 +40,15 @@ interface NewSessionDraftProps {
   /** Rail filter at the time the draft was opened — seeds the default agent. */
   filter: SessionFilter;
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
-  /** Esc / Cancel — discard the draft and return to the previous view. */
+  /** Esc — discard the draft and return to the previous view. */
   onCancel: () => void;
+  /** Mobile-only top-left back button (see `.new-session-draft-head` below) —
+   *  routes through App.tsx's `backToRail` so cancelling lands on the rail,
+   *  not a blank detail pane, matching the live session's back button.
+   *  Optional + falls back to onCancel (see the button's onClick below) so
+   *  callers that don't care about the rail-vs-blank-pane distinction don't
+   *  need to pass it. */
+  onBack?: () => void;
   /** Session created successfully — caller selects it (lands in its transcript). */
   onCreated: (result: CreateSessionResult) => void;
 }
@@ -72,7 +79,7 @@ const DEFAULT_DIR_HINT = /pleri-org/i;
  * session's assistant-ui runtime. This is a plain controlled textarea styled
  * with the same `.composer-card` / `.composer-input` CSS classes.
  */
-export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSessionDraftProps) {
+export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }: NewSessionDraftProps) {
   const [agent, setAgent] = useState<'claude' | 'codex'>(() => defaultAgentForFilter(filter));
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
@@ -456,6 +463,28 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
             : 'Listening…';
 
   return (
+    <>
+    {/* Mobile-only back affordance (hidden ≥760px — see .new-session-draft-head
+        and its shared .back-btn class in styles.css, the same rule that hides
+        the live session's own back button on desktop/iPad). Rendered as a
+        SIBLING of the rootRef div below, not a child of it — the centering
+        effect above measures root.offsetHeight and assumes it spans exactly
+        [hero, composer], so this header must sit outside that box rather than
+        add unaccounted height to the lift math. Reuses the exact `.back-btn`
+        markup/classes the session detail header uses (App.tsx's `backToRail`
+        button) so the treatment matches; wired to onBack (App.tsx's
+        `backToRail`) rather than onCancel so tapping it returns to the mobile
+        rail/sidebar instead of leaving a blank detail pane. */}
+    <header className="detail-head new-session-draft-head">
+      <button
+        type="button"
+        className="back-btn"
+        aria-label="Cancel new session"
+        onClick={onBack ?? onCancel}
+      >
+        ‹
+      </button>
+    </header>
     <div
       ref={rootRef}
       className="new-session-draft"
@@ -505,10 +534,9 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
               target: submit()'s slideToBottom fades this whole row out
               (opacity only) so the card reads as the plain live composer
               once it lands in the bottom slot; slideBackToCenter reverses it
-              on a failed submit. Cancel travels with it (trailing,
-              margin-left:auto — see .new-session-draft-cancel in
-              styles.css); Esc still cancels too (see the root's onKeyDown
-              above). */}
+              on a failed submit. Cancel no longer lives in this row (moved to
+              the mobile-only top-left back button — see .new-session-draft-head
+              above); Esc still cancels too (see the root's onKeyDown above). */}
           <div className="new-session-draft-options" ref={fadeRef}>
             {/* Harness — segmented pill (reuses the same
                 .rail-new-mode-seg/-btn classes as the Advanced mode pills
@@ -688,15 +716,6 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
                 })}
               </div>
             ) : null}
-
-            <button
-              type="button"
-              className="rail-new-cancel new-session-draft-cancel"
-              onClick={onCancel}
-              disabled={creating}
-            >
-              Cancel
-            </button>
           </div>
 
           {/* Voice recording panel — swaps in for the input+attachments+
@@ -871,5 +890,6 @@ export function NewSessionDraft({ filter, onToast, onCancel, onCreated }: NewSes
         </form>
       </div>
     </div>
+    </>
   );
 }
