@@ -5199,7 +5199,10 @@ body.is-external-display .composer {
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
   padding: var(--control-pad);
-  font-size: var(--control-font);
+  /* Match the compact control row (dropdowns) rather than the composer-sized
+     --control-font, which read too big/chunky in monospace. (Below the 16px
+     iOS-zoom floor, but this optional name field is rarely focused on mobile.) */
+  font-size: calc(13px * var(--ui-scale));
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .rail-new-name:focus {
