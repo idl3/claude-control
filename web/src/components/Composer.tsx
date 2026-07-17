@@ -18,9 +18,10 @@ import { OptimizeReview } from './OptimizeReview';
 import { Lightbox } from './AttachmentPreview';
 import { SkillBrowser } from './SkillBrowser';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
-import { TerminalView } from './TerminalView';
+import { XtermHost } from './XtermHost';
+import { TerminalKeyBar } from './TerminalKeyBar';
 import { useShell } from './ShellContext';
-import { relayDiff, controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
+import { controlToken, interceptToken, navToken, isLetter, type Mods } from '../lib/terminalKeys';
 import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { AnswerSelection } from '../lib/types';
@@ -269,60 +270,24 @@ export function Composer({
   // NOTE: SkillBrowser now unreachable via UI (inline / typing replaced the
   // toolbar slash button). State + component kept to avoid risky dead-code removal.
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
-  // Terminal (>_) mode: the composer runs shell command lines in a dedicated
-  // server-side pane instead of replying to Claude. `terminal` = currently SHOWN;
-  // `termWarm` = TerminalView is mounted+polling (kept warm so re-opens don't
-  // flash a loader). Opening the first time warms it; closing only hides it; the
-  // real unload happens on session change (the effect below resets both).
+  // Terminal (>_) mode: the composer window BECOMES the terminal — an embedded
+  // xterm (XtermHost) takes the composer card's input region and owns keystrokes
+  // → pty, the normal text input is hidden, and the special-keys bar hoists into
+  // the action row. `terminal` = active; opening mounts the xterm (attaches),
+  // closing unmounts it. Unloads on session change (the effect below resets it).
   const [terminal, setTerminal] = useState(false);
-  const [termWarm, setTermWarm] = useState(false);
-  const termWrapRef = useRef<HTMLDivElement>(null);
   const openTerminal = useCallback(() => {
-    setTermWarm(true);
     setTerminal(true);
     onTerminalModeChange?.(true);
   }, [onTerminalModeChange]);
 
-  // Real unload on session change: drop the warm terminal and hide it.
+  // Real unload on session change: leave terminal mode.
   useEffect(() => {
     setTerminal(false);
-    setTermWarm(false);
     onTerminalModeChange?.(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  // Cosmetic show/hide of the kept-warm terminal (fade + zoom). The element stays
-  // mounted + polling while hidden, so re-opening is instant (no loader flash).
-  useEffect(() => {
-    const el = termWrapRef.current;
-    if (!el) return;
-    if (terminal) {
-      el.style.display = '';
-      if (prefersReducedMotion()) {
-        gsap.set(el, { opacity: 1, scale: 1, y: 0 });
-        return;
-      }
-      gsap.fromTo(
-        el,
-        { opacity: 0, scale: 0.95, y: 8 },
-        { opacity: 1, scale: 1, y: 0, duration: 0.26, ease: 'power3.out', transformOrigin: 'bottom center' },
-      );
-    } else if (prefersReducedMotion()) {
-      el.style.display = 'none';
-    } else {
-      gsap.to(el, {
-        opacity: 0,
-        scale: 0.95,
-        y: 8,
-        duration: 0.18,
-        ease: 'power2.in',
-        transformOrigin: 'bottom center',
-        onComplete: () => {
-          el.style.display = 'none';
-        },
-      });
-    }
-  }, [terminal, termWarm]);
   // Enhance state BOUND PER SESSION (keyed by session id), like the per-session
   // AskUserQuestion pending state. The Composer stays mounted across session
   // switches, so this map persists: switching away preserves an in-progress or
@@ -344,6 +309,15 @@ export function Composer({
       document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus();
     });
   }, []);
+
+  // Leave terminal mode from anywhere — the `>_` toggle AND xterm's Cmd/Ctrl+Esc
+  // keyboard escape hatch (XtermHost onExit) both route here: restore the normal
+  // composer input and refocus it.
+  const closeTerminal = useCallback(() => {
+    setTerminal(false);
+    onTerminalModeChange?.(false);
+    refocusComposer();
+  }, [onTerminalModeChange, refocusComposer]);
 
   // Pulse the primary send button while a prompt is being optimised (in flight).
   const sendBtnRef = useRef<HTMLButtonElement>(null);
@@ -1593,58 +1567,26 @@ export function Composer({
   // then a letter, for Ctrl-<letter> "in succession" (the soft keyboard can't
   // chord). Refs keep the relay reading the latest sticky/shell values.
   const [sticky, setSticky] = useState<Mods>({ ctrl: false, alt: false });
-  const stickyRef = useRef(sticky);
-  stickyRef.current = sticky;
-  const shellRef = useRef(shell);
-  shellRef.current = shell;
-  const termPrevRef = useRef(''); // last buffer value we relayed
+  const termPrevRef = useRef(''); // legacy keydown-relay bookkeeping (see note below)
 
   const toggleMod = useCallback((m: keyof Mods) => {
     setSticky((s) => ({ ...s, [m]: !s[m] }));
   }, []);
 
-  // Subscribe to composer text changes; relay the diff while in terminal mode.
+  // Entering terminal mode: clear any leftover reply draft and reset sticky mods.
+  // The composer-text RELAY is gone: in terminal mode xterm OWNS keystrokes
+  // (physical typing → xterm → pty, which echoes) and the composer text input is
+  // hidden, so there is no textarea-diff → send-keys round-trip (that was the
+  // double-echo path). The on-screen special keys (TerminalKeyBar in the action
+  // row) still route through shell.key into the same pane.
   useEffect(() => {
     if (!terminal) {
       termPrevRef.current = '';
       return;
     }
-    composer.setText(''); // clean slate — don't relay a leftover reply draft
+    composer.setText(''); // clean slate — don't carry a reply draft into the shell
     termPrevRef.current = '';
     setSticky({ ctrl: false, alt: false });
-
-    const relay = () => {
-      const next = composer.getState().text ?? '';
-      const prev = termPrevRef.current;
-      if (next === prev) return;
-      const { removed, added } = relayDiff(prev, next);
-      const s = stickyRef.current;
-
-      // Sticky modifier + a single inserted letter → control key (Ctrl-A etc.);
-      // consume the modifier and DON'T keep the letter in the buffer.
-      if ((s.ctrl || s.alt) && removed === 0 && added.length === 1 && isLetter(added)) {
-        const tok = controlToken(s, added);
-        if (tok) shellRef.current.key(tok);
-        setSticky({ ctrl: false, alt: false });
-        composer.setText(prev); // revert; termPrevRef stays = prev
-        return;
-      }
-      // A newline in the delta == Enter (a soft-keyboard return that slipped past
-      // keydown): run the line and clear the buffer.
-      const nl = added.indexOf('\n');
-      if (nl !== -1) {
-        for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
-        if (added.slice(0, nl)) shellRef.current.text(added.slice(0, nl));
-        shellRef.current.key('Enter');
-        termPrevRef.current = '';
-        composer.setText('');
-        return;
-      }
-      for (let i = 0; i < removed; i += 1) shellRef.current.key('BSpace');
-      if (added) shellRef.current.text(added);
-      termPrevRef.current = next;
-    };
-    return composer.subscribe(relay);
   }, [terminal, composer]);
 
   // ── Inline pill overlay (Part 3) ───────────────────────────────────────────
@@ -1828,19 +1770,6 @@ export function Composer({
               </span>
             </button>
           ))}
-        </div>
-      ) : null}
-      {/* Terminal mode: kept-warm once opened (still polling while hidden) so
-          re-opening just fades+zooms in — no loader flash. Unloads on session
-          change (the effect above resets termWarm). */}
-      {termWarm && sessionId ? (
-        <div ref={termWrapRef} className="term-warm">
-          <TerminalView
-            ptySessionId={`cc-shell:${sessionId}`}
-            sendKey={shell.key}
-            mods={sticky}
-            onToggleMod={toggleMod}
-          />
         </div>
       ) : null}
       {/* Centered card (max-width on desktop): input on top, attachments below,
@@ -2113,6 +2042,22 @@ export function Composer({
           ) : null}
         </div>
 
+        {/* Terminal mode: the composer window IS the terminal. xterm takes the
+            input region (the text input above is hidden via CSS in terminal
+            mode) and OWNS keystrokes → pty (which echoes). Keyed by session so
+            it re-attaches on switch; Cmd/Ctrl+Esc (onExit) or the `>_` toggle
+            leaves terminal mode and restores the composer input. The bounded
+            height + absolute canvas (styles.css) preserve the no-fit-loop fix. */}
+        {terminal && sessionId ? (
+          <XtermHost
+            key={sessionId}
+            sessionId={`cc-shell:${sessionId}`}
+            className="composer-term-canvas"
+            autoFocus
+            onExit={closeTerminal}
+          />
+        ) : null}
+
         {/* children render form: invoked once per composer attachment. */}
         {!voice ? (
           <div className="composer-attachments">
@@ -2143,17 +2088,22 @@ export function Composer({
               title="Terminal mode — run shell commands"
               aria-pressed={terminal}
               data-on={terminal ? 'true' : undefined}
-              onClick={() => {
-                if (terminal) {
-                  setTerminal(false);
-                  onTerminalModeChange?.(false);
-                } else {
-                  openTerminal();
-                }
-              }}
+              onClick={() => (terminal ? closeTerminal() : openTerminal())}
             >
               <TerminalIcon />
             </button>
+          ) : null}
+          {/* Terminal mode: the special-keys bar JOINS the action row, inline
+              next to the `>_` toggle (NOT a separate strip inside a panel).
+              Scrolls horizontally on narrow widths. Keys route through shell.key
+              into the same cc-shell pane the xterm pty is attached to. */}
+          {terminal && !voice ? (
+            <TerminalKeyBar
+              className="composer-key-bar"
+              sendKey={shell.key}
+              mods={sticky}
+              onToggleMod={toggleMod}
+            />
           ) : null}
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
               with "Using a sub-agent." Sits in the LEFT toolbar cluster,
