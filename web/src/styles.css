@@ -725,6 +725,13 @@ html.pwa-fill body.kbd-up .app {
   .back-btn {
     display: none !important;
   }
+  /* New-session draft's mobile-only back/cancel header (NewSessionDraft.tsx) —
+     desktop/iPad show no Cancel affordance at all, so hide the whole bar (not
+     just the .back-btn it contains, which is already covered above) or an
+     empty bordered strip would be left sitting above the hero. */
+  .new-session-draft-head {
+    display: none !important;
+  }
 }
 
 /* On a large external display there's room to spare — give the rail a fixed
@@ -5202,23 +5209,6 @@ body.is-external-display .composer {
 .rail-new-name:disabled {
   opacity: 0.6;
 }
-.rail-new-cancel {
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 12px;
-  cursor: pointer;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--line);
-}
-.rail-new-cancel:hover:not(:disabled) {
-  color: var(--text);
-}
-.rail-new-cancel:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 
 /* Freetext CWD/tmux-name inputs — monospace so paths/names read cleanly;
    shares rail-new-name chrome. (The dropdown-choice versions of these
@@ -5384,12 +5374,6 @@ body.is-external-display .composer {
    fights the primary harness/model/dir/tmux row for space. */
 .new-session-draft-options > .rail-new-mode-seg:not(.new-session-draft-agent-seg) {
   flex: 1 1 100%;
-}
-/* Cancel travels with the option row (top, not the bottom action bar, which
-   must stay identical to the live composer's — no Cancel there). Pinned to
-   the row's trailing edge regardless of how much wraps above it. */
-.new-session-draft-cancel {
-  margin-left: auto;
 }
 /* Harness pill sizes to its two labels, not the full row. */
 .new-session-draft-agent-seg {
