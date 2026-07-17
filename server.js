@@ -31,7 +31,7 @@ import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
-import { buildAnswerProgram, parsePicker, planStep, planTextStep, isTextDirective, nextSubmitAction } from './lib/answer.js';
+import { buildAnswerProgram, parsePicker, planStep, planTextStep, isTextDirective, confirmSubmit } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
 import { resolveMediaPath } from './lib/media.js';
 import { isValidAppName, listVersions } from './lib/media-apps.js';
@@ -3027,32 +3027,30 @@ async function handleClientMessage(ws, msg) {
             questions.some((q) => q && q.multiSelect) ||
             selections.some((s) => isTextDirective(s));
           if (dynamicOk && needsSubmitConfirm) {
-            const SUBMIT_TRIES = 5; // ~5×2×SETTLE_MS ceiling; exits as soon as gone
-            let submitted = false;
-            for (let t = 0; t < SUBMIT_TRIES; t += 1) {
-              let cap;
-              try {
-                cap = await tmux.capturePane(session.target, 40, false, true);
-              } catch (captureErr) {
-                console.log(`[answer/dynamic] submit-confirm capture failed: ${captureErr?.message}`);
-                break; // can't confirm — fail loud below
-              }
-              const action = nextSubmitAction(parsePicker(cap));
-              if (action === 'done') {
-                submitted = true;
-                break;
-              }
-              if (action === 'enter') {
-                console.log(`[answer/dynamic] submit-confirm ${t}: picker up (review/parked) — sending Enter`);
-                sentAny = true;
-                await tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS);
-              }
-              // 'enter' → let the submit land; 'wait' → let the TUI finish rendering.
-              await new Promise((r) => setTimeout(r, SETTLE_MS));
-            }
+            // Capture VISIBLE-ONLY here: a scrollback-inclusive capture re-parses the
+            // just-submitted review screen frozen in pane history as a live review
+            // screen (the scrollback-ghost bug), so the loop never sees the picker
+            // gone and fails loud even though the submit landed. confirmSubmit nudges
+            // the review "Submit answers" with Enter, guards against transition-blank
+            // false positives, and only fails after a genuinely exhausted budget.
+            sentAny = true; // confirmSubmit may send Enter → picker no longer pristine
+            const submitted = await confirmSubmit({
+              capture: () => tmux.capturePane(session.target, 40, false, true, { visibleOnly: true }),
+              sendEnter: () => tmux.sendRawKeysSequenced(session.target, ['Enter'], SETTLE_MS),
+              sendUp: () => tmux.sendRawKeysSequenced(session.target, ['Up'], SETTLE_MS),
+              delay: (ms) => new Promise((r) => setTimeout(r, ms)),
+              tries: 12,          // ~12 iterations ≈ 6–8s ceiling on a loaded host
+              settleMs: SETTLE_MS,
+              // Live E2E measured the review screen taking up to ~800ms to clear
+              // after its Submit Enter; wait past that tail before re-capturing so
+              // a slow clear isn't mistaken for a dropped Enter (which would send a
+              // stray Enter into the now-focused composer).
+              postEnterMs: 900,
+              log: (m) => console.log(`[answer/dynamic] ${m}`),
+            });
             if (!submitted) {
               console.error(
-                `[answer/dynamic] picker never confirmed submitted after ${SUBMIT_TRIES} tries — failing loud toolUseId=${msg.toolUseId}`,
+                `[answer/dynamic] picker never confirmed submitted — failing loud toolUseId=${msg.toolUseId}`,
               );
               dynamicOk = false;
             }
