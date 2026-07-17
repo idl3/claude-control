@@ -1,50 +1,30 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TerminalView } from './TerminalView';
-import { useTerminalRelay } from '../hooks/useTerminalRelay';
 import gsap, { prefersReducedMotion } from '../lib/anim';
-
-// Compatibility shim for the in-progress TerminalView active-prop optimization:
-// spread avoids a hard dependency on that prop in clean checkouts, while current
-// worktrees that require it still receive active=true for full terminal panes.
-const terminalViewActiveProps = { active: true };
+import type { Mods } from '../lib/terminalKeys';
 
 interface TerminalPaneProps {
-  /** Selected pane id (tmux target) — re-arms capture on change. */
+  /** App session id (kind === 'terminal') — resolved server-side to the pane's
+      tmux target and attached as a pty (`pane:<id>`). */
   sessionId: string;
-  /** Latest ANSI capture of the pane (cockpit store). */
-  capture: string | null;
-  /** Poll the pane capture; `escapes` toggles ANSI passthrough. */
-  requestCapture: (lines?: number, escapes?: boolean) => boolean;
-  clearCapture: () => void;
-  /** Relay a literal char / control key to the selected pane. */
-  sendText: (text: string) => boolean;
+  /** Send an allow-listed control key to the pane (on-screen key bar). */
   sendKey: (key: string) => boolean;
 }
 
 /**
- * A plain (non-Claude) tmux pane rendered as a fully interactive terminal: the
- * live ANSI view + key bar (TerminalView), plus a visible input the user types
- * into that relays keystrokes to THAT pane (Tab-complete, sticky Ctrl/Opt). The
- * pane is the echo. Replaces the read-only transcript fallback for terminals.
+ * A plain (non-Claude) tmux pane rendered as a fully interactive terminal. The
+ * pane's pty is streamed over the `/pty` WebSocket into an embedded xterm.js
+ * instance (via TerminalView → XtermHost) — real terminal emulation with native
+ * echo, cursor addressing, Tab-complete, history and TUI apps. Replaces the old
+ * poll(`capture-pane`)+relay(`send-keys`) model (and its local-echo/backspace
+ * race): physical typing now goes straight to the pty, which is the echo.
  */
-export function TerminalPane({
-  sessionId,
-  capture,
-  requestCapture,
-  clearCapture,
-  sendText,
-  sendKey,
-}: TerminalPaneProps) {
-  // Bake ANSI escapes into capture requests so colours render in the view.
-  const pollCapture = useMemo(
-    () => (lines?: number) => requestCapture(lines, true),
-    [requestCapture],
-  );
-  const ops = useMemo(
-    () => ({ sendText: (s: string) => void sendText(s), sendKey: (k: string) => void sendKey(k) }),
-    [sendText, sendKey],
-  );
-  const relay = useTerminalRelay(ops);
+export function TerminalPane({ sessionId, sendKey }: TerminalPaneProps) {
+  // On-screen sticky Ctrl/Opt state for the key bar (mobile helper). The
+  // arm-then-physical-letter chord is a deferred mobile-polish item; the bar's
+  // discrete ^C/^D/^R/^Z/^L keys cover the high-frequency control keys directly.
+  const [sticky, setSticky] = useState<Mods>({ ctrl: false, alt: false });
+  const toggleMod = (m: keyof Mods) => setSticky((s) => ({ ...s, [m]: !s[m] }));
 
   // Fade + zoom in when the pane mounts (selecting a terminal session).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -62,29 +42,11 @@ export function TerminalPane({
     <div className="thread-root terminal-pane-root" ref={rootRef}>
       <TerminalView
         key={sessionId}
-        {...terminalViewActiveProps}
-        output={capture}
-        requestCapture={pollCapture}
-        clearOutput={clearCapture}
+        ptySessionId={`pane:${sessionId}`}
         sendKey={sendKey}
-        mods={relay.sticky}
-        onToggleMod={relay.toggleMod}
+        mods={sticky}
+        onToggleMod={toggleMod}
       />
-      <div className="terminal-pane-input">
-        <textarea
-          className="composer-input"
-          aria-label="Terminal input"
-          placeholder="Keys go to the pane…"
-          rows={1}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          value={relay.value}
-          onChange={relay.onChange}
-          onKeyDown={relay.onKeyDown}
-        />
-      </div>
     </div>
   );
 }

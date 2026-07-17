@@ -1833,12 +1833,10 @@ export function Composer({
       {/* Terminal mode: kept-warm once opened (still polling while hidden) so
           re-opening just fades+zooms in — no loader flash. Unloads on session
           change (the effect above resets termWarm). */}
-      {termWarm ? (
+      {termWarm && sessionId ? (
         <div ref={termWrapRef} className="term-warm">
           <TerminalView
-            output={shell.output}
-            requestCapture={shell.poll}
-            clearOutput={shell.clear}
+            ptySessionId={`cc-shell:${sessionId}`}
             sendKey={shell.key}
             mods={sticky}
             onToggleMod={toggleMod}

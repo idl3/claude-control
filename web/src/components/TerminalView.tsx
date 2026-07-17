@@ -1,14 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { parseAnsi, splitUrls, trimTrailingBlankLines } from '../lib/ansi';
 import type { Mods } from '../lib/terminalKeys';
+import { XtermHost } from './XtermHost';
 
 interface TerminalViewProps {
-  /** Latest capture of the shell pane, or null before the first poll. */
-  output: string | null;
-  /** Poll the shell pane capture (server clamps lines 1..10000). */
-  requestCapture: (lines?: number) => boolean;
-  /** Drop the cached capture (on unmount / leaving terminal mode). */
-  clearOutput: () => void;
+  /** pty attach id — same value passed to XtermHost's `sessionId` prop. */
+  ptySessionId: string;
   /** Send an allow-listed control key (Stop = C-c). */
   sendKey: (key: string) => boolean;
   /** Armed sticky modifiers (one-shot Ctrl/Opt), shown as pressed in the bar. */
@@ -17,13 +12,16 @@ interface TerminalViewProps {
   onToggleMod: (m: keyof Mods) => void;
 }
 
-const LINES = 400;
-const POLL_MS = 800; // snappier than LivePane — this is the active surface.
-
 // On-screen key bar: keys a phone keyboard can't physically produce, mapped to
 // tmux send-keys tokens (must stay within the backend SHELL_KEYS allow-list).
 // Sticky Ctrl/Opt (handled separately) cover arbitrary Ctrl-/Opt-<letter>; this
 // row keeps the high-frequency one-tap keys. label → tmux key; gap === separator.
+//
+// This bar stays wired to `sendKey` (shell.key → shell-key op → tmux send-keys
+// into the SAME cc-shell pane XtermHost's pty attaches to) rather than being
+// converted to raw pty escape bytes: physical typing goes straight to the pty
+// via xterm (instant, native echo); the key bar is a mobile tap-helper for keys
+// a soft keyboard can't produce. Both paths feed the same pane tty — no conflict.
 type KeyBarItem = { label: string; key: string; title: string } | 'gap';
 const KEY_BAR: KeyBarItem[] = [
   { label: '↑', key: 'Up', title: 'Up' },
@@ -48,70 +46,12 @@ const KEY_BAR: KeyBarItem[] = [
 
 /**
  * Live view of the server's dedicated shell pane, shown while the composer is in
- * terminal (>_) mode. Mirrors LivePane: polls the `shell-capture` op and renders
- * the plain-text capture in a terminal-style <pre>, auto-scrolling when pinned.
+ * terminal (>_) mode. Streams the pane's pty over WebSocket into an embedded
+ * xterm.js instance (XtermHost) — real terminal emulation (native echo, cursor
+ * addressing, TUI apps) in place of the old poll+<pre> capture render.
  * Includes a Stop button (sends C-c) for interrupting a running command.
  */
-export function TerminalView({
-  output,
-  requestCapture,
-  clearOutput,
-  sendKey,
-  mods,
-  onToggleMod,
-}: TerminalViewProps) {
-  const preRef = useRef<HTMLPreElement>(null);
-  const pinnedRef = useRef(true);
-
-  useEffect(() => {
-    requestCapture(LINES);
-    const t = setInterval(() => requestCapture(LINES), POLL_MS);
-    return () => {
-      clearInterval(t);
-      clearOutput();
-    };
-  }, [requestCapture, clearOutput]);
-
-  useLayoutEffect(() => {
-    const el = preRef.current;
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [output]);
-
-  const onScroll = () => {
-    const el = preRef.current;
-    if (!el) return;
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-  };
-
-
-  // Parse ANSI colors → styled segments, and linkify URLs inside each segment.
-  const rendered = useMemo(() => {
-    if (output == null) return null;
-    return parseAnsi(trimTrailingBlankLines(output)).map((seg, i) => {
-      const style: React.CSSProperties = {
-        color: seg.fg,
-        background: seg.bg,
-        fontWeight: seg.bold ? 700 : undefined,
-        fontStyle: seg.italic ? 'italic' : undefined,
-        textDecoration: seg.underline ? 'underline' : undefined,
-        opacity: seg.dim ? 0.7 : undefined,
-      };
-      return (
-        <span key={i} style={style}>
-          {splitUrls(seg.text).map((p, j) =>
-            p.href ? (
-              <a key={j} href={p.href} target="_blank" rel="noopener noreferrer">
-                {p.text}
-              </a>
-            ) : (
-              p.text
-            ),
-          )}
-        </span>
-      );
-    });
-  }, [output]);
-
+export function TerminalView({ ptySessionId, sendKey, mods, onToggleMod }: TerminalViewProps) {
   return (
     <div className="terminal-view">
       <div className="terminal-view-head">
@@ -125,14 +65,7 @@ export function TerminalView({
           Stop
         </button>
       </div>
-      <pre className="terminal-view-body" ref={preRef} onScroll={onScroll}>
-        {rendered ?? (
-          <span className="terminal-loading">
-            <span className="terminal-loading-spinner" aria-hidden="true" />
-            starting shell…
-          </span>
-        )}
-      </pre>
+      <XtermHost sessionId={ptySessionId} className="terminal-view-canvas" />
       {/* Tappable special-keys row — the only way to reach arrows / Esc / Ctrl-*
           from a phone. Scrolls horizontally; keeps textarea focus so the iOS
           keyboard stays up. ponytail: discrete buttons, no sticky modifier —

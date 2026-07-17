@@ -407,8 +407,13 @@ function AppInner() {
   // Tracks whether the Composer's >_ terminal mode is active — updated by the
   // Composer via onTerminalModeChange. Used to gate the sub-agent prefix.
   const composerTerminalRef = useRef(false);
+  // State mirror of the ref above, purely for the terminal-mode red→yellow
+  // theming (data-terminal-mode on .app) — a re-render IS wanted here, unlike
+  // the ref's hot-path Esc-key-handler read.
+  const [terminalMode, setTerminalMode] = useState(false);
   const onTerminalModeChange = useCallback((active: boolean) => {
     composerTerminalRef.current = active;
+    setTerminalMode(active);
   }, []);
   // Working indicator after answering an AskUserQuestion — the answer is sent as
   // keystrokes (no transcript echo to match), so it clears on the next activity.
@@ -2371,6 +2376,7 @@ function AppInner() {
         data-detail={(cockpit.selectedId || draftOpen) && !railOpenMobile ? 'open' : 'closed'}
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
+        data-terminal-mode={terminalMode ? 'true' : undefined}
       >
         {cosmosBackground && (
           <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
@@ -2745,10 +2751,6 @@ function AppInner() {
               // ANSI view + key bar + keystroke relay. No transcript, by design.
               <TerminalPane
                 sessionId={selectedSession.id}
-                capture={cockpit.capture}
-                requestCapture={cockpit.requestCapture}
-                clearCapture={cockpit.clearCapture}
-                sendText={cockpit.sendPaneText}
                 sendKey={cockpit.sendPaneKey}
               />
             ) : (
