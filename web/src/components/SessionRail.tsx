@@ -15,6 +15,13 @@ import {
   type RailTokenPrefs,
 } from '../lib/railTokenPrefs';
 
+/** Rail filter values — one per funnel-chip stop in App.tsx's cycleFilter.
+ *  Deliberately NO 'claudex' value: claudex panes run the claude binary
+ *  (pointed at the olam auth-worker), so they surface under the 'agents' and
+ *  'claude' filters like any other claude pane (see the filter predicate in
+ *  the useMemo below). A dedicated chip would also need App.tsx's cycle +
+ *  persisted-filter validation extended — fold instead, per the
+ *  claudex-integration phase-b tracker. */
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
 interface SessionRailProps {
@@ -844,10 +851,13 @@ export function SessionRail({
     const visible = sessions.filter((s) => {
       if (s.kind === 'remote') return false; // remote rows render in their own org sections
       if (filter === 'all') return true;
-      if (filter === 'agents') return s.kind !== 'terminal'; // claude + codex, no shells
+      if (filter === 'agents') return s.kind !== 'terminal'; // claude + claudex + codex, no shells
       if (filter === 'terminal') return s.kind === 'terminal';
       if (filter === 'codex') return s.kind === 'codex';
-      // 'claude' filter: show claude panes (kind === 'claude' or kind unset, but not terminal/codex)
+      // 'claude' filter: show claude panes (kind === 'claude' or kind unset,
+      // but not terminal/codex). Claudex panes run the claude binary, so they
+      // classify as kind 'claude' and land here + under 'agents' — no
+      // dedicated claudex chip (see the SessionFilter doc above).
       return s.kind !== 'terminal' && s.kind !== 'codex';
     });
     return groupByTmux(visible);
