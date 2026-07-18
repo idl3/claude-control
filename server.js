@@ -56,6 +56,7 @@ import {
   MLX_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
+  CLAUDEX_MODELS,
   detectMachine,
   recommendMlxModel,
   recommendClaudeModel,
@@ -554,6 +555,7 @@ const _handler = (req, res) => {
       mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
       claudeModels: CLAUDE_MODELS,
       codexModels: CODEX_MODELS,
+      claudexModels: CLAUDEX_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -1162,6 +1164,9 @@ const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
 // Same pattern for Codex — single source of truth is CODEX_MODELS (lib/models.js).
 const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
+
+// Same pattern for Claudex — single source of truth is CLAUDEX_MODELS (lib/models.js).
+const ALLOWED_CLAUDEX_MODELS = new Set(CLAUDEX_MODELS.map((m) => m.id));
 
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
