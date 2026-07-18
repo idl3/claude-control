@@ -5,14 +5,19 @@ import type { SessionFilter } from './SessionRail';
 // ── Codex filter logic ───────────────────────────────────────────────────────
 // Mirrors the filter predicate in SessionRail's useMemo so the codex branch
 // can be unit-tested without rendering.
+//
+// CP3 Fix 1: claudex (kind 'claudex') is the PRIMARY codex-flavored option
+// (design decision 7, locked) — it now surfaces under the 'codex' filter
+// bucket, NOT 'claude'. Pane TREATMENT (icon/aria-label, tested below) stays
+// claude-like; only the filter BUCKET is codex-flavored.
 
 function applyFilter(sessions: Session[], filter: SessionFilter): Session[] {
   return sessions.filter((s) => {
     if (filter === 'all') return true;
     if (filter === 'terminal') return s.kind === 'terminal';
-    if (filter === 'codex') return s.kind === 'codex';
-    // 'claude': show panes that are not terminal and not codex
-    return s.kind !== 'terminal' && s.kind !== 'codex';
+    if (filter === 'codex') return s.kind === 'codex' || s.kind === 'claudex';
+    // 'claude': claude-only — kind === 'claude' or kind unset
+    return s.kind === 'claude' || s.kind === undefined;
   });
 }
 
@@ -22,36 +27,38 @@ function makeSession(partial: Partial<Session>): Session {
 
 describe('SessionRail codex filter', () => {
   const claude = makeSession({ id: 'c1', kind: 'claude' });
+  const claudex = makeSession({ id: 'cx0', kind: 'claudex' });
   const codex = makeSession({ id: 'cx1', kind: 'codex' });
   const terminal = makeSession({ id: 't1', kind: 'terminal' });
   const unknown = makeSession({ id: 'u1' }); // kind unset
 
   it('filter="all" shows all session kinds', () => {
-    const result = applyFilter([claude, codex, terminal, unknown], 'all');
-    expect(result).toHaveLength(4);
+    const result = applyFilter([claude, claudex, codex, terminal, unknown], 'all');
+    expect(result).toHaveLength(5);
   });
 
-  it('filter="codex" shows only codex sessions', () => {
-    const result = applyFilter([claude, codex, terminal, unknown], 'codex');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('cx1');
+  it('filter="codex" shows codex AND claudex sessions (codex-flavored bucket)', () => {
+    const result = applyFilter([claude, claudex, codex, terminal, unknown], 'codex');
+    expect(result.map((s) => s.id).sort()).toEqual(['cx0', 'cx1']);
   });
 
-  it('filter="claude" excludes codex and terminal', () => {
-    const result = applyFilter([claude, codex, terminal, unknown], 'claude');
-    // Includes 'claude' kind and 'unknown' (no kind) but not codex or terminal
+  it('filter="claude" excludes claudex, codex, and terminal', () => {
+    const result = applyFilter([claude, claudex, codex, terminal, unknown], 'claude');
+    // Includes 'claude' kind and 'unknown' (no kind) but not claudex, codex, or terminal.
+    expect(result.some((s) => s.kind === 'claudex')).toBe(false);
     expect(result.some((s) => s.kind === 'codex')).toBe(false);
     expect(result.some((s) => s.kind === 'terminal')).toBe(false);
     expect(result.find((s) => s.id === 'c1')).toBeTruthy();
+    expect(result.find((s) => s.id === 'u1')).toBeTruthy();
   });
 
   it('filter="terminal" shows only terminal sessions', () => {
-    const result = applyFilter([claude, codex, terminal, unknown], 'terminal');
+    const result = applyFilter([claude, claudex, codex, terminal, unknown], 'terminal');
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('t1');
   });
 
-  it('filter="codex" returns empty when no codex sessions exist', () => {
+  it('filter="codex" returns empty when no codex/claudex sessions exist', () => {
     const result = applyFilter([claude, terminal], 'codex');
     expect(result).toHaveLength(0);
   });
@@ -62,6 +69,9 @@ describe('SessionRail codex filter', () => {
 //   terminal → 'terminal'
 //   codex    → 'codex'
 //   claude   → 'claude'
+//   claudex  → 'claude' (pane TREATMENT stays claude-like — only the rail
+//              FILTER bucket above is codex-flavored; isCodex only ever
+//              matches the literal 'codex' kind)
 //   default  → 'claude' (s.kind ?? 'claude')
 
 function deriveDataKind(s: Session): string {
@@ -81,6 +91,10 @@ describe('SessionRail codex badge data-kind derivation', () => {
 
   it('claude session gets data-kind="claude"', () => {
     expect(deriveDataKind(makeSession({ kind: 'claude' }))).toBe('claude');
+  });
+
+  it('claudex session gets data-kind="claude" (pane treatment, not filter bucket)', () => {
+    expect(deriveDataKind(makeSession({ kind: 'claudex' }))).toBe('claude');
   });
 
   it('session with no kind defaults to "claude" (consistent with data-kind={s.kind ?? "claude"})', () => {
@@ -103,6 +117,10 @@ describe('SessionRail codex aria-label', () => {
 
   it('claude session gets "Claude pane" aria-label', () => {
     expect(deriveAriaLabel(makeSession({ kind: 'claude' }))).toBe('Claude pane');
+  });
+
+  it('claudex session gets "Claude pane" aria-label (same claude TUI, just a different upstream)', () => {
+    expect(deriveAriaLabel(makeSession({ kind: 'claudex' }))).toBe('Claude pane');
   });
 
   it('terminal session gets "terminal pane" aria-label', () => {

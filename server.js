@@ -27,7 +27,7 @@ import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
-import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
+import { SessionRegistry, listRecentTranscripts, isClaudeKind } from './lib/sessions.js';
 import { Collab } from './lib/collab.js';
 import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
@@ -566,7 +566,7 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleTranscribe(req, res, u);
   }
-  // GET /api/spawn-agents — agent-type availability (claude vs codex).
+  // GET /api/spawn-agents — agent-type availability (claude vs claudex vs codex).
   // Returns which agent binaries are resolvable on this machine so the UI can
   // disable an unavailable agent picker option and show a reason.
   // Token-gated + localhost, same as other GET endpoints.
@@ -576,7 +576,28 @@ const _handler = (req, res) => {
     return Promise.all([
       resolveBin(cfg.claudeBin || cfg.launchCommand),
       resolveBin(cfg.codexBin || cfg.codexLaunchCommand),
-    ]).then(([claudeResult, codexResult]) => {
+    ]).then(async ([claudeResult, codexResult]) => {
+      // Claudex spawns the claude binary pointed at the olam auth-worker (see
+      // handleSessionNew's claudex pre-validation, which this mirrors), so its
+      // availability is claude's availability AND the cloud-bearer artifact
+      // AND a tmux new enough for `-e` env injection (>= 3.2). Checked in that
+      // order, short-circuiting on the first failure, so `reason` always names
+      // the FIRST failing precondition — never a misleading later-stage one.
+      // Cheap either way: a local file stat + (at most) one `tmux -V` fork.
+      let claudexAvailable = claudeResult.available;
+      let claudexReason = claudeResult.reason;
+      if (claudexAvailable && !readCloudBearer()) {
+        claudexAvailable = false;
+        claudexReason = "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it";
+      }
+      if (claudexAvailable) {
+        try {
+          await tmux.assertTmuxSupportsEnv();
+        } catch (err) {
+          claudexAvailable = false;
+          claudexReason = String(err?.message || err);
+        }
+      }
       return endJson(res, 200, {
         agents: [
           {
@@ -585,6 +606,15 @@ const _handler = (req, res) => {
             defaultTransport: CONFIG.claudeTransport,
             transports: ['tmux', 'print'],
             ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+          },
+          {
+            id: 'claudex',
+            available: claudexAvailable,
+            defaultTransport: 'tmux',
+            // Claudex is tmux-only, ALWAYS — see handleSessionNew's forced
+            // claudeTransport ternary (the print bridge never applies to it).
+            transports: ['tmux'],
+            ...(claudexAvailable ? {} : { reason: claudexReason }),
           },
           {
             id: 'codex',
@@ -1215,10 +1245,22 @@ async function handleSessionNew(req, res) {
   // agent ∈ {'claude','codex','claudex'}, default 'claude'. Claudex = the
   // claude binary backed by Codex via the olam auth-worker (ENV-only setup).
   const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claudex' ? 'claudex' : 'claude';
+  // Claudex is tmux-only, ALWAYS — never the print-bridge path. Below, the
+  // `else if (claudeTransport === 'print')` branch does not itself check
+  // `agent`; without this force, a host running CLAUDE_TRANSPORT=print (or a
+  // body override) would route a claudex request through the print bridge,
+  // which drops the preflighted claudexModel (the bridge only knows `model`,
+  // which is null for claudex) and mislabels the pane (@cc_agent='claude').
+  // The preflighted model + the `-e ANTHROPIC_BASE_URL=...` env injection
+  // both require the tmux launch shape, so claudeTransport is forced here
+  // regardless of config/body — the print branch below becomes unreachable
+  // for agent==='claudex' as a direct consequence.
   const claudeTransport =
-    body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
-      ? body.claudeTransport
-      : CONFIG.claudeTransport;
+    agent === 'claudex'
+      ? 'tmux'
+      : body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
+        ? body.claudeTransport
+        : CONFIG.claudeTransport;
   const codexTransport =
     body.codexTransport === 'tmux' || body.codexTransport === 'rpc'
       ? body.codexTransport
@@ -2839,13 +2881,15 @@ async function handleClientMessage(ws, msg) {
         // stays as cheap defense-in-depth that can short-circuit before we even
         // get here. viaAnswer replies bypass BOTH guards (they are the answer).
         //
-        // Gate: keystroke-TUI panes (claude AND codex-TUI). Print transport has no
-        // keystroke TUI to guard against, and codex-rpc panes already returned above
-        // (so any codex pane reaching here fell through to tmux sendText). The parser
-        // is chosen by kind — parsePanePrompt for claude, parseCodexPrompt for codex —
+        // Gate: keystroke-TUI panes (claude, claudex, AND codex-TUI — claudex runs
+        // the same claude binary/TUI, just pointed at the olam auth-worker, so it
+        // needs the identical guard). Print transport has no keystroke TUI to guard
+        // against, and codex-rpc panes already returned above (so any codex pane
+        // reaching here fell through to tmux sendText). The parser is chosen by
+        // kind — parsePanePrompt for claude/claudex, parseCodexPrompt for codex —
         // because the two TUIs scrape pickers differently; the pure predicate then
         // decides on the boolean presence of a parsed picker, identical for both.
-        if (!msg.viaAnswer && (session.kind === 'claude' || session.kind === 'codex') && session.transport !== 'print') {
+        if (!msg.viaAnswer && (isClaudeKind(session.kind) || session.kind === 'codex') && session.transport !== 'print') {
           try {
             const cap = await tmux.capturePane(session.target, 120, false, true, { visibleOnly: true });
             const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : detectPanePicker(cap);

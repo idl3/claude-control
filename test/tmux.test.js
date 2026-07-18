@@ -17,6 +17,7 @@ import {
   createTmuxSession,
   createWindowInSession,
   assertTmuxSupportsEnv,
+  scrubEnvValuesFromError,
 } from '../lib/tmux.js';
 
 /** Stub runner returning fixed pane text (ignores argv). */
@@ -53,7 +54,11 @@ describe('redactBearerPaths', () => {
       [
         'first: https://h1/auth/<redacted>/<redacted>/v1/messages',
         'second: /auth/<redacted>/<redacted>',
-        'third: https://h2/auth/<redacted>/<redacted>/v1/models',
+        // "third:" is ALSO redacted here — line 2's match lands exactly at
+        // end-of-line, which is the Fix 4 newline-tolerant-wrap signal (see
+        // the 'newline-tolerant wrap redaction' describe block below). This
+        // is the accepted conservative trade-off, not a regression.
+        '<redacted> https://h2/auth/<redacted>/<redacted>/v1/models',
       ].join('\n'),
     );
   });
@@ -95,6 +100,49 @@ describe('redactBearerPaths', () => {
     assert.equal(redactBearerPaths(''), '');
     assert.equal(redactBearerPaths(undefined), undefined);
     assert.equal(redactBearerPaths(null), null);
+  });
+});
+
+// ── Fix 4: newline-tolerant redaction for hard-wrapped bearer URLs ──────────
+
+describe('redactBearerPaths: newline-tolerant wrap redaction', () => {
+  test('wrapped bearer URL split across two physical lines: both segments redacted', () => {
+    // Simulates capture-pane WITHOUT -J: an 80-col wrap cuts the secret value
+    // mid-string. Line 1's redacted match reaches line-end (no trailing
+    // chars before \n) — that is the signal that triggers the line-2 redact.
+    const input = 'https://host/auth/user-1/sekret4\n2abc extra-context-not-secret';
+    assert.equal(
+      redactBearerPaths(input),
+      'https://host/auth/<redacted>/<redacted>\n<redacted> extra-context-not-secret',
+    );
+  });
+
+  test('a redacted match with a trailing suffix (NOT at EOL) does not touch the next line', () => {
+    const input = 'https://host/auth/user-1/sekret42/v1/messages\nunrelated line here';
+    assert.equal(
+      redactBearerPaths(input),
+      'https://host/auth/<redacted>/<redacted>/v1/messages\nunrelated line here',
+    );
+  });
+
+  test('conservative trade-off: a COMPLETE (non-wrapped) URL that ends a line also triggers next-line redaction', () => {
+    // No way to distinguish this from a genuine wrap from text alone (see the
+    // function doc comment) — this pins the accepted false-positive direction.
+    const input = 'see /auth/bob/hunter2\nthird unrelated line';
+    assert.equal(
+      redactBearerPaths(input),
+      'see /auth/<redacted>/<redacted>\n<redacted> unrelated line',
+    );
+  });
+
+  test('no cascade past the immediate next line', () => {
+    const input = '/auth/a/b\nsecondline\nthirdline';
+    assert.equal(redactBearerPaths(input), '/auth/<redacted>/<redacted>\n<redacted>\nthirdline');
+  });
+
+  test('trailing newline / empty last line does not throw', () => {
+    const input = '/auth/a/b\n';
+    assert.equal(redactBearerPaths(input), '/auth/<redacted>/<redacted>\n');
   });
 });
 
@@ -170,7 +218,11 @@ describe('createWindow env injection', () => {
       { _run, _listPanes },
     );
 
-    assert.equal(calls.length, 1);
+    // CP3 Fix 2: the new-session -e call is followed by a set-environment -u
+    // per key, unsetting the SESSION-scoped env right after create so later
+    // windows in this session don't inherit it (full argv-order pin in the
+    // dedicated 'createWindow: secret scrubbing + session-env unset' block).
+    assert.equal(calls.length, 3);
     assert.deepEqual(calls[0], [
       'new-session', '-d', '-s', 'claude-control', '-c', CWD,
       '-e', 'ANTHROPIC_BASE_URL=https://h/auth/u/s',
@@ -303,7 +355,12 @@ describe('createTmuxSession env injection', () => {
       { _run, _listPanes },
     );
 
-    assert.equal(calls.length, 1);
+    // CP3 Fix 2: the new-session -e call is followed by a set-environment -u
+    // per key, unsetting the SESSION-scoped env right after create so later
+    // windows in this session don't inherit it (see the dedicated
+    // 'createTmuxSession: secret scrubbing + session-env unset' describe
+    // block below for the full argv-order pin).
+    assert.equal(calls.length, 3);
     assert.deepEqual(calls[0], [
       'new-session', '-d', '-s', 'sess', '-c', CWD,
       '-e', 'ANTHROPIC_BASE_URL=https://h/auth/u/s',
@@ -361,6 +418,262 @@ describe('createWindowInSession env injection', () => {
       '-c', CWD,
       '-n', 'feat',
     ]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CP3 Fix 1 (HIGH): scrub secrets from tmux exec errors.
+//
+// Node's execFile rejection embeds the FULL argv verbatim in err.message —
+// including a `-e ANTHROPIC_BASE_URL=https://…/auth/<sub>/<secret>` value.
+// server.js's handleSessionNew catch returns `String(err?.message)` in a 500
+// JSON body a remote viewer can read. scrubEnvValuesFromError (and its call
+// sites in createWindow/createTmuxSession/createWindowInSession) must strip
+// every env VALUE out of that message before it ever leaves lib/tmux.js.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('scrubEnvValuesFromError (pure helper)', () => {
+  test('replaces every occurrence of an env value with <redacted>', () => {
+    const err = new Error('Command failed: tmux new-session -e ANTHROPIC_BASE_URL=https://host/auth/sub-1/sekret42 -c /tmp');
+    const scrubbed = scrubEnvValuesFromError(err, { ANTHROPIC_BASE_URL: 'https://host/auth/sub-1/sekret42' });
+    assert.ok(!scrubbed.message.includes('sekret42'), scrubbed.message);
+    assert.ok(!scrubbed.message.includes('sub-1'), scrubbed.message);
+    assert.ok(scrubbed.message.includes('<redacted>'), scrubbed.message);
+    assert.ok(scrubbed.message.includes('Command failed: tmux new-session'), scrubbed.message);
+  });
+
+  test('scrubs multiple env values independently', () => {
+    const err = new Error('argv: -e A=secretA -e B=secretB');
+    const scrubbed = scrubEnvValuesFromError(err, { A: 'secretA', B: 'secretB' });
+    assert.equal(scrubbed.message, 'argv: -e A=<redacted> -e B=<redacted>');
+  });
+
+  test('preserves err.code when present', () => {
+    const err = new Error('boom');
+    err.code = 'ENOENT';
+    const scrubbed = scrubEnvValuesFromError(err, { A: 'x' });
+    assert.equal(scrubbed.code, 'ENOENT');
+  });
+
+  test('null/empty env → message unchanged (still returns a fresh Error)', () => {
+    const err = new Error('plain failure, no secrets');
+    assert.equal(scrubEnvValuesFromError(err, null).message, 'plain failure, no secrets');
+    assert.equal(scrubEnvValuesFromError(err, {}).message, 'plain failure, no secrets');
+  });
+});
+
+describe('createWindow: secret scrubbing + session-env unset (CP3 Fix 1 + Fix 2)', () => {
+  test('cold-start bootstrap: a tmux failure never leaks the secret value', async () => {
+    const secret = 'https://host/auth/sub-1/sekret42';
+    async function _listPanes() {
+      return []; // no server → cold-start bootstrap
+    }
+    async function _run(args) {
+      // Mirrors Node's real execFile rejection: the whole argv, incl. the
+      // secret, embedded verbatim in the message.
+      throw new Error(`Command failed: tmux ${args.join(' ')}`);
+    }
+
+    await assert.rejects(
+      () => createWindow({ cwd: CWD, env: { ANTHROPIC_BASE_URL: secret } }, { _run, _listPanes }),
+      (err) => {
+        assert.ok(!err.message.includes('sekret42'), err.message);
+        assert.ok(!err.message.includes('sub-1'), err.message);
+        assert.ok(err.message.includes('<redacted>'), err.message);
+        return true;
+      },
+    );
+  });
+
+  test('cold-start bootstrap: no env → a tmux failure is NOT scrubbed/wrapped (byte-identical)', async () => {
+    async function _listPanes() {
+      return [];
+    }
+    async function _run() {
+      throw new Error('Command failed: tmux new-session -d -s claude-control');
+    }
+
+    await assert.rejects(
+      () => createWindow({ cwd: CWD }, { _run, _listPanes }),
+      (err) => {
+        assert.equal(err.message, 'Command failed: tmux new-session -d -s claude-control');
+        return true;
+      },
+    );
+  });
+
+  test('cold-start bootstrap: unsets each injected env key right after new-session succeeds', async () => {
+    const { calls, _run } = makeRun();
+    let listCall = 0;
+    async function _listPanes() {
+      listCall += 1;
+      if (listCall === 1) return [];
+      return [{ sessionName: 'claude-control', target: 'claude-control:0', windowIndex: 0 }];
+    }
+
+    await createWindow(
+      { cwd: CWD, env: { ANTHROPIC_BASE_URL: 'https://h/auth/u/s', FOO: 'bar' } },
+      { _run, _listPanes },
+    );
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0][0], 'new-session');
+    assert.deepEqual(calls[1], ['set-environment', '-t', 'claude-control', '-u', 'ANTHROPIC_BASE_URL']);
+    assert.deepEqual(calls[2], ['set-environment', '-t', 'claude-control', '-u', 'FOO']);
+  });
+
+  test('cold-start bootstrap: no env → no set-environment calls', async () => {
+    const { calls, _run } = makeRun();
+    let listCall = 0;
+    async function _listPanes() {
+      listCall += 1;
+      if (listCall === 1) return [];
+      return [{ sessionName: 'claude-control', target: 'claude-control:0', windowIndex: 0 }];
+    }
+
+    await createWindow({ cwd: CWD }, { _run, _listPanes });
+
+    assert.equal(calls.length, 1);
+    assert.ok(!calls.some((c) => c[0] === 'set-environment'));
+  });
+
+  test('existing-server path (new-window): a tmux failure never leaks the secret value', async () => {
+    const secret = 'https://host/auth/sub-1/sekret42';
+    async function _listPanes() {
+      return [{ sessionName: 'work', target: 'work:0', windowIndex: 0 }];
+    }
+    async function _run(args) {
+      throw new Error(`Command failed: tmux ${args.join(' ')}`);
+    }
+
+    await assert.rejects(
+      () => createWindow({ cwd: CWD, env: { ANTHROPIC_BASE_URL: secret } }, { _run, _listPanes }),
+      (err) => {
+        assert.ok(!err.message.includes('sekret42'), err.message);
+        assert.ok(err.message.includes('<redacted>'), err.message);
+        return true;
+      },
+    );
+  });
+
+  test('existing-server path (new-window -e): pane-scoped — NO session-env unset issued', async () => {
+    const { calls, _run } = makeRun({ 'new-window': 'work:3\n' });
+    async function _listPanes() {
+      return [{ sessionName: 'work', target: 'work:0', windowIndex: 0 }];
+    }
+
+    await createWindow(
+      { cwd: CWD, env: { ANTHROPIC_BASE_URL: 'https://h/auth/u/s' } },
+      { _run, _listPanes },
+    );
+
+    assert.equal(calls.length, 1, 'new-window is pane-scoped; no follow-up unset call');
+    assert.ok(!calls.some((c) => c[0] === 'set-environment'));
+  });
+});
+
+describe('createTmuxSession: secret scrubbing + session-env unset (CP3 Fix 1 + Fix 2)', () => {
+  test('a tmux failure never leaks the secret value', async () => {
+    const secret = 'https://host/auth/sub-1/sekret42';
+    async function _run(args) {
+      throw new Error(`Command failed: tmux ${args.join(' ')}`);
+    }
+
+    await assert.rejects(
+      () => createTmuxSession({ name: 'sess', cwd: CWD, env: { ANTHROPIC_BASE_URL: secret } }, { _run }),
+      (err) => {
+        assert.ok(!err.message.includes('sekret42'), err.message);
+        assert.ok(err.message.includes('<redacted>'), err.message);
+        return true;
+      },
+    );
+  });
+
+  test('no env → a tmux failure is NOT scrubbed/wrapped (byte-identical)', async () => {
+    async function _run() {
+      throw new Error('Command failed: tmux new-session -d -s sess');
+    }
+
+    await assert.rejects(
+      () => createTmuxSession({ name: 'sess', cwd: CWD }, { _run }),
+      (err) => {
+        assert.equal(err.message, 'Command failed: tmux new-session -d -s sess');
+        return true;
+      },
+    );
+  });
+
+  test('unsets each injected env key right after new-session succeeds (same argv shape as createWindow)', async () => {
+    const { calls, _run } = makeRun();
+    async function _listPanes() {
+      return [{ sessionName: 'sess', target: 'sess:0', windowIndex: 0 }];
+    }
+
+    await createTmuxSession(
+      { name: 'sess', cwd: CWD, env: { ANTHROPIC_BASE_URL: 'https://h/auth/u/s', A: '1' } },
+      { _run, _listPanes },
+    );
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0][0], 'new-session');
+    assert.deepEqual(calls[1], ['set-environment', '-t', 'sess', '-u', 'ANTHROPIC_BASE_URL']);
+    assert.deepEqual(calls[2], ['set-environment', '-t', 'sess', '-u', 'A']);
+  });
+
+  test('no env → no set-environment calls', async () => {
+    const { calls, _run } = makeRun();
+    async function _listPanes() {
+      return [{ sessionName: 'sess', target: 'sess:0', windowIndex: 0 }];
+    }
+
+    await createTmuxSession({ name: 'sess', cwd: CWD }, { _run, _listPanes });
+
+    assert.equal(calls.length, 1);
+    assert.ok(!calls.some((c) => c[0] === 'set-environment'));
+  });
+});
+
+describe('createWindowInSession: secret scrubbing only — no session-env unset (pane-scoped)', () => {
+  test('a tmux failure never leaks the secret value', async () => {
+    const secret = 'https://host/auth/sub-1/sekret42';
+    async function _run(args) {
+      throw new Error(`Command failed: tmux ${args.join(' ')}`);
+    }
+
+    await assert.rejects(
+      () => createWindowInSession({ sessionName: 'work', cwd: CWD, env: { ANTHROPIC_BASE_URL: secret } }, { _run }),
+      (err) => {
+        assert.ok(!err.message.includes('sekret42'), err.message);
+        assert.ok(err.message.includes('<redacted>'), err.message);
+        return true;
+      },
+    );
+  });
+
+  test('no env → a tmux failure is NOT scrubbed/wrapped (byte-identical)', async () => {
+    async function _run() {
+      throw new Error('Command failed: tmux new-window -t work:');
+    }
+
+    await assert.rejects(
+      () => createWindowInSession({ sessionName: 'work', cwd: CWD }, { _run }),
+      (err) => {
+        assert.equal(err.message, 'Command failed: tmux new-window -t work:');
+        return true;
+      },
+    );
+  });
+
+  test('env present but new-window is pane-scoped: NO session-env unset issued', async () => {
+    const { calls, _run } = makeRun({ 'new-window': 'work:5\n' });
+
+    await createWindowInSession(
+      { sessionName: 'work', cwd: CWD, env: { ANTHROPIC_BASE_URL: 'https://h/auth/u/s' } },
+      { _run },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.ok(!calls.some((c) => c[0] === 'set-environment'));
   });
 });
 

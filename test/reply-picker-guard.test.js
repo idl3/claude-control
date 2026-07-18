@@ -90,3 +90,40 @@ test('allows when kind is neither claude nor codex even with a picker present', 
   });
   assert.equal(result, false);
 });
+
+// ---------------------------------------------------------------------------
+// Claudex-TUI keystroke panes (CP3 Fix 1): claudex is the claude binary
+// pointed at the olam auth-worker — same TUI, same picker scrape
+// (parsePanePrompt via server.js's detectPanePicker branch) — so it needs the
+// identical send-time guard as a native claude pane.
+// ---------------------------------------------------------------------------
+
+test('refuses when picker is open in a claudex tmux pane', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: false,
+    kind: 'claudex',
+    transport: 'tmux', // claudex is ALWAYS tmux — never print
+    parsedPicker: PICKER,
+  });
+  assert.equal(result, true);
+});
+
+test('allows when claudex pane has no picker open (parsedPicker is null)', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: false,
+    kind: 'claudex',
+    transport: 'tmux',
+    parsedPicker: null,
+  });
+  assert.equal(result, false);
+});
+
+test('allows when viaAnswer is true in a claudex pane even with a picker open', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: true,
+    kind: 'claudex',
+    transport: 'tmux',
+    parsedPicker: PICKER,
+  });
+  assert.equal(result, false);
+});

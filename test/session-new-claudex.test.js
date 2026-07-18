@@ -47,6 +47,19 @@ describe('readCloudBearer', () => {
     assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'h', sub: '', secret: 'k' }) }), null);
     assert.equal(readCloudBearer({ _path: tmpBearerFile([1, 2]) }), null);
   });
+
+  // CP3 Fix 6 (LOW): authHost hardening — reject whitespace/control chars.
+  test('authHost containing whitespace or control chars → null (fail closed)', () => {
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil host', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil\thost', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil\nhost', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil\rhost', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil\x01host', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'evil\x7fhost', sub: 's', secret: 'k' }) }), null);
+    assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'trailing-space ', sub: 's', secret: 'k' }) }), null);
+    // A normal hostname (with scheme + port) still passes.
+    assert.ok(readCloudBearer({ _path: tmpBearerFile({ authHost: 'http://localhost:9999', sub: 's', secret: 'k' }) }));
+  });
 });
 
 describe('preflightClaudexModel', () => {
@@ -110,5 +123,104 @@ describe('claudex launch construction (server.js mirror)', () => {
     const claudexEnv = { ANTHROPIC_BASE_URL: bearer.baseUrl };
     assert.deepEqual(Object.keys(claudexEnv), ['ANTHROPIC_BASE_URL']);
     assert.equal(claudexEnv.ANTHROPIC_BASE_URL, 'https://h.example/auth/op/sek');
+  });
+});
+
+// CP3 Fix 5 (HIGH): claudex must NEVER take the print-transport bridge path.
+//
+// Mirror of server.js handleSessionNew's claudeTransport computation
+// (~:1218): with a host running CLAUDE_TRANSPORT=print (or a body override),
+// `agent === 'claudex'` short-circuits to 'tmux' BEFORE the print/tmux
+// branch selection — so the `else if (claudeTransport === 'print')` branch
+// (which has no agent guard of its own) is structurally unreachable for
+// claudex. Without this, claudex would lose its preflighted model (the
+// print bridge only knows `model`, which is null for claudex) and mislabel
+// the pane (@cc_agent hardcoded to 'claude' in that branch).
+function claudeTransportFor(agent, requestedTransport, configDefault) {
+  if (agent === 'claudex') return 'tmux';
+  return requestedTransport === 'print' || requestedTransport === 'tmux'
+    ? requestedTransport
+    : configDefault;
+}
+
+describe('claudeTransport forcing for claudex (server.js mirror)', () => {
+  test('claudex always forces tmux, even when body/config both request print', () => {
+    assert.equal(claudeTransportFor('claudex', 'print', 'print'), 'tmux');
+    assert.equal(claudeTransportFor('claudex', undefined, 'print'), 'tmux');
+    assert.equal(claudeTransportFor('claudex', 'tmux', 'tmux'), 'tmux');
+  });
+
+  test('claude/codex transport selection is unaffected by the claudex force', () => {
+    assert.equal(claudeTransportFor('claude', 'print', 'tmux'), 'print');
+    assert.equal(claudeTransportFor('claude', undefined, 'print'), 'print');
+    assert.equal(claudeTransportFor('claude', undefined, 'tmux'), 'tmux');
+    assert.equal(claudeTransportFor('codex', undefined, 'print'), 'print');
+  });
+});
+
+// CP3 Fix 2 (MEDIUM): GET /api/spawn-agents claudex entry, mirroring
+// server.js's ~:573-627 handler EXACTLY. Availability = claude binary
+// available AND readCloudBearer() !== null AND tmux >= 3.2 — checked in that
+// order, short-circuiting, so `reason` always names the FIRST failing
+// precondition (never a later-stage one masking an earlier real cause).
+function claudexSpawnEntryFor(claudeResult, bearerPresent, tmuxError) {
+  let available = claudeResult.available;
+  let reason = claudeResult.reason;
+  if (available && !bearerPresent) {
+    available = false;
+    reason = "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it";
+  }
+  if (available && tmuxError) {
+    available = false;
+    reason = tmuxError;
+  }
+  return {
+    id: 'claudex',
+    available,
+    defaultTransport: 'tmux',
+    transports: ['tmux'],
+    ...(available ? {} : { reason }),
+  };
+}
+
+describe('/api/spawn-agents claudex entry (server.js mirror)', () => {
+  test('all three preconditions pass → available, no reason field', () => {
+    const entry = claudexSpawnEntryFor({ available: true }, true, null);
+    assert.equal(entry.available, true);
+    assert.equal(entry.defaultTransport, 'tmux');
+    assert.deepEqual(entry.transports, ['tmux']);
+    assert.ok(!('reason' in entry));
+  });
+
+  test('claude binary unavailable → claudex unavailable, reason is the claude-binary reason (first precondition)', () => {
+    const entry = claudexSpawnEntryFor(
+      { available: false, reason: 'claude missing' },
+      true, // bearer present — must NOT override the earlier failure
+      null,
+    );
+    assert.equal(entry.available, false);
+    assert.equal(entry.reason, 'claude missing');
+  });
+
+  test('claude available, bearer missing → claudex unavailable, reason names the bearer artifact (second precondition)', () => {
+    const entry = claudexSpawnEntryFor({ available: true }, false, null);
+    assert.equal(entry.available, false);
+    assert.match(entry.reason, /cloud-bearer\.json/);
+    assert.match(entry.reason, /olam auth login/);
+  });
+
+  test('claude available, bearer present, tmux too old → claudex unavailable, reason is the tmux version message (third precondition)', () => {
+    const entry = claudexSpawnEntryFor(
+      { available: true },
+      true,
+      'tmux >= 3.2 required for claudex env injection (new-session -e); found 3.1 — brew upgrade tmux',
+    );
+    assert.equal(entry.available, false);
+    assert.match(entry.reason, /tmux >= 3\.2/);
+  });
+
+  test('claude unavailable AND bearer missing → reason stays the FIRST failing precondition (claude), never overwritten by the bearer check', () => {
+    const entry = claudexSpawnEntryFor({ available: false, reason: 'claude missing' }, false, null);
+    assert.equal(entry.reason, 'claude missing');
   });
 });

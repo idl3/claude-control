@@ -16,12 +16,18 @@ import {
 } from '../lib/railTokenPrefs';
 
 /** Rail filter values — one per funnel-chip stop in App.tsx's cycleFilter.
- *  Deliberately NO 'claudex' value: claudex panes run the claude binary
- *  (pointed at the olam auth-worker), so they surface under the 'agents' and
- *  'claude' filters like any other claude pane (see the filter predicate in
- *  the useMemo below). A dedicated chip would also need App.tsx's cycle +
- *  persisted-filter validation extended — fold instead, per the
- *  claudex-integration phase-b tracker. */
+ *  Deliberately NO 'claudex' value: claudex is the PRIMARY Codex-flavored
+ *  option (claudex-integration design decision 7, locked) — a claudex pane
+ *  (kind 'claudex') surfaces under the 'agents' filter (any non-terminal)
+ *  and under the 'codex' filter (its codex-flavored bucket — a claude/legacy
+ *  split would strand the operator who lives in the codex filter and picks
+ *  claudex from the "+ New session" default), NOT under 'claude' (see the
+ *  filter predicate in the useMemo below). Pane TREATMENT (icon, aria-label,
+ *  transcript binding, prompt detection) still renders claudex identically
+ *  to claude — only this filter BUCKET is codex-flavored. A dedicated chip
+ *  would also need App.tsx's cycle + persisted-filter validation extended —
+ *  fold into the codex bucket instead, per the claudex-integration phase-b
+ *  tracker. */
 export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
 
 interface SessionRailProps {
@@ -853,12 +859,20 @@ export function SessionRail({
       if (filter === 'all') return true;
       if (filter === 'agents') return s.kind !== 'terminal'; // claude + claudex + codex, no shells
       if (filter === 'terminal') return s.kind === 'terminal';
-      if (filter === 'codex') return s.kind === 'codex';
-      // 'claude' filter: show claude panes (kind === 'claude' or kind unset,
-      // but not terminal/codex). Claudex panes run the claude binary, so they
-      // classify as kind 'claude' and land here + under 'agents' — no
-      // dedicated claudex chip (see the SessionFilter doc above).
-      return s.kind !== 'terminal' && s.kind !== 'codex';
+      // 'codex' filter: the codex-flavored bucket — legacy codex panes AND
+      // claudex panes (design decision 7: claudex is the PRIMARY
+      // codex-flavored option, so the operator who lives in this filter and
+      // spawns from it via NewSessionForm's default MUST see those sessions
+      // here, not stranded under 'claude'). No dedicated claudex chip (see
+      // the SessionFilter doc above).
+      if (filter === 'codex') return s.kind === 'codex' || s.kind === 'claudex';
+      // 'claude' filter: claude-only — kind === 'claude' or kind unset
+      // (legacy panes with no classifier tag yet). Explicitly EXCLUDES
+      // claudex (it lives under 'codex' above) rather than the old
+      // exclusion-style "not terminal/not codex" shape, which would have
+      // silently swept claudex in here the moment lib/sessions.js started
+      // returning the first-class 'claudex' kind.
+      return s.kind === 'claude' || s.kind === undefined;
     });
     return groupByTmux(visible);
   }, [sessions, filter]);

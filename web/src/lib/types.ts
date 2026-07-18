@@ -26,8 +26,13 @@ export interface Session {
   pendingQuestion?: string | null;
   cmd?: string;
   isClaude?: boolean;
-  /** 'claude' = a Claude Code pane (transcript Thread); 'codex' = an OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal); 'remote' = an olam remote sandbox session. */
-  kind?: 'claude' | 'codex' | 'terminal' | 'remote';
+  /** 'claude' = a Claude Code pane (transcript Thread); 'claudex' = the claude
+   *  binary pointed at the olam auth-worker (renders/behaves like 'claude' —
+   *  it's a rail-FILTER-bucket distinction, codex-flavored per design
+   *  decision 7, not a pane-treatment one); 'codex' = an OpenAI Codex pane;
+   *  'terminal' = a plain shell pane (live terminal); 'remote' = an olam
+   *  remote sandbox session. */
+  kind?: 'claude' | 'claudex' | 'codex' | 'terminal' | 'remote';
   /** Per-session control transport. */
   transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
   // --- remote (olam) rows only — additive; absent on local sessions ---------
