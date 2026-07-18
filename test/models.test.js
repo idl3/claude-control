@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   MLX_MODELS,
   CLAUDE_MODELS,
+  CLAUDEX_MODELS,
   recommendMlxModel,
   recommendClaudeModel,
   detectMachine,
@@ -33,6 +34,16 @@ test('catalog entries are well-formed', () => {
   for (const m of CLAUDE_MODELS) {
     assert.match(m.id, /^claude-/);
   }
+  for (const m of CLAUDEX_MODELS) {
+    assert.ok(typeof m.id === 'string' && m.id.length > 0);
+    assert.ok(typeof m.label === 'string' && m.label.length > 0);
+  }
+});
+
+test('claudex catalog is a closed single-entry list', () => {
+  // Deliberately exactly one entry (design rubric S3: no generic model /
+  // base-URL configurability for the claudex agent kind).
+  assert.deepEqual(CLAUDEX_MODELS, [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (Codex)' }]);
 });
 
 test('detectMachine returns plausible specs', () => {

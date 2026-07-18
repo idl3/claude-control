@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readConfig, writeConfig } from '../lib/config.js';
+import { CLAUDEX_MODELS } from '../lib/models.js';
 
 let dataDir;
 
@@ -130,6 +131,35 @@ test('writeConfig round-trips all four CLI fields together', () => {
   assert.equal(read.claudeBin, '/opt/homebrew/bin/claude');
   assert.equal(read.codexLaunchCommand, 'yodex');
   assert.equal(read.codexBin, '/opt/homebrew/bin/codex');
+});
+
+// ── Claudex fields ────────────────────────────────────────────────────────────
+
+test('readConfig returns the claudex default when no file exists', () => {
+  const cfg = readConfig();
+  assert.equal(cfg.claudexModel, 'gpt-5.6-sol');
+  // The default must be a member of the curated closed list (single source
+  // of truth: lib/models.js CLAUDEX_MODELS).
+  assert.ok(CLAUDEX_MODELS.some((m) => m.id === cfg.claudexModel));
+});
+
+test('writeConfig persists a valid claudexModel', () => {
+  const saved = writeConfig({ claudexModel: 'gpt-5.6-sol' });
+  assert.equal(saved.claudexModel, 'gpt-5.6-sol');
+  assert.equal(readConfig().claudexModel, 'gpt-5.6-sol');
+});
+
+test('writeConfig rejects a claudexModel outside the closed list', () => {
+  assert.throws(() => writeConfig({ claudexModel: 'gpt-99-invented' }), /must be one of/);
+  assert.throws(() => writeConfig({ claudexModel: 42 }), /must be one of/);
+});
+
+test('readConfig falls back to the default on an unknown persisted claudexModel', () => {
+  fs.writeFileSync(
+    path.join(dataDir, 'config.json'),
+    JSON.stringify({ claudexModel: 'gpt-99-invented' }),
+  );
+  assert.equal(readConfig().claudexModel, 'gpt-5.6-sol');
 });
 
 // ── projectDirs fields ────────────────────────────────────────────────────────
