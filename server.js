@@ -17,7 +17,7 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
-import { readCloudBearer, preflightClaudexModel } from './lib/cloud-bearer.js';
+import { resolveClaudexBaseUrl, preflightClaudexModel } from './lib/cloud-bearer.js';
 import * as shell from './lib/shell.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import { TranscriptTailer } from './lib/transcript.js';
@@ -1338,17 +1338,19 @@ async function handleSessionNew(req, res) {
   }
 
   // (iv) Claudex pre-validation — ALL fail-closed, BEFORE any window exists:
-  //      bearer artifact present, tmux supports -e (>=3.2), and the requested
-  //      model is actually served by the auth-worker (never silently fall
-  //      back to an Anthropic model — design T2). The composed base URL
-  //      carries the bearer secret: it rides ONLY the tmux -e env option
+  //      a base URL resolves (direnv at cwd FIRST — org trees export their
+  //      own auth-worker's path-bearer URL in .envrc, giving per-org routing
+  //      — then ~/.olam/cloud-bearer.json), tmux supports -e (>=3.2), and
+  //      the requested model is actually served by the auth-worker (never
+  //      silently fall back to an Anthropic model — design T2). The resolved
+  //      URL carries the bearer secret: it rides ONLY the tmux -e env option
   //      below — never the launch string, never a log line (T3/T8).
   let claudexEnv = null;
   if (agent === 'claudex') {
-    const bearer = readCloudBearer();
-    if (!bearer) {
+    const resolved = await resolveClaudexBaseUrl(cwd);
+    if (!resolved) {
       return endJson(res, 400, {
-        error: "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it",
+        error: "claudex needs ANTHROPIC_BASE_URL — export it in the project's .envrc (direnv) or run 'olam auth login' to provision ~/.olam/cloud-bearer.json",
       });
     }
     try {
@@ -1356,12 +1358,14 @@ async function handleSessionNew(req, res) {
     } catch (err) {
       return endJson(res, 400, { error: String(err?.message || err) });
     }
-    const pf = await preflightClaudexModel(bearer.baseUrl, claudexModel);
+    const pf = await preflightClaudexModel(resolved.baseUrl, claudexModel);
     if (!pf.ok) {
       const served = pf.served && pf.served.length > 0 ? `; served: ${pf.served.join(', ')}` : '';
       return endJson(res, 400, { error: `claudex preflight failed: ${pf.reason}${served}` });
     }
-    claudexEnv = { ANTHROPIC_BASE_URL: bearer.baseUrl };
+    // Inject even when direnv-sourced: same value, and it keeps non-direnv
+    // cwds working plus the redaction/injection story uniform.
+    claudexEnv = { ANTHROPIC_BASE_URL: resolved.baseUrl };
   }
 
   try {
