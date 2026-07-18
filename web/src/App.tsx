@@ -35,6 +35,7 @@ import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
 import { loadFontSize } from './lib/fontSizePrefs';
+import { keyboardIsUp } from './lib/keyboardViewport';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -2243,66 +2244,86 @@ function AppInner() {
   // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
   const cmdHeld = useModifierHeld(500);
 
-  // Mobile soft-keyboard gap: the composer keeps a constant
-  // safe-area-inset-bottom clearance for the home indicator (styles.css
-  // .composer), but once the iOS keyboard is up it covers the home bar, so
-  // that inset becomes dead space floating above the keyboard. Detect
-  // keyboard-up via visualViewport rather than :focus-within — tapping the
-  // composer's mic/+ buttons blurs the textarea without changing viewport
-  // height, so a focus-driven toggle previously caused a visible jump
-  // (see the styles.css comment this replaces). Viewport height only moves
-  // when the keyboard itself slides, so this stays stable across taps.
+  // Mobile soft-keyboard flush: pin .app to the visible area above the iOS
+  // keyboard so the composer ends FLUSH on the keyboard every time. iOS gives
+  // us no keyboard API (no interactive-widget meta, no navigator.virtualKeyboard,
+  // no env(keyboard-inset-*) — all unshipped on WebKit as of 2026), so this is
+  // pure visualViewport math. Three hard-won invariants, each fixing a real
+  // non-deterministic gap observed on-device:
   //
-  // Same effect also republishes vv.offsetTop as --vv-top: iOS Safari scrolls
-  // the VISUAL viewport (not the layout viewport) up when the keyboard opens,
-  // so a `position: fixed; top: 0` element — like .app-top-fade below — stays
-  // pinned to the layout viewport's top and drifts out of alignment with the
-  // status-bar area it's meant to cover. Anchoring it to `var(--vv-top)`
-  // instead keeps it glued to the true visible top edge.
+  //  1. DETECT keyboard-up off a STABLE height reference. window.innerHeight is
+  //     NOT stable on iOS — when the keyboard opens and iOS scrolls the focused
+  //     input into view, innerHeight collapses to visualViewport.height (measured
+  //     358 vs a true 695). documentElement.clientHeight holds the real layout
+  //     height through that, so we detect on `clientHeight - vv.height`. We do
+  //     NOT subtract vv.offsetTop: iOS drives offsetTop large during that scroll,
+  //     and the old `innerHeight - vv.height - offsetTop > 120` then went
+  //     NEGATIVE, silently never setting kbd-up — the pin never engaged and the
+  //     composer floated with a gap. This was the "sometimes flush, sometimes a
+  //     massive gap on identical input" bug.
+  //
+  //  2. KILL the document scroll iOS induces. On focus iOS scrolls the whole
+  //     document up (scrollTop/offsetTop → keyboard height) to reveal the input,
+  //     even with body{overflow:hidden}. That shifts the position:fixed pin out
+  //     of alignment. Since .app pins itself into the visible area, the document
+  //     never NEEDS to scroll — so we force scrollTop back to 0, which realigns
+  //     the visual viewport to the layout origin (offsetTop → 0) and lands the
+  //     pin flush. Also clears iOS 26's offsetTop-doesn't-revert-on-dismiss drift.
+  //
+  //  3. SETTLE past the animation. iOS can finish the keyboard slide / scroll
+  //     WITHOUT firing a final visualViewport event at the settled geometry, so
+  //     a purely event-driven read can stick on a mid-animation value. A trailing
+  //     re-read a beat after events go quiet guarantees the last committed
+  //     geometry is the settled one.
+  //
+  // .app pinning + --vv-top/--vv-h are consumed by styles.css
+  // (`body.kbd-up .app`, `.app-top-fade`). --vv-top also re-anchors the
+  // status-bar scrim to the true visible top edge.
   useEffect(() => {
-    if (!window.visualViewport) return;
     const vv = window.visualViewport;
+    if (!vv) return;
     let rafId: number | null = null;
+    let settleTimer: number | null = null;
     let lastUp = false;
-    const apply = () => {
+    const commit = () => {
       rafId = null;
-      const up = window.innerHeight - vv.height - vv.offsetTop > 120;
-      if (up === lastUp) return;
-      lastUp = up;
-      document.body.classList.toggle('kbd-up', up);
-    };
-    const applyOffset = () => {
+      // The app never intends a document-level scroll (inner containers scroll
+      // instead). Any nonzero scrollTop here is iOS's focus scroll-into-view —
+      // undo it so the visual viewport realigns to the layout origin.
+      const se = document.scrollingElement;
+      if (se && se.scrollTop !== 0) se.scrollTop = 0;
+      // Stable layout-viewport height (see invariant 1); offsetTop deliberately
+      // NOT subtracted (see keyboardIsUp).
+      const up = keyboardIsUp(document.documentElement.clientHeight, vv.height);
       document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
-      // Publish the visual-viewport height too. When the keyboard is up the
-      // installed PWA pins .app to the visible area above the keyboard via
-      // position:fixed + top:--vv-top + height:--vv-h (see styles.css
-      // `html.pwa-fill body.kbd-up .app`). This is a standard visualViewport
-      // FOLLOW: .app is out of document flow so its size never changes the
-      // document height, so iOS never re-scrolls — the composer lands reliably
-      // above the keyboard every time (the earlier `--screen-h = offsetTop +
-      // height` resized the document and fed back into iOS's scroll → the
-      // composer landed randomly under/over the keyboard). --screen-h stays the
-      // full screen (set in main.tsx) for the keyboard-down / rail case.
       document.documentElement.style.setProperty('--vv-h', `${vv.height}px`);
+      if (up !== lastUp) {
+        lastUp = up;
+        document.body.classList.toggle('kbd-up', up);
+      }
+    };
+    const scheduleCommit = () => {
+      if (rafId == null) rafId = requestAnimationFrame(commit);
     };
     const onViewportChange = () => {
-      // Coalesce the burst of resize/scroll events fired during the
-      // keyboard's slide animation into one DOM write per frame.
-      if (rafId != null) return;
-      rafId = requestAnimationFrame(() => {
-        apply();
-        applyOffset();
-      });
+      // Coalesce the burst of resize/scroll events during the slide into one
+      // write per frame (continuous tracking, never a single stale read)...
+      scheduleCommit();
+      // ...then a trailing settle read past the animation (invariant 3).
+      if (settleTimer != null) clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(scheduleCommit, 350);
     };
-    applyOffset();
+    commit();
     vv.addEventListener('resize', onViewportChange);
     vv.addEventListener('scroll', onViewportChange);
     return () => {
       vv.removeEventListener('resize', onViewportChange);
       vv.removeEventListener('scroll', onViewportChange);
       if (rafId != null) cancelAnimationFrame(rafId);
+      if (settleTimer != null) clearTimeout(settleTimer);
       document.body.classList.remove('kbd-up');
       document.documentElement.style.removeProperty('--vv-top');
+      document.documentElement.style.removeProperty('--vv-h');
     };
   }, []);
 
