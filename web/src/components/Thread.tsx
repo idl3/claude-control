@@ -1,8 +1,8 @@
-import { memo, useEffect, useState } from 'react';
+import { forwardRef, memo, useEffect, useState } from 'react';
 import { ThreadPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
 import { PendingAskCard } from './MessageParts';
-import { Composer } from './Composer';
+import { Composer, type ComposerHandle } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
 import { SubAgentThread } from './SubAgentThread';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -158,7 +158,7 @@ function ThreadWelcomeHero({ agentName }: { agentName: string }) {
   );
 }
 
-function ThreadImpl({
+const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   hasSelection,
   agentName = 'Claude',
   loading = false,
@@ -186,7 +186,7 @@ function ThreadImpl({
   onSelect,
   onReply,
   emptyState = null,
-}: ThreadProps) {
+}: ThreadProps, ref) {
   const loaderTimedOut = useLoaderTimedOut(!!loading);
   // Hold the skeleton (instead of falling through to the empty/welcome state)
   // while either:
@@ -308,6 +308,7 @@ function ThreadImpl({
         working={working}
       />
       <Composer
+        ref={ref}
         disabled={!hasSelection || loading}
         loading={loading}
         sessionId={sessionId}
@@ -329,9 +330,12 @@ function ThreadImpl({
       />
     </ThreadPrimitive.Root>
   );
-}
+});
 
 // Memoized: Thread's props are stabilized at the App call site (stable cockpit
 // action refs, memoized derived props), so a WS frame for another session or the
 // 5s resources tick no longer re-renders the transcript + composer subtree.
+// Also forwards a ref through to the inner Composer (see ComposerHandle) so
+// App can imperatively open/toggle the `>_` terminal mode (⌘J, the command
+// palette, the header's raw-terminal button).
 export const Thread = memo(ThreadImpl);
