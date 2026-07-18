@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useMessage, TextMessagePartProvider } from '@assistant-ui/react';
 import type {
   TextMessagePartComponent,
@@ -258,15 +258,27 @@ export const WorkflowPart: ToolCallMessagePartComponent = (props) => {
   const runId = extractWorkflowRunId(res?.text);
   const workflow = runId ? byRunId.get(runId) ?? null : null;
 
+  // Stable per-block callback (runId + the context openAgent are both stable) so
+  // the card's row memo (P3) is NOT defeated: the context value object changes
+  // every poll, which re-renders this part — an inline closure here would churn
+  // the callback identity and force every AgentRow to re-render on each tick.
+  const onOpenAgentTranscript = useCallback(
+    (agentId: string, label: string) => {
+      if (runId && openAgent) openAgent(runId, agentId, label);
+    },
+    [runId, openAgent],
+  );
+
   // No runId, or no live run for it yet (poll hasn't surfaced the slice) → the
   // generic tool row, so the transcript never shows a blank where the card goes.
   if (!workflow || !runId) return <ToolPart {...props} />;
 
-  const onOpenAgentTranscript = openAgent
-    ? (agentId: string, label: string) => openAgent(runId, agentId, label)
-    : undefined;
-
-  return <WorkflowCard workflow={workflow} onOpenAgentTranscript={onOpenAgentTranscript} />;
+  return (
+    <WorkflowCard
+      workflow={workflow}
+      onOpenAgentTranscript={openAgent ? onOpenAgentTranscript : undefined}
+    />
+  );
 };
 
 // tool_use → controlled expandable row with a panel-open trigger on the name.
