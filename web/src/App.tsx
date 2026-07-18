@@ -25,6 +25,7 @@ import { renameSession, getConfig, resetBinding, rematchAll, olamTerminalToken, 
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
+import type { ComposerHandle } from './components/Composer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
@@ -42,7 +43,6 @@ import { PermissionBanner } from './components/PermissionBanner';
 import { ConfigModal } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { NewSessionDraft } from './components/NewSessionDraft';
-import { TerminalPanel } from './components/TerminalPanel';
 import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
@@ -417,6 +417,11 @@ function AppInner() {
     composerTerminalRef.current = active;
     setTerminalMode(active);
   }, []);
+  // Imperative handle onto the Composer's own `>_` terminal mode (forwarded
+  // through Thread — see ComposerHandle) — the single surviving terminal
+  // surface. ⌘J, the command palette, and the header's raw-terminal button
+  // all trigger it through this ref instead of the retired ttyd overlay.
+  const composerRef = useRef<ComposerHandle>(null);
   // Working indicator after answering an AskUserQuestion — the answer is sent as
   // keystrokes (no transcript echo to match), so it clears on the next activity.
   const [answering, setAnswering] = useState<{
@@ -881,59 +886,18 @@ function AppInner() {
   // In-transcript search (⌘/).
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Raw-terminal escape hatch with an LRU of warm ttyd panels. To avoid
-  // leaving background ttyd/tmux attaches around when the terminal is closed,
-  // we only keep panels mounted while the raw terminal is actually visible.
-  // Switching sessions while terminalShown=true can still keep a small warm
-  // set for instant reopen, but closing the surface drops the cache so the
-  // server can reap the processes promptly.
-  const TERM_WARM_MAX = 4;
-  const [warmTerms, setWarmTerms] = useState<string[]>([]);
-  const [terminalShown, setTerminalShown] = useState(false);
-
-  // Bump `id` to most-recently-used; cap the warm set at 4 (drop the oldest).
-  const touchWarm = useCallback((id: string) => {
-    setWarmTerms((w) => {
-      const next = [...w.filter((x) => x !== id), id];
-      return next.length > TERM_WARM_MAX ? next.slice(next.length - TERM_WARM_MAX) : next;
-    });
-  }, []);
-
-  // Keep only the visible terminal hot. When the terminal is closed, clear the
-  // warm cache so hidden ttyd iframes don't keep consuming resources.
-  useEffect(() => {
-    if (!terminalShown) {
-      setWarmTerms([]);
-      return;
-    }
-    const id = cockpit.selectedId;
-    if (!id) return;
-    const t = setTimeout(() => {
-      setWarmTerms((w) => {
-        if (w.includes(id)) return [...w.filter((x) => x !== id), id]; // refresh recency
-        if (w.length < TERM_WARM_MAX) return [...w, id];
-        return w; // full → leave it; openTerminal will evict-and-load on demand
-      });
-    }, 500);
-    return () => clearTimeout(t);
-  }, [cockpit.selectedId, terminalShown]);
-
-  // Open: ensure the current session's panel is warm + visible. Toggle: same key
-  // (⌘J) flips it back out. Close keeps it warm for an instant reopen.
+  // Raw-terminal escape hatch: opens/toggles the Composer's own `>_` terminal
+  // mode via the imperative composerRef (the ttyd overlay this used to drive
+  // is retired — see ComposerHandle). Requires a session to be selected, same
+  // guard the old ttyd path had.
   const openTerminal = useCallback(() => {
-    const id = cockpit.selectedId;
-    if (!id) return;
-    touchWarm(id);
-    setTerminalShown(true);
-  }, [cockpit.selectedId, touchWarm]);
+    if (!cockpit.selectedId) return;
+    composerRef.current?.openTerminal();
+  }, [cockpit.selectedId]);
   const toggleTerminal = useCallback(() => {
-    const id = cockpit.selectedId;
-    if (!id) return;
-    setTerminalShown((v) => {
-      if (!v) touchWarm(id);
-      return !v;
-    });
-  }, [cockpit.selectedId, touchWarm]);
+    if (!cockpit.selectedId) return;
+    composerRef.current?.toggleTerminal();
+  }, [cockpit.selectedId]);
 
   // Sub-agent side panel, process monitor, and locally-hidden pane prompt
   // (keyed by JSON signature so it re-shows when the prompt changes). Reset the
@@ -1978,19 +1942,14 @@ function AppInner() {
       if (target) {
         e.preventDefault();
         e.stopPropagation();
-        // Release a stuck ttyd iframe first (it swallows keydowns in its own
-        // document, so the window listener wouldn't fire while it holds focus).
-        const ae = document.activeElement as HTMLElement | null;
-        if (ae && ae.tagName === 'IFRAME') ae.blur();
-        // Close any open ttyd overlay BEFORE select() so React batches both state
-        // updates — otherwise the new session's TerminalPanel can briefly see
-        // visible=true and steal focus into its iframe.
-        setTerminalShown(false);
+        // Composer's own sessionId-keyed effect already leaves `>_` terminal
+        // mode on session switch, so there's no stuck terminal focus to
+        // release here (the old ttyd iframe needed a manual blur; the
+        // composer-terminal doesn't).
         select(target.id);
         // Land focus in the composer so you can type immediately (the default on
         // every switch). For terminal sessions there's no .composer-input, so the
-        // visible terminal pane keeps its own focus. The hidden-terminal focus
-        // steal is handled separately (TerminalPanel's in-iframe guard).
+        // visible terminal pane keeps its own focus.
         const focusComposer = () => {
           document
             .querySelector<HTMLTextAreaElement>('.composer-input')
@@ -2014,7 +1973,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [addressableClaude, paletteOpen, select, setTerminalShown]);
+  }, [addressableClaude, paletteOpen, select]);
 
   // ⌘/Ctrl+Enter from anywhere jumps focus back INTO the composer — but only when
   // focus isn't already in a text field (where ⌘Enter means send/optimise) and no
@@ -2131,7 +2090,7 @@ function AppInner() {
         label: 'View raw tmux window',
         hint: selectedSession ? selectedSession.name || selectedSession.id : 'select a session first',
         group: 'Actions',
-        keywords: 'terminal ttyd pane window',
+        keywords: 'terminal pane window shell',
         run: () => openTerminal(),
       },
       {
@@ -2163,10 +2122,10 @@ function AppInner() {
       },
       {
         id: 'act:terminal-mode',
-        label: terminalShown ? 'Exit terminal mode' : 'Terminal mode',
+        label: terminalMode ? 'Exit terminal mode' : 'Terminal mode',
         hint: selectedSession ? undefined : 'select a session first',
         group: 'Actions',
-        keywords: 'raw tmux ttyd shell toggle',
+        keywords: 'terminal shell toggle raw tmux',
         hotkey: '⌘J',
         run: () => toggleTerminal(),
       },
@@ -2260,7 +2219,7 @@ function AppInner() {
     showToast,
     openTerminal,
     openDraft,
-    terminalShown,
+    terminalMode,
     toggleTerminal,
     galleryOpen,
     searchOpen,
@@ -2283,32 +2242,6 @@ function AppInner() {
   // Holding ⌘/Ctrl reveals hotkey affordances (incl. the scroll-to-bottom
   // button + its ⌘. badge). Same 500ms hold the HotkeyHints overlay uses.
   const cmdHeld = useModifierHeld(500);
-
-  // Focus-steal guard: warm/hidden ttyd panels keep their <iframe> loaded, and
-  // ttyd/xterm INSIDE the iframe calls .focus() on itself (on load + on poll).
-  // `inert` + delayed `visibility:hidden` don't reliably stop an iframe's own
-  // document from grabbing focus, so a hidden terminal can silently steal it —
-  // popping the keyboard and eating every hotkey. Catch focus landing on any
-  // term iframe whose overlay isn't currently visible and bounce it back out.
-  useEffect(() => {
-    const onFocusIn = (e: FocusEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (!t || t.tagName !== 'IFRAME' || !t.classList.contains('term-frame')) return;
-      const overlay = t.closest('.term-overlay');
-      if (overlay && overlay.getAttribute('data-visible') === 'true') return; // legit, visible
-      (t as HTMLIFrameElement).blur();
-      // Land in the composer (ready to type) rather than parking on the body.
-      const ci = document.querySelector<HTMLTextAreaElement>('.composer-input');
-      if (ci) ci.focus({ preventScroll: true });
-      else {
-        const host = document.querySelector<HTMLElement>('.detail-body') ?? document.body;
-        host.setAttribute('tabindex', '-1');
-        host.focus({ preventScroll: true });
-      }
-    };
-    document.addEventListener('focusin', onFocusIn, true);
-    return () => document.removeEventListener('focusin', onFocusIn, true);
-  }, []);
 
   // Mobile soft-keyboard gap: the composer keeps a constant
   // safe-area-inset-bottom clearance for the home indicator (styles.css
@@ -2830,6 +2763,7 @@ function AppInner() {
                     label="This conversation failed to render"
                   >
                   <Thread
+                    ref={composerRef}
                     hasSelection={!!cockpit.selectedId}
                     agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
                     loading={!cockpit.messagesLoaded}
@@ -2890,21 +2824,6 @@ function AppInner() {
             onToast={showToast}
           />
         ) : null}
-
-        {/* Up to 4 warm ttyd panels stay mounted (LRU); only the current
-            session's, when shown, is visible — `visible` fades+zooms it in/out
-            so opening never waits on a fresh ttyd load. */}
-        {warmTerms.map((id) => (
-          <ErrorBoundary key={id} label="Terminal failed to render">
-            <TerminalPanel
-              sessionId={id}
-              visible={id === cockpit.selectedId && terminalShown}
-              label={cockpit.sessions.find((s) => s.id === id)?.name ?? id}
-              sendKey={cockpit.sendPaneKey}
-              onClose={() => setTerminalShown(false)}
-            />
-          </ErrorBoundary>
-        ))}
 
         <ErrorBoundary label="Sub-agent panel failed to render">
           <SubAgentPanel

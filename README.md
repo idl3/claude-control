@@ -42,7 +42,7 @@ npm install -g @idl3/claude-control     # or run once: npx @idl3/claude-control
 > missing after `-g`, your npm global bin dir isn't on `PATH`: run `npm prefix -g`
 > and add `<that>/bin` to your shell `PATH`, or just use `npx @idl3/claude-control`.
 
-**Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). Optional: **ttyd** for the in-browser raw terminal (`brew install ttyd` · `sudo apt install ttyd`) — set `CLAUDE_CONTROL_TTYD` to override its path. The web UI ships prebuilt — no build step on install.
+**Prerequisites:** Node ≥20 and **tmux** on your `PATH` (`brew install tmux` · `sudo apt install tmux`). The in-browser terminal (the composer's `>_` mode) is a bundled xterm.js + pty bridge — no extra dependency to install. The web UI ships prebuilt — no build step on install.
 
 **Optional local AI (no API key):**
 

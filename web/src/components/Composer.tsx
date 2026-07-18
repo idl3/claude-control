@@ -1,4 +1,14 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -137,6 +147,20 @@ interface ComposerProps {
   services?: Partial<ComposerServices>;
 }
 
+/**
+ * Imperative handle exposed via ref so a caller outside the Thread/Composer
+ * tree (App's ⌘J hotkey, the command palette, the header's raw-terminal
+ * button) can trigger the composer's own `>_` terminal mode — the ONE
+ * surviving terminal surface after the ttyd overlay's retirement. Mirrors
+ * the internal `openTerminal`/`closeTerminal` the `>_` toolbar button and
+ * XtermHost's Escape hatch already use.
+ */
+export interface ComposerHandle {
+  openTerminal: () => void;
+  closeTerminal: () => void;
+  toggleTerminal: () => void;
+}
+
 export interface ComposerServices {
   optimizePrompt: (text: string) => Promise<OptimizeResult>;
   loadSkills: (id?: string | null) => Promise<SkillEntry[]>;
@@ -238,7 +262,7 @@ type EnhanceState = {
 };
 const EMPTY_ENHANCE: EnhanceState = { optimizing: false, review: null };
 
-export function Composer({
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({
   disabled,
   loading = false,
   sessionId,
@@ -258,7 +282,7 @@ export function Composer({
   onSelect,
   onReply,
   services,
-}: ComposerProps) {
+}: ComposerProps, ref) {
   const composer = useComposerRuntime();
   const shell = useShell();
   const composerServices = useMemo<ComposerServices>(
@@ -318,6 +342,20 @@ export function Composer({
     onTerminalModeChange?.(false);
     refocusComposer();
   }, [onTerminalModeChange, refocusComposer]);
+
+  // Imperative surface for callers outside the Thread/Composer tree (App's
+  // ⌘J hotkey, the command palette, the header's raw-terminal button) — the
+  // ttyd overlay used to own those triggers; now they all drive this, the
+  // single surviving terminal.
+  useImperativeHandle(
+    ref,
+    () => ({
+      openTerminal,
+      closeTerminal,
+      toggleTerminal: () => (terminal ? closeTerminal() : openTerminal()),
+    }),
+    [openTerminal, closeTerminal, terminal],
+  );
 
   // Pulse the primary send button while a prompt is being optimised (in flight).
   const sendBtnRef = useRef<HTMLButtonElement>(null);
@@ -2285,7 +2323,7 @@ export function Composer({
       ) : null}
     </ComposerPrimitive.Root>
   );
-}
+});
 
 // ── VoiceInline ──────────────────────────────────────────────────────────────
 // Always mounted inside .composer-card. When idle (active=false) the wrapper

@@ -105,3 +105,68 @@ test('GET /api/does-not-exist returns 404 application/json, not 200 text/html', 
     assert.equal(parsed.error, 'not found');
   }
 });
+
+// ── /term/ is retired (the ttyd raw-terminal overlay is gone) ──────────────
+// `serveStatic`'s fallback is async (fs.readFile), so these tests must wait
+// for the response instead of asserting synchronously right after `_handler`.
+function mockResAsync() {
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const res = mockRes();
+  const origEnd = res.end.bind(res);
+  res.end = (body) => {
+    origEnd(body);
+    resolveDone();
+  };
+  return { res, done };
+}
+
+test('GET /term/<id>/asset.css (an old ttyd-asset-shaped path) is a plain 404 — no proxy, no distinguishable route', async () => {
+  const { res, done } = mockResAsync();
+  _handler(mockReq('/term/fake-session%3A0/asset.css'), res);
+  await done;
+
+  assert.equal(res._code, 404, 'must be a plain 404, not a ttyd proxy response');
+  assert.ok(!res._headers?.['content-type']?.includes('application/json'), 'not the JSON /api/* 404 either — just the generic static 404');
+});
+
+test('GET /term/<id> falls through to the SAME generic handling as any other unmatched path — no special /term/ route remains', async () => {
+  const { res: termRes, done: termDone } = mockResAsync();
+  _handler(mockReq('/term/fake-session%3A0'), termRes);
+  await termDone;
+
+  const { res: siblingRes, done: siblingDone } = mockResAsync();
+  _handler(mockReq('/this-path-has-never-existed-either'), siblingRes);
+  await siblingDone;
+
+  // Both are extension-less unknown paths — they must resolve identically
+  // (the SPA fallback), proving /term/ carries no special-cased behavior.
+  assert.equal(termRes._code, siblingRes._code);
+  assert.equal(termRes._headers?.['content-type'], siblingRes._headers?.['content-type']);
+});
+
+test('?token= has no effect anywhere — the ttyd query-string auth exception is gone', async () => {
+  const { res: withBadToken, done: d1 } = mockResAsync();
+  _handler(mockReq('/term/fake-session%3A0?token=totally-wrong-token'), withBadToken);
+  await d1;
+
+  const { res: withoutToken, done: d2 } = mockResAsync();
+  _handler(mockReq('/term/fake-session%3A0'), withoutToken);
+  await d2;
+
+  // A bogus/missing ?token= must never produce a distinguishing 401 — that
+  // gate (checkTerminalToken) no longer exists anywhere in the codebase, and
+  // a wrong token must not change the response at all.
+  assert.notEqual(withBadToken._code, 401);
+  assert.equal(withBadToken._code, withoutToken._code);
+
+  // Sanity: a bogus ?token= on a completely unrelated route ALSO has zero
+  // effect anywhere else in the app (it was never a general auth mechanism).
+  const { res: apiWithToken, done: d3 } = mockResAsync();
+  _handler(mockReq('/api/does-not-exist?token=totally-wrong-token'), apiWithToken);
+  await d3;
+  const { res: apiWithoutToken, done: d4 } = mockResAsync();
+  _handler(mockReq('/api/does-not-exist'), apiWithoutToken);
+  await d4;
+  assert.equal(apiWithToken._code, apiWithoutToken._code);
+});
