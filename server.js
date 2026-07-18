@@ -18,6 +18,7 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
+import { readCloudBearer, preflightClaudexModel } from './lib/cloud-bearer.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
@@ -1211,8 +1212,9 @@ async function handleSessionNew(req, res) {
       ? os.homedir()
       : rawCwd;
 
-  // agent ∈ {'claude','codex'}, default 'claude'.
-  const agent = body.agent === 'codex' ? 'codex' : 'claude';
+  // agent ∈ {'claude','codex','claudex'}, default 'claude'. Claudex = the
+  // claude binary backed by Codex via the olam auth-worker (ENV-only setup).
+  const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claudex' ? 'claudex' : 'claude';
   const claudeTransport =
     body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
       ? body.claudeTransport
@@ -1233,6 +1235,21 @@ async function handleSessionNew(req, res) {
   // codexModel: same pattern, Codex-only. Unknown/absent → null (no --model
   // flag / no thread/start model field, Codex CLI default).
   const codexModel = agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
+
+  // claudexModel: DELIBERATELY fail-closed, unlike the silent-fallback
+  // ternaries above — a claudex session with the wrong model would silently
+  // bill/answer on the wrong upstream (design T2). Absent/'default' → the
+  // config default (gpt-5.6-sol); a provided-but-unknown value → 400.
+  let claudexModel = null;
+  if (agent === 'claudex') {
+    const requested = typeof body.claudexModel === 'string' && body.claudexModel && body.claudexModel !== 'default'
+      ? body.claudexModel
+      : config.claudexModel;
+    if (!ALLOWED_CLAUDEX_MODELS.has(requested)) {
+      return endJson(res, 400, { error: `unknown claudexModel: ${requested}` });
+    }
+    claudexModel = requested;
+  }
 
   // prompt: optional initial message, delivered atomically with the launch
   // (tmux transports) or over the print/RPC socket once the agent is ready.
@@ -1303,15 +1320,42 @@ async function handleSessionNew(req, res) {
     }
   }
 
+  // (iv) Claudex pre-validation — ALL fail-closed, BEFORE any window exists:
+  //      bearer artifact present, tmux supports -e (>=3.2), and the requested
+  //      model is actually served by the auth-worker (never silently fall
+  //      back to an Anthropic model — design T2). The composed base URL
+  //      carries the bearer secret: it rides ONLY the tmux -e env option
+  //      below — never the launch string, never a log line (T3/T8).
+  let claudexEnv = null;
+  if (agent === 'claudex') {
+    const bearer = readCloudBearer();
+    if (!bearer) {
+      return endJson(res, 400, {
+        error: "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it",
+      });
+    }
+    try {
+      await tmux.assertTmuxSupportsEnv();
+    } catch (err) {
+      return endJson(res, 400, { error: String(err?.message || err) });
+    }
+    const pf = await preflightClaudexModel(bearer.baseUrl, claudexModel);
+    if (!pf.ok) {
+      const served = pf.served && pf.served.length > 0 ? `; served: ${pf.served.join(', ')}` : '';
+      return endJson(res, 400, { error: `claudex preflight failed: ${pf.reason}${served}` });
+    }
+    claudexEnv = { ANTHROPIC_BASE_URL: bearer.baseUrl };
+  }
+
   try {
     // (1) Reliable named path: the tmux window name. createWindow sets it via
     //     `new-window -n` and the `-c cwd` flag — cwd flows through tmux's own
     //     working-directory flag, never a shell `cd`.
     const target = newTmuxSessionName
-      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd })
+      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd, env: claudexEnv ?? undefined })
       : rawTmuxSession
-        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name })
-        : await tmux.createWindow({ cwd, name });
+        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name, env: claudexEnv ?? undefined })
+        : await tmux.createWindow({ cwd, name, env: claudexEnv ?? undefined });
 
     let launch;
     let codexRpcEndpoint = null;
@@ -1378,7 +1422,10 @@ async function handleSessionNew(req, res) {
       //     control chars/newlines) since the command is typed into an interactive
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
-      if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
+      // Claudex rides the SAME claude launch shape with its own model flag;
+      // the auth-worker base URL is already in the pane env via -e (never here).
+      const launchModel = agent === 'claudex' ? claudexModel : model;
+      if (launchModel) launch += ` --model ${tmux.shellQuoteName(launchModel)}`;
       // Explicit, idempotent bypass flag — harmless if config.launchCommand
       // is a shell alias that already carries it. Appending it here (rather
       // than relying solely on the alias) is the robust fix: an alias may
@@ -1401,6 +1448,9 @@ async function handleSessionNew(req, res) {
       await tmux.setPaneOption(target, '@cc_agent', 'codex');
       await tmux.setPaneOption(target, '@cc_transport', codexTransport);
       if (codexRpcEndpoint) await tmux.setPaneOption(target, '@cc_endpoint', codexRpcEndpoint);
+    } else if (agent === 'claudex') {
+      await tmux.setPaneOption(target, '@cc_agent', 'claudex');
+      await tmux.setPaneOption(target, '@cc_transport', 'tmux');
     }
 
     await tmux.sendText(target, launch);
