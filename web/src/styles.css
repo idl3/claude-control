@@ -229,17 +229,30 @@ html.pwa-fill #root {
 html.pwa-fill .app {
   height: var(--screen-h);
 }
-/* Keyboard up in the installed PWA: pin .app to the visible area ABOVE the
-   keyboard (standard visualViewport follow — App.tsx publishes --vv-top/--vv-h).
-   position:fixed takes .app out of document flow, so its size never changes the
-   document height and iOS never re-scrolls → the composer at .app's bottom lands
-   reliably above the keyboard every time (no more random under/over). */
-html.pwa-fill body.kbd-up .app {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: var(--vv-top, 0px);
-  height: var(--vv-h, 100dvh);
+/* Keyboard up: pin .app to the visible area ABOVE the keyboard (standard
+   visualViewport follow — App.tsx's effect publishes --vv-top/--vv-h and
+   toggles `body.kbd-up` unconditionally, not just in the installed PWA — see
+   App.tsx ~line 2329). position:fixed takes .app out of document flow, so its
+   size never changes the document height and iOS never re-scrolls → the
+   composer at .app's bottom lands reliably flush above the keyboard every
+   time. This used to be scoped to `html.pwa-fill` (the rule above), which
+   only fixed the installed-PWA case: a plain mobile Safari TAB never got the
+   pin at all, so .app stayed at its unshrunk 100dvh (dvh does not react to
+   the on-screen keyboard) and the composer was left wherever iOS's own
+   imprecise scroll-into-view happened to land it — a large dead gap above
+   the keyboard. Dropping the `html.pwa-fill` requirement covers both cases
+   with the one mechanism; `@media (max-width: 760px)` keeps it mobile-only
+   (desktop never gets `body.kbd-up` in the first place — there's no
+   on-screen keyboard to shrink visualViewport — but this stays scoped to
+   match `body.kbd-up .composer`'s own mobile-only rule below). */
+@media (max-width: 760px) {
+  body.kbd-up .app {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--vv-top, 0px);
+    height: var(--vv-h, 100dvh);
+  }
 }
 
 /* ── Cosmic backdrop — deep-space base + a two-tone breathing nebula wash +
