@@ -332,6 +332,10 @@ export type ServerMessage =
   | { type: 'prompt'; id: string; prompt: PanePrompt | null }
   | { type: 'subagents'; id: string; subagents: SubAgent[] }
   | { type: 'subagent'; id: string; subagent: SubAgent }
+  // B3 Agent View: one workflow agent's transcript, loaded on demand from
+  // <session>/subagents/workflows/<runId>/agent-<agentId>.jsonl (see server.js
+  // workflow-agent-load). Rendered in the reused SubAgentThread viewer.
+  | { type: 'workflow-agent'; id: string; runId: string; agentId: string; messages: Msg[] }
   | { type: 'raw-events'; id: string; events: RawEvent[] }
   | { type: 'raw-event'; id: string; event: RawEvent }
   // Composer terminal mode (>_): live capture of the dedicated shell pane.
@@ -356,6 +360,7 @@ export type ClientMessage =
   | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: AnswerSelection[] }
   | { type: 'subagent-load'; id: string; agentId: string }
+  | { type: 'workflow-agent-load'; id: string; runId: string; agentId: string }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
   | { type: 'promptkey'; id: string; key: string }
   | { type: 'promptselect'; id: string; labels: string[] }

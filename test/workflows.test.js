@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   computeWorkflowActivity,
   deriveWorkflowSummary,
+  loadWorkflowAgentMessages,
   _resetWorkflowCache,
   _workflowParseCountForTest,
   _workflowCacheSizeForTest,
@@ -321,4 +322,67 @@ test('T2: over-long previews are truncated with an ellipsis', () => {
   assert.ok(ag.promptPreview.length <= 2001, 'promptPreview bounded');
   assert.ok(ag.resultPreview.endsWith('…'), 'resultPreview truncated');
   assert.ok(ag.lastToolName.length <= 201, 'lastToolName bounded');
+});
+
+// ===========================================================================
+// 12. loadWorkflowAgentMessages (B3) — one-shot agent transcript loader from
+//     <session>/subagents/workflows/<runId>/agent-<agentId>.jsonl (the dir the
+//     SubAgentsWatcher does NOT scan), parsed via TranscriptTailer → Msg[].
+// ===========================================================================
+function writeAgentTranscript(root, sessionId, runId, agentId, lines) {
+  const dir = path.join(root, sessionId, 'subagents', 'workflows', runId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), lines.join('\n') + '\n');
+}
+
+test('loadWorkflowAgentMessages: reads + parses a workflow agent transcript', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-agent-'));
+  const sessionId = 'sess-agent';
+  const transcriptPath = path.join(root, `${sessionId}.jsonl`);
+  fs.writeFileSync(transcriptPath, '');
+  writeAgentTranscript(root, sessionId, 'wf_abc123', 'a99', [
+    JSON.stringify({ type: 'user', uuid: 'u1', timestamp: 1, message: { role: 'user', content: 'go' } }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: 2,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    }),
+  ]);
+
+  const msgs = await loadWorkflowAgentMessages({ transcriptPath, runId: 'wf_abc123', agentId: 'a99' });
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].role, 'user');
+  assert.equal(msgs[1].role, 'assistant');
+  assert.equal(msgs[1].blocks[0].text, 'done');
+});
+
+test('loadWorkflowAgentMessages: missing file / bad args → []', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-agent-'));
+  const transcriptPath = path.join(root, 'sess.jsonl');
+  fs.writeFileSync(transcriptPath, '');
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath, runId: 'wf_none', agentId: 'nope' }), []);
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath: null, runId: 'wf_x', agentId: 'a' }), []);
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath, runId: '', agentId: 'a' }), []);
+});
+
+test('loadWorkflowAgentMessages (T1): rejects traversal / non-wf runId', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-agent-'));
+  const sessionId = 'sess-trav';
+  const transcriptPath = path.join(root, `${sessionId}.jsonl`);
+  fs.writeFileSync(transcriptPath, '');
+  // Plant a real transcript OUTSIDE the workflows tree to prove it's unreachable.
+  const secret = path.join(root, sessionId, 'subagents', 'secret');
+  fs.mkdirSync(secret, { recursive: true });
+  fs.writeFileSync(
+    path.join(secret, 'agent-x.jsonl'),
+    JSON.stringify({ type: 'assistant', uuid: 's', message: { role: 'assistant', content: [{ type: 'text', text: 'leak' }] } }) + '\n',
+  );
+
+  // runId without the wf_ prefix is rejected outright.
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath, runId: '../secret', agentId: 'x' }), []);
+  // A runId with a path separator can never match the strict charset.
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath, runId: 'wf_../secret', agentId: 'x' }), []);
+  // agentId with a separator is rejected too.
+  assert.deepEqual(await loadWorkflowAgentMessages({ transcriptPath, runId: 'wf_a', agentId: '../secret/agent-x' }), []);
 });
