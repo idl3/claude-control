@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readCloudBearer, preflightClaudexModel } from '../lib/cloud-bearer.js';
+import { readCloudBearer, preflightClaudexModel, resolveClaudexBaseUrl } from '../lib/cloud-bearer.js';
 import { shellQuoteName } from '../lib/tmux.js';
 
 function tmpBearerFile(contents) {
@@ -59,6 +59,44 @@ describe('readCloudBearer', () => {
     assert.equal(readCloudBearer({ _path: tmpBearerFile({ authHost: 'trailing-space ', sub: 's', secret: 'k' }) }), null);
     // A normal hostname (with scheme + port) still passes.
     assert.ok(readCloudBearer({ _path: tmpBearerFile({ authHost: 'http://localhost:9999', sub: 's', secret: 'k' }) }));
+  });
+});
+
+describe('resolveClaudexBaseUrl — direnv-first, artifact fallback', () => {
+  const artifact = () => ({ authHost: 'h', sub: 's', secret: 'k', baseUrl: 'https://h/auth/s/k' });
+
+  test('direnv-provided URL wins (per-org routing) and is shape-guarded', async () => {
+    const r = await resolveClaudexBaseUrl('/some/org/dir', {
+      _exec: async () => ({ stdout: 'https://auth-worker.pleri.com/auth/op/sek\n', stderr: '' }),
+      _readBearer: artifact,
+    });
+    assert.deepEqual(r, { baseUrl: 'https://auth-worker.pleri.com/auth/op/sek', source: 'direnv' });
+  });
+
+  test('empty / malformed / whitespace direnv output falls through to the artifact', async () => {
+    for (const stdout of ['', '   ', 'not-a-url', 'https://h /auth/x', 'ftp://nope']) {
+      const r = await resolveClaudexBaseUrl('/d', {
+        _exec: async () => ({ stdout, stderr: '' }),
+        _readBearer: artifact,
+      });
+      assert.deepEqual(r, { baseUrl: 'https://h/auth/s/k', source: 'cloud-bearer' }, JSON.stringify(stdout));
+    }
+  });
+
+  test('direnv exec failure (binary absent / cwd not allowed) falls through; both absent → null', async () => {
+    const boom = async () => { throw new Error('direnv: command not found'); };
+    const r = await resolveClaudexBaseUrl('/d', { _exec: boom, _readBearer: artifact });
+    assert.equal(r.source, 'cloud-bearer');
+    const none = await resolveClaudexBaseUrl('/d', { _exec: boom, _readBearer: () => null });
+    assert.equal(none, null);
+  });
+
+  test('trailing slash trimmed on the direnv source', async () => {
+    const r = await resolveClaudexBaseUrl('/d', {
+      _exec: async () => ({ stdout: 'https://h/auth/a/b///', stderr: '' }),
+      _readBearer: () => null,
+    });
+    assert.equal(r.baseUrl, 'https://h/auth/a/b');
   });
 });
 
