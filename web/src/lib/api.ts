@@ -380,8 +380,11 @@ export interface ModelsInfo {
   /** Codex model catalog (id/label), same shape as claudeModels. */
   codexModels: ClaudeModelInfo[];
   /** Claudex model catalog (id/label) — the claude CLI pointed at the olam
-   *  auth-worker's OpenAI translation (CLAUDEX_MODELS in lib/models.js). */
-  claudexModels: ClaudeModelInfo[];
+   *  auth-worker's OpenAI translation (CLAUDEX_MODELS in lib/models.js).
+   *  Optional to match runtime defense at the sole call site (NewSessionDraft
+   *  reads it as `info.claudexModels ?? []`) — the server has always sent it,
+   *  but the type shouldn't claim a guarantee the code doesn't rely on. */
+  claudexModels?: ClaudeModelInfo[];
   recommendedMlxModel: string;
   recommendedClaudeModel: string;
 }

@@ -162,6 +162,42 @@ test('readConfig falls back to the default on an unknown persisted claudexModel'
   assert.equal(readConfig().claudexModel, 'gpt-5.6-sol');
 });
 
+// CP3 Fix 3: the silent fallback above still never throws, but now warns
+// naming the ignored value — an operator whose config.json got hand-edited
+// or corrupted can see WHY their choice was ignored instead of the model
+// quietly reverting with no trace.
+test('readConfig warns (but never throws) when discarding an invalid persisted claudexModel', () => {
+  fs.writeFileSync(
+    path.join(dataDir, 'config.json'),
+    JSON.stringify({ claudexModel: 'gpt-99-invented' }),
+  );
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  let cfg;
+  try {
+    cfg = readConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(cfg.claudexModel, 'gpt-5.6-sol');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /gpt-99-invented/);
+});
+
+test('readConfig does NOT warn when claudexModel is simply absent', () => {
+  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ launchCommand: 'yolo' }));
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    readConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warnings.length, 0);
+});
+
 // ── projectDirs fields ────────────────────────────────────────────────────────
 
 test('readConfig returns seed projectDirs by default', () => {

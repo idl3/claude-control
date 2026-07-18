@@ -16,7 +16,7 @@ const FILTER_TITLE: Record<SessionFilter, string> = {
   all: 'Showing all panes — tap to show agents (Claude + Claudex + Codex)',
   agents: 'Showing agents (Claude + Claudex + Codex) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
-  codex: 'Showing Codex sessions — tap to show only terminals',
+  codex: 'Showing Codex-flavored sessions (Claudex + legacy Codex) — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
 };
 
