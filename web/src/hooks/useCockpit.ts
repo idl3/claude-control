@@ -10,6 +10,7 @@ import type {
   ResourceSnapshot,
   Session,
   SubAgent,
+  Workflow,
 } from '../lib/types';
 
 export interface ResourceState {
@@ -47,6 +48,12 @@ export interface CockpitStore {
    * sub-agent appear as keys. Used by SessionRail to show the "cloning" icon state.
    */
   runningSubagentCountById: Record<string, number>;
+  /**
+   * Parsed workflow runs per session id (only sessions that have run ≥1 workflow
+   * appear as keys). Rides the session poll — a component looks up a run by
+   * session id then `runId`. Server-parsed in lib/workflows.js.
+   */
+  workflowsById: Record<string, Workflow[]>;
   conn: ConnState;
   resources: ResourceState;
   /** Rolling ~10min CPU%/Mem% history for the process-monitor chart. */
@@ -515,6 +522,16 @@ export function useCockpit(): CockpitStore {
     return result;
   }, [subagentsById]);
 
+  // Workflow runs per session id — rides the session payload (lib/workflows.js).
+  // Keyed for by-session + by-runId lookup; only sessions with runs appear.
+  const workflowsById = useMemo<Record<string, Workflow[]>>(() => {
+    const result: Record<string, Workflow[]> = {};
+    for (const s of sessions) {
+      if (s.workflows && s.workflows.length > 0) result[s.id] = s.workflows;
+    }
+    return result;
+  }, [sessions]);
+
   return {
     sessions,
     selectedId,
@@ -525,6 +542,7 @@ export function useCockpit(): CockpitStore {
     degraded,
     subagents,
     runningSubagentCountById,
+    workflowsById,
     conn,
     resources,
     resourceHistory,
