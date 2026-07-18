@@ -282,6 +282,22 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   // structural row (agent/advanced/custom-cwd/new-tmux-name) is added or
   // removed. Skipped entirely while submitting — submit()'s own GSAP
   // timeline owns the transform during that window.
+  //
+  // Mobile soft-keyboard up: drop the centering lift entirely instead of
+  // recomputing it against the shrunk container. `.composer` here is the
+  // SAME class as the live composer's (Composer.tsx), so it already inherits
+  // `body.kbd-up .app`'s position:fixed pin above the keyboard and
+  // `body.kbd-up .composer { padding-bottom: 0 }` (styles.css) — but this
+  // wrap div also carries an unrelated GSAP `translateY` centering transform
+  // that isn't recomputed on keyboard show (window's 'resize' event doesn't
+  // reliably fire for the on-screen keyboard — that's exactly why App.tsx
+  // uses visualViewport instead), so without this the card kept floating at
+  // its pre-keyboard centered position: high above the keyboard with a large
+  // dead gap below it, mirroring the live composer's bug. Reusing App.tsx's
+  // already-published `body.kbd-up` signal (not re-deriving keyboard state)
+  // via a MutationObserver — no second keyboard-detection system — makes
+  // `y: 0` land the card flush at the true bottom of its (now
+  // keyboard-shrunk) flex container, exactly like the live composer.
   useLayoutEffect(() => {
     if (creating) return;
     const root = rootRef.current;
@@ -289,6 +305,12 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     const hero = heroRef.current;
     if (!root || !wrap) return;
     const recompute = () => {
+      if (document.body.classList.contains('kbd-up')) {
+        liftRef.current = 0;
+        gsap.set(wrap, { y: 0 });
+        if (hero) gsap.set(hero, { y: 0 });
+        return;
+      }
       const heroH = hero?.offsetHeight ?? 0;
       const lift = -Math.max(root.offsetHeight - heroH - wrap.offsetHeight, 0) / 2;
       liftRef.current = lift;
@@ -297,7 +319,12 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     };
     recompute();
     window.addEventListener('resize', recompute);
-    return () => window.removeEventListener('resize', recompute);
+    const kbdObserver = new MutationObserver(recompute);
+    kbdObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    return () => {
+      window.removeEventListener('resize', recompute);
+      kbdObserver.disconnect();
+    };
   }, [creating, agent, showAdvanced, cwdChoice, tmuxChoice]);
 
   const submit = useCallback(async () => {
