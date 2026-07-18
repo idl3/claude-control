@@ -59,6 +59,7 @@ const FIXTURE_MODELS: ModelsInfo = {
   mlxModels: [{ id: 'qwen-7b', label: 'Qwen 7B', sizeGB: 4, minRamGB: 8, installed: true }],
   claudeModels: [{ id: 'claude-sonnet', label: 'Sonnet' }],
   codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }],
+  claudexModels: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (Codex)' }],
   recommendedMlxModel: 'qwen-7b',
   recommendedClaudeModel: 'claude-sonnet',
 };

@@ -18,6 +18,7 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
+import { readCloudBearer, preflightClaudexModel } from './lib/cloud-bearer.js';
 import * as terminal from './lib/terminal.js';
 import * as shell from './lib/shell.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
@@ -26,7 +27,7 @@ import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
-import { SessionRegistry, listRecentTranscripts } from './lib/sessions.js';
+import { SessionRegistry, listRecentTranscripts, isClaudeKind } from './lib/sessions.js';
 import { Collab } from './lib/collab.js';
 import { recordClientError } from './lib/client-errors.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
@@ -56,6 +57,7 @@ import {
   MLX_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
+  CLAUDEX_MODELS,
   detectMachine,
   recommendMlxModel,
   recommendClaudeModel,
@@ -554,6 +556,7 @@ const _handler = (req, res) => {
       mlxModels: MLX_MODELS.map((m) => ({ ...m, installed: mlx.isModelCached(m.id) })),
       claudeModels: CLAUDE_MODELS,
       codexModels: CODEX_MODELS,
+      claudexModels: CLAUDEX_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -563,7 +566,7 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleTranscribe(req, res, u);
   }
-  // GET /api/spawn-agents — agent-type availability (claude vs codex).
+  // GET /api/spawn-agents — agent-type availability (claude vs claudex vs codex).
   // Returns which agent binaries are resolvable on this machine so the UI can
   // disable an unavailable agent picker option and show a reason.
   // Token-gated + localhost, same as other GET endpoints.
@@ -573,7 +576,28 @@ const _handler = (req, res) => {
     return Promise.all([
       resolveBin(cfg.claudeBin || cfg.launchCommand),
       resolveBin(cfg.codexBin || cfg.codexLaunchCommand),
-    ]).then(([claudeResult, codexResult]) => {
+    ]).then(async ([claudeResult, codexResult]) => {
+      // Claudex spawns the claude binary pointed at the olam auth-worker (see
+      // handleSessionNew's claudex pre-validation, which this mirrors), so its
+      // availability is claude's availability AND the cloud-bearer artifact
+      // AND a tmux new enough for `-e` env injection (>= 3.2). Checked in that
+      // order, short-circuiting on the first failure, so `reason` always names
+      // the FIRST failing precondition — never a misleading later-stage one.
+      // Cheap either way: a local file stat + (at most) one `tmux -V` fork.
+      let claudexAvailable = claudeResult.available;
+      let claudexReason = claudeResult.reason;
+      if (claudexAvailable && !readCloudBearer()) {
+        claudexAvailable = false;
+        claudexReason = "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it";
+      }
+      if (claudexAvailable) {
+        try {
+          await tmux.assertTmuxSupportsEnv();
+        } catch (err) {
+          claudexAvailable = false;
+          claudexReason = String(err?.message || err);
+        }
+      }
       return endJson(res, 200, {
         agents: [
           {
@@ -582,6 +606,15 @@ const _handler = (req, res) => {
             defaultTransport: CONFIG.claudeTransport,
             transports: ['tmux', 'print'],
             ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+          },
+          {
+            id: 'claudex',
+            available: claudexAvailable,
+            defaultTransport: 'tmux',
+            // Claudex is tmux-only, ALWAYS — see handleSessionNew's forced
+            // claudeTransport ternary (the print bridge never applies to it).
+            transports: ['tmux'],
+            ...(claudexAvailable ? {} : { reason: claudexReason }),
           },
           {
             id: 'codex',
@@ -1163,6 +1196,9 @@ const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
 // Same pattern for Codex — single source of truth is CODEX_MODELS (lib/models.js).
 const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
 
+// Same pattern for Claudex — single source of truth is CLAUDEX_MODELS (lib/models.js).
+const ALLOWED_CLAUDEX_MODELS = new Set(CLAUDEX_MODELS.map((m) => m.id));
+
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
 // for a prompt up to this size plus JSON-escaping overhead and the other
@@ -1206,12 +1242,25 @@ async function handleSessionNew(req, res) {
       ? os.homedir()
       : rawCwd;
 
-  // agent ∈ {'claude','codex'}, default 'claude'.
-  const agent = body.agent === 'codex' ? 'codex' : 'claude';
+  // agent ∈ {'claude','codex','claudex'}, default 'claude'. Claudex = the
+  // claude binary backed by Codex via the olam auth-worker (ENV-only setup).
+  const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claudex' ? 'claudex' : 'claude';
+  // Claudex is tmux-only, ALWAYS — never the print-bridge path. Below, the
+  // `else if (claudeTransport === 'print')` branch does not itself check
+  // `agent`; without this force, a host running CLAUDE_TRANSPORT=print (or a
+  // body override) would route a claudex request through the print bridge,
+  // which drops the preflighted claudexModel (the bridge only knows `model`,
+  // which is null for claudex) and mislabels the pane (@cc_agent='claude').
+  // The preflighted model + the `-e ANTHROPIC_BASE_URL=...` env injection
+  // both require the tmux launch shape, so claudeTransport is forced here
+  // regardless of config/body — the print branch below becomes unreachable
+  // for agent==='claudex' as a direct consequence.
   const claudeTransport =
-    body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
-      ? body.claudeTransport
-      : CONFIG.claudeTransport;
+    agent === 'claudex'
+      ? 'tmux'
+      : body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
+        ? body.claudeTransport
+        : CONFIG.claudeTransport;
   const codexTransport =
     body.codexTransport === 'tmux' || body.codexTransport === 'rpc'
       ? body.codexTransport
@@ -1228,6 +1277,21 @@ async function handleSessionNew(req, res) {
   // codexModel: same pattern, Codex-only. Unknown/absent → null (no --model
   // flag / no thread/start model field, Codex CLI default).
   const codexModel = agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
+
+  // claudexModel: DELIBERATELY fail-closed, unlike the silent-fallback
+  // ternaries above — a claudex session with the wrong model would silently
+  // bill/answer on the wrong upstream (design T2). Absent/'default' → the
+  // config default (gpt-5.6-sol); a provided-but-unknown value → 400.
+  let claudexModel = null;
+  if (agent === 'claudex') {
+    const requested = typeof body.claudexModel === 'string' && body.claudexModel && body.claudexModel !== 'default'
+      ? body.claudexModel
+      : config.claudexModel;
+    if (!ALLOWED_CLAUDEX_MODELS.has(requested)) {
+      return endJson(res, 400, { error: `unknown claudexModel: ${requested}` });
+    }
+    claudexModel = requested;
+  }
 
   // prompt: optional initial message, delivered atomically with the launch
   // (tmux transports) or over the print/RPC socket once the agent is ready.
@@ -1298,15 +1362,42 @@ async function handleSessionNew(req, res) {
     }
   }
 
+  // (iv) Claudex pre-validation — ALL fail-closed, BEFORE any window exists:
+  //      bearer artifact present, tmux supports -e (>=3.2), and the requested
+  //      model is actually served by the auth-worker (never silently fall
+  //      back to an Anthropic model — design T2). The composed base URL
+  //      carries the bearer secret: it rides ONLY the tmux -e env option
+  //      below — never the launch string, never a log line (T3/T8).
+  let claudexEnv = null;
+  if (agent === 'claudex') {
+    const bearer = readCloudBearer();
+    if (!bearer) {
+      return endJson(res, 400, {
+        error: "claudex requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it",
+      });
+    }
+    try {
+      await tmux.assertTmuxSupportsEnv();
+    } catch (err) {
+      return endJson(res, 400, { error: String(err?.message || err) });
+    }
+    const pf = await preflightClaudexModel(bearer.baseUrl, claudexModel);
+    if (!pf.ok) {
+      const served = pf.served && pf.served.length > 0 ? `; served: ${pf.served.join(', ')}` : '';
+      return endJson(res, 400, { error: `claudex preflight failed: ${pf.reason}${served}` });
+    }
+    claudexEnv = { ANTHROPIC_BASE_URL: bearer.baseUrl };
+  }
+
   try {
     // (1) Reliable named path: the tmux window name. createWindow sets it via
     //     `new-window -n` and the `-c cwd` flag — cwd flows through tmux's own
     //     working-directory flag, never a shell `cd`.
     const target = newTmuxSessionName
-      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd })
+      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd, env: claudexEnv ?? undefined })
       : rawTmuxSession
-        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name })
-        : await tmux.createWindow({ cwd, name });
+        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name, env: claudexEnv ?? undefined })
+        : await tmux.createWindow({ cwd, name, env: claudexEnv ?? undefined });
 
     let launch;
     let codexRpcEndpoint = null;
@@ -1373,7 +1464,10 @@ async function handleSessionNew(req, res) {
       //     control chars/newlines) since the command is typed into an interactive
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
-      if (model) launch += ` --model ${tmux.shellQuoteName(model)}`;
+      // Claudex rides the SAME claude launch shape with its own model flag;
+      // the auth-worker base URL is already in the pane env via -e (never here).
+      const launchModel = agent === 'claudex' ? claudexModel : model;
+      if (launchModel) launch += ` --model ${tmux.shellQuoteName(launchModel)}`;
       // Explicit, idempotent bypass flag — harmless if config.launchCommand
       // is a shell alias that already carries it. Appending it here (rather
       // than relying solely on the alias) is the robust fix: an alias may
@@ -1396,6 +1490,9 @@ async function handleSessionNew(req, res) {
       await tmux.setPaneOption(target, '@cc_agent', 'codex');
       await tmux.setPaneOption(target, '@cc_transport', codexTransport);
       if (codexRpcEndpoint) await tmux.setPaneOption(target, '@cc_endpoint', codexRpcEndpoint);
+    } else if (agent === 'claudex') {
+      await tmux.setPaneOption(target, '@cc_agent', 'claudex');
+      await tmux.setPaneOption(target, '@cc_transport', 'tmux');
     }
 
     await tmux.sendText(target, launch);
@@ -2784,13 +2881,15 @@ async function handleClientMessage(ws, msg) {
         // stays as cheap defense-in-depth that can short-circuit before we even
         // get here. viaAnswer replies bypass BOTH guards (they are the answer).
         //
-        // Gate: keystroke-TUI panes (claude AND codex-TUI). Print transport has no
-        // keystroke TUI to guard against, and codex-rpc panes already returned above
-        // (so any codex pane reaching here fell through to tmux sendText). The parser
-        // is chosen by kind — parsePanePrompt for claude, parseCodexPrompt for codex —
+        // Gate: keystroke-TUI panes (claude, claudex, AND codex-TUI — claudex runs
+        // the same claude binary/TUI, just pointed at the olam auth-worker, so it
+        // needs the identical guard). Print transport has no keystroke TUI to guard
+        // against, and codex-rpc panes already returned above (so any codex pane
+        // reaching here fell through to tmux sendText). The parser is chosen by
+        // kind — parsePanePrompt for claude/claudex, parseCodexPrompt for codex —
         // because the two TUIs scrape pickers differently; the pure predicate then
         // decides on the boolean presence of a parsed picker, identical for both.
-        if (!msg.viaAnswer && (session.kind === 'claude' || session.kind === 'codex') && session.transport !== 'print') {
+        if (!msg.viaAnswer && (isClaudeKind(session.kind) || session.kind === 'codex') && session.transport !== 'print') {
           try {
             const cap = await tmux.capturePane(session.target, 120, false, true, { visibleOnly: true });
             const parsedPicker = session.kind === 'codex' ? parseCodexPrompt(cap) : detectPanePicker(cap);

@@ -80,13 +80,13 @@ const DEFAULT_DIR_HINT = /pleri-org/i;
  * with the same `.composer-card` / `.composer-input` CSS classes.
  */
 export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }: NewSessionDraftProps) {
-  const [agent, setAgent] = useState<'claude' | 'codex'>(() => defaultAgentForFilter(filter));
+  const [agent, setAgent] = useState<'claude' | 'codex' | 'claudex'>(() => defaultAgentForFilter(filter));
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
-  // Single model slot shared by both agents — switching harness re-defaults
-  // it to 'default' (see the agent-change effect below) rather than
-  // remembering a separate choice per agent, matching the toolbar's single
-  // Model Dropdown.
+  // Single model slot shared by all harnesses — switching harness
+  // re-defaults it to 'default' (see the agent-change effect below) rather
+  // than remembering a separate choice per agent, matching the toolbar's
+  // single Model Dropdown.
   const [model, setModel] = useState<ClaudeModel>('default');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [name, setName] = useState('');
@@ -105,6 +105,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
   const [claudeModels, setClaudeModels] = useState<ClaudeModelInfo[]>([]);
   const [codexModels, setCodexModels] = useState<ClaudeModelInfo[]>([]);
+  const [claudexModels, setClaudexModels] = useState<ClaudeModelInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionSummary[]>([]);
@@ -219,6 +220,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
       .then((info) => {
         setClaudeModels(info.claudeModels ?? []);
         setCodexModels(info.codexModels ?? []);
+        setClaudexModels(info.claudexModels ?? []);
       })
       .catch(() => {
         // Non-fatal: model picker falls back to just "Default".
@@ -234,21 +236,24 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   }, [agent]);
 
   // If agentInfos arrives showing the currently-selected agent is genuinely
-  // unavailable while the OTHER agent is available, switch to the available
-  // one rather than leaving the user staring at a disabled harness they can't
-  // submit. If both (or neither) report unavailable, leave the selection
-  // alone — nothing safe to switch to.
+  // unavailable while ANOTHER agent is available, switch to the first
+  // available one (claude → claudex → codex preference) rather than leaving
+  // the user staring at a disabled harness they can't submit. If every agent
+  // reports unavailable, leave the selection alone — nothing safe to switch
+  // to. Claudex spawns the claude binary, so until the server reports a
+  // dedicated 'claudex' entry its availability is claude's (same fallback as
+  // agentInfo() below).
   useEffect(() => {
     if (agentInfos.length === 0) return;
-    const claude = agentInfos.find((a) => a.id === 'claude');
-    const codex = agentInfos.find((a) => a.id === 'codex');
+    const infoFor = (id: 'claude' | 'codex' | 'claudex'): SpawnAgentInfo | undefined =>
+      agentInfos.find((a) => a.id === id) ??
+      (id === 'claudex' ? agentInfos.find((a) => a.id === 'claude') : undefined);
     setAgent((prev) => {
-      const prevInfo = prev === 'claude' ? claude : codex;
-      const otherInfo = prev === 'claude' ? codex : claude;
-      if (prevInfo?.available === false && otherInfo?.available !== false) {
-        return prev === 'claude' ? 'codex' : 'claude';
-      }
-      return prev;
+      if (infoFor(prev)?.available !== false) return prev;
+      const fallback = (['claude', 'claudex', 'codex'] as const).find(
+        (id) => id !== prev && infoFor(id)?.available !== false,
+      );
+      return fallback ?? prev;
     });
   }, [agentInfos]);
 
@@ -337,7 +342,9 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     // prompt the spawned agent receives.
     const attachmentPaths = attachments.map((a) => a.path).filter((p): p is string => !!p);
     const finalPrompt = [prompt.trim(), ...attachmentPaths].filter(Boolean).join(' ');
-    // Required-with-default: blank name field falls back to the shown placeholder.
+    // Required-with-default: blank name field falls back to the shown
+    // placeholder. Codex has no --name flag; claudex reuses the claude tmux
+    // launch shape, so it names sessions exactly like claude.
     const resolvedName = agent === 'codex' ? undefined : (name.trim() || placeholder);
     // Resolve the effective cwd: '' = use server default; 'custom' = free-text;
     // otherwise the path from the selected dropdown option.
@@ -404,6 +411,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
           codexTransport: agent === 'codex' ? codexTransport : undefined,
           model: agent === 'claude' && model !== 'default' ? model : undefined,
           codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
+          claudexModel: agent === 'claudex' && model !== 'default' ? model : undefined,
           prompt: finalPrompt || undefined,
           tmuxSession: resolvedTmuxSession,
           newTmuxSession: resolvedNewTmuxSession,
@@ -441,13 +449,18 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   ]);
 
   // Helper: look up availability for an agent id.
-  function agentInfo(id: 'claude' | 'codex'): SpawnAgentInfo | undefined {
+  function agentInfo(id: 'claude' | 'codex' | 'claudex'): SpawnAgentInfo | undefined {
     return agentInfos.find((a) => a.id === id);
   }
 
   const claudeInfo = agentInfo('claude');
   const codexInfo = agentInfo('codex');
-  const modelOptions = agent === 'claude' ? claudeModels : codexModels;
+  // Claudex spawns the claude binary (pointed at the olam auth-worker), so
+  // until the server reports a dedicated 'claudex' entry, claude's binary
+  // availability governs it.
+  const claudexInfo = agentInfo('claudex') ?? claudeInfo;
+  const modelOptions =
+    agent === 'claude' ? claudeModels : agent === 'claudex' ? claudexModels : codexModels;
 
   // ASSUMPTION: modelOptions[0] is the harness default (flagship-first
   // ordering in lib/models.js — CLAUDE_MODELS[0]/CODEX_MODELS[0] are the ids
@@ -531,7 +544,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
       <div className="new-session-draft-placeholder">
         <div className="new-session-draft-hero" ref={heroRef}>
           <WelcomeHero
-            agentName={agent === 'codex' ? 'Codex' : 'Claude'}
+            agentName={agent === 'codex' ? 'Codex' : agent === 'claudex' ? 'Claudex' : 'Claude'}
             onInsert={(t) => {
               setPrompt(t);
               promptRef.current?.focus();
@@ -570,10 +583,17 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 below), matching the reference's primary "Chat | Cowork"
                 pill language. Availability + auto-switch logic unchanged
                 from the old <select>: a genuinely unavailable agent stays
-                visible but disabled, with the reason as its title. */}
+                visible but disabled, with the reason as its title.
+                Claudex (claude CLI → olam auth-worker → OpenAI) is the
+                PRIMARY Codex-flavored option (design decision 7, locked);
+                the legacy codex CLI/RPC harness stays fully functional but
+                visually secondary via the muted "Legacy" tag (aria-hidden so
+                the button's accessible name stays exactly "Codex"; the title
+                carries the same hint for assistive tech + hover). */}
             <div className="rail-new-mode-seg new-session-draft-agent-seg" role="group" aria-label="Harness">
               {([
                 ['claude', 'Claude', claudeInfo],
+                ['claudex', 'Claudex', claudexInfo],
                 ['codex', 'Codex', codexInfo],
               ] as const).map(([id, label, info]) => {
                 const isActive = agent === id;
@@ -584,13 +604,22 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                     className="rail-new-mode-seg-btn"
                     data-active={isActive ? 'true' : 'false'}
                     disabled={creating || info?.available === false}
-                    title={info?.available === false ? info.reason : undefined}
+                    title={
+                      info?.available === false
+                        ? info.reason
+                        : id === 'codex'
+                          ? 'Legacy Codex CLI/RPC harness — prefer Claudex'
+                          : undefined
+                    }
                     aria-pressed={isActive}
                     onClick={() => setAgent(id)}
                   >
                     <span className="rail-new-agent-seg-label">
                       {label}{info?.available === false ? ' (unavailable)' : ''}
                     </span>
+                    {id === 'codex' ? (
+                      <span className="dropdown-option-badge" aria-hidden="true">Legacy</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -669,10 +698,11 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
               {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
             </button>
 
-            {/* Name field — Claude only; Codex has no --name flag. Compact
-                auto-width (not a stretched full-width field) via
+            {/* Name field — Claude + Claudex (both use the claude tmux
+                launch shape); Codex has no --name flag. Compact auto-width
+                (not a stretched full-width field) via
                 new-session-draft-name-compact. */}
-            {agent === 'claude' ? (
+            {agent !== 'codex' ? (
               <input
                 className="rail-new-name new-session-draft-name-compact"
                 type="text"

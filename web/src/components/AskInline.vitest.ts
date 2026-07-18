@@ -249,7 +249,7 @@ describe('AskInline plan-review mode (kind=prompt + planMarkdown)', () => {
 
 // ── Codex single-select detection (agentName) ─────────────────────────────────
 
-type SessionKind = 'claude' | 'codex' | 'terminal';
+type SessionKind = 'claude' | 'claudex' | 'codex' | 'terminal';
 
 function deriveAgentName(kind: SessionKind | undefined): string {
   return kind === 'codex' ? 'Codex' : 'Claude';
@@ -262,6 +262,13 @@ describe('AskInline agentName derivation', () => {
 
   it('uses "Claude" for claude sessions', () => {
     expect(deriveAgentName('claude')).toBe('Claude');
+  });
+
+  // CP3 Fix 1: claudex (the claude binary pointed at the olam auth-worker)
+  // renders as "Claude" here — only the rail FILTER bucket is codex-flavored
+  // (design decision 7); pane-level agentName/icon treatment stays claude-like.
+  it('uses "Claude" for claudex sessions', () => {
+    expect(deriveAgentName('claudex')).toBe('Claude');
   });
 
   it('uses "Claude" for terminal sessions', () => {
