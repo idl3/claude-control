@@ -13,8 +13,8 @@ interface NewSessionFormProps {
 }
 
 const FILTER_TITLE: Record<SessionFilter, string> = {
-  all: 'Showing all panes — tap to show agents (Claude + Codex)',
-  agents: 'Showing agents (Claude + Codex) — tap to show only Claude',
+  all: 'Showing all panes — tap to show agents (Claude + Claudex + Codex)',
+  agents: 'Showing agents (Claude + Claudex + Codex) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
   codex: 'Showing Codex sessions — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
@@ -25,8 +25,13 @@ export function defaultName(now: number = Date.now()): string {
   return `session-${now.toString(36).slice(-6)}`;
 }
 
-export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' {
-  return filter === 'codex' ? 'codex' : 'claude';
+/** Claudex (claude CLI → olam auth-worker → OpenAI) is the PRIMARY
+ *  Codex-flavored option (claudex-integration design decision 7, locked):
+ *  a Codex-ish rail filter seeds the draft with claudex, while the legacy
+ *  codex CLI/RPC harness stays reachable under the picker's "Legacy" label.
+ *  Claude remains the overall default for every other filter. */
+export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' | 'claudex' {
+  return filter === 'codex' ? 'claudex' : 'claude';
 }
 
 export function normalizeCodexTransport(value: unknown): CodexTransport {

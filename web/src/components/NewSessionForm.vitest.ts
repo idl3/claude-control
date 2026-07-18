@@ -74,8 +74,11 @@ describe('filter cycle (all → agents → claude → codex → terminal → all
 });
 
 describe('defaultAgentForFilter', () => {
-  it('codex filter defaults to codex', () => {
-    expect(defaultAgentForFilter('codex')).toBe('codex');
+  // Design decision 7 (locked): Claudex is the primary Codex-flavored option,
+  // so a Codex-ish filter seeds the draft with claudex (legacy codex CLI/RPC
+  // stays reachable via the picker's Legacy-tagged Codex button).
+  it('codex filter defaults to claudex', () => {
+    expect(defaultAgentForFilter('codex')).toBe('claudex');
   });
 
   it('every other filter defaults to claude', () => {

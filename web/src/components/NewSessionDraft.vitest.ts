@@ -42,9 +42,15 @@ function pickOption(menu: HTMLElement, labelText: string) {
   fireEvent.click(within(menu).getByText(labelText).closest('[role="option"]') as HTMLElement);
 }
 
-/** The segmented Harness control (Claude | Codex). */
+/** The segmented Harness control (Claude | Claudex | Codex-Legacy). */
 function harnessGroup(): HTMLElement {
   return screen.getByRole('group', { name: 'Harness' });
+}
+
+/** Clicks a harness segment by its accessible name (the Legacy tag on the
+ *  Codex button is aria-hidden, so 'Codex' still matches exactly). */
+function pickHarness(name: 'Claude' | 'Claudex' | 'Codex') {
+  fireEvent.click(within(harnessGroup()).getByRole('button', { name }));
 }
 
 // ── SpawnAgentInfo type contract ─────────────────────────────────────────────
@@ -216,6 +222,7 @@ function stubApi({
         mlxModels: [],
         claudeModels: FIXTURE_CLAUDE_MODELS,
         codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }, { id: 'gpt-5.4', label: 'GPT-5.4' }],
+        claudexModels: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (Codex)' }],
         recommendedMlxModel: '',
         recommendedClaudeModel: 'claude-haiku-4-5-20251001',
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -372,7 +379,10 @@ describe('NewSessionDraft harness segmented control + model dropdown', () => {
   });
 });
 
-describe('NewSessionDraft Codex model options', () => {
+// The codex filter now seeds the draft with CLAUDEX (design decision 7) —
+// these legacy-codex tests explicitly click the Legacy-tagged Codex segment
+// first, proving the legacy CLI/RPC harness stays fully reachable + working.
+describe('NewSessionDraft Codex model options (legacy harness)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -387,6 +397,7 @@ describe('NewSessionDraft Codex model options', () => {
     }));
 
     const trigger = await screen.findByLabelText('Model');
+    pickHarness('Codex');
     await waitFor(() => expect(trigger.textContent).toContain('GPT-5.5'));
 
     const menu = openDropdown('Model');
@@ -405,6 +416,7 @@ describe('NewSessionDraft Codex model options', () => {
     }));
 
     await screen.findByLabelText('Model');
+    pickHarness('Codex');
     const menu = openDropdown('Model');
     await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
     pickOption(menu, 'GPT-5.4');
@@ -424,8 +436,10 @@ describe('NewSessionDraft Codex model options', () => {
     }));
 
     await screen.findByLabelText('Model');
+    pickHarness('Codex');
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
     await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('codex');
     expect(createCalls[0].codexModel).toBeUndefined();
   });
 
@@ -439,16 +453,129 @@ describe('NewSessionDraft Codex model options', () => {
     }));
 
     await screen.findByLabelText('Model');
+    pickHarness('Codex');
     const menu = openDropdown('Model');
     await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
     pickOption(menu, 'GPT-5.4');
 
-    fireEvent.click(within(harnessGroup()).getByRole('button', { name: 'Claude' }));
+    pickHarness('Claude');
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => expect(createCalls.length).toBe(1));
     expect(createCalls[0].agent).toBe('claude');
     expect(createCalls[0].codexModel).toBeUndefined();
+  });
+});
+
+describe('NewSessionDraft Claudex (primary Codex-flavored harness)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders the Claudex segment between Claude and the Legacy-tagged Codex segment', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const group = await screen.findByRole('group', { name: 'Harness' });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    expect(within(group).getByRole('button', { name: 'Claudex' })).toBeTruthy();
+    // The legacy Codex segment carries the muted "Legacy" tag (aria-hidden,
+    // so its accessible name stays exactly "Codex").
+    const codexBtn = within(group).getByRole('button', { name: 'Codex' });
+    expect(codexBtn.textContent).toContain('Legacy');
+    expect(within(group).getByRole('button', { name: 'Claude' }).textContent).not.toContain('Legacy');
+  });
+
+  it('serves the claudex model list, defaulting the trigger to GPT-5.6 Sol', async () => {
+    stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const trigger = await screen.findByLabelText('Model');
+    await waitFor(() => expect(trigger.textContent).toContain('GPT-5.6 Sol (Codex)'));
+
+    const menu = openDropdown('Model');
+    // Single-entry catalog: exactly the badged default row, nothing else.
+    expect(within(menu).getAllByRole('option')).toHaveLength(1);
+    expect(within(menu).getByText('Default')).toBeTruthy();
+  });
+
+  it('creates with agent claudex, omitting claudexModel at Default and sending a session name (claude launch shape)', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    // Claudex names sessions like claude (shared launch shape) — the name
+    // field renders instead of the codex "no session name" note.
+    await screen.findByLabelText('Session name');
+    expect(screen.queryByText('Codex has no session name')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('claudex');
+    expect(createCalls[0].claudexModel).toBeUndefined();
+    expect(createCalls[0].codexModel).toBeUndefined();
+    expect(createCalls[0].model).toBeUndefined();
+    expect(typeof createCalls[0].name).toBe('string');
+    expect(String(createCalls[0].name)).toMatch(/^session-/);
+  });
+
+  it('does not leak claudexModel when switching harness after a pick — codex send carries codexModel only', async () => {
+    const { createCalls } = stubApi();
+    render(createElement(NewSessionDraft, {
+      filter: 'codex',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const trigger = await screen.findByLabelText('Model');
+    await waitFor(() => expect(trigger.textContent).toContain('GPT-5.6 Sol (Codex)'));
+    pickHarness('Codex');
+    const menu = openDropdown('Model');
+    await waitFor(() => expect(within(menu).getByText('GPT-5.4')).toBeTruthy());
+    pickOption(menu, 'GPT-5.4');
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('codex');
+    expect(createCalls[0].codexModel).toBe('gpt-5.4');
+    expect(createCalls[0].claudexModel).toBeUndefined();
+  });
+
+  it('claudex is disabled alongside claude when the claude binary is unavailable (shared binary), auto-switching to codex', async () => {
+    stubApi({ claudeAvailable: false });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const group = harnessGroup();
+    const claudexBtn = await waitFor(() =>
+      within(group).getByRole('button', { name: 'Claudex (unavailable)' }),
+    );
+    expect((claudexBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(claudexBtn.getAttribute('title')).toBe('claude missing');
+    // Codex is the only available harness left, so the draft lands there.
+    await waitFor(() =>
+      expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('true'),
+    );
   });
 });
 
@@ -850,7 +977,10 @@ describe('NewSessionDraft agent default from filter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults to codex when opened from the codex filter', async () => {
+  // Design decision 7 (locked): claudex is the primary Codex-flavored option,
+  // so the codex filter seeds the draft with claudex — legacy codex stays one
+  // click away via the Legacy-tagged segment.
+  it('defaults to claudex when opened from the codex filter', async () => {
     stubApi();
     render(createElement(NewSessionDraft, {
       filter: 'codex',
@@ -859,7 +989,8 @@ describe('NewSessionDraft agent default from filter', () => {
       onCreated: () => {},
     }));
     const group = await screen.findByRole('group', { name: 'Harness' });
-    expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Claudex' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('false');
     expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('false');
   });
 
@@ -873,6 +1004,7 @@ describe('NewSessionDraft agent default from filter', () => {
     }));
     const group = await screen.findByRole('group', { name: 'Harness' });
     expect(within(group).getByRole('button', { name: 'Claude' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Claudex' }).getAttribute('aria-pressed')).toBe('false');
     expect(within(group).getByRole('button', { name: 'Codex' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
