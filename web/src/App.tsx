@@ -29,6 +29,7 @@ import type { ComposerHandle } from './components/Composer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
+import { WorkflowContext, type WorkflowContextValue } from './components/WorkflowContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { UrlActionProvider } from './components/UrlActionContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
@@ -962,6 +963,16 @@ function AppInner() {
     setViewingAgentId((prev) => (prev === agentId ? null : agentId));
   }, [cockpit.requestSubagent]);
   const closeAgent = useCallback(() => setViewingAgentId(null), []);
+
+  // Live workflow slice for the selected session, keyed by runId — consumed by
+  // the inline WorkflowCard (MessageParts' WorkflowPart) to bind to the polled
+  // run, not the frozen tool_result. `openAgent` is wired in B3 (transcript
+  // overlay); omitted here → the card renders read-only.
+  const workflowCtx = useMemo<WorkflowContextValue>(() => {
+    const runs = cockpit.selectedId ? cockpit.workflowsById[cockpit.selectedId] ?? [] : [];
+    const byRunId = new Map(runs.map((w) => [w.runId, w]));
+    return { byRunId };
+  }, [cockpit.selectedId, cockpit.workflowsById]);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -2801,6 +2812,7 @@ function AppInner() {
                 ) : null}
                 <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
+                <WorkflowContext.Provider value={workflowCtx}>
                   {/* Catch a render crash in the transcript so one bad message
                       can't white-screen the whole app; resets on session switch. */}
                   <ErrorBoundary
@@ -2838,6 +2850,7 @@ function AppInner() {
                     onReply={onInlineReply}
                   />
                   </ErrorBoundary>
+                </WorkflowContext.Provider>
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ErrorBoundary label="Artifact panel failed to render">
