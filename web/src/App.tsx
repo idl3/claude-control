@@ -29,6 +29,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
+import { UrlActionProvider } from './components/UrlActionContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
@@ -2374,6 +2375,7 @@ function AppInner() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+    <UrlActionProvider>
     <ArtifactPanelProvider sessionId={cockpit.selectedId}>
       <div
         ref={appRef}
@@ -2938,6 +2940,7 @@ function AppInner() {
         <ToastView toast={toast} />
       </div>
     </ArtifactPanelProvider>
+    </UrlActionProvider>
     </AssistantRuntimeProvider>
   );
 }
