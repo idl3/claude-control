@@ -15,6 +15,8 @@ import { MarkdownImg } from './EmbeddedMedia';
 import { MarkdownDiv } from './DeliveryCard';
 import { UltrathinkText } from './ReservedTokens';
 import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
+import { UrlLink } from './UrlLink';
+import { linkifyChildren, hljsHtmlToNodes } from '../lib/linkify';
 
 /**
  * GitHub-flavored markdown for assistant/system text parts.
@@ -22,13 +24,18 @@ import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
  * Built on assistant-ui's `MarkdownTextPrimitive`, which reads the current
  * text part from message-part context (no `text` prop needed), so it is a
  * drop-in replacement for the `Text` part component. remark-gfm enables
- * tables, strikethrough, task-lists and autolinks. Fenced code is highlighted
- * via a lazily-loaded, locally-bundled highlight.js (see lib/highlight.ts) with
- * a dark theme; unknown languages and load failures fall back to the default
- * <pre><code>, styled for the dark compact theme in styles.css under the
- * `.aui-md` wrapper. All content is escaped by react-markdown; the only HTML we
- * inject is highlight.js output, which escapes the source and emits only
- * <span class="hljs-*"> wrappers.
+ * tables, strikethrough, task-lists and autolinks (prose only — see
+ * lib/linkify.ts's module doc for why code spans/blocks need their own path).
+ * Fenced code is highlighted via a lazily-loaded, locally-bundled highlight.js
+ * (see lib/highlight.ts) with a dark theme; unknown languages and load
+ * failures fall back to the default <pre><code>, styled for the dark compact
+ * theme in styles.css under the `.aui-md` wrapper. All content is escaped by
+ * react-markdown; the only HTML we ever parse is highlight.js output (which
+ * escapes the source and emits only <span class="hljs-*"> wrappers) — and
+ * that HTML is parsed via DOMParser into a real React tree (lib/linkify.ts's
+ * `hljsHtmlToNodes`), not injected via dangerouslySetInnerHTML, so every URL
+ * inside it can be linkified through the same `UrlLink`/popover mechanism as
+ * prose and inline code.
  */
 
 // Compact language tag above fenced blocks, with an "open in panel" button.
@@ -69,10 +76,14 @@ const CodeHeader = ({ language, code }: CodeHeaderProps) => {
   );
 };
 
+// renderUrl passed to every code-path linkify call below — module-scope so
+// it's a stable reference (no need to recreate a closure per render/branch).
+const renderCodeUrl = (url: string) => <UrlLink url={url} variant="code" />;
+
 // Fenced-code rendering. We attempt to highlight via highlight.js (lazy). While
 // the highlighter loads — and for unknown languages or failures — we render the
-// raw, React-escaped text through the default Pre/Code. Once highlighted HTML is
-// ready we inject it (hljs output is safe, see module doc above).
+// raw text through the default Pre/Code, linkified. Once highlighted HTML is
+// ready we parse it into a linkified React tree (see hljsHtmlToNodes's doc).
 const CodeHighlighter = ({ components, language, code }: SyntaxHighlighterProps) => {
   const { Pre, Code } = components;
   const supported = resolveLanguage(language) !== null;
@@ -97,16 +108,24 @@ const CodeHighlighter = ({ components, language, code }: SyntaxHighlighterProps)
     };
   }, [supported, language, code]);
 
-  if (supported && html != null) {
+  // Parsing hljs's HTML into a React tree is pure work re-run identically
+  // for the same `html` string — memoize so it isn't redone every render.
+  const highlighted = useMemo(
+    () => (html != null ? hljsHtmlToNodes(html, renderCodeUrl) : null),
+    [html],
+  );
+  const fallback = useMemo(() => linkifyChildren(code, renderCodeUrl), [code]);
+
+  if (supported && highlighted != null) {
     return (
       <Pre>
-        <Code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+        <Code className="hljs">{highlighted}</Code>
       </Pre>
     );
   }
   return (
     <Pre>
-      <Code className={supported ? 'hljs' : undefined}>{code}</Code>
+      <Code className={supported ? 'hljs' : undefined}>{fallback}</Code>
     </Pre>
   );
 };
@@ -119,6 +138,37 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
   <div className="md-table-wrap">
     <table {...props} />
   </div>
+);
+
+// Prose links: remark-gfm autolinks bare URLs into real `<a>` nodes, and
+// `[text](url)` markdown links land here too. Anything with an http(s) href
+// routes through the shared UrlLink popover (see UrlLink.tsx); anything else
+// (mailto:, relative paths, etc.) renders as a plain, unhandled anchor.
+const ProseLink = ({ href, children }: { href?: string; children?: React.ReactNode }) =>
+  typeof href === 'string' && /^https?:\/\//i.test(href) ? (
+    <UrlLink url={href} variant="prose">
+      {children}
+    </UrlLink>
+  ) : (
+    <a href={href}>{children}</a>
+  );
+
+// Inline `code` (single-backtick spans). This is ALSO the `Code` slot handed
+// to CodeHighlighter above for fenced blocks — there, `children` always
+// arrives as already-linkified React nodes (an array), so the `typeof`
+// check below only ever fires for genuine inline code (a plain string),
+// keeping this one component correct for both call sites without double-
+// linkifying fenced-block content. `node` is react-markdown's AST node —
+// stripped so it isn't spread onto the DOM element.
+const InlineCode = ({
+  node: _node,
+  className,
+  children,
+  ...rest
+}: { node?: unknown; className?: string; children?: React.ReactNode } & React.HTMLAttributes<HTMLElement>) => (
+  <code className={className} {...rest}>
+    {typeof children === 'string' ? linkifyChildren(children, renderCodeUrl) : children}
+  </code>
 );
 
 // The `ultrathink` rainbow highlight (lib/reservedTokens.ts remarkUltrathink)
@@ -147,6 +197,10 @@ export const MD_COMPONENTS = {
   CodeHeader,
   SyntaxHighlighter: CodeHighlighter,
   table: TableWrap,
+  // Every clickable URL — prose, inline code, and (via CodeHighlighter above)
+  // fenced code blocks — funnels through UrlLink's shared popover.
+  a: ProseLink,
+  code: InlineCode,
   // <embedded-image|video …/> blocks (rewritten to image nodes by
   // remarkEmbeds) render as real <img>/<video>; other images unchanged.
   img: MarkdownImg,
