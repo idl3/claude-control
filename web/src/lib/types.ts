@@ -79,6 +79,14 @@ export interface Session {
   /** true when this session has a sub-agent actively running (server-side dir probe;
    *  works for ALL sessions, unlike runningSubagentCountById which is subscription-scoped) */
   subAgentActive?: boolean;
+  /** Parsed Claude `Workflow` runs for this session (server-side, mtime-cached
+   *  from wf_<runId>.json). Rides the existing session poll — see lib/workflows.js. */
+  workflows?: Workflow[];
+  /** true when ANY workflow run in this session is currently running. */
+  workflowActive?: boolean;
+  /** Thin summary of the most-recently-active (else most-recent) run — drives the
+   *  rail indicator + live dock. null when the session has run no workflows. */
+  workflowSummary?: WorkflowSummary | null;
   /** Codex-only: primary rate-limit used_percent (0–100). null for Claude sessions. */
   usagePct?: number | null;
   /** Codex-only: primary rate-limit window in minutes (e.g. 300 = 5h, 10080 = 7d). */
@@ -94,6 +102,60 @@ export interface Session {
    *  lib/olam-archive.js deriveArchived. Sessions with archived:true render
    *  under the rail's collapsed "Archived" section instead of the active list. */
   archived?: boolean;
+}
+
+/** One agent within a workflow phase (a `workflow_agent` progress entry, shaped
+ *  by lib/workflows.js). Model-authored preview strings are size-bounded server
+ *  side; render them as text (auto-escaped), never as HTML. */
+export interface WorkflowAgent {
+  index: number | null;
+  label: string | null;
+  agentId: string | null;
+  agentType: string | null;
+  model: string | null;
+  state: 'queued' | 'running' | 'done';
+  startedAt: number | null;
+  queuedAt: number | null;
+  durationMs: number | null;
+  tokens: number | null;
+  toolCalls: number | null;
+  lastToolName: string | null;
+  promptPreview: string | null;
+  resultPreview: string | null;
+}
+
+/** A phase group — a `workflow_phase` marker plus the agents bound to it. */
+export interface WorkflowPhase {
+  index: number | null;
+  title: string | null;
+  detail: string | null;
+  agents: WorkflowAgent[];
+}
+
+/** One workflow run (`wf_<runId>.json`), phase-grouped and progress-tallied. */
+export interface Workflow {
+  runId: string;
+  workflowName: string | null;
+  summary: string | null;
+  status: string;
+  agentCount: number;
+  startTime: number | null;
+  durationMs: number | null;
+  totalTokens: number | null;
+  totalToolCalls: number | null;
+  done: number;
+  total: number;
+  active: boolean;
+  phases: WorkflowPhase[];
+}
+
+/** Thin per-session workflow summary (rail indicator + live dock). */
+export interface WorkflowSummary {
+  name: string | null;
+  activePhaseTitle: string | null;
+  done: number;
+  total: number;
+  status: string;
 }
 
 export type Role = 'user' | 'assistant' | 'system';
