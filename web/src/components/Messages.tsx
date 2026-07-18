@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { SlotText } from 'slot-text/react';
 import 'slot-text/style.css';
-import { TextPart, ToolPart, AskAnsweredPart, ExitPlanPart, lastUpdateLine } from './MessageParts';
+import { TextPart, ToolPart, AskAnsweredPart, ExitPlanPart, WorkflowPart, lastUpdateLine } from './MessageParts';
 import { useLiveThinkingId } from './ThinkingContext';
 import { parsePendingKey } from '../lib/pendingSend';
 
@@ -177,9 +177,14 @@ const partComponents = {
   Text: TextPart,
   Reasoning: GroupedReasoning,
   // AskUserQuestion renders as a clean Q&A card, ExitPlanMode as a rendered-
-  // markdown Plan card; everything else uses the generic expandable tool row.
+  // markdown Plan card, Workflow as the inline live WorkflowCard; everything
+  // else uses the generic expandable tool row.
   tools: {
-    by_name: { AskUserQuestion: AskAnsweredPart, ExitPlanMode: ExitPlanPart },
+    by_name: {
+      AskUserQuestion: AskAnsweredPart,
+      ExitPlanMode: ExitPlanPart,
+      Workflow: WorkflowPart,
+    },
     Fallback: ToolPart,
   },
 } as const;

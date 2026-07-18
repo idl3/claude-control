@@ -15,6 +15,8 @@ import { useArtifactPanel } from './ArtifactContext';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { CodexIcon } from './CodexIcon';
 import { useAgentKind } from './AgentContext';
+import { WorkflowCard } from './WorkflowCard';
+import { useWorkflows } from './WorkflowContext';
 
 // The optimistic "Working…" placeholder (App.tsx, while Claude's real reply is
 // pending) renders as an animated spinner; everything else is GitHub-flavored
@@ -231,6 +233,41 @@ export function PendingAskCard({ questions }: { questions: AskInputQuestion[] })
     </div>
   );
 }
+
+// Workflow → the inline WorkflowCard, bound to the LIVE polled run (not the
+// frozen tool_result). The `Workflow` tool_use INPUT carries only `{script}` —
+// the runId is not there. It IS in the tool_RESULT, which reads:
+//   Workflow launched in background. Task ID: <taskId>
+//   Summary: <…>
+//   Transcript dir: <…>/subagents/workflows/wf_<runId>
+// We pull the runId from that "Transcript dir" path (primary) or any bare `wf_`
+// token (fallback), then look up the live slice by runId. Extraction failure →
+// the generic ToolPart (fixed-slot fallback, per B2 acceptance).
+const WF_RUNID_PATH_RE = /workflows\/(wf_[A-Za-z0-9._-]+)/;
+const WF_RUNID_BARE_RE = /\b(wf_[A-Za-z0-9._-]+)/;
+
+export function extractWorkflowRunId(resultText: string | null | undefined): string | null {
+  if (!resultText) return null;
+  const m = WF_RUNID_PATH_RE.exec(resultText) ?? WF_RUNID_BARE_RE.exec(resultText);
+  return m ? m[1] : null;
+}
+
+export const WorkflowPart: ToolCallMessagePartComponent = (props) => {
+  const { byRunId, openAgent } = useWorkflows();
+  const res = toolResult(props.result);
+  const runId = extractWorkflowRunId(res?.text);
+  const workflow = runId ? byRunId.get(runId) ?? null : null;
+
+  // No runId, or no live run for it yet (poll hasn't surfaced the slice) → the
+  // generic tool row, so the transcript never shows a blank where the card goes.
+  if (!workflow || !runId) return <ToolPart {...props} />;
+
+  const onOpenAgentTranscript = openAgent
+    ? (agentId: string, label: string) => openAgent(runId, agentId, label)
+    : undefined;
+
+  return <WorkflowCard workflow={workflow} onOpenAgentTranscript={onOpenAgentTranscript} />;
+};
 
 // tool_use → controlled expandable row with a panel-open trigger on the name.
 //   ▸ <ToolName> — <one-line input summary>
