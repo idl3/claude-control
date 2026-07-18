@@ -48,6 +48,7 @@ import { NewSessionDraft } from './components/NewSessionDraft';
 import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
+import { WorkflowAgentView } from './components/WorkflowAgentView';
 import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
@@ -955,6 +956,7 @@ function AppInner() {
   useEffect(() => {
     setPanelOpen(false);
     setViewingAgentId(null);
+    setViewingWorkflowAgent(null);
     setRawOpen(false);
   }, [cockpit.selectedId]);
   // Pill click → show inline transcript; does NOT open the side panel.
@@ -964,15 +966,27 @@ function AppInner() {
   }, [cockpit.requestSubagent]);
   const closeAgent = useCallback(() => setViewingAgentId(null), []);
 
+  // B3 Agent View: which workflow agent's full-transcript overlay is open.
+  const [viewingWorkflowAgent, setViewingWorkflowAgent] = useState<
+    { runId: string; agentId: string; label: string } | null
+  >(null);
+  const openWorkflowAgent = useCallback(
+    (runId: string, agentId: string, label: string) => {
+      cockpit.requestWorkflowAgent(runId, agentId);
+      setViewingWorkflowAgent({ runId, agentId, label });
+    },
+    [cockpit.requestWorkflowAgent],
+  );
+  const closeWorkflowAgent = useCallback(() => setViewingWorkflowAgent(null), []);
+
   // Live workflow slice for the selected session, keyed by runId — consumed by
   // the inline WorkflowCard (MessageParts' WorkflowPart) to bind to the polled
-  // run, not the frozen tool_result. `openAgent` is wired in B3 (transcript
-  // overlay); omitted here → the card renders read-only.
+  // run, not the frozen tool_result. `openAgent` opens the transcript overlay.
   const workflowCtx = useMemo<WorkflowContextValue>(() => {
     const runs = cockpit.selectedId ? cockpit.workflowsById[cockpit.selectedId] ?? [] : [];
     const byRunId = new Map(runs.map((w) => [w.runId, w]));
-    return { byRunId };
-  }, [cockpit.selectedId, cockpit.workflowsById]);
+    return { byRunId, openAgent: openWorkflowAgent };
+  }, [cockpit.selectedId, cockpit.workflowsById, openWorkflowAgent]);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -2892,6 +2906,25 @@ function AppInner() {
             focusAgentId={panelAgentId}
           />
         </ErrorBoundary>
+
+        {viewingWorkflowAgent ? (
+          <ErrorBoundary label="Workflow agent transcript failed to render">
+            <WorkflowAgentView
+              label={viewingWorkflowAgent.label}
+              messages={
+                cockpit.workflowAgentById[
+                  `${viewingWorkflowAgent.runId}::${viewingWorkflowAgent.agentId}`
+                ]?.messages ?? []
+              }
+              loading={
+                !cockpit.workflowAgentById[
+                  `${viewingWorkflowAgent.runId}::${viewingWorkflowAgent.agentId}`
+                ]?.loaded
+              }
+              onClose={closeWorkflowAgent}
+            />
+          </ErrorBoundary>
+        ) : null}
 
         {processOpen ? (
           <ErrorBoundary label="Process monitor failed to render">
