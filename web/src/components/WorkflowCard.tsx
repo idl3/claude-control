@@ -173,10 +173,12 @@ function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
   );
 }
 
-/** Re-render only when a memo-key field changes (P3). Duration ticks alone are
- *  intentionally NOT a trigger — the spec keys on these four. onOpenTranscript
- *  is stable (useCallback keyed on the stable runId). */
-export const AgentRow = memo(AgentRowImpl, (prev, next) => {
+/** The memo predicate (P3): re-render ONLY when a keyed field changes —
+ *  (agentId, state, lastToolName, tokens) + the (stable) callback identity.
+ *  Duration ticks alone are intentionally NOT a trigger; the spec keys on these
+ *  four. Exported so the render test can assert the key precisely. Returns true
+ *  when props are "equal" (skip re-render). */
+export function agentRowPropsEqual(prev: AgentRowProps, next: AgentRowProps): boolean {
   const a = prev.agent;
   const b = next.agent;
   return (
@@ -186,7 +188,9 @@ export const AgentRow = memo(AgentRowImpl, (prev, next) => {
     a.tokens === b.tokens &&
     prev.onOpenTranscript === next.onOpenTranscript
   );
-});
+}
+
+export const AgentRow = memo(AgentRowImpl, agentRowPropsEqual);
 
 // ---------------------------------------------------------------------------
 // Phase group — Gestalt common-region (labeled inset). Collapse-by-default;
