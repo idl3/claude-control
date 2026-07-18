@@ -9,7 +9,7 @@ Two suites, both run in CI (`.github/workflows/ci.yml`) on every PR and push to 
 
 The web build (`cd web && npm run build`) runs `tsc -b` first, so type errors fail CI too.
 
-**Hermetic by design** — no `tmux`, `ttyd`, `ffmpeg`, or `whisper` on the runner. Anything that would shell out is injected/stubbed (a `_run`/`spawn` seam, or a captured fixture). Verify a single file with `node --test test/<file>.test.js`.
+**Hermetic by design** — no `tmux`, `ffmpeg`, or `whisper` on the runner. Anything that would shell out is injected/stubbed (a `_run`/`spawn` seam, or a captured fixture). Verify a single file with `node --test test/<file>.test.js`.
 
 ## Backend suites by area
 
@@ -17,7 +17,7 @@ The web build (`cd web && npm run build`) runs `tsc -b` first, so type errors fa
 - **Transcript** — `transcript`, `transcript-parser`, `push-pending` (cross-session AskUserQuestion flag), `subagents`.
 - **TUI question detection + answering** — see invariants below: `prompt`, `prompt-parse`, `picker-parse`, `answer`, `reply-guard`, `reply-picker-guard`.
 - **Codex** — `codex`, `codex-prompt`, `codex-rpc`, `sessions-codex-appserver`, `create-session-codex`.
-- **tmux / terminal** — `tmux-capture`, `tmux-sendtext` (paste→poll-Pasting→Enter), `terminal` (ttyd dedup), `shell`, `shell-keys`.
+- **tmux / terminal** — `tmux-capture`, `tmux-sendtext` (paste→poll-Pasting→Enter), `pty-bridge`, `pty-bridge.integration`, `shell`, `shell-keys`.
 - **Transport / protocol** — `ws-serialize`, `ws-heartbeat`, `server`, `server-hardening`, `auth`, `claude-print`, `claude-cli`.
 - **Misc** — `config`, `json-file`, `pins`, `models`, `mlx`, `optimize*`, `transcribe`, `uploads`, `resources`, `skills`, `tui`, `fixes`.
 
