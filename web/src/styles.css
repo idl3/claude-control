@@ -253,6 +253,27 @@ html.pwa-fill .app {
     top: var(--vv-top, 0px);
     height: var(--vv-h, 100dvh);
   }
+  /* .app pinning (above) only fixes .app's own box — it says nothing about
+     WHERE inside that box the new-session composer sits. .new-session-draft
+     mirrors .thread-root's flex shape (placeholder: flex:1 1 auto growing to
+     fill, composer: flex:0 0 auto) which bottom-anchors the composer in the
+     live-session case, but NewSessionDraft.tsx also GSAP-translates the
+     [hero, composer] group to vertically center it pre-keyboard; clearing
+     that lift to y:0 on kbd-up (see NewSessionDraft.tsx) only un-centers the
+     group — it does NOT itself bottom-anchor it, leaving the composer
+     top-anchored with the void below it instead of above. Force the
+     bottom-anchor at the CSS layer instead of relying on the flex-grow
+     chain + JS lift math to net out correctly: stop the placeholder from
+     claiming all the leftover space (flex-grow:0, shrinks to hero's natural
+     height) and let the container's own flex-end justification push
+     [placeholder, composer] to the bottom, so the composer's bottom edge is
+     always the container's bottom edge, flush above the keyboard. */
+  body.kbd-up .new-session-draft {
+    justify-content: flex-end;
+  }
+  body.kbd-up .new-session-draft-placeholder {
+    flex: 0 1 auto;
+  }
 }
 
 /* ── Cosmic backdrop — deep-space base + a two-tone breathing nebula wash +
@@ -2068,7 +2089,7 @@ body.is-external-display .rail {
   margin: 0;
   font-family: ui-serif, Georgia, 'Times New Roman', serif;
   font-size: clamp(1.6rem, 4vw, 2.4rem);
-  font-weight: 700;
+  font-weight: 400;
   color: var(--text);
   letter-spacing: -0.02em;
   line-height: 1.15;
