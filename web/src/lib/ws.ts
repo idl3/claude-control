@@ -1,5 +1,6 @@
 import { handleUnauthorized, wsUrl } from './api';
 import { getToken, WS_PROTOCOL } from './auth';
+import { recordPerfEvent } from './perfDiagnostics';
 import type { ClientMessage, ServerMessage } from './types';
 
 // WS policy close code for auth failures. Browsers can't read a 401 on the
@@ -62,6 +63,7 @@ export class CockpitSocket {
     });
 
     ws.addEventListener('message', (evt) => {
+      recordPerfEvent('ws-message', typeof evt.data === 'string' ? evt.data.length : 0);
       let parsed: ServerMessage;
       try {
         parsed = JSON.parse(evt.data as string) as ServerMessage;
