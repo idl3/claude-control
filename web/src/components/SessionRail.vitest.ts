@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { claudeWorking, remoteRowLabel } from './SessionRail';
+import { claudeWorking, remoteRowLabel, modelProvider, modelBadgeClass } from './SessionRail';
 import type { Session } from '../lib/types';
 
 /**
@@ -209,5 +209,28 @@ describe('remoteRowLabel — rail label never shows the raw olam:org:uuid id', (
     const rawId = 'olam:atlas:55717fae-1234-5678-9abc-def012345678';
     const s = { id: rawId, title: undefined, summary: undefined };
     expect(remoteRowLabel(s)).not.toBe(rawId);
+  });
+});
+
+describe('modelProvider — provider tint classification (Claudex/Claudemi parity)', () => {
+  it('maps each provider family to its tag', () => {
+    for (const id of ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'fable-5'])
+      expect(modelProvider(id), id).toBe('anthropic');
+    for (const id of ['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.5-xhigh', 'o3-mini'])
+      expect(modelProvider(id), id).toBe('openai');
+    for (const id of ['kimi-k3', 'kimi-k2.7-code', 'moonshot-v1-128k'])
+      expect(modelProvider(id), id).toBe('moonshot');
+  });
+
+  it('returns null for unknown ids (badge keeps default hue)', () => {
+    for (const id of ['qwen3-coder', 'kimimaru', 'gptzilla', ''])
+      expect(modelProvider(id), id).toBeNull();
+  });
+
+  it('modelBadgeClass appends the tint to the base, omits it when unknown', () => {
+    expect(modelBadgeClass('gpt-5.6-sol')).toBe('meta-model mp-openai');
+    expect(modelBadgeClass('kimi-k3', 'agent-chip-model')).toBe('agent-chip-model mp-moonshot');
+    expect(modelBadgeClass('claude-opus-4-8')).toBe('meta-model mp-anthropic');
+    expect(modelBadgeClass('qwen3-coder')).toBe('meta-model');
   });
 });

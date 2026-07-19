@@ -9,7 +9,7 @@ import {
   RAIL_INTERVAL_CHOICES_MS,
   type RailToken,
 } from '../lib/railTokenPrefs';
-import { effortClass, formatModel, useMetaCyclePhase } from './SessionRail';
+import { effortClass, formatModel, modelBadgeClass, useMetaCyclePhase } from './SessionRail';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { CodexIcon } from './CodexIcon';
 
@@ -97,7 +97,7 @@ function randomPreviewFields(isCodex: boolean): PreviewField[] {
   const model = pick(isCodex ? CODEX_MODELS : CLAUDE_MODELS);
   const effort = pick(isCodex ? CODEX_EFFORTS : CLAUDE_EFFORTS);
   const fields: PreviewField[] = [
-    { key: 'model', text: formatModel(model), className: 'meta-model' },
+    { key: 'model', text: formatModel(model), className: modelBadgeClass(model) },
     { key: 'effort', text: effort, className: effortClass(effort, isCodex) },
     { key: 'ctx', text: `ctx:${randInt(0, 100)}%`, className: 'meta-ctx' },
   ];

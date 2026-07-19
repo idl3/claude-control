@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { Workflow, WorkflowPhase, WorkflowAgent } from '../lib/types';
+import { ModelBadge } from './SessionRail';
 
 // ---------------------------------------------------------------------------
 // Formatting — pure, total. All model-authored strings render as React text
@@ -141,7 +142,7 @@ function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
         {agent.agentType && agent.label ? (
           <span className="wf-agent-type">{agent.agentType}</span>
         ) : null}
-        {agent.model ? <span className="meta-model wf-agent-model">{agent.model}</span> : null}
+        {agent.model ? <ModelBadge model={agent.model} className="meta-model wf-agent-model" /> : null}
         {/* Running rows show the live tool name; finished rows show cost/time. */}
         {state === 'running' ? (
           <span className="wf-agent-live" key={agent.lastToolName ?? ''}>
@@ -159,7 +160,7 @@ function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
         <div className="wf-agent-detail">
           {/* provenance/cost row */}
           <div className="wf-agent-provenance">
-            {agent.model ? <span className="meta-model">{agent.model}</span> : null}
+            {agent.model ? <ModelBadge model={agent.model} /> : null}
             {tokens ? <span>{tokens} tok</span> : null}
             {agent.toolCalls != null ? <span>{agent.toolCalls} calls</span> : null}
             {duration ? <span>{duration}</span> : null}
