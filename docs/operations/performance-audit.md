@@ -1,6 +1,6 @@
 # Claude Control/Cockpit Performance Audit
 
-Last updated: 2026-07-15
+Last updated: 2026-07-19
 
 ## Current Hot Paths
 
@@ -22,6 +22,14 @@ Last updated: 2026-07-15
 - The process snapshot showed Cockpit `server.js` resident at roughly 467 MB RSS during the audit. This is inside the 768 MB default RSS budget.
 - The same snapshot showed the tmux server itself sampling around 20% CPU with frequent status-line helper shells from the user tmux configuration. That is not Cockpit native cleanup work and should be treated separately from Cockpit process hygiene. If it stays high, reduce tmux status-line shell frequency or `status-interval` in the tmux config rather than changing Cockpit.
 - Chrome DevTools MCP was unavailable in this Codex session, so a live Core Web Vitals trace could not be captured. Static code/bundle audit still found a network win: content-hashed Vite assets are now cacheable as immutable while `index.html` remains no-store.
+
+## Mobile / On-device Diagnostics
+
+- Enable the browser-side diagnostics overlay from the command palette: **Show device performance diagnostics**. It can also be forced at load with `?perf=1`, `?diagnostics=1`, or `?cc_perf=1`.
+- The overlay is opt-in. When disabled it does not run a RAF loop, timers, PerformanceObservers, or websocket/render counters.
+- Metrics sampled on the phone: FPS, worst frame gap, estimated dropped/janky frames, event-loop lag, Long Task API totals, Long Animation Frame API totals where available, JS heap where exposed, websocket message/KB rate, app-render rate, DPR/viewport, reduced-motion state, and WebGL renderer metadata where available.
+- Browsers do not expose device temperature, so use these samples for correlation: heat + long tasks/render bursts points at JS/React work; heat + clean main-thread metrics but WebGL/iframe/compositor stress points at GPU/layer pressure.
+- Use the overlay's **Copy** action after reproducing the heat. It copies a compact JSON report with the latest sample and the last ~120 seconds of history.
 
 ## Remaining Optimization Backlog
 
