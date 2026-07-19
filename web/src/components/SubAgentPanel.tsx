@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import type { SubAgent, AgentDef, NestedSubAgent } from '../lib/types';
 import { SubAgentThread } from './SubAgentThread';
+import { ModelBadge } from './SessionRail';
 
 interface SubAgentPanelProps {
   subagents: SubAgent[];
@@ -34,7 +35,7 @@ function AgentChip({ agentType, model }: { agentType: string | null; model: stri
   return (
     <span className="agent-chip">
       <span className="agent-chip-name">{agentType || 'sub-agent'}</span>
-      {model ? <span className="agent-chip-model">{model}</span> : null}
+      {model ? <ModelBadge model={model} className="agent-chip-model" /> : null}
     </span>
   );
 }
@@ -72,7 +73,7 @@ function AgentDefBlock({ def, agentType }: { def: AgentDef | null | undefined; a
       {def.model ? (
         <div className="agent-def-row">
           <span className="agent-def-label">model</span>
-          <span className="agent-def-val">{def.model}</span>
+          <ModelBadge model={def.model} className="agent-def-val" />
         </div>
       ) : null}
       {extraKeys.map((k) => (

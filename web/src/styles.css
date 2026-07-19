@@ -12729,3 +12729,13 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   .wf-card--collapsed { min-height: 48px; }
   .wf-show-more { min-height: 44px; }
 }
+
+/* Provider tint for model badges (ModelBadge / modelBadgeClass, SessionRail.tsx).
+   Makes non-Claude providers legible at a glance across the rail, workflow rows,
+   and sub-agent chips — a real Claudex session reads green "gpt-5.6-sol", a Claudemi
+   session reads violet "kimi-k3", Claude keeps the home accent. Placed last so the
+   flat .mp-* class wins equal-specificity ties with .meta-model / .agent-chip-model
+   / .agent-def-val (all single-class, so source order decides). */
+.mp-openai { color: oklch(72% 0.14 165); }    /* OpenAI / GPT — green */
+.mp-moonshot { color: oklch(70% 0.16 300); }  /* Moonshot / Kimi — violet */
+.mp-anthropic { color: var(--accent-2); }     /* Claude — home accent */
