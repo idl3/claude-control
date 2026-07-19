@@ -40,5 +40,27 @@ describe('nativeShell', () => {
     });
     const mod = await import('./nativeShell');
     expect(() => mod.notifySessionNative('s1', 't', 'b')).not.toThrow();
+    expect(() =>
+      mod.shellDragStart({ target: null, currentTarget: null, buttons: 1 }),
+    ).not.toThrow();
+  });
+
+  it('shellDragStart: drags only on a primary-button press on the bar itself', async () => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'ClaudeControlShell/0.0.1',
+    });
+    const startDragging = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {
+      window: { getCurrentWindow: () => ({ startDragging }) },
+    };
+    const mod = await import('./nativeShell');
+    const bar = {};
+    mod.shellDragStart({ target: bar, currentTarget: bar, buttons: 1 });
+    expect(startDragging).toHaveBeenCalledTimes(1);
+    // child element press → no drag (children keep their clicks)
+    mod.shellDragStart({ target: {}, currentTarget: bar, buttons: 1 });
+    // secondary button → no drag
+    mod.shellDragStart({ target: bar, currentTarget: bar, buttons: 2 });
+    expect(startDragging).toHaveBeenCalledTimes(1);
   });
 });

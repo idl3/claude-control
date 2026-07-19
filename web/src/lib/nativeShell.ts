@@ -14,7 +14,32 @@ type TauriGlobal = {
   core?: {
     invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   };
+  window?: {
+    getCurrentWindow?: () => {
+      startDragging?: () => Promise<void>;
+    };
+  };
 };
+
+/**
+ * Mousedown handler for shell drag surfaces (the HUD row): starts a native
+ * window drag via the Tauri window API. Explicit and deterministic — we don't
+ * rely on the init script's `data-tauri-drag-region` listener behaving on a
+ * remote origin. Fires only on the surface itself (children keep their
+ * clicks) and only for a primary-button press.
+ */
+export function shellDragStart(e: {
+  target: unknown;
+  currentTarget: unknown;
+  buttons: number;
+}): void {
+  if (!isNativeShell) return;
+  if (e.buttons !== 1 || e.target !== e.currentTarget) return;
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  void tauri?.window?.getCurrentWindow?.()?.startDragging?.()?.catch(() => {
+    /* drag is best-effort — an old shell build simply doesn't drag */
+  });
+}
 
 /** Fire-and-forget native notification (no-op outside the shell). */
 export function notifySessionNative(

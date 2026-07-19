@@ -576,7 +576,12 @@ html.pwa-fill .app {
 /* Desktop shell (Tauri WKWebView, titleBarStyle: Overlay): the macOS traffic
    lights float over the top-left of this row (trafficLightPosition centers
    them in the HUD's 43px height) — clear them. The HUD is also the window
-   drag region (data-tauri-drag-region, set in ResourceHud.tsx). */
+   drag region (shellDragStart in ResourceHud.tsx). The brand (robot + name)
+   is hidden in-shell: the app IS claude control — dock icon + window carry
+   the identity, the bar keeps just the live metrics. */
+html[data-native-shell='true'] .hud-brand {
+  display: none;
+}
 html[data-native-shell='true'] .hud {
   padding-left: 86px;
   overscroll-behavior: contain;
