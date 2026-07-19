@@ -58,6 +58,7 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CLAUDEX_MODELS,
+  CLAUDEMI_MODELS,
   detectMachine,
   recommendMlxModel,
   recommendClaudeModel,
@@ -548,6 +549,7 @@ const _handler = (req, res) => {
       claudeModels: CLAUDE_MODELS,
       codexModels: CODEX_MODELS,
       claudexModels: CLAUDEX_MODELS,
+      claudemiModels: CLAUDEMI_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -557,10 +559,10 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleTranscribe(req, res, u);
   }
-  // GET /api/spawn-agents — agent-type availability (claude vs claudex vs codex).
-  // Returns which agent binaries are resolvable on this machine so the UI can
-  // disable an unavailable agent picker option and show a reason.
-  // Token-gated + localhost, same as other GET endpoints.
+  // GET /api/spawn-agents — agent-type availability (claude vs claudex vs
+  // claudemi vs codex). Returns which agent binaries are resolvable on this
+  // machine so the UI can disable an unavailable agent picker option and
+  // show a reason. Token-gated + localhost, same as other GET endpoints.
   if (u.pathname === '/api/spawn-agents') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     const cfg = readConfig();
@@ -589,6 +591,24 @@ const _handler = (req, res) => {
           claudexReason = String(err?.message || err);
         }
       }
+      // Claudemi is claudex's sibling: same claude binary, same olam
+      // auth-worker cloud-bearer + tmux-env preconditions — only the
+      // upstream provider (Kimi via the worker's /kimi route, vs. OpenAI for
+      // claudex) differs. Identical short-circuit-on-first-failure shape.
+      let claudemiAvailable = claudeResult.available;
+      let claudemiReason = claudeResult.reason;
+      if (claudemiAvailable && !readCloudBearer()) {
+        claudemiAvailable = false;
+        claudemiReason = "claudemi requires ~/.olam/cloud-bearer.json — run 'olam auth login' to provision it";
+      }
+      if (claudemiAvailable) {
+        try {
+          await tmux.assertTmuxSupportsEnv();
+        } catch (err) {
+          claudemiAvailable = false;
+          claudemiReason = String(err?.message || err);
+        }
+      }
       return endJson(res, 200, {
         agents: [
           {
@@ -606,6 +626,15 @@ const _handler = (req, res) => {
             // claudeTransport ternary (the print bridge never applies to it).
             transports: ['tmux'],
             ...(claudexAvailable ? {} : { reason: claudexReason }),
+          },
+          {
+            id: 'claudemi',
+            available: claudemiAvailable,
+            defaultTransport: 'tmux',
+            // Claudemi is tmux-only, ALWAYS — same forced claudeTransport
+            // ternary as claudex (the print bridge never applies to it).
+            transports: ['tmux'],
+            ...(claudemiAvailable ? {} : { reason: claudemiReason }),
           },
           {
             id: 'codex',
@@ -1182,6 +1211,9 @@ const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
 // Same pattern for Claudex — single source of truth is CLAUDEX_MODELS (lib/models.js).
 const ALLOWED_CLAUDEX_MODELS = new Set(CLAUDEX_MODELS.map((m) => m.id));
 
+// Same pattern for Claudemi — single source of truth is CLAUDEMI_MODELS (lib/models.js).
+const ALLOWED_CLAUDEMI_MODELS = new Set(CLAUDEMI_MODELS.map((m) => m.id));
+
 // Hard cap on an initial-prompt payload. readJsonBody's default 64KB body cap
 // is raised for this endpoint (see the readJsonBody call below) to leave room
 // for a prompt up to this size plus JSON-escaping overhead and the other
@@ -1225,21 +1257,32 @@ async function handleSessionNew(req, res) {
       ? os.homedir()
       : rawCwd;
 
-  // agent ∈ {'claude','codex','claudex'}, default 'claude'. Claudex = the
-  // claude binary backed by Codex via the olam auth-worker (ENV-only setup).
-  const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claudex' ? 'claudex' : 'claude';
-  // Claudex is tmux-only, ALWAYS — never the print-bridge path. Below, the
-  // `else if (claudeTransport === 'print')` branch does not itself check
-  // `agent`; without this force, a host running CLAUDE_TRANSPORT=print (or a
-  // body override) would route a claudex request through the print bridge,
-  // which drops the preflighted claudexModel (the bridge only knows `model`,
-  // which is null for claudex) and mislabels the pane (@cc_agent='claude').
-  // The preflighted model + the `-e ANTHROPIC_BASE_URL=...` env injection
-  // both require the tmux launch shape, so claudeTransport is forced here
-  // regardless of config/body — the print branch below becomes unreachable
-  // for agent==='claudex' as a direct consequence.
+  // agent ∈ {'claude','codex','claudex','claudemi'}, default 'claude'. Claudex
+  // = the claude binary backed by Codex via the olam auth-worker (ENV-only
+  // setup). Claudemi = the same claude binary backed by Kimi via the worker's
+  // `/kimi` provider-selector segment (also ENV-only — see the claudemi
+  // pre-validation block below).
+  const agent =
+    body.agent === 'codex'
+      ? 'codex'
+      : body.agent === 'claudex'
+        ? 'claudex'
+        : body.agent === 'claudemi'
+          ? 'claudemi'
+          : 'claude';
+  // Claudex/claudemi are tmux-only, ALWAYS — never the print-bridge path.
+  // Below, the `else if (claudeTransport === 'print')` branch does not itself
+  // check `agent`; without this force, a host running CLAUDE_TRANSPORT=print
+  // (or a body override) would route a claudex/claudemi request through the
+  // print bridge, which drops the preflighted claudexModel/claudemiModel (the
+  // bridge only knows `model`, which is null for both) and mislabels the pane
+  // (@cc_agent='claude'). The preflighted/selected model + the
+  // `-e ANTHROPIC_BASE_URL=...` env injection both require the tmux launch
+  // shape, so claudeTransport is forced here regardless of config/body — the
+  // print branch below becomes unreachable for agent==='claudex' or
+  // agent==='claudemi' as a direct consequence.
   const claudeTransport =
-    agent === 'claudex'
+    agent === 'claudex' || agent === 'claudemi'
       ? 'tmux'
       : body.claudeTransport === 'print' || body.claudeTransport === 'tmux'
         ? body.claudeTransport
@@ -1274,6 +1317,23 @@ async function handleSessionNew(req, res) {
       return endJson(res, 400, { error: `unknown claudexModel: ${requested}` });
     }
     claudexModel = requested;
+  }
+
+  // claudemiModel: same fail-closed discipline as claudexModel — a claudemi
+  // session with the wrong model would silently bill/answer on the wrong
+  // upstream (design T2). Absent/'default' → the config default (kimi-k3); a
+  // provided-but-unknown value → 400. No preflight call for claudemi (the
+  // worker's /v1/models registry is codex-only — see the pre-validation
+  // block below), so this closed-list check is the ONLY validation.
+  let claudemiModel = null;
+  if (agent === 'claudemi') {
+    const requested = typeof body.claudemiModel === 'string' && body.claudemiModel && body.claudemiModel !== 'default'
+      ? body.claudemiModel
+      : config.claudemiModel;
+    if (!ALLOWED_CLAUDEMI_MODELS.has(requested)) {
+      return endJson(res, 400, { error: `unknown claudemiModel: ${requested}` });
+    }
+    claudemiModel = requested;
   }
 
   // prompt: optional initial message, delivered atomically with the launch
@@ -1376,15 +1436,54 @@ async function handleSessionNew(req, res) {
     claudexEnv = { ANTHROPIC_BASE_URL: resolved.baseUrl };
   }
 
+  // (v) Claudemi pre-validation — same fail-closed discipline as (iv), reusing
+  //     resolveClaudexBaseUrl AS-IS (no renamed helper — direnv-first, then
+  //     ~/.olam/cloud-bearer.json fallback) since the base-URL resolution is
+  //     identical; the ONLY difference is the `/kimi` provider-selector
+  //     segment appended before Claude Code adds its own `/v1/messages`. NO
+  //     model preflight here (the worker's `/v1/models` registry is
+  //     codex-only — kimi-k3/kimi-k2.7-code are never listed there), so the
+  //     closed-list check above is the full validation. Per Moonshot's Claude
+  //     Code guide, a claudemi spawn also needs several ADDITIONAL env vars
+  //     beyond ANTHROPIC_BASE_URL (opus/sonnet/haiku/subagent model pins, a
+  //     widened auto-compact window, max effort, and tool-search disabled) —
+  //     none of these are secrets, but they ride the SAME tmux -e mechanism
+  //     as the bearer-carrying base URL for consistency (T3/T8: never the
+  //     launch string, never a log line).
+  let claudemiEnv = null;
+  if (agent === 'claudemi') {
+    const resolved = await resolveClaudexBaseUrl(cwd);
+    if (!resolved) {
+      return endJson(res, 400, {
+        error: "claudemi needs ANTHROPIC_BASE_URL — export it in the project's .envrc (direnv) or run 'olam auth login' to provision ~/.olam/cloud-bearer.json",
+      });
+    }
+    try {
+      await tmux.assertTmuxSupportsEnv();
+    } catch (err) {
+      return endJson(res, 400, { error: String(err?.message || err) });
+    }
+    claudemiEnv = {
+      ANTHROPIC_BASE_URL: `${resolved.baseUrl}/kimi`,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claudemiModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: claudemiModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: claudemiModel,
+      CLAUDE_CODE_SUBAGENT_MODEL: claudemiModel,
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1048576',
+      CLAUDE_CODE_EFFORT_LEVEL: 'max',
+      ENABLE_TOOL_SEARCH: 'false',
+    };
+  }
+
   try {
     // (1) Reliable named path: the tmux window name. createWindow sets it via
     //     `new-window -n` and the `-c cwd` flag — cwd flows through tmux's own
     //     working-directory flag, never a shell `cd`.
     const target = newTmuxSessionName
-      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd, env: claudexEnv ?? undefined })
+      ? await tmux.createTmuxSession({ name: newTmuxSessionName, cwd, env: claudexEnv ?? claudemiEnv ?? undefined })
       : rawTmuxSession
-        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name, env: claudexEnv ?? undefined })
-        : await tmux.createWindow({ cwd, name, env: claudexEnv ?? undefined });
+        ? await tmux.createWindowInSession({ sessionName: rawTmuxSession, cwd, name, env: claudexEnv ?? claudemiEnv ?? undefined })
+        : await tmux.createWindow({ cwd, name, env: claudexEnv ?? claudemiEnv ?? undefined });
 
     let launch;
     let codexRpcEndpoint = null;
@@ -1451,9 +1550,10 @@ async function handleSessionNew(req, res) {
       //     control chars/newlines) since the command is typed into an interactive
       //     shell so aliases like `yolo` resolve. sendText appends Enter → runs it.
       launch = `${config.launchCommand} --name ${tmux.shellQuoteName(name)}`;
-      // Claudex rides the SAME claude launch shape with its own model flag;
-      // the auth-worker base URL is already in the pane env via -e (never here).
-      const launchModel = agent === 'claudex' ? claudexModel : model;
+      // Claudex/claudemi ride the SAME claude launch shape with their own
+      // model flag; the auth-worker base URL (+ claudemi's extra guide env
+      // vars) is already in the pane env via -e (never here).
+      const launchModel = agent === 'claudex' ? claudexModel : agent === 'claudemi' ? claudemiModel : model;
       if (launchModel) launch += ` --model ${tmux.shellQuoteName(launchModel)}`;
       // Explicit, idempotent bypass flag — harmless if config.launchCommand
       // is a shell alias that already carries it. Appending it here (rather
@@ -1479,6 +1579,9 @@ async function handleSessionNew(req, res) {
       if (codexRpcEndpoint) await tmux.setPaneOption(target, '@cc_endpoint', codexRpcEndpoint);
     } else if (agent === 'claudex') {
       await tmux.setPaneOption(target, '@cc_agent', 'claudex');
+      await tmux.setPaneOption(target, '@cc_transport', 'tmux');
+    } else if (agent === 'claudemi') {
+      await tmux.setPaneOption(target, '@cc_agent', 'claudemi');
       await tmux.setPaneOption(target, '@cc_transport', 'tmux');
     }
 

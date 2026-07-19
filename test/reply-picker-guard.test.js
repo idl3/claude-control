@@ -127,3 +127,39 @@ test('allows when viaAnswer is true in a claudex pane even with a picker open', 
   });
   assert.equal(result, false);
 });
+
+// ---------------------------------------------------------------------------
+// Claudemi-TUI keystroke panes: claudex's sibling — same claude binary,
+// pointed at Kimi via the olam auth-worker's /kimi route. Same TUI, same
+// picker scrape, so it needs the identical send-time guard.
+// ---------------------------------------------------------------------------
+
+test('refuses when picker is open in a claudemi tmux pane', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: false,
+    kind: 'claudemi',
+    transport: 'tmux', // claudemi is ALWAYS tmux — never print
+    parsedPicker: PICKER,
+  });
+  assert.equal(result, true);
+});
+
+test('allows when claudemi pane has no picker open (parsedPicker is null)', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: false,
+    kind: 'claudemi',
+    transport: 'tmux',
+    parsedPicker: null,
+  });
+  assert.equal(result, false);
+});
+
+test('allows when viaAnswer is true in a claudemi pane even with a picker open', () => {
+  const result = shouldRefuseSendForPicker({
+    viaAnswer: true,
+    kind: 'claudemi',
+    transport: 'tmux',
+    parsedPicker: PICKER,
+  });
+  assert.equal(result, false);
+});

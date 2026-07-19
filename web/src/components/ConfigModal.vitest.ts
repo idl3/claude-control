@@ -60,6 +60,7 @@ const FIXTURE_MODELS: ModelsInfo = {
   claudeModels: [{ id: 'claude-sonnet', label: 'Sonnet' }],
   codexModels: [{ id: 'gpt-5.5', label: 'GPT-5.5' }],
   claudexModels: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (Codex)' }],
+  claudemiModels: [{ id: 'kimi-k3', label: 'Kimi K3' }],
   recommendedMlxModel: 'qwen-7b',
   recommendedClaudeModel: 'claude-sonnet',
 };
