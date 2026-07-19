@@ -2888,6 +2888,7 @@ function AppInner() {
                     onOpenAgent={openAgent}
                     viewingAgent={viewingAgent}
                     onCloseAgent={closeAgent}
+                    onOpenAgentTerminal={selectedSession ? () => setAgentTerminalOpen(true) : undefined}
                     working={agentWorking}
                     compacting={!!selectedSession?.compacting}
                     resuming={resuming?.sessionId === cockpit.selectedId}
