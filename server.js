@@ -28,6 +28,7 @@ import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
 import { SessionRegistry, listRecentTranscripts, isClaudeKind } from './lib/sessions.js';
 import { Collab } from './lib/collab.js';
 import { recordClientError } from './lib/client-errors.js';
+import { recordClientPerf, summarizeClientPerf } from './lib/client-perf.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
 import { writePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
@@ -394,6 +395,12 @@ const _handler = (req, res) => {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     return handleClientError(req, res);
+  }
+  if (u.pathname === '/api/client-perf') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    if (req.method === 'GET') return endJson(res, 200, summarizeClientPerf(Number(u.searchParams.get('limit')) || undefined));
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    return handleClientPerf(req, res);
   }
   if (u.pathname === '/api/skills') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -1576,6 +1583,17 @@ async function handleClientError(req, res) {
     const body = await readJsonBody(req);
     recordClientError(body, { userAgent: req.headers['user-agent'] });
     return endJson(res, 200, { ok: true });
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+}
+
+// Append browser/device performance samples to the local client-perf sink.
+async function handleClientPerf(req, res) {
+  try {
+    const body = await readJsonBody(req, 256 * 1024);
+    const rec = recordClientPerf(body, { userAgent: req.headers['user-agent'] });
+    return endJson(res, 200, { ok: true, samples: rec.samples.length });
   } catch (err) {
     return endJson(res, 400, { error: String(err?.message || err) });
   }

@@ -1,4 +1,5 @@
 export const PERF_DIAGNOSTICS_STORAGE_KEY = 'cc:perf-diagnostics';
+export const PERF_CLIENT_ID_STORAGE_KEY = 'cc:perf-client-id';
 
 export type PerfEventKind = 'ws-message' | 'app-render';
 
@@ -129,6 +130,22 @@ export function savePerfDiagnosticsEnabled(enabled: boolean): void {
     else window.localStorage.removeItem(PERF_DIAGNOSTICS_STORAGE_KEY);
   } catch {
     /* localStorage unavailable/full — diagnostics still work for this page load */
+  }
+}
+
+export function loadPerfClientId(): string {
+  if (typeof window === 'undefined') return 'server-render';
+  try {
+    const existing = window.localStorage.getItem(PERF_CLIENT_ID_STORAGE_KEY);
+    if (existing) return existing;
+    const next =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(PERF_CLIENT_ID_STORAGE_KEY, next);
+    return next;
+  } catch {
+    return `client-${Date.now().toString(36)}`;
   }
 }
 

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  postClientPerfBatch,
+} from '../lib/api';
+import {
   buildPerfReport,
   buildPerfSample,
   classifyPerfSample,
   createEmptyCounters,
   createEmptyFrameWindow,
   getPerfDeviceInfo,
+  loadPerfClientId,
   recordFrameGap,
   sampleMemory,
   setPerfEventRecording,
@@ -17,7 +21,9 @@ import {
 } from '../lib/perfDiagnostics';
 
 const SAMPLE_MS = 1000;
+const POST_MS = 10_000;
 const HISTORY_LIMIT = 120;
+const PENDING_POST_LIMIT = 30;
 
 interface PerfDiagnosticsProps {
   enabled: boolean;
@@ -28,11 +34,15 @@ interface PerfSnapshot {
   device: PerfDeviceInfo;
   latest: PerfSample | null;
   copied: 'idle' | 'ok' | 'error';
+  localLog: 'idle' | 'ok' | 'error';
 }
 
 export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
   const device = useMemo(() => (enabled ? getPerfDeviceInfo() : null), [enabled]);
+  const clientId = useMemo(() => loadPerfClientId(), []);
+  const pageIdRef = useRef<string>(newPageId());
   const historyRef = useRef<PerfSample[]>([]);
+  const pendingPostRef = useRef<PerfSample[]>([]);
   const frameRef = useRef<FrameWindow>(createEmptyFrameWindow());
   const countersRef = useRef<PerfCounters>(createEmptyCounters());
   const [snapshot, setSnapshot] = useState<PerfSnapshot | null>(null);
@@ -48,7 +58,10 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
     let lastFrameTs = 0;
     let lastSampleTs = performance.now();
     let expectedTick = lastSampleTs + SAMPLE_MS;
+    let lastPostTs = lastSampleTs;
     let maxLoopLagMs = 0;
+    let posting = false;
+    let alive = true;
     const observers: PerformanceObserver[] = [];
 
     const handlePerfEvent = (event: Event) => {
@@ -120,11 +133,17 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
         visibility: document.visibilityState,
       });
       historyRef.current = [...historyRef.current.slice(-(HISTORY_LIMIT - 1)), latest];
+      pendingPostRef.current = [...pendingPostRef.current, latest].slice(-PENDING_POST_LIMIT);
       setSnapshot((prev) => ({
         device,
         latest,
         copied: prev?.copied === 'ok' ? 'ok' : 'idle',
+        localLog: prev?.localLog ?? 'idle',
       }));
+      if (now - lastPostTs >= POST_MS) {
+        lastPostTs = now;
+        flushLocalLog();
+      }
       frameRef.current = createEmptyFrameWindow();
       countersRef.current = createEmptyCounters();
       lastSampleTs = now;
@@ -132,22 +151,51 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
       maxLoopLagMs = 0;
     };
 
+    const flushLocalLog = () => {
+      if (posting || pendingPostRef.current.length === 0) return;
+      const samples = pendingPostRef.current;
+      pendingPostRef.current = [];
+      posting = true;
+      void postClientPerfBatch({
+        clientId,
+        pageId: pageIdRef.current,
+        device,
+        samples,
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+      })
+        .then((ok) => {
+          if (!alive) return;
+          setSnapshot((prev) => (prev ? { ...prev, localLog: ok ? 'ok' : 'error' } : prev));
+        })
+        .catch(() => {
+          if (!alive) return;
+          setSnapshot((prev) => (prev ? { ...prev, localLog: 'error' } : prev));
+        })
+        .finally(() => {
+          posting = false;
+        });
+    };
+
     setPerfEventRecording(true);
     window.addEventListener('cockpit:perf-event', handlePerfEvent);
     rafId = window.requestAnimationFrame(onFrame);
     const intervalId = window.setInterval(sample, SAMPLE_MS);
-    setSnapshot({ device, latest: null, copied: 'idle' });
+    setSnapshot({ device, latest: null, copied: 'idle', localLog: 'idle' });
 
     return () => {
+      flushLocalLog();
+      alive = false;
       setPerfEventRecording(false);
       window.removeEventListener('cockpit:perf-event', handlePerfEvent);
       window.cancelAnimationFrame(rafId);
       window.clearInterval(intervalId);
       for (const observer of observers) observer.disconnect();
+      pendingPostRef.current = [];
       frameRef.current = createEmptyFrameWindow();
       countersRef.current = createEmptyCounters();
     };
-  }, [enabled, device]);
+  }, [enabled, device, clientId]);
 
   const copyReport = useCallback(async () => {
     if (!snapshot) return;
@@ -206,6 +254,7 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
             <Metric label="WS" value={`${latest.wsMessagesPerSec.toFixed(1)}/s · ${latest.wsKbPerSec.toFixed(1)}KB/s`} />
             <Metric label="Renders" value={`${latest.appRendersPerSec.toFixed(1)}/s`} tone={latest.appRendersPerSec > 20 ? 'warn' : 'ok'} />
             <Metric label="Heap" value={latest.memory ? `${latest.memory.usedMb.toFixed(1)}MB` : 'n/a'} />
+            <Metric label="Local log" value={snapshot.localLog === 'ok' ? 'ok' : snapshot.localLog === 'error' ? 'failed' : 'pending'} tone={snapshot.localLog === 'error' ? 'warn' : 'neutral'} />
             <Metric label="DPR" value={`${snapshot.device.dpr} · ${snapshot.device.viewport.width}×${snapshot.device.viewport.height}`} />
           </div>
           <p className="perf-diagnostics-note">
@@ -235,6 +284,12 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
       )}
     </aside>
   );
+}
+
+function newPageId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function Metric({
