@@ -54,6 +54,13 @@ export interface CockpitStore {
    * session id then `runId`. Server-parsed in lib/workflows.js.
    */
   workflowsById: Record<string, Workflow[]>;
+  /**
+   * On-demand workflow-agent transcripts, keyed `${runId}::${agentId}`. Loaded
+   * via requestWorkflowAgent when the Agent View opens "full transcript"; fed to
+   * the reused SubAgentThread viewer (B3). `loaded` distinguishes "still
+   * fetching" from "genuinely empty".
+   */
+  workflowAgentById: Record<string, { messages: Msg[]; loaded: boolean }>;
   conn: ConnState;
   resources: ResourceState;
   /** Rolling ~10min CPU%/Mem% history for the process-monitor chart. */
@@ -94,6 +101,8 @@ export interface CockpitStore {
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: AnswerSelection[]) => boolean;
   requestSubagent: (agentId: string) => boolean;
+  /** Load a workflow agent's full transcript (B3 Agent View overlay). */
+  requestWorkflowAgent: (runId: string, agentId: string) => boolean;
   requestCapture: (lines?: number, escapes?: boolean) => boolean;
   clearCapture: () => void;
   /** Interactive terminal panes: relay a literal char / control key to the selected pane. */
@@ -146,6 +155,10 @@ export function useCockpit(): CockpitStore {
     Record<string, Record<string, SubAgent>>
   >({});
   const [rawEventsById, setRawEventsById] = useState<Record<string, RawEvent[]>>({});
+  // Workflow-agent transcripts loaded on demand (B3), keyed `${runId}::${agentId}`.
+  const [workflowAgentById, setWorkflowAgentById] = useState<
+    Record<string, { messages: Msg[]; loaded: boolean }>
+  >({});
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
   // Pane-scrape picker signal: open:true means a TUI picker is on screen right now.
   const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
@@ -281,6 +294,14 @@ export function useCockpit(): CockpitStore {
             [msg.id]: { ...(prev[msg.id] ?? {}), [msg.subagent.agentId]: msg.subagent },
           }));
           break;
+        case 'workflow-agent':
+          // On-demand workflow-agent transcript (B3). Keyed by run+agent so it
+          // survives session polls; the Agent View overlay reads it by that key.
+          setWorkflowAgentById((prev) => ({
+            ...prev,
+            [`${msg.runId}::${msg.agentId}`]: { messages: msg.messages ?? [], loaded: true },
+          }));
+          break;
         case 'raw-events':
           setRawEventsById((prev) => ({
             ...prev,
@@ -380,6 +401,15 @@ export function useCockpit(): CockpitStore {
       const id = selectedRef.current;
       if (!id || !agentId) return false;
       return socket.send({ type: 'subagent-load', id, agentId });
+    },
+    [socket],
+  );
+
+  const requestWorkflowAgent = useCallback(
+    (runId: string, agentId: string): boolean => {
+      const id = selectedRef.current;
+      if (!id || !runId || !agentId) return false;
+      return socket.send({ type: 'workflow-agent-load', id, runId, agentId });
     },
     [socket],
   );
@@ -543,6 +573,7 @@ export function useCockpit(): CockpitStore {
     subagents,
     runningSubagentCountById,
     workflowsById,
+    workflowAgentById,
     conn,
     resources,
     resourceHistory,
@@ -558,6 +589,7 @@ export function useCockpit(): CockpitStore {
     sendPromptSelect,
     sendAnswer,
     requestSubagent,
+    requestWorkflowAgent,
     requestCapture,
     clearCapture,
     sendPaneText,
