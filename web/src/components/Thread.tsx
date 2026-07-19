@@ -5,11 +5,12 @@ import { PendingAskCard } from './MessageParts';
 import { Composer, type ComposerHandle } from './Composer';
 import { SubAgentStrip } from './SubAgentStrip';
 import { SubAgentThread } from './SubAgentThread';
+import { WorkflowLiveDock } from './WorkflowLiveDock';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ArrowDownIcon } from './icons';
 import { WelcomeHero } from './WelcomeHero';
 import type { SubAgentMode } from '../lib/subAgent';
-import type { AnswerSelection, Pending, SubAgent } from '../lib/types';
+import type { AnswerSelection, Pending, SubAgent, Workflow } from '../lib/types';
 import type { ActivePrompt } from './AskInline';
 
 interface ThreadProps {
@@ -36,6 +37,12 @@ interface ThreadProps {
   onTerminalModeChange: (active: boolean) => void;
   /** Sub-agents for the active session — drives the above-composer strip. */
   subagents: SubAgent[];
+  /** The selected session's workflow runs — drives the live dock (Phase C).
+   *  The dock mounts beside SubAgentStrip so it shares the above-composer
+   *  surface + the mobile keyboard pinning. */
+  workflows?: Workflow[];
+  /** Dock tap → scroll to / reveal the inline WorkflowCard for this run. */
+  onOpenWorkflowCard?: (runId: string) => void;
   /** Open a specific running agent's transcript (pill click → inline view). */
   onOpenAgent: (agentId: string) => void;
   /** The sub-agent whose transcript is shown inline (null = show session). */
@@ -169,6 +176,8 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   onSubAgentModeChange,
   onTerminalModeChange,
   subagents,
+  workflows,
+  onOpenWorkflowCard,
   onOpenAgent,
   viewingAgent = null,
   onCloseAgent,
@@ -300,6 +309,12 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
         </>
       )}
 
+      {/* Live workflow dock — above the strip so a running fan-out's progress
+          is watchable without scrolling; shares this container's keyboard
+          pinning. Renders null when no workflow is running. */}
+      {workflows && workflows.length > 0 && onOpenWorkflowCard ? (
+        <WorkflowLiveDock workflows={workflows} onOpenCard={onOpenWorkflowCard} />
+      ) : null}
       {/* Pills + composer always visible so user can switch agents or type */}
       <SubAgentStrip
         subagents={subagents}

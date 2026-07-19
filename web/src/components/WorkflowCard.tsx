@@ -317,7 +317,12 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
   const agentCount = workflow.agentCount || workflow.total;
 
   return (
-    <section className="wf-card" data-status={status} aria-label={`Workflow ${name}, ${CHIP_TEXT[status]}`}>
+    <section
+      id={`wf-card-${workflow.runId}`}
+      className="wf-card"
+      data-status={status}
+      aria-label={`Workflow ${name}, ${CHIP_TEXT[status]}`}
+    >
       <header className="wf-header">
         <div className="wf-header-main">
           <span className="wf-glyph" aria-hidden="true">

@@ -552,6 +552,44 @@ function paneMetaFields(
   return orderMetaFields(fields, tokens);
 }
 
+/**
+ * Rail workflow indicator (Phase C2): `⚙ N/M` while a session's workflow runs
+ * (amber, mirrors the sub-agent "cloning" plumbing but as its OWN inline badge
+ * so both can coexist), fading out shortly after the run finishes. State is
+ * glyph + counts (shape + text), never hue alone.
+ */
+const WF_GLYPH_LINGER_MS = 6000;
+
+function WorkflowRailGlyph({ s }: { s: Session }) {
+  const active = !!s.workflowActive;
+  const sum = s.workflowSummary;
+  const [linger, setLinger] = useState(false);
+  const prevActive = useRef(active);
+  useEffect(() => {
+    const was = prevActive.current;
+    prevActive.current = active;
+    if (was && !active) {
+      setLinger(true);
+      const t = setTimeout(() => setLinger(false), WF_GLYPH_LINGER_MS);
+      return () => clearTimeout(t);
+    }
+    if (active) setLinger(false);
+  }, [active]);
+
+  if (!sum || (!active && !linger)) return null;
+  const status = active ? 'running' : sum.status === 'completed' ? 'done' : 'failed';
+  return (
+    <span
+      className="wf-rail-glyph"
+      data-status={status}
+      title={sum.name ? `workflow ${sum.name} — ${status}` : `workflow ${status}`}
+      aria-label={`workflow ${sum.done} of ${sum.total} agents, ${status}`}
+    >
+      <span aria-hidden="true">⚙</span> {sum.done}/{sum.total}
+    </span>
+  );
+}
+
 function PaneRow({
   s,
   selected,
@@ -765,6 +803,7 @@ function PaneRow({
             ASK
           </span>
         ) : null}
+        {!isTerminal ? <WorkflowRailGlyph s={s} /> : null}
         {/* Single right-hand meta slot, same real estate for every row kind —
             cycles model ⟷ context (⟷ Codex usage) every 10s (see metaTick /
             paneMetaFields), or shows the tmux pane name while ⌘ is held
