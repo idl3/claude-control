@@ -579,6 +579,28 @@ html.pwa-fill .app {
    drag region (shellDragStart in ResourceHud.tsx). The brand (robot + name)
    is hidden in-shell: the app IS claude control — dock icon + window carry
    the identity, the bar keeps just the live metrics. */
+/* Shell HUD density: the bar tightens (43→36px) and its action buttons go
+   borderless + smaller (26px box, 12px glyphs) so the row reads as window
+   chrome, not web toolbar. trafficLightPosition in the shell's
+   tauri.conf.json tracks the 36px height — change one, change both. */
+html[data-native-shell='true'] {
+  --hud-h: 36px;
+}
+html[data-native-shell='true'] .notify-bell {
+  width: 26px;
+  height: 26px;
+  border: 0;
+}
+html[data-native-shell='true'] .notify-bell:hover:not(:disabled) {
+  background: oklch(100% 0 0 / 0.07);
+}
+html[data-native-shell='true'] .notify-bell svg {
+  width: 12px;
+  height: 12px;
+}
+html[data-native-shell='true'] .hud-reload-glyph {
+  font-size: 12px;
+}
 html[data-native-shell='true'] .hud-brand {
   display: none;
 }
