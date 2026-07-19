@@ -572,6 +572,13 @@ html.pwa-fill .app {
   color: var(--text-dim);
   white-space: nowrap;
   overflow-x: auto;
+}
+/* Desktop shell (Tauri WKWebView, titleBarStyle: Overlay): the macOS traffic
+   lights float over the top-left of this row (trafficLightPosition centers
+   them in the HUD's 43px height) — clear them. The HUD is also the window
+   drag region (data-tauri-drag-region, set in ResourceHud.tsx). */
+html[data-native-shell='true'] .hud {
+  padding-left: 86px;
   overscroll-behavior: contain;
   flex: 0 0 auto;
   box-sizing: content-box;
