@@ -29,10 +29,12 @@ export interface Session {
   /** 'claude' = a Claude Code pane (transcript Thread); 'claudex' = the claude
    *  binary pointed at the olam auth-worker (renders/behaves like 'claude' —
    *  it's a rail-FILTER-bucket distinction, codex-flavored per design
-   *  decision 7, not a pane-treatment one); 'codex' = an OpenAI Codex pane;
-   *  'terminal' = a plain shell pane (live terminal); 'remote' = an olam
-   *  remote sandbox session. */
-  kind?: 'claude' | 'claudex' | 'codex' | 'terminal' | 'remote';
+   *  decision 7, not a pane-treatment one); 'claudemi' = the same claude
+   *  binary pointed at the olam auth-worker's Kimi provider (identical
+   *  rail-FILTER-bucket / pane-treatment story as 'claudex'); 'codex' = an
+   *  OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal);
+   *  'remote' = an olam remote sandbox session. */
+  kind?: 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'remote';
   /** Per-session control transport. */
   transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
   // --- remote (olam) rows only — additive; absent on local sessions ---------

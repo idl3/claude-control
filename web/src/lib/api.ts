@@ -392,6 +392,11 @@ export interface ModelsInfo {
    *  reads it as `info.claudexModels ?? []`) — the server has always sent it,
    *  but the type shouldn't claim a guarantee the code doesn't rely on. */
   claudexModels?: ClaudeModelInfo[];
+  /** Claudemi model catalog (id/label) — the claude CLI pointed at the olam
+   *  auth-worker's Kimi provider-selector segment (CLAUDEMI_MODELS in
+   *  lib/models.js). Optional for the same runtime-defense reason as
+   *  claudexModels above. */
+  claudemiModels?: ClaudeModelInfo[];
   recommendedMlxModel: string;
   recommendedClaudeModel: string;
 }
@@ -472,8 +477,8 @@ export interface CreateSessionResult {
   target: string;
   /** Resolved name (server-generated default when the request name was blank). */
   name: string;
-  /** Agent type used to spawn the session ('claude' | 'codex' | 'claudex'). */
-  agent?: 'claude' | 'codex' | 'claudex';
+  /** Agent type used to spawn the session ('claude' | 'codex' | 'claudex' | 'claudemi'). */
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
   /** Transport used for the spawned pane. */
   transport?: 'tmux' | 'rpc' | 'print';
 }
@@ -494,7 +499,7 @@ export async function createSession(opts?: {
   cwd?: string;
   name?: string;
   /** Agent type to spawn. Defaults to 'claude' on the server when absent. */
-  agent?: 'claude' | 'codex' | 'claudex';
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
   /** Claude-only transport. Defaults to the server's configured transport. */
   claudeTransport?: 'tmux' | 'print';
   /** Codex-only transport. Defaults to the server's configured transport. */
@@ -509,6 +514,10 @@ export async function createSession(opts?: {
    *  (e.g. 'gpt-5.6-sol'). Omitted/'default' → the server's configured
    *  claudexModel default. */
   claudexModel?: string;
+  /** Claudemi-only model override — a full model id from ClaudeModelInfo.id
+   *  (e.g. 'kimi-k3'). Omitted/'default' → the server's configured
+   *  claudemiModel default. */
+  claudemiModel?: string;
   /** Initial prompt, submitted atomically with session creation. */
   prompt?: string;
   /**
@@ -538,10 +547,11 @@ export async function createSession(opts?: {
 }
 
 /** One agent entry from /api/spawn-agents. The server may not report a
- *  dedicated 'claudex' entry (claudex spawns the claude binary, so claude's
- *  availability governs it) — consumers fall back to the claude entry. */
+ *  dedicated 'claudex'/'claudemi' entry (both spawn the claude binary, so
+ *  claude's availability governs them) — consumers fall back to the claude
+ *  entry. */
 export interface SpawnAgentInfo {
-  id: 'claude' | 'codex' | 'claudex';
+  id: 'claude' | 'codex' | 'claudex' | 'claudemi';
   available: boolean;
   /** Present when available is false. */
   reason?: string;
