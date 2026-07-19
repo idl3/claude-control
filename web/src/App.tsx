@@ -71,7 +71,7 @@ import {
   GalleryIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { AnswerSelection, Pending, ServerMessage } from './lib/types';
+import type { AnswerSelection, Pending, ServerMessage, Workflow } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
 import {
   echoMatches,
@@ -987,6 +987,32 @@ function AppInner() {
     const byRunId = new Map(runs.map((w) => [w.runId, w]));
     return { byRunId, openAgent: openWorkflowAgent };
   }, [cockpit.selectedId, cockpit.workflowsById, openWorkflowAgent]);
+
+  // The same slice for the live dock (Phase C), but IDENTITY-STABLE: a fresh
+  // sessions array lands every poll, so handing `workflowsById[...]` straight
+  // to the memoized Thread would re-render it (and the whole transcript
+  // subtree) once a second forever after any workflow ran. Reuse the previous
+  // array while the serialized content is unchanged. undefined when no runs.
+  const wfSliceRef = useRef<{ json: string; runs: Workflow[] } | null>(null);
+  const selectedWorkflows = useMemo<Workflow[] | undefined>(() => {
+    const runs = cockpit.selectedId ? cockpit.workflowsById[cockpit.selectedId] : undefined;
+    if (!runs || runs.length === 0) {
+      wfSliceRef.current = null;
+      return undefined;
+    }
+    const json = JSON.stringify(runs);
+    if (wfSliceRef.current?.json === json) return wfSliceRef.current.runs;
+    wfSliceRef.current = { json, runs };
+    return runs;
+  }, [cockpit.selectedId, cockpit.workflowsById]);
+
+  // Dock tap → bring the inline card into view. The card mounts ungrouped at
+  // its tool block (see Messages.tsx INTERACTIVE_TOOLS), carrying this DOM id.
+  const openWorkflowCard = useCallback((runId: string) => {
+    document
+      .getElementById(`wf-card-${runId}`)
+      ?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+  }, []);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -2846,6 +2872,8 @@ function AppInner() {
                     onSubAgentModeChange={onActiveSubAgentModeChange}
                     onTerminalModeChange={onTerminalModeChange}
                     subagents={cockpit.subagents}
+                    workflows={selectedWorkflows}
+                    onOpenWorkflowCard={openWorkflowCard}
                     onOpenAgent={openAgent}
                     viewingAgent={viewingAgent}
                     onCloseAgent={closeAgent}
