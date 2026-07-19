@@ -23,6 +23,7 @@ import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import { TranscriptTailer } from './lib/transcript.js';
 import { MediaAppWatcher } from './lib/media-watch.js';
 import { SubAgentsWatcher, CodexSubAgentsWatcher, listAgents } from './lib/subagents.js';
+import { loadWorkflowAgentMessages } from './lib/workflows.js';
 import { parsePanePrompt, isSystemPrompt, detectPanePicker } from './lib/prompt.js';
 import { buildSnapshotPromptFrames } from './lib/snapshot-replay.js';
 import { SessionRegistry, listRecentTranscripts, isClaudeKind } from './lib/sessions.js';
@@ -2632,6 +2633,32 @@ async function handleClientMessage(ws, msg) {
       }
       if (!entry) throw new Error('unknown sub-agent');
       return send(ws, { type: 'subagent', id: msg.id, subagent: entry });
+    }
+    case 'workflow-agent-load': {
+      // B3 Agent View: load one workflow agent's transcript on demand from
+      // <session>/subagents/workflows/<runId>/agent-<agentId>.jsonl (a dir the
+      // SubAgentsWatcher does not scan). Same subscription/scope gate as
+      // subagent-load; path derives from the trusted session.transcriptPath (T1).
+      const sub = subscriptions.get(msg.id);
+      if (!sub || !sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
+      const session = sessionById(msg.id);
+      const messages = await loadWorkflowAgentMessages({
+        transcriptPath: session?.transcriptPath ?? null,
+        runId: String(msg.runId ?? ''),
+        agentId: String(msg.agentId ?? ''),
+      });
+      if (!sub.clients.has(ws) || !ws._subs.has(msg.id)) {
+        throw new Error('session is not subscribed');
+      }
+      return send(ws, {
+        type: 'workflow-agent',
+        id: msg.id,
+        runId: String(msg.runId ?? ''),
+        agentId: String(msg.agentId ?? ''),
+        messages,
+      });
     }
     case 'reply': {
       const session = sessionById(msg.id);

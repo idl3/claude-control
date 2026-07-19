@@ -29,6 +29,7 @@ import type { ComposerHandle } from './components/Composer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LiveThinkingContext } from './components/ThinkingContext';
 import { AgentKindContext } from './components/AgentContext';
+import { WorkflowContext, type WorkflowContextValue } from './components/WorkflowContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { UrlActionProvider } from './components/UrlActionContext';
 import { ArtifactPanel } from './components/ArtifactPanel';
@@ -47,6 +48,7 @@ import { NewSessionDraft } from './components/NewSessionDraft';
 import { TokenGate } from './components/TokenGate';
 import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
+import { WorkflowAgentView } from './components/WorkflowAgentView';
 import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
@@ -954,6 +956,7 @@ function AppInner() {
   useEffect(() => {
     setPanelOpen(false);
     setViewingAgentId(null);
+    setViewingWorkflowAgent(null);
     setRawOpen(false);
   }, [cockpit.selectedId]);
   // Pill click → show inline transcript; does NOT open the side panel.
@@ -962,6 +965,28 @@ function AppInner() {
     setViewingAgentId((prev) => (prev === agentId ? null : agentId));
   }, [cockpit.requestSubagent]);
   const closeAgent = useCallback(() => setViewingAgentId(null), []);
+
+  // B3 Agent View: which workflow agent's full-transcript overlay is open.
+  const [viewingWorkflowAgent, setViewingWorkflowAgent] = useState<
+    { runId: string; agentId: string; label: string } | null
+  >(null);
+  const openWorkflowAgent = useCallback(
+    (runId: string, agentId: string, label: string) => {
+      cockpit.requestWorkflowAgent(runId, agentId);
+      setViewingWorkflowAgent({ runId, agentId, label });
+    },
+    [cockpit.requestWorkflowAgent],
+  );
+  const closeWorkflowAgent = useCallback(() => setViewingWorkflowAgent(null), []);
+
+  // Live workflow slice for the selected session, keyed by runId — consumed by
+  // the inline WorkflowCard (MessageParts' WorkflowPart) to bind to the polled
+  // run, not the frozen tool_result. `openAgent` opens the transcript overlay.
+  const workflowCtx = useMemo<WorkflowContextValue>(() => {
+    const runs = cockpit.selectedId ? cockpit.workflowsById[cockpit.selectedId] ?? [] : [];
+    const byRunId = new Map(runs.map((w) => [w.runId, w]));
+    return { byRunId, openAgent: openWorkflowAgent };
+  }, [cockpit.selectedId, cockpit.workflowsById, openWorkflowAgent]);
 
   // Inline session rename: null when not editing, else the draft name. Opening
   // prefills the current name; saving POSTs to /api/session/rename (renames the
@@ -2801,6 +2826,7 @@ function AppInner() {
                 ) : null}
                 <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
+                <WorkflowContext.Provider value={workflowCtx}>
                   {/* Catch a render crash in the transcript so one bad message
                       can't white-screen the whole app; resets on session switch. */}
                   <ErrorBoundary
@@ -2838,6 +2864,7 @@ function AppInner() {
                     onReply={onInlineReply}
                   />
                   </ErrorBoundary>
+                </WorkflowContext.Provider>
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
                 <ErrorBoundary label="Artifact panel failed to render">
@@ -2879,6 +2906,25 @@ function AppInner() {
             focusAgentId={panelAgentId}
           />
         </ErrorBoundary>
+
+        {viewingWorkflowAgent ? (
+          <ErrorBoundary label="Workflow agent transcript failed to render">
+            <WorkflowAgentView
+              label={viewingWorkflowAgent.label}
+              messages={
+                cockpit.workflowAgentById[
+                  `${viewingWorkflowAgent.runId}::${viewingWorkflowAgent.agentId}`
+                ]?.messages ?? []
+              }
+              loading={
+                !cockpit.workflowAgentById[
+                  `${viewingWorkflowAgent.runId}::${viewingWorkflowAgent.agentId}`
+                ]?.loaded
+              }
+              onClose={closeWorkflowAgent}
+            />
+          </ErrorBoundary>
+        ) : null}
 
         {processOpen ? (
           <ErrorBoundary label="Process monitor failed to render">
