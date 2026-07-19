@@ -42,6 +42,7 @@ export type PtyConnState = 'connecting' | 'connected' | 'reconnecting' | 'auth-e
 
 type DataHandler = (bytes: Uint8Array) => void;
 type StateHandler = (state: PtyConnState) => void;
+type PaneSizeHandler = (cols: number, rows: number) => void;
 
 const textEncoder = new TextEncoder();
 
@@ -78,6 +79,7 @@ export class PtyClient {
 
   private dataHandlers = new Set<DataHandler>();
   private stateHandlers = new Set<StateHandler>();
+  private paneSizeHandlers = new Set<PaneSizeHandler>();
 
   // FIFO byte queue (array of 0-255 values — simplest correct impl at this
   // volume; a typed ring buffer would be premature optimization here).
@@ -125,6 +127,9 @@ export class PtyClient {
         this.emitState('connected');
         this.flushQueue();
         this.flushPendingSize();
+      }
+      if (msg.type === 'pane-size') {
+        for (const h of this.paneSizeHandlers) h(msg.paneCols, msg.paneRows);
       }
       // 'error' frames (dead-target/unauthorized) always precede a close with
       // the matching code (lib/pty-bridge.js's killEntryClientsWithError /
@@ -233,6 +238,12 @@ export class PtyClient {
   onState(h: StateHandler): () => void {
     this.stateHandlers.add(h);
     return () => this.stateHandlers.delete(h);
+  }
+
+  /** agent-kind sessions only — fires with the real tmux pane's geometry on attach and on live resize. */
+  onPaneSize(h: PaneSizeHandler): () => void {
+    this.paneSizeHandlers.add(h);
+    return () => this.paneSizeHandlers.delete(h);
   }
 
   private emitState(state: PtyConnState): void {

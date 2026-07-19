@@ -686,6 +686,10 @@ function agentDeps(overrides = {}) {
     capturePane: async () => '',
     cursorPosition: async () => ({ x: 0, y: 0 }),
     createReadStream: () => new FakeFifoStream(),
+    // Real, non-zero default so the attach-handler's `paneCols > 0` guard
+    // (lib/pty-bridge.js) fires and every agent-kind test exercises the
+    // `pane-size` frame path unless it explicitly overrides this.
+    paneSize: async () => ({ cols: 80, rows: 24 }),
     ...overrides,
   });
 }
@@ -760,6 +764,97 @@ test('agent-kind attach seeds EACH newly-attached client with a capture-pane + c
 
   assert.equal(binaryFrames(wsB).length, 1, 'the second attacher gets its own seed frame');
   assert.equal(binaryFrames(wsA).length, 1, 'the first attacher does not get a duplicate seed from the second attach');
+});
+
+test('agent-kind attach sends a pane-size frame (real tmux geometry) between "attached" and the capture-pane seed — the client must resize its own grid before the seed paints into it', async () => {
+  const bridge = createPtyBridge(agentDeps({
+    paneSize: async () => ({ cols: 80, rows: 24 }),
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  const frames = jsonFrames(ws);
+  assert.deepEqual(frames, [
+    { type: 'attached', sessionId: 'main:0' },
+    { type: 'pane-size', paneCols: 80, paneRows: 24 },
+  ], 'pane-size must arrive after attached and before the binary seed frame is sent');
+  assert.equal(binaryFrames(ws).length, 1, 'the seed frame still arrives, after both control frames');
+});
+
+test('agent-kind attach: a paneSize query failure means no pane-size frame is sent, but attach still succeeds normally', async () => {
+  const bridge = createPtyBridge(agentDeps({
+    paneSize: async () => { throw new Error('boom'); },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  assert.deepEqual(jsonFrames(ws), [{ type: 'attached', sessionId: 'main:0' }], 'no pane-size frame when the geometry query failed');
+  assert.equal(binaryFrames(ws).length, 1, 'the seed frame is unaffected by the pane-size query failure');
+  assert.equal(bridge.liveCount(), 1);
+});
+
+test('agent-kind: a live pane resize broadcasts a fresh pane-size frame to every attached client, but only when the geometry actually changed', async () => {
+  let current = { cols: 80, rows: 24 };
+  let pollFn = null;
+  const bridge = createPtyBridge(agentDeps({
+    paneSize: async () => current,
+    // Capture the poll callback instead of firing it immediately (unlike the
+    // scheduleIdleReap `(fn) => { fn(); return null; }` pattern used
+    // elsewhere) — this test needs to control exactly when a "poll tick"
+    // happens, after mutating `current`, to prove the broadcast is
+    // change-gated rather than unconditional.
+    schedulePaneSizePoll: (fn) => { pollFn = fn; return 'timer'; },
+    clearPaneSizePoll: () => {},
+  }));
+
+  const wsA = new FakeWs();
+  const wsB = new FakeWs();
+  bridge.handleConnection(wsA, fakeReq());
+  bridge.handleConnection(wsB, fakeReq());
+  attach(wsA, 'main:0');
+  attach(wsB, 'main:0');
+  await tick();
+  assert.ok(typeof pollFn === 'function', 'setupAgentEntry scheduled a poll callback');
+
+  // Poll tick with no change: no broadcast.
+  await pollFn();
+  await tick();
+  assert.equal(jsonFrames(wsA).filter((f) => f.type === 'pane-size').length, 1, 'unchanged geometry does not re-broadcast');
+
+  // The pane's real owner resizes their terminal.
+  current = { cols: 120, rows: 40 };
+  await pollFn();
+  await tick();
+
+  const paneSizeFramesA = jsonFrames(wsA).filter((f) => f.type === 'pane-size');
+  const paneSizeFramesB = jsonFrames(wsB).filter((f) => f.type === 'pane-size');
+  assert.deepEqual(paneSizeFramesA.at(-1), { type: 'pane-size', paneCols: 120, paneRows: 40 });
+  assert.deepEqual(paneSizeFramesB.at(-1), { type: 'pane-size', paneCols: 120, paneRows: 40 }, 'every attached client gets the broadcast, not just the one that triggered the resize');
+});
+
+test('agent-kind teardown (last client detaches) clears the pane-size poll timer', async () => {
+  let cleared = null;
+  const bridge = createPtyBridge(agentDeps({
+    schedulePaneSizePoll: () => 'the-timer-handle',
+    clearPaneSizePoll: (t) => { cleared = t; },
+    scheduleIdleReap: (fn) => { fn(); return null; },
+    clearIdleReap: () => {},
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+  ws.emit('close');
+  await tick();
+
+  assert.equal(cleared, 'the-timer-handle', 'the poll timer is cleared on teardown, not left running against a dead entry');
 });
 
 test('agent-kind input: a binary keystroke frame is sent via send-keys -l (sendLiteral) to the live tmux pane, never pty.write (there is no pty)', async () => {
