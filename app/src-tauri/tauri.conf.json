@@ -7,13 +7,18 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Claude Control",
         "width": 1280,
         "height": 860,
         "minWidth": 480,
-        "minHeight": 480
+        "minHeight": 480,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 15 },
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) ClaudeControlShell/0.0.1"
       }
     ],
     "security": {
