@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { transcribeAudio } from '../lib/api';
+import { recordPerfEvent } from '../lib/perfDiagnostics';
 
 function getAudioCtx(): typeof AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -87,6 +88,17 @@ export function useVoiceRecorder({ onCommit, onClose, active }: UseVoiceRecorder
   const committedRef = useRef(false);
   const mountedRef = useRef(true);
   const transcribeAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    document.body.classList.toggle('cc-voice-active', active);
+    recordPerfEvent('voice-state', active ? 1 : 0);
+    return () => {
+      if (active) {
+        document.body.classList.remove('cc-voice-active');
+        recordPerfEvent('voice-state', 0);
+      }
+    };
+  }, [active]);
 
   const stopDraw = useCallback(() => {
     drawingRef.current = false;

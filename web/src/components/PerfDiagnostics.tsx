@@ -12,6 +12,7 @@ import {
   loadPerfClientId,
   recordFrameGap,
   sampleMemory,
+  sampleSurfaces,
   setPerfEventRecording,
   type FrameWindow,
   type PerfCounters,
@@ -130,6 +131,7 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
         counters: countersRef.current,
         loopLagMs: maxLoopLagMs,
         memory: sampleMemory(),
+        surfaces: sampleSurfaces(),
         visibility: document.visibilityState,
       });
       historyRef.current = [...historyRef.current.slice(-(HISTORY_LIMIT - 1)), latest];
@@ -254,6 +256,8 @@ export function PerfDiagnostics({ enabled, onClose }: PerfDiagnosticsProps) {
             <Metric label="WS" value={`${latest.wsMessagesPerSec.toFixed(1)}/s · ${latest.wsKbPerSec.toFixed(1)}KB/s`} />
             <Metric label="Renders" value={`${latest.appRendersPerSec.toFixed(1)}/s`} tone={latest.appRendersPerSec > 20 ? 'warn' : 'ok'} />
             <Metric label="Heap" value={latest.memory ? `${latest.memory.usedMb.toFixed(1)}MB` : 'n/a'} />
+            <Metric label="Media" value={`v${latest.surfaces.playingVideos}/${latest.surfaces.videos} · a${latest.surfaces.playingAudio}/${latest.surfaces.audios} · mic ${latest.surfaces.voiceActive ? 'on' : 'off'}`} tone={latest.surfaces.playingVideos || latest.surfaces.playingAudio || latest.surfaces.voiceActive ? 'warn' : 'neutral'} />
+            <Metric label="GPU-ish" value={`ifr ${latest.surfaces.visibleIframes}/${latest.surfaces.iframes} · canv ${latest.surfaces.visibleCanvases}/${latest.surfaces.canvases} · anim ${latest.surfaces.runningAnimations}`} tone={latest.surfaces.visibleIframes || latest.surfaces.visibleCanvases > 1 || latest.surfaces.runningAnimations > 12 ? 'warn' : 'neutral'} />
             <Metric label="Local log" value={snapshot.localLog === 'ok' ? 'ok' : snapshot.localLog === 'error' ? 'failed' : 'pending'} tone={snapshot.localLog === 'error' ? 'warn' : 'neutral'} />
             <Metric label="DPR" value={`${snapshot.device.dpr} · ${snapshot.device.viewport.width}×${snapshot.device.viewport.height}`} />
           </div>
