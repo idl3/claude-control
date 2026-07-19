@@ -115,12 +115,7 @@
   --star-far:     0.22;                   /* far plane — dense, tiny, dim; barely moves (depth cue) (~30% dimmer, same hue) */
   --nebula-1:     oklch(55% 0.12 285);   /* desaturated indigo/violet */
   --nebula-2:     oklch(58% 0.10 200);   /* desaturated teal (echoes --accent) */
-  --nebula-alpha:      0.06;              /* resting wash alpha — still very low, must recede */
-  --nebula-alpha-peak: 0.11;              /* slow breathing peak — the "color life" swell */
-  --nebula-drift:      150s;              /* one full breathe+drift+rotate cycle, ultra-slow */
-  --star-drift:      70s;                 /* mid plane drift; near/far derive their own below */
-  --star-drift-near: 40s;                 /* fastest — closest plane */
-  --star-drift-far:  160s;                /* slowest — barely perceptible (depth cue) */
+  --nebula-alpha:      0.08;              /* static wash alpha — midpoint of the retired breathe cycle (0.06–0.11) */
   /* Shooting stars are now one-shot, JS/GSAP-triggered (rare ambient timer +
      turn-completion event — see lib/shootingStars.ts + App.tsx's
      fireShootingStar), not an always-on CSS @keyframes loop, so the old
@@ -140,12 +135,10 @@
   --cosmos-active-ease:       650ms;  /* breathe-in/out duration */
 
   /* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint
-     while typing (see .cosmos-aurora below). Blur radius is fixed/static
-     (never animated, only transform/opacity move) and alpha stays low/dark
+     while typing (see .cosmos-aurora below). Static bands (softness baked
+     into the gradient stops, no runtime blur) and alpha stays low/dark
      so it reads as a subtle organic wash, not a light show. */
   --aurora-alpha: 0.05;   /* peak opacity while composer-active (dialed back further — text legibility) */
-  --aurora-blur:  40px;   /* static blur radius */
-  --aurora-drift: 15s;    /* one flowing drift+skew cycle (~50% faster) */
 
   /* Glass tiers — dark translucency so text stays legible over the cosmos */
   --glass-blur:         14px;
@@ -276,23 +269,23 @@ html.pwa-fill .app {
   }
 }
 
-/* ── Cosmic backdrop — deep-space base + a two-tone breathing nebula wash +
-   a three-plane parallax starfield (far/mid/near) + twinkling highlights +
-   rare shooting stars, painted BEHIND the entire app (z-index:-1 relative
-   to .app's own stacking context) but ABOVE body's flat --space-base fill.
-   Every animated layer below moves ONLY transform/opacity (blur, where
-   used, is a STATIC filter radius baked into a layer once — never
-   recomputed per frame; only the already-blurred texture's transform
-   moves, which is compositor-cheap, same technique the codebase already
-   uses for the composer's living ring). No per-frame JS beyond the single
-   existing rAF scroll-parallax handler in App.tsx (extended to publish
-   three shift vars instead of one). Every intensity value lives in the
-   --space-, --star-, --nebula- and --shoot- tokens above so tuning is a
-   one-file, one-block edit. Reduced-motion strips every `animation`/
-   `will-change` declaration below (all gated inside `no-preference`
-   blocks) and the twinkle + shooting-star layers are never even painted
-   under reduced-motion (their content/background is declared ONLY inside
-   the gated block) — everything else still renders, just frozen. */
+/* ── Cosmic backdrop — deep-space base + a two-tone static nebula wash +
+   a three-plane parallax starfield (far/mid/near) + rare shooting stars,
+   painted BEHIND the entire app (z-index:-1 relative to .app's own
+   stacking context) but ABOVE body's flat --space-base fill.
+   STATIC BY DESIGN: no ambient/infinite animation anywhere in this system.
+   The former nebula-breathe / star-drift / twinkle loops kept the
+   compositor (and, in the WKWebView desktop shell, the host process's CA
+   layer-commit path) busy 100% of the time for motion nobody consciously
+   saw — measured as a continuous double-digit %CPU burn at idle. What
+   remains is exactly what prefers-reduced-motion always rendered: the full
+   layered backdrop, frozen. Softness is baked into gradient stops (no
+   runtime `filter: blur()` — a blurred viewport-scale layer holds a large
+   GPU texture and re-filters on every invalidation). Motion that survives
+   is strictly event-driven and bounded: the rAF scroll-parallax handler in
+   App.tsx (runs only while scrolling) and one-shot JS-fired shooting stars
+   (idle slots paint nothing). Every intensity value lives in the --space-,
+   --star- and --nebula- tokens above so tuning is a one-file edit. */
 .cosmos-backdrop {
   position: absolute;
   inset: 0;
@@ -303,81 +296,56 @@ html.pwa-fill .app {
     var(--space-lift) 0%, var(--space-base) 46%, var(--space-edge) 100%);
   /* Composer-active boost transition target — see the block near the bottom
      of this section. Declared here (not repeated per-layer) so ONE filter/
-     transform on the container lifts every child (nebula/stars/twinkle/
-     shooting) at once instead of touching each layer individually. */
+     transform on the container lifts every child (nebula/stars/shooting)
+     at once instead of touching each layer individually. */
   transition:
     filter var(--cosmos-active-ease) var(--ease),
     transform var(--cosmos-active-ease) var(--ease);
 }
 
-/* nebula wash — two large, softly-blurred color blobs (indigo + teal) as the
+/* nebula wash — two large static color blobs (indigo + teal) as the
    backdrop's own ::before/::after (paint order between two diffuse,
-   low-alpha, blurred washes is visually immaterial, so both live as pseudo-
+   low-alpha washes is visually immaterial, so both live as pseudo-
    elements; every star plane below is an ordinary child so their back-to-
    front DOM order reads correctly instead of fighting ::after's "always
-   paints last" rule). Each independently drifts/rotates/scales and breathes
-   opacity, offset half a cycle apart, so the wash feels alive — dominance
-   gently shifts between the two hues — rather than a flat static gradient.
-   Blur radius (34px) is fixed and applied once; only the pre-blurred
-   layer's transform/opacity animate. */
+   paints last" rule). A radial-gradient's own falloff already reads soft at
+   this alpha — the retired blur(34px) mostly re-smoothed an edge the
+   gradient stops now handle, at the cost of two viewport-scale filtered
+   GPU layers. Painted once, never animated (see section comment). */
 .cosmos-backdrop::before,
 .cosmos-backdrop::after {
   content: '';
   position: absolute;
   inset: -18%;
-  filter: blur(34px);
   opacity: var(--nebula-alpha);
 }
 .cosmos-backdrop::before {
-  background: radial-gradient(42% 38% at 22% 18%, var(--nebula-1) 0%, transparent 70%);
+  background: radial-gradient(46% 42% at 22% 18%, var(--nebula-1) 0%, transparent 74%);
 }
 .cosmos-backdrop::after {
-  background: radial-gradient(48% 42% at 82% 74%, var(--nebula-2) 0%, transparent 72%);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-backdrop::before,
-  .cosmos-backdrop::after {
-    animation: cosmos-nebula-1 var(--nebula-drift) ease-in-out infinite;
-    will-change: transform, opacity;
-  }
-  .cosmos-backdrop::after {
-    animation-name: cosmos-nebula-2;
-    /* Half-cycle offset: while nebula-1 dims, nebula-2 swells (and vice
-       versa) — the "color life" cross-fade, purely via a negative delay on
-       the SAME duration, no extra state needed. */
-    animation-delay: calc(var(--nebula-drift) / -2);
-  }
-}
-@keyframes cosmos-nebula-1 {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: var(--nebula-alpha); }
-  50%      { transform: translate3d(3%, -4%, 0) rotate(7deg) scale(1.1); opacity: var(--nebula-alpha-peak); }
-}
-@keyframes cosmos-nebula-2 {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: var(--nebula-alpha); }
-  50%      { transform: translate3d(-3%, 4%, 0) rotate(-6deg) scale(1.1); opacity: var(--nebula-alpha-peak); }
+  background: radial-gradient(52% 46% at 82% 74%, var(--nebula-2) 0%, transparent 76%);
 }
 
 /* starfield — three depth planes, back to front. Each is an ordinary tiled
    radial-gradient dot-field (no visible seam thanks to per-layer
-   background-size) with its own density/size/opacity/drift speed, so the
-   trio reads as real depth rather than one flat sprinkle of dust:
-     far  — tiny, dense, dim, almost static (the milky "dust" plane)
+   background-size) with its own density/size/opacity, so the trio reads as
+   real depth rather than one flat sprinkle of dust:
+     far  — tiny, dense, dim (the milky "dust" plane)
      mid  — the original starfield, medium everything
-     near — few, big, bright, fastest drift + strongest scroll parallax
-   Scroll parallax: App sets --cosmos-shift-far/-mid/-near from the
-   transcript scrollTop (one rAF handler, three writes — coalesced to a
-   single write per animation frame regardless of how many scroll events
-   fire in between). The shift is applied as a `translate3d` on the OUTER
-   plane element (compositor-only: transform is never a paint property), NOT
+     near — few, big, bright, strongest scroll parallax
+   The planes are static except for scroll parallax (the retired ambient
+   drift loops moved 7–34px over minutes — imperceptible, but kept the
+   compositor awake permanently). Scroll parallax: App sets
+   --cosmos-shift-far/-mid/-near from the transcript scrollTop (one rAF
+   handler, three writes — coalesced to a single write per animation frame
+   regardless of how many scroll events fire in between; runs ONLY while
+   scrolling). The shift is applied as a `translate3d` on the OUTER plane
+   element (compositor-only: transform is never a paint property), NOT
    `background-position` (a paint property — shifting a viewport-sized tiled
    radial-gradient background every frame forces a repaint per frame, which
    is what actually caused the choppy/steppy feel during scroll). The tiled
-   background + its own ambient drift keyframe live on an inner `::before`
-   instead, so the JS-driven scroll transform (outer element) and the CSS
-   keyframe-driven ambient drift transform (inner ::before) are two
-   independent `transform` values on two different elements — they compose
-   visually without one clobbering the other's animated value. Never reveals
-   a tile edge since it's a repeating pattern, not a moving box. */
+   background lives on an inner `::before`. Never reveals a tile edge since
+   it's a repeating pattern, not a moving box. */
 .cosmos-stars-far,
 .cosmos-stars-mid,
 .cosmos-stars-near {
@@ -427,46 +395,6 @@ html.pwa-fill .app {
     radial-gradient(2px 2px at 400px 260px,  var(--star), transparent);
   background-size: 460px 460px, 460px 460px, 400px 400px, 400px 400px, 520px 520px;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-stars-far::before  { animation: cosmos-drift-far  var(--star-drift-far)  linear infinite alternate; will-change: transform; }
-  .cosmos-stars-mid::before  { animation: cosmos-drift-mid  var(--star-drift)      linear infinite alternate; will-change: transform; }
-  .cosmos-stars-near::before { animation: cosmos-drift-near var(--star-drift-near) linear infinite alternate; will-change: transform; }
-}
-@keyframes cosmos-drift-far  { to { transform: translate3d(0, -7px, 0); } }
-@keyframes cosmos-drift-mid  { to { transform: translate3d(0, -22px, 0); } }
-@keyframes cosmos-drift-near { to { transform: translate3d(0, -34px, 0); } }
-
-/* twinkle — a sparse overlay of stars that gently blink, in two out-of-phase
-   layers so it reads as individual stars flickering rather than a group pulse.
-   Only rendered under no-preference; reduced-motion keeps the steady base only. */
-.cosmos-twinkle { position: absolute; inset: -40px; pointer-events: none; }
-@media (prefers-reduced-motion: no-preference) {
-  .cosmos-twinkle::before,
-  .cosmos-twinkle::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-repeat: repeat;
-  }
-  .cosmos-twinkle::before {
-    background-image:
-      radial-gradient(1px 1px at 50px 90px, var(--star), transparent),
-      radial-gradient(1.5px 1.5px at 180px 60px, var(--star), transparent),
-      radial-gradient(1px 1px at 240px 190px, var(--star), transparent);
-    background-size: 360px 360px;
-    animation: cosmos-twinkle 3.6s ease-in-out infinite;
-  }
-  .cosmos-twinkle::after {
-    background-image:
-      radial-gradient(1px 1px at 110px 30px, var(--star), transparent),
-      radial-gradient(1px 1px at 20px 220px, var(--star), transparent),
-      radial-gradient(1.5px 1.5px at 300px 140px, var(--star), transparent);
-    background-size: 300px 300px;
-    animation: cosmos-twinkle 5.2s ease-in-out infinite;
-    animation-delay: -2.1s;
-  }
-}
-@keyframes cosmos-twinkle { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.58; } }
 
 /* shooting stars — a pool of real (ref-able) elements, one-shot fired from
    JS via GSAP (App.tsx's fireShootingStar), NOT an always-on CSS @keyframes
@@ -536,8 +464,9 @@ html.pwa-fill .app {
 .cosmos-active-tint {
   position: absolute;
   inset: -20%;
-  background: radial-gradient(55% 50% at 50% 88%, var(--accent) 0%, transparent 70%);
-  filter: blur(46px);
+  /* Softness from the gradient falloff itself — the retired blur(46px) on a
+     viewport-scale layer held a large GPU texture for near-identical output. */
+  background: radial-gradient(60% 55% at 50% 88%, var(--accent) 0%, transparent 74%);
   opacity: 0;
   transition: opacity var(--cosmos-active-ease) var(--ease);
   pointer-events: none;
@@ -548,22 +477,19 @@ html.pwa-fill .app {
 
 /* Aurora-borealis composer-focus glow — layers on top of .cosmos-active-tint,
    active only while the composer is focused/typing (same :has() signal).
-   Two low-alpha, blurred bands (--accent + --nebula-2, echoing the nebula
-   wash's two-hue trick) independently drift/skew/scale so the glow feels
-   like real northern-lights motion rather than a static gradient, while
-   staying compositor-only: only transform/opacity animate, and the blur
-   radius (--aurora-blur) is fixed, applied once via `filter`, never itself
-   animated. Concentrated toward the bottom of the viewport, right behind
-   the composer (inset biased downward). The opacity fade-in/out is a short
-   ~600ms bounded transition tied directly to focus — per this file's own
-   convention (see .cosmos-active-tint above), that's NOT gated behind
-   reduced-motion. Only the continuous drift loop is gated, and simply
-   omitting its `animation` under reduced-motion leaves the glow visible but
-   motionless (freeze), matching the composer-boost precedent exactly. */
+   Two low-alpha static bands (--accent + --nebula-2, echoing the nebula
+   wash's two-hue trick), concentrated toward the bottom of the viewport,
+   right behind the composer (inset biased downward). STATIC while shown:
+   the former drift/skew/scale loop ran infinite keyframes on two
+   viewport-scale blurred layers exactly while the user was typing — the
+   most latency-sensitive moment in the app. Softness is baked into the
+   wide gradient spans (no runtime blur). The only motion left is the
+   ~600ms opacity fade tied to focus/blur — a bounded transition, which per
+   this file's own convention (see .cosmos-active-tint above) is NOT gated
+   behind reduced-motion. */
 .cosmos-aurora {
   position: absolute;
   inset: -20% -10% -35% -10%;
-  filter: blur(var(--aurora-blur));
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--cosmos-active-ease) var(--ease);
@@ -586,14 +512,14 @@ html.pwa-fill .app {
 }
 .cosmos-aurora::before {
   background: linear-gradient(100deg,
-    transparent 5%, var(--accent) 35%, transparent 60%,
-    var(--nebula-2) 78%, transparent 95%);
+    transparent 2%, var(--accent) 35%, transparent 62%,
+    var(--nebula-2) 78%, transparent 97%);
   opacity: 0.8;
 }
 .cosmos-aurora::after {
   background: linear-gradient(115deg,
-    transparent 10%, var(--nebula-2) 40%, transparent 65%,
-    var(--accent) 82%, transparent 98%);
+    transparent 6%, var(--nebula-2) 40%, transparent 68%,
+    var(--accent) 82%, transparent 99%);
   opacity: 0.55;
 }
 /* Terminal (>_) mode: recolor the composer-focus aurora + active-tint to the
@@ -615,48 +541,16 @@ html.pwa-fill .app {
     transparent 10%, var(--term-glow-yellow) 40%, transparent 65%,
     var(--term-glow-red) 82%, transparent 98%);
 }
-/* Terminal mode must SNAP open, not ease/drift in. Freeze every ambient
-   background animation the instant terminal mode engages: the aurora's own
-   drift keyframes, the whole cosmos-backdrop's nebula-breathe/starfield-drift/
-   twinkle loops (all `animation-play-state: paused` — a no-op on any layer
-   that isn't animating, e.g. under reduced-motion), and collapse the
-   red/yellow recolor + tint/backdrop transitions above to 0ms so the palette
-   swap is instant rather than the ambient 650ms cross-fade. Composer-card's
+/* Terminal mode must SNAP open, not ease in: collapse the red/yellow
+   recolor + tint/backdrop transitions above to 0ms so the palette swap is
+   instant rather than the ambient 650ms cross-fade. (The backdrop itself is
+   fully static now, so there is nothing else to freeze.) Composer-card's
    own ring recolor is unaffected (display:none card swap is already instant;
    see .composer-term-canvas). */
-.app[data-terminal-mode='true'] .cosmos-aurora::before,
-.app[data-terminal-mode='true'] .cosmos-aurora::after {
-  animation: none;
-}
-.app[data-terminal-mode='true'] .cosmos-backdrop *,
-.app[data-terminal-mode='true'] .cosmos-backdrop {
-  animation-play-state: paused;
-}
 .app[data-terminal-mode='true'] .cosmos-aurora,
 .app[data-terminal-mode='true'] .cosmos-active-tint,
 .app[data-terminal-mode='true'] .cosmos-backdrop {
   transition-duration: 0ms;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .app:has(.composer-card:focus-within) .cosmos-aurora::before,
-  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
-    animation: cosmos-aurora-1 var(--aurora-drift) ease-in-out infinite;
-    will-change: transform;
-  }
-  .app:has(.composer-card:focus-within) .cosmos-aurora::after {
-    animation-name: cosmos-aurora-2;
-    animation-delay: calc(var(--aurora-drift) / -2.4);
-  }
-}
-@keyframes cosmos-aurora-1 {
-  0%, 100% { transform: translate3d(-4%, 0, 0) scaleY(1) skewX(0deg); }
-  33%      { transform: translate3d(3%, -3%, 0) scaleY(1.18) skewX(-4deg); }
-  66%      { transform: translate3d(-2%, 2%, 0) scaleY(0.92) skewX(3deg); }
-}
-@keyframes cosmos-aurora-2 {
-  0%, 100% { transform: translate3d(4%, 0, 0) scaleY(1) skewX(0deg); }
-  33%      { transform: translate3d(-3%, 3%, 0) scaleY(0.9) skewX(4deg); }
-  66%      { transform: translate3d(2%, -2%, 0) scaleY(1.15) skewX(-3deg); }
 }
 
 /* ── Resource HUD ─────────────────────────────────────────────── */
@@ -1663,7 +1557,7 @@ body.is-external-display .rail {
   }
 }
 /* The running-agents glow was the one infinite animation missing a reduced-motion
-   gate (its siblings mic-pulse / cosmos-drift-* are gated). Hold the accent state,
+   gate (its sibling mic-pulse is gated). Hold the accent state,
    drop the continuous pulse. */
 @media (prefers-reduced-motion: reduce) {
   .detail-action[data-running='true'] { animation: none; }
@@ -3558,15 +3452,14 @@ body.is-external-display .composer {
 .subagent-pill .sa-dot[data-status='running'] {
   animation: pulse 0.82s var(--ease) infinite;
 }
-/* Working — reuses the composer's living animated rim (registered
-   `--composer-ring-angle` custom property + `composer-ring-flow` keyframes +
-   the conic-gradient/mask rim technique, see the block comment near
-   `.composer-card::before` below for why masking — not z-index — is what
-   confines this to a rim). Sized to the pill's own 999px radius via
-   `border-radius: inherit`; each pill gets its own independent
-   `--composer-ring-angle` instance (the property is registered
-   `inherits: false`, so per-element, not shared/synced across pills or with
-   the composer). */
+/* Working — reuses the composer's static gradient rim (registered
+   `--composer-ring-angle` custom property + the conic-gradient/mask rim
+   technique, see the block comment near `.composer-card::before` below for
+   why masking — not z-index — is what confines this to a rim). Static like
+   the composer's: the former per-pill conic-flow loop re-rastered a
+   gradient every frame per running pill; "running" liveness is signalled
+   by the pulsing .sa-dot above, the rim just marks the state. Sized to the
+   pill's own 999px radius via `border-radius: inherit`. */
 .subagent-pill[data-status='running']::before {
   content: '';
   position: absolute;
@@ -3596,11 +3489,6 @@ body.is-external-display .composer {
   -webkit-mask-clip: content-box, border-box;
   -webkit-mask-composite: xor;
   pointer-events: none;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .subagent-pill[data-status='running']::before {
-    animation: composer-ring-flow 7s linear infinite;
-  }
 }
 /* Done, waiting on the parent to respond/clear — steady muted green border,
    no animation (steady reads as "waiting", not "working"). Replaces the
@@ -3968,21 +3856,15 @@ body.is-external-display .composer {
     0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 
-/* ── Living accent: a slow, iridescent gradient ring on the BORDER only — the
+/* ── Accent ring: an iridescent gradient ring on the BORDER only — the
    card body itself never moves. Operator feedback on the first pass (PR
    #221) was explicit: the "living" treatment read as the whole window
-   breathing, which was too loud; the animation belongs on the edge, not the
-   surface. So this now layers two effects entirely on `.composer-card::before`
-   (the ring pseudo): the existing 12s conic color flow (--accent <->
-   --accent-warm), plus a second, independent opacity breathe on the ring
-   itself (composer-ring-pulse, ~0.7x-1x multiplier over 6s) so the edge
-   feels alive without the card's fill ever changing. Both are switched off
-   entirely under prefers-reduced-motion (composer-ring-flow and
-   composer-ring-pulse are gated inside the `no-preference` media block
-   below, so neither is ever declared under `reduce`): the gradient ring is
-   still painted (it's decoration, not motion — a colored border, just
-   frozen at its 0deg resting angle, constant opacity) but never animates.
-   Nothing moves under reduced motion.
+   breathing, which was too loud; any treatment belongs on the edge, not
+   the surface. The ring is now fully STATIC for every user — a colored
+   gradient border frozen at its 0deg resting angle, constant opacity —
+   which is exactly the rendering reduced-motion users always had (the
+   retired 12s conic flow + 6s opacity breathe re-rastered the gradient
+   per frame, permanently; see the ::before block's comment).
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
@@ -4011,36 +3893,20 @@ body.is-external-display .composer {
    traded one non-rim-only failure mode for another; masking is the fix
    that actually guarantees rim-only, independent of paint order.)
 
-   The gradient "flows" by animating its own start angle via a registered
-   custom property (--composer-ring-angle, 0deg -> 360deg), NOT by rotating
-   the element with `transform: rotate()`. Rotating the ::before box itself
-   was the first approach tried, and it produced a much worse bug: the ring
-   box is an elongated rectangle (card-width x card-height, not square), so
-   rotating it swings its corners far outside the card's own footprint at
-   the diagonal (verified: the rotated box's visible extent reached well
-   into the toolbar above and buttons below, painting a large diagonal
-   band across neighboring UI, since nothing clips an absolutely
-   positioned, transform-rotated layer to the card's bounds). Animating the
-   conic-gradient's angle instead keeps the box's geometry completely
-   static (only ever `inset: -1.4px`, never transformed), so there is no
-   growth to leak beyond the card — the visual "rotation" comes entirely
-   from repainting the gradient's colors, not from moving the box. Whisper-
+   The ring is STATIC. Its former "flow" animation tweened the registered
+   --composer-ring-angle custom property 0deg -> 360deg — and a custom-
+   property tween is style+paint work, NOT a compositor transform, so the
+   conic gradient re-rasterised on every frame of its 12s loop, on an
+   always-visible card-sized layer, forever (plus a second 6s pulse tween
+   on --composer-ring-pulse). Alongside the cosmos loops this was a top
+   standing burner at idle; both were retired for a static rim (exactly
+   what prefers-reduced-motion already rendered). The two vars remain as
+   registered properties parked at their initial values (0deg / 1) because
+   the gradient + the resting-opacity calc() below still read them; the
+   "alive" signal is carried entirely by the focus opacity step. Whisper-
    faint at rest (opacity 0.16), fuller once focused (0.5), matching "most
-   visible on focus-within".
-
-   Ring-pulse: a SECOND registered custom property (--composer-ring-pulse,
-   a unitless multiplier, 1 -> 0.7 -> 1) that the ring's resting opacity is
-   multiplied against via calc(), so the edge gently breathes independently
-   of the color flow. It's registered via @property (not a plain custom
-   property) for the same reason --composer-ring-angle is: unregistered
-   custom properties animate with discrete (jump-cut) interpolation, not a
-   smooth tween, so the multiplier would step instead of ease. Deliberately
-   NOT applied to the focus-within rule below — `:focus-within::before` sets
-   a flat, literal `opacity: 0.5` that wins on specificity over the resting
-   calc() expression, so focusing the composer locks the ring to its
-   brightest, steadiest state (focus is already the strongest "alive"
-   signal; the ambient pulse settles until you click away, rather than
-   fighting the focus glow or drifting under someone's typing cursor). */
+   visible on focus-within" — `:focus-within::before` sets a flat, literal
+   `opacity: 0.5` that wins on specificity over the resting calc(). */
 @property --composer-ring-angle {
   syntax: '<angle>';
   inherits: false;
@@ -4098,7 +3964,7 @@ body.is-external-display .composer {
    default composer, but recolor its conic gradient to the terminal's red→yellow
    identity so the border+glow reads congruent with the terminal chrome and the
    red→yellow focus aurora. All the ring machinery (mask, padding, resting +
-   focus opacity, conic-flow animation) is inherited from .composer-card::before;
+   focus opacity) is inherited from .composer-card::before;
    only the gradient hues change here. Replaces the old suppression (display:none)
    that left terminal mode with just a flat red border. */
 .composer-card[data-terminal]::before {
@@ -4110,35 +3976,6 @@ body.is-external-display .composer {
     var(--term-glow-yellow),
     var(--term-glow-red)
   );
-}
-@media (prefers-reduced-motion: no-preference) {
-  .composer-card::before {
-    /* Two independent animations on the same pseudo: the 12s conic color
-       flow (angle) and a separate ~6s ring-pulse (opacity multiplier).
-       They run concurrently and don't fight — one drives
-       --composer-ring-angle, the other drives --composer-ring-pulse. */
-    animation:
-      composer-ring-flow 12s linear infinite,
-      composer-ring-pulse 6s ease-in-out infinite;
-  }
-}
-@keyframes composer-ring-flow {
-  to {
-    --composer-ring-angle: 360deg;
-  }
-}
-/* Resting-state ring breathe: opacity multiplier only (never the card's own
-   fill — see the block comment above for why that moved off the window).
-   Range is intentionally shallow (1 -> 0.7, i.e. the resting 0.16 opacity
-   ring dips to ~0.11) over a slow 6s ease so it reads as a living edge, not
-   a strobe. */
-@keyframes composer-ring-pulse {
-  0%, 100% {
-    --composer-ring-pulse: 1;
-  }
-  50% {
-    --composer-ring-pulse: 0.7;
-  }
 }
 .composer-toolbar {
   display: flex;

@@ -2393,7 +2393,6 @@ function AppInner() {
             <i className="cosmos-stars-far" />
             <i className="cosmos-stars-mid" />
             <i className="cosmos-stars-near" />
-            <i className="cosmos-twinkle" />
             <div className="cosmos-shoot-stars">
               {[0, 1, 2].map((i) => (
                 <i
