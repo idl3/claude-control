@@ -1,0 +1,15 @@
+[package]
+name = "claude-control-spike"
+version = "0.0.1"
+description = "Disposable Tauri wrap of the Claude Control SPA (Phase-A adoption spike)"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[[bin]]
+name = "claude-control-spike"
+path = "src/main.rs"
