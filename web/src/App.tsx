@@ -50,6 +50,7 @@ import { SubAgentPanel } from './components/SubAgentPanel';
 import { ProcessPanel } from './components/ProcessPanel';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
+import { PerfDiagnostics } from './components/PerfDiagnostics';
 import { HotkeyHints } from './components/HotkeyHints';
 import { AppFrameLayer } from './components/AppFrameLayer';
 import { useHotkeySuppressionInterceptor } from './lib/hotkeySuppression';
@@ -86,6 +87,7 @@ import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
 import { loadCosmosPref } from './lib/cosmosPrefs';
 import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
+import { loadPerfDiagnosticsEnabled, recordPerfEvent, savePerfDiagnosticsEnabled } from './lib/perfDiagnostics';
 
 
 // How long a queued send waits for its transcript echo before we stop showing it.
@@ -855,6 +857,19 @@ function AppInner() {
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [perfDiagnosticsOpen, setPerfDiagnosticsOpen] = useState(() => loadPerfDiagnosticsEnabled());
+  const setPerfDiagnostics = useCallback(
+    (open: boolean) => {
+      setPerfDiagnosticsOpen(open);
+      savePerfDiagnosticsEnabled(open);
+      showToast(open ? 'Device diagnostics enabled' : 'Device diagnostics disabled', open ? 'ok' : '');
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    recordPerfEvent('app-render', cockpit.messages.length);
+  });
 
   // Transcript links: http(s) links from transcript markdown (.aui-md) open in
   // a new browser tab. ⌘/Ctrl/Shift/middle-click already opens a regular new
@@ -2107,6 +2122,13 @@ function AppInner() {
         run: () => openDraft(),
       },
       {
+        id: 'act:perf-diagnostics',
+        label: perfDiagnosticsOpen ? 'Hide device performance diagnostics' : 'Show device performance diagnostics',
+        group: 'Actions',
+        keywords: 'mobile heat hot fps jank longtask memory heap gpu webgl diagnostics performance',
+        run: () => setPerfDiagnostics(!perfDiagnosticsOpen),
+      },
+      {
         id: 'act:processes',
         label: 'Processes & system',
         group: 'Actions',
@@ -2224,6 +2246,8 @@ function AppInner() {
     toggleTerminal,
     galleryOpen,
     searchOpen,
+    perfDiagnosticsOpen,
+    setPerfDiagnostics,
   ]);
 
   // The live "thinking" block is the trailing reasoning of the last real
@@ -2870,6 +2894,10 @@ function AppInner() {
         {paletteOpen ? (
           <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
         ) : null}
+
+        <ErrorBoundary label="Device diagnostics failed to render">
+          <PerfDiagnostics enabled={perfDiagnosticsOpen} onClose={() => setPerfDiagnostics(false)} />
+        </ErrorBoundary>
 
         <HotkeyHints />
         {/* AppFrameLayer runs its geometry/hoist loop on every render — isolate a
