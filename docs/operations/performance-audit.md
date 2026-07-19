@@ -30,6 +30,8 @@ Last updated: 2026-07-19
 - Metrics sampled on the phone: FPS, worst frame gap, estimated dropped/janky frames, event-loop lag, Long Task API totals, Long Animation Frame API totals where available, JS heap where exposed, websocket message/KB rate, app-render rate, DPR/viewport, reduced-motion state, and WebGL renderer metadata where available.
 - Browsers do not expose device temperature, so use these samples for correlation: heat + long tasks/render bursts points at JS/React work; heat + clean main-thread metrics but WebGL/iframe/compositor stress points at GPU/layer pressure.
 - Use the overlay's **Copy** action after reproducing the heat. It copies a compact JSON report with the latest sample and the last ~120 seconds of history.
+- While the overlay is open, the phone also POSTs a small sample batch every ~10 seconds to the same Cockpit server. Samples stay local in `~/.claude-control/logs/client-perf.jsonl` (or `$CLAUDE_CONTROL_DIR/logs/client-perf.jsonl`) and rotate at 10 MB with one `.1` backup.
+- Local summary: `GET /api/client-perf?limit=500` returns recent-tail aggregates for avg/min FPS, worst frame, max loop lag, long-task totals, websocket rate, render rate, and stressed/hot sample counts.
 
 ## Remaining Optimization Backlog
 

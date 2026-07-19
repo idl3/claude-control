@@ -3,6 +3,7 @@
 // localStorage via lib/auth. Same-origin throughout.
 
 import { getToken, clearToken } from './auth';
+import type { PerfDeviceInfo, PerfSample } from './perfDiagnostics';
 import type { SessionLiveness } from './olamMode';
 
 // --- 401 handling -----------------------------------------------------------
@@ -50,6 +51,29 @@ export async function authFetch(
   });
   if (res.status === 401) handleUnauthorized();
   return res;
+}
+
+export interface ClientPerfBatch {
+  clientId: string;
+  pageId: string;
+  device: PerfDeviceInfo;
+  samples: PerfSample[];
+  url: string;
+  userAgent: string;
+}
+
+export async function postClientPerfBatch(batch: ClientPerfBatch): Promise<boolean> {
+  try {
+    const res = await fetch('/api/client-perf', {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify(batch),
+      keepalive: true,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export function wsUrl(): string {
