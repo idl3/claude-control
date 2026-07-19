@@ -42,6 +42,20 @@ function sample(overrides = {}) {
     appRendersPerSec: 2,
     maxRenderMessages: 120,
     memory: { usedMb: 80, totalMb: 128, limitMb: 2048 },
+    surfaces: {
+      iframes: 0,
+      visibleIframes: 0,
+      videos: 0,
+      playingVideos: 0,
+      audios: 0,
+      playingAudio: 0,
+      canvases: 0,
+      visibleCanvases: 0,
+      runningAnimations: 0,
+      embedHoists: 0,
+      visibleEmbedHoists: 0,
+      voiceActive: false,
+    },
     visibility: 'visible',
     ...overrides,
   };
@@ -68,6 +82,7 @@ test('recordClientPerf appends a local JSONL batch with normalized samples', () 
   assert.equal(rec.clientId, 'phone-1');
   assert.equal(rec.samples.length, 1);
   assert.equal(rec.samples[0].fps, 42);
+  assert.equal(rec.samples[0].surfaces.visibleIframes, 0);
   assert.equal(rec.device.webgl.renderer, 'Apple GPU');
 
   const lines = fs.readFileSync(clientPerfPath(), 'utf8').trim().split('\n');
@@ -93,7 +108,21 @@ test('summarizeClientPerf computes local recent-tail stress metrics', () => {
     clientId: 'phone-1',
     samples: [
       sample({ fps: 60, worstFrameMs: 17, wsKbPerSec: 0.5 }),
-      sample({ fps: 35, worstFrameMs: 140, loopLagMs: 130, longTaskMs: 220, wsKbPerSec: 3 }),
+      sample({
+        fps: 35,
+        worstFrameMs: 140,
+        loopLagMs: 130,
+        longTaskMs: 220,
+        wsKbPerSec: 3,
+        surfaces: {
+          ...sample().surfaces,
+          visibleIframes: 2,
+          visibleCanvases: 1,
+          runningAnimations: 18,
+          playingVideos: 1,
+          voiceActive: true,
+        },
+      }),
       sample({ fps: 5, visibility: 'hidden', worstFrameMs: 1000 }),
     ],
   });
@@ -108,6 +137,10 @@ test('summarizeClientPerf computes local recent-tail stress metrics', () => {
   assert.equal(summary.summary.hotSamples, 1);
   assert.equal(summary.summary.stressedSamples, 1);
   assert.equal(summary.summary.wsKbPerSecMax, 3);
+  assert.equal(summary.summary.maxVisibleIframes, 2);
+  assert.equal(summary.summary.maxRunningAnimations, 18);
+  assert.equal(summary.summary.maxPlayingVideos, 1);
+  assert.equal(summary.summary.voiceActiveSamples, 1);
 });
 
 test('readRecentClientPerfRecords ignores corrupt JSONL lines', () => {

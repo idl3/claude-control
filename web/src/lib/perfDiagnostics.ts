@@ -1,7 +1,7 @@
 export const PERF_DIAGNOSTICS_STORAGE_KEY = 'cc:perf-diagnostics';
 export const PERF_CLIENT_ID_STORAGE_KEY = 'cc:perf-client-id';
 
-export type PerfEventKind = 'ws-message' | 'app-render';
+export type PerfEventKind = 'ws-message' | 'app-render' | 'voice-state';
 
 export interface PerfEventDetail {
   kind: PerfEventKind;
@@ -33,6 +33,21 @@ export interface PerfMemorySample {
   usedMb: number;
   totalMb: number | null;
   limitMb: number | null;
+}
+
+export interface PerfSurfaceSample {
+  iframes: number;
+  visibleIframes: number;
+  videos: number;
+  playingVideos: number;
+  audios: number;
+  playingAudio: number;
+  canvases: number;
+  visibleCanvases: number;
+  runningAnimations: number;
+  embedHoists: number;
+  visibleEmbedHoists: number;
+  voiceActive: boolean;
 }
 
 export interface PerfCounters {
@@ -74,6 +89,7 @@ export interface PerfSample {
   appRendersPerSec: number;
   maxRenderMessages: number;
   memory: PerfMemorySample | null;
+  surfaces: PerfSurfaceSample;
   visibility: DocumentVisibilityState;
 }
 
@@ -203,6 +219,33 @@ export function sampleMemory(): PerfMemorySample | null {
   };
 }
 
+export function sampleSurfaces(): PerfSurfaceSample {
+  if (typeof document === 'undefined') return createEmptySurfaceSample();
+  const iframes = [...document.querySelectorAll<HTMLIFrameElement>('iframe')];
+  const videos = [...document.querySelectorAll<HTMLVideoElement>('video')];
+  const audios = [...document.querySelectorAll<HTMLAudioElement>('audio')];
+  const canvases = [...document.querySelectorAll<HTMLCanvasElement>('canvas')];
+  const hoists = [...document.querySelectorAll<HTMLElement>('.embed-app-hoist')];
+  const runningAnimations =
+    typeof document.getAnimations === 'function'
+      ? document.getAnimations().filter((a) => a.playState === 'running').length
+      : 0;
+  return {
+    iframes: iframes.length,
+    visibleIframes: iframes.filter(isVisibleElement).length,
+    videos: videos.length,
+    playingVideos: videos.filter((v) => !v.paused && !v.ended && v.readyState > 2).length,
+    audios: audios.length,
+    playingAudio: audios.filter((a) => !a.paused && !a.ended && a.readyState > 2).length,
+    canvases: canvases.length,
+    visibleCanvases: canvases.filter(isVisibleElement).length,
+    runningAnimations,
+    embedHoists: hoists.length,
+    visibleEmbedHoists: hoists.filter(isVisibleElement).length,
+    voiceActive: document.body.classList.contains('cc-voice-active'),
+  };
+}
+
 export function createEmptyCounters(): PerfCounters {
   return {
     longTasks: 0,
@@ -227,6 +270,23 @@ export function createEmptyFrameWindow(): FrameWindow {
   };
 }
 
+export function createEmptySurfaceSample(): PerfSurfaceSample {
+  return {
+    iframes: 0,
+    visibleIframes: 0,
+    videos: 0,
+    playingVideos: 0,
+    audios: 0,
+    playingAudio: 0,
+    canvases: 0,
+    visibleCanvases: 0,
+    runningAnimations: 0,
+    embedHoists: 0,
+    visibleEmbedHoists: 0,
+    voiceActive: false,
+  };
+}
+
 export function recordFrameGap(window: FrameWindow, gapMs: number): void {
   if (!Number.isFinite(gapMs) || gapMs <= 0) return;
   window.frames += 1;
@@ -245,6 +305,7 @@ export function buildPerfSample(args: {
   counters: PerfCounters;
   loopLagMs: number;
   memory: PerfMemorySample | null;
+  surfaces?: PerfSurfaceSample;
   visibility: DocumentVisibilityState;
 }): PerfSample {
   const elapsedSec = Math.max(args.elapsedMs / 1000, 0.001);
@@ -267,6 +328,7 @@ export function buildPerfSample(args: {
     appRendersPerSec: round1(args.counters.appRenders / elapsedSec),
     maxRenderMessages: args.counters.maxRenderMessages,
     memory: args.memory,
+    surfaces: args.surfaces ?? createEmptySurfaceSample(),
     visibility: args.visibility,
   };
 }
@@ -329,6 +391,13 @@ function detectWebgl(): PerfDeviceInfo['webgl'] {
     vendor,
     renderer,
   };
+}
+
+function isVisibleElement(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return false;
+  const style = getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0.01;
 }
 
 function round1(value: number): number {
