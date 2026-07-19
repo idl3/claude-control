@@ -61,6 +61,7 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
             className="agent-term-canvas"
             autoFocus
             onExit={onClose}
+            paneScale
           />
         </div>
       </div>
