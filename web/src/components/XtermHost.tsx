@@ -36,6 +36,19 @@ export interface XtermHostProps {
   onExit?: () => void;
   /** Focus the terminal on mount (so the user can just start typing on open). */
   autoFocus?: boolean;
+  /**
+   * agent-kind sessions only (Cmd+J full-screen pane mirror): the real tmux
+   * pane has a FIXED size the app deliberately never resizes (see
+   * pty-bridge.js's resizeClient early-return, and pty-client.ts's
+   * `onPaneSize` doc comment) — pinning the grid to whatever size the local
+   * container happens to be (the normal FitAddon flow every other host
+   * uses) would show the pane's 80-col-formatted content occupying only a
+   * fraction of a much wider grid. Instead: pin the xterm grid to the
+   * pane's exact cols/rows, then zoom the RENDERED text (fontSize) to fill
+   * the container — the inverse of the normal "fit the grid to the
+   * container" flow.
+   */
+  paneScale?: boolean;
 }
 
 const TYPED_ERROR_FRAME =
@@ -56,7 +69,7 @@ const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, monospace";
  * — that omission IS the T6 "OSC-52 disabled by default" mitigation (a
  * decision to withhold code, not a config flag; see A1 §3).
  */
-export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, autoFocus }: XtermHostProps) {
+export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, autoFocus, paneScale }: XtermHostProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connState, setConnState] = useState<PtyConnState>('connecting');
   // Keep the latest onExit callable without re-running the attach effect (its
@@ -175,10 +188,51 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
     let lastCols = 0;
     let lastRows = 0;
     let rafId = 0;
+    // pane-scale only: the last pane-size frame received. null until the
+    // first one arrives (or forever, if the server's paneSize query failed —
+    // graceful degrade to whatever size the Terminal was constructed with).
+    let lastPaneSize: { cols: number; rows: number } | null = null;
+
+    // pane-scale only: pin the grid to the pane's exact size, then converge
+    // fontSize so the rendered `.xterm-screen` fills whichever dimension of
+    // the container is limiting (the other letterboxes via the flex-center
+    // CSS on .agent-term-canvas .term-canvas). Font-size scaling — not a CSS
+    // transform — is deliberate: xterm redraws each glyph natively at the
+    // new size, so text stays crisp instead of being raster-scaled.
+    const applyPaneScale = (cols: number, rows: number) => {
+      const el = containerRef.current;
+      if (!el) return;
+      if (term.cols !== cols || term.rows !== rows) {
+        term.resize(cols, rows);
+      }
+      const screen = el.querySelector('.xterm-screen');
+      if (!screen) return;
+      // Glyph raster size scales ~linearly with fontSize, so one pass usually
+      // lands within a pixel or two — a few more tighten it up. Capped so a
+      // box that's still mid-layout (0-sized, or xterm's own resize hasn't
+      // repainted yet) can't spin forever.
+      for (let i = 0; i < 6; i += 1) {
+        const rect = screen.getBoundingClientRect();
+        const cw = el.clientWidth;
+        const ch = el.clientHeight;
+        if (rect.width < 1 || rect.height < 1 || cw < 2 || ch < 2) return;
+        const ratio = Math.min(cw / rect.width, ch / rect.height);
+        if (Math.abs(ratio - 1) < 0.01) return;
+        const current = term.options.fontSize ?? 12;
+        const next = Math.max(4, current * ratio);
+        if (Math.abs(next - current) < 0.05) return;
+        term.options.fontSize = next;
+      }
+    };
+
     const applyFit = () => {
       rafId = 0;
       const el = containerRef.current;
       if (!el || el.clientHeight < 2 || el.clientWidth < 2) return;
+      if (paneScale) {
+        if (lastPaneSize) applyPaneScale(lastPaneSize.cols, lastPaneSize.rows);
+        return;
+      }
       try { fit.fit(); } catch { /* renderer not ready yet */ }
       if (term.cols !== lastCols || term.rows !== lastRows) {
         lastCols = term.cols;
@@ -203,11 +257,31 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       } else if (state === 'connected') {
         // Once attach is confirmed, re-fit and tell the server our real size —
         // sending this any earlier races the server's async attach handshake
-        // (see pty-client.ts's `resize`/`write` queuing comment).
+        // (see pty-client.ts's `resize`/`write` queuing comment). Pane-scale
+        // mode never reports a client-driven size back — the server never
+        // resizes the real pane for agent-kind sessions (see resizeClient's
+        // early-return in pty-bridge.js), so there is nothing useful to send.
         scheduleFit();
-        client.resize(term.cols, term.rows);
+        if (!paneScale) client.resize(term.cols, term.rows);
       }
     });
+
+    // pane-scale only: the server sends this BEFORE the capture-pane seed
+    // frame (lib/pty-bridge.js's attach handler) specifically so the grid
+    // can be resized synchronously here before that seed's text is written
+    // into it — the resize() call above happens synchronously within this
+    // handler, and WebSocket message events are delivered/handled strictly
+    // in arrival order, so it always completes before the next message
+    // (the seed) is processed. The fontSize convergence loop that follows is
+    // best-effort within this same tick; `scheduleFit()`'s rAF pass corrects
+    // it if the renderer hadn't repainted `.xterm-screen` yet.
+    const offPaneSize = paneScale
+      ? client.onPaneSize((cols, rows) => {
+          lastPaneSize = { cols, rows };
+          applyPaneScale(cols, rows);
+          scheduleFit();
+        })
+      : () => {};
 
     const disposeOnData = term.onData((data) => {
       client.write(data);
@@ -235,6 +309,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       if (rafId) cancelAnimationFrame(rafId);
       offData();
       offState();
+      offPaneSize();
       disposeOnData.dispose();
       disposeSelectionChange.dispose();
       if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
