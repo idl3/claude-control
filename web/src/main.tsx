@@ -2,12 +2,18 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { reportClientError } from './lib/reportError';
+import { isNativeShell } from './lib/nativeShell';
 import 'slot-text/style.css';
 import './styles.css';
 import './highlight-theme.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found');
+
+// Desktop shell (Tauri, titleBarStyle: Overlay): flag the document before first
+// paint so shell-only CSS (traffic-light clearance on the HUD) applies without
+// a flash of the browser layout.
+if (isNativeShell) document.documentElement.dataset.nativeShell = 'true';
 
 // iOS installed-PWA (standalone) viewport fix. Measured on an iOS 26 sim: in an
 // installed PWA (display-mode: standalone, black-translucent, viewport-fit=cover)
