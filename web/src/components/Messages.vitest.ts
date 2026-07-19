@@ -36,7 +36,7 @@ vi.mock('@assistant-ui/react', () => ({
   },
 }));
 
-import { UserMessage } from './Messages';
+import { UserMessage, groupTurn } from './Messages';
 
 function setMessage(sendStatus: 'queued' | 'sent' | 'failed' | undefined, id = 'queued-7') {
   currentMessage = {
@@ -140,5 +140,36 @@ describe('UserMessage — force-remove control on a stuck queued/sent bubble', (
     window.removeEventListener('cockpit:pending-discard', onDiscard);
     expect(onDiscard).toHaveBeenCalledTimes(1);
     expect((onDiscard.mock.calls[0][0] as CustomEvent).detail).toEqual({ key: 17 });
+  });
+});
+
+describe('groupTurn — Workflow is a boundary tool (regression: card buried in collapsed CoT)', () => {
+  const t = (toolName: string) => ({ type: 'tool-call', toolName });
+  const reasoning = { type: 'reasoning' };
+
+  it('renders a Workflow tool-call inline, never inside a work group', () => {
+    // reasoning + Bash + Workflow + Bash + reasoning: without the boundary the
+    // whole run would collapse into one CoT group whose children unmount when
+    // closed — hiding the WorkflowCard on historical transcripts.
+    const parts = [reasoning, t('Bash'), t('Workflow'), t('Bash'), reasoning];
+    const groups = groupTurn(parts);
+    const wfGroup = groups.find((g) => g.indices.includes(2));
+    expect(wfGroup).toBeTruthy();
+    expect(wfGroup!.groupKey).toBeUndefined();
+    expect(wfGroup!.indices).toEqual([2]);
+  });
+
+  it('keeps AskUserQuestion + ExitPlanMode boundaries intact alongside Workflow', () => {
+    const parts = [t('AskUserQuestion'), t('Workflow'), t('ExitPlanMode')];
+    for (const g of groupTurn(parts)) {
+      expect(g.groupKey).toBeUndefined();
+      expect(g.indices.length).toBe(1);
+    }
+  });
+
+  it('still groups ordinary tool runs into a CoT group', () => {
+    const parts = [reasoning, t('Bash'), t('Read')];
+    const groups = groupTurn(parts);
+    expect(groups).toEqual([{ groupKey: 'group-thought', indices: [0, 1, 2] }]);
   });
 });

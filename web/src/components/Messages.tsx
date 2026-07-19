@@ -104,8 +104,11 @@ function MessageActions() {
 type PartLike = { readonly type: string; readonly toolName?: string };
 type Group = { groupKey: string | undefined; indices: number[] };
 
-/** Interactive tool-calls that must surface inline (never buried in a CoT group). */
-const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+/** Interactive tool-calls that must surface inline (never buried in a CoT group).
+ *  Workflow is here because its part IS the canonical WorkflowCard surface
+ *  (historical + live) — a collapsed CoT group unmounts its children, which
+ *  would hide the card entirely on completed transcripts. */
+const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Workflow']);
 
 /**
  * Turn-level work grouping (position-aware, so it needs the whole parts array —
@@ -116,7 +119,7 @@ const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
  * when it is:
  *   - a `text` part (each assistant answer ends a group), OR
  *   - a `tool-call` whose toolName is in INTERACTIVE_TOOLS (AskUserQuestion,
- *     ExitPlanMode must remain visible, not buried).
+ *     ExitPlanMode, Workflow must remain visible, not buried).
  *
  * Non-boundary parts (reasoning blocks, ordinary tool-calls) accumulate in a
  * `work` buffer. When a boundary (or end-of-parts) is reached the buffer is
@@ -129,7 +132,7 @@ const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
  *
  * Every input index appears in exactly one output group; order is preserved.
  */
-function groupTurn(parts: readonly PartLike[]): Group[] {
+export function groupTurn(parts: readonly PartLike[]): Group[] {
   const groups: Group[] = [];
   const work: number[] = [];
 
