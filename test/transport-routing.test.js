@@ -42,11 +42,23 @@ test('claudex sessions route to tmux (never claude-print, even if transport were
   assert.equal(replyTransport({ kind: 'claudex', transport: 'print' }), 'tmux');
 });
 
+// Claudemi (claudex's sibling — the same claude binary, pointed at Kimi via
+// the olam auth-worker's /kimi route) mirrors the same defense-in-depth
+// story: it is ALWAYS tmux transport (server.js forces claudeTransport='tmux'
+// for it too), and replyTransport must not treat 'claudemi' as an alias for
+// 'claude' either.
+test('claudemi sessions route to tmux (never claude-print, even if transport were print)', () => {
+  assert.equal(replyTransport({ kind: 'claudemi', transport: 'tmux' }), 'tmux');
+  assert.equal(replyTransport({ kind: 'claudemi' }), 'tmux');
+  assert.equal(replyTransport({ kind: 'claudemi', transport: 'print' }), 'tmux');
+});
+
 test('olam branch never fires for a local session (no shadowing)', () => {
   for (const local of [
     { kind: 'claude', transport: 'tmux' },
     { kind: 'claude', transport: 'print' },
     { kind: 'claudex', transport: 'tmux' },
+    { kind: 'claudemi', transport: 'tmux' },
     { kind: 'codex', transport: 'rpc' },
     { kind: 'codex', transport: 'tmux' },
     { kind: 'terminal' },

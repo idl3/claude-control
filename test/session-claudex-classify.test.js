@@ -114,6 +114,30 @@ test('@cc_agent=claudex pane classifies as kind "claudex" (not "claude"), tmux t
   }
 });
 
+test('@cc_agent=claudemi pane classifies as kind "claudemi" (not "claude"), tmux transport, transcript-bound', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-claudemi-classify-'));
+  const projectsRoot = path.join(temp, 'projects');
+  const cwd = '/work/repo';
+  const uuid = crypto.randomUUID();
+  const file = writeTranscript(projectsRoot, cwd, uuid);
+  const paneId = `%claudemi-${Math.random().toString(36).slice(2)}`;
+  const pane = makePane({ cwd, paneId, target: 'test:4.1', ccAgent: 'claudemi' });
+
+  try {
+    const reg = makeRegistry({ pane, projectsRoots: [projectsRoot] });
+    await reg.refresh();
+    const session = reg.getSessions().find((s) => s.target === pane.target);
+    assert.ok(session, 'pane produced a session row');
+    assert.equal(session.kind, 'claudemi', 'the @cc_agent tag must win over the ps-based "claude" fallback');
+    assert.equal(session.isClaude, true, 'claudemi is claude-flavored for pane treatment');
+    assert.equal(session.transport, 'tmux');
+    assert.equal(session.transcriptPath, file, 'claudemi writes a normal claude-format transcript and must bind to it');
+    assert.equal(session.sessionId, uuid);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test('control: @cc_agent=claude pane still classifies as kind "claude" (unaffected baseline)', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-claude-classify-'));
   const projectsRoot = path.join(temp, 'projects');
@@ -159,9 +183,10 @@ test('control: no @cc_agent tag falls back to ps-based classification ("claude")
 // claude-pane behavior gate (lib/sessions.js, lib/picker-send-guard.js via
 // server.js) is built on. ─────────────────────────────────────────────────
 
-test('isClaudeKind: true for claude and claudex, false for codex/terminal/null/undefined', () => {
+test('isClaudeKind: true for claude, claudex, and claudemi; false for codex/terminal/null/undefined', () => {
   assert.equal(isClaudeKind('claude'), true);
   assert.equal(isClaudeKind('claudex'), true);
+  assert.equal(isClaudeKind('claudemi'), true);
   assert.equal(isClaudeKind('codex'), false);
   assert.equal(isClaudeKind('terminal'), false);
   assert.equal(isClaudeKind(null), false);

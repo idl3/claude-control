@@ -716,6 +716,36 @@ test('computeSubAgentActivity (claudex, sync): identical to claude — active un
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// Claudemi (the same claude binary, pointed at Kimi via the olam
+// auth-worker's /kimi route) mirrors claudex's transcript shape exactly —
+// same claude-shaped scan must fire identically for kind 'claudemi'.
+test('computeSubAgentActivity (claudemi, sync): identical to claude — active until the parent tool_result lands', () => {
+  const tmp = makeTmpDir();
+  const parentPath = path.join(tmp, 'session.jsonl');
+  fs.writeFileSync(parentPath, '');
+
+  const subDir = path.join(tmp, 'session', 'subagents');
+  const agentId = 'sync-agent-1';
+  const toolUseId = `tu-${agentId}`;
+  writeAgentFiles(subDir, agentId, { jsonlContent: '{"type":"assistant"}\n' });
+
+  let act = computeSubAgentActivity({ kind: 'claudemi', transcriptPath: parentPath });
+  assert.equal(act.active, true, 'no completion signal yet -> active');
+  assert.equal(act.count, 1);
+  assert.deepEqual(act.runningIds, [agentId]);
+
+  fs.appendFileSync(parentPath, `${JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+  })}\n`);
+
+  act = computeSubAgentActivity({ kind: 'claudemi', transcriptPath: parentPath });
+  assert.equal(act.active, false, 'sync tool_result landed -> not active');
+  assert.equal(act.count, 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('computeSubAgentActivity (claude, async): launch-ack alone must NOT complete; <task-notification> after quiet does', () => {
   const tmp = makeTmpDir();
   const parentPath = path.join(tmp, 'session.jsonl');

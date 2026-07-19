@@ -4,6 +4,7 @@ import {
   MLX_MODELS,
   CLAUDE_MODELS,
   CLAUDEX_MODELS,
+  CLAUDEMI_MODELS,
   recommendMlxModel,
   recommendClaudeModel,
   detectMachine,
@@ -38,12 +39,26 @@ test('catalog entries are well-formed', () => {
     assert.ok(typeof m.id === 'string' && m.id.length > 0);
     assert.ok(typeof m.label === 'string' && m.label.length > 0);
   }
+  for (const m of CLAUDEMI_MODELS) {
+    assert.ok(typeof m.id === 'string' && m.id.length > 0);
+    assert.ok(typeof m.label === 'string' && m.label.length > 0);
+  }
 });
 
 test('claudex catalog is a closed single-entry list', () => {
   // Deliberately exactly one entry (design rubric S3: no generic model /
   // base-URL configurability for the claudex agent kind).
   assert.deepEqual(CLAUDEX_MODELS, [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (Codex)' }]);
+});
+
+test('claudemi catalog is a closed two-entry list', () => {
+  // Deliberately exactly two entries — Kimi K3 (default) + Kimi K2.7 Code
+  // (design rubric S3 parity: no generic model / base-URL configurability
+  // for the claudemi agent kind, same as claudex).
+  assert.deepEqual(CLAUDEMI_MODELS, [
+    { id: 'kimi-k3', label: 'Kimi K3' },
+    { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+  ]);
 });
 
 test('detectMachine returns plausible specs', () => {

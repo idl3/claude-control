@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readConfig, writeConfig } from '../lib/config.js';
-import { CLAUDEX_MODELS } from '../lib/models.js';
+import { CLAUDEX_MODELS, CLAUDEMI_MODELS } from '../lib/models.js';
 
 let dataDir;
 
@@ -186,6 +186,67 @@ test('readConfig warns (but never throws) when discarding an invalid persisted c
 });
 
 test('readConfig does NOT warn when claudexModel is simply absent', () => {
+  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ launchCommand: 'yolo' }));
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    readConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warnings.length, 0);
+});
+
+// ── Claudemi fields (Kimi K3 harness — claudex's sibling) ────────────────────
+
+test('readConfig returns the claudemi default when no file exists', () => {
+  const cfg = readConfig();
+  assert.equal(cfg.claudemiModel, 'kimi-k3');
+  // The default must be a member of the curated closed list (single source
+  // of truth: lib/models.js CLAUDEMI_MODELS).
+  assert.ok(CLAUDEMI_MODELS.some((m) => m.id === cfg.claudemiModel));
+});
+
+test('writeConfig persists a valid claudemiModel', () => {
+  const saved = writeConfig({ claudemiModel: 'kimi-k2.7-code' });
+  assert.equal(saved.claudemiModel, 'kimi-k2.7-code');
+  assert.equal(readConfig().claudemiModel, 'kimi-k2.7-code');
+});
+
+test('writeConfig rejects a claudemiModel outside the closed list', () => {
+  assert.throws(() => writeConfig({ claudemiModel: 'kimi-99-invented' }), /must be one of/);
+  assert.throws(() => writeConfig({ claudemiModel: 42 }), /must be one of/);
+});
+
+test('readConfig falls back to the default on an unknown persisted claudemiModel', () => {
+  fs.writeFileSync(
+    path.join(dataDir, 'config.json'),
+    JSON.stringify({ claudemiModel: 'kimi-99-invented' }),
+  );
+  assert.equal(readConfig().claudemiModel, 'kimi-k3');
+});
+
+test('readConfig warns (but never throws) when discarding an invalid persisted claudemiModel', () => {
+  fs.writeFileSync(
+    path.join(dataDir, 'config.json'),
+    JSON.stringify({ claudemiModel: 'kimi-99-invented' }),
+  );
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  let cfg;
+  try {
+    cfg = readConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(cfg.claudemiModel, 'kimi-k3');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /kimi-99-invented/);
+});
+
+test('readConfig does NOT warn when claudemiModel is simply absent', () => {
   fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ launchCommand: 'yolo' }));
   const warnings = [];
   const origWarn = console.warn;
