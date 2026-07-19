@@ -98,7 +98,17 @@ interface AgentRowProps {
   onOpenTranscript?: (agentId: string, label: string) => void;
 }
 
+// Render probe (D2): counts AgentRowImpl executions so the render test can
+// assert "one agent's tick re-renders exactly one row". Mirrors the
+// _workflowParseCountForTest convention in lib/workflows.js — a bare counter
+// increment, zero cost in production.
+let rowRenders = 0;
+export function _agentRowRenderCountForTest(): number {
+  return rowRenders;
+}
+
 function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
+  rowRenders += 1;
   const state = agentDotState(agent);
   const [expanded, setExpanded] = useState(false);
 
@@ -207,11 +217,20 @@ interface PhaseGroupProps {
   onOpenTranscript?: (agentId: string, label: string) => void;
 }
 
+// Windowed rows (D1): a large phase mounts only a bounded slice + a "show N
+// more" affordance — the transcript's manual-windowing discipline (a state cap
+// + step button), NOT a virtualization dependency. 20 matches the tracker's
+// threshold; the step reveals the rest in one tap for the common 21–50 case.
+const WF_ROW_WINDOW = 20;
+const WF_ROW_STEP = 30;
+
 function PhaseGroup({ phase, phaseKey, solo, open, onToggle, onOpenTranscript }: PhaseGroupProps) {
   const activity = phaseActivity(phase);
   const done = phaseDone(phase);
   const total = phase.agents.length;
   const title = phase.title || 'Phase';
+  const [rowCap, setRowCap] = useState(WF_ROW_WINDOW);
+  const hiddenRows = Math.max(0, total - rowCap);
 
   // Solo phase: no collapse chrome, always show rows (card reads "name → agents").
   const showRows = solo || open;
@@ -220,7 +239,7 @@ function PhaseGroup({ phase, phaseKey, solo, open, onToggle, onOpenTranscript }:
     total === 0 ? (
       <li className="wf-phase-empty">queued — no agents yet</li>
     ) : (
-      phase.agents.map((agent, i) => (
+      phase.agents.slice(0, rowCap).map((agent, i) => (
         <AgentRow
           key={agent.agentId ?? `${phaseKey}:${i}`}
           agent={agent}
@@ -259,7 +278,20 @@ function PhaseGroup({ phase, phaseKey, solo, open, onToggle, onOpenTranscript }:
           </span>
         </button>
       )}
-      {showRows ? <ul className="wf-agent-list">{rows}</ul> : null}
+      {showRows ? (
+        <>
+          <ul className="wf-agent-list">{rows}</ul>
+          {hiddenRows > 0 ? (
+            <button
+              type="button"
+              className="wf-show-more"
+              onClick={() => setRowCap((c) => c + WF_ROW_STEP)}
+            >
+              show {hiddenRows} more agent{hiddenRows === 1 ? '' : 's'}
+            </button>
+          ) : null}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -280,6 +312,12 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
   const status = chipStatus(workflow);
   const phases = workflow.phases ?? [];
   const solo = phases.length === 1;
+
+  // Collapse-after-done (D1): a card that is ALREADY finished when it mounts
+  // (historical transcript) rests as a one-line summary — tap to expand. A card
+  // that finishes while mounted stays expanded (no jarring collapse mid-read);
+  // the initializer runs once, so a live running→completed flip never re-arms it.
+  const [collapsed, setCollapsed] = useState(() => status !== 'running');
 
   // Stable phase keys (index, else title, else position) for expansion state
   // and React keys. Pipelined/multi-run runs keep first-appearance order.
@@ -316,6 +354,38 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
   const elapsed = fmtDuration(workflow.durationMs);
   const agentCount = workflow.agentCount || workflow.total;
 
+  // Resting one-liner (D1): same DOM id so the dock's scroll target still
+  // resolves; expanding is a plain state flip (the full card mounts in place).
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        id={`wf-card-${workflow.runId}`}
+        className="wf-card wf-card--collapsed"
+        data-status={status}
+        aria-expanded={false}
+        aria-label={`Workflow ${name}, ${CHIP_TEXT[status]}, ${workflow.done} of ${workflow.total} agents. Expand.`}
+        onClick={() => setCollapsed(false)}
+      >
+        <span className="wf-glyph" aria-hidden="true">⚙</span>
+        <span className="wf-name">{name}</span>
+        <span className="wf-status-chip" data-status={status}>
+          <span className="wf-status-dot" aria-hidden="true" />
+          {CHIP_TEXT[status]}
+        </span>
+        <span className="wf-progress">
+          {workflow.done}/{workflow.total}
+        </span>
+        <span className="wf-collapsed-meta">
+          {agentCount} agents
+          {tokens ? ` · ${tokens}` : ''}
+          {elapsed ? ` · ${elapsed}` : ''}
+        </span>
+        <span className="wf-collapsed-caret" aria-hidden="true">▸</span>
+      </button>
+    );
+  }
+
   return (
     <section
       id={`wf-card-${workflow.runId}`}
@@ -336,6 +406,17 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
           <span className="wf-progress">
             {workflow.done}/{workflow.total}
           </span>
+          {status !== 'running' ? (
+            <button
+              type="button"
+              className="wf-collapse-btn"
+              aria-label="Collapse workflow card"
+              title="Collapse to one line"
+              onClick={() => setCollapsed(true)}
+            >
+              ▾
+            </button>
+          ) : null}
         </div>
         {workflow.summary ? <p className="wf-summary">{workflow.summary}</p> : null}
         <div className="wf-aggregate">

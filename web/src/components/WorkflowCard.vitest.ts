@@ -17,7 +17,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, fireEvent, within } from '@testing-library/react';
 import { createElement as h } from 'react';
 import type { Workflow, WorkflowAgent, WorkflowPhase } from '../lib/types';
-import { WorkflowCard, agentRowPropsEqual, fmtTokens, fmtDuration } from './WorkflowCard';
+import {
+  WorkflowCard,
+  agentRowPropsEqual,
+  fmtTokens,
+  fmtDuration,
+  _agentRowRenderCountForTest,
+} from './WorkflowCard';
 
 afterEach(cleanup);
 
@@ -74,11 +80,20 @@ function specimen(): Workflow {
   return mkWorkflow({ phases: [mkPhase({ agents })] });
 }
 
+/** Render + auto-expand: a finished card mounts as the D1 one-line resting
+ *  state; tests asserting on the full card click through it first. */
+function renderCard(wf: Workflow, onOpenAgentTranscript?: (agentId: string, label: string) => void) {
+  const utils = render(h(WorkflowCard, { workflow: wf, onOpenAgentTranscript }));
+  const collapsed = utils.container.querySelector('.wf-card--collapsed');
+  if (collapsed) fireEvent.click(collapsed);
+  return utils;
+}
+
 // --- tests -----------------------------------------------------------------
 
 describe('WorkflowCard — specimen', () => {
   it('renders header (name/status/progress) + one row per agent (1 phase × 6 done)', () => {
-    const { container } = render(h(WorkflowCard, { workflow: specimen() }));
+    const { container } = renderCard(specimen());
     expect(container.querySelector('.wf-card')).toBeTruthy();
     expect(container.querySelector('.wf-name')?.textContent).toBe('claudex-plan-review-fanout');
     const chip = container.querySelector('.wf-status-chip');
@@ -94,7 +109,7 @@ describe('WorkflowCard — specimen', () => {
   });
 
   it('single-phase card de-emphasizes the phase chrome (solo) and shows rows without a toggle', () => {
-    const { container } = render(h(WorkflowCard, { workflow: specimen() }));
+    const { container } = renderCard(specimen());
     const phase = container.querySelector('.wf-phase');
     expect(phase?.getAttribute('data-solo')).toBe('true');
     // solo phase head is not a button (no collapse control).
@@ -124,7 +139,7 @@ describe('WorkflowCard — state encoding (H3: shape + text, not hue)', () => {
         }),
       ],
     });
-    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    const { container } = renderCard(wf);
     const byState = (s: string) => container.querySelector(`.wf-agent[data-state="${s}"]`)!;
     expect(within(byState('queued') as HTMLElement).getByText('○')).toBeTruthy();
     expect(within(byState('queued') as HTMLElement).getByText('queued')).toBeTruthy();
@@ -149,7 +164,7 @@ describe('WorkflowCard — state encoding (H3: shape + text, not hue)', () => {
         }),
       ],
     });
-    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    const { container } = renderCard(wf);
     expect(container.querySelector('.wf-agent-live')?.textContent).toContain('StructuredOutput');
     const queuedBtn = container.querySelector('.wf-agent[data-state="queued"] .wf-agent-row') as HTMLButtonElement;
     expect(queuedBtn.disabled).toBe(true);
@@ -168,7 +183,7 @@ describe('WorkflowCard — phase grouping (Gestalt common-region, D4 auto-expand
         mkPhase({ index: 2, title: 'Build', agents: [mkAgent({ agentId: 'b1', state: 'running', resultPreview: null }), mkAgent({ agentId: 'b2', state: 'queued', resultPreview: null })] }),
       ],
     });
-    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    const { container } = renderCard(wf);
     const heads = container.querySelectorAll('button.wf-phase-head');
     expect(heads.length).toBe(2); // multi-phase → collapsible headers (not solo)
     const phases = container.querySelectorAll('.wf-phase');
@@ -185,7 +200,7 @@ describe('WorkflowCard — previews (T2: escaped, never HTML)', () => {
   it('renders a malicious resultPreview as inert text, injecting no elements', () => {
     const evil = '<img src=x onerror="alert(1)"><script>alert(2)</script>hello & <b>world</b>';
     const wf = mkWorkflow({ phases: [mkPhase({ agents: [mkAgent({ agentId: 'x', state: 'done', resultPreview: evil })] })] });
-    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    const { container } = renderCard(wf);
     fireEvent.click(container.querySelector('.wf-agent-row') as HTMLElement);
     const preview = container.querySelector('.wf-agent-preview')!;
     // The raw string is present verbatim as text …
@@ -224,7 +239,7 @@ describe('WorkflowCard — Agent View wiring (B3)', () => {
   it('"open full transcript" fires the callback with (agentId, label)', () => {
     const spy = vi.fn();
     const wf = mkWorkflow({ phases: [mkPhase({ agents: [mkAgent({ agentId: 'a7', label: 'feasibility', state: 'done' })] })] });
-    const { container } = render(h(WorkflowCard, { workflow: wf, onOpenAgentTranscript: spy }));
+    const { container } = renderCard(wf, spy);
     fireEvent.click(container.querySelector('.wf-agent-row') as HTMLElement); // expand
     fireEvent.click(container.querySelector('.wf-open-transcript') as HTMLElement);
     expect(spy).toHaveBeenCalledWith('a7', 'feasibility');
@@ -232,7 +247,7 @@ describe('WorkflowCard — Agent View wiring (B3)', () => {
 
   it('no transcript affordance when no callback is provided (read-only card)', () => {
     const wf = mkWorkflow({ phases: [mkPhase({ agents: [mkAgent({ agentId: 'a7', state: 'done' })] })] });
-    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    const { container } = renderCard(wf);
     fireEvent.click(container.querySelector('.wf-agent-row') as HTMLElement);
     expect(container.querySelector('.wf-open-transcript')).toBeNull();
   });
@@ -251,5 +266,95 @@ describe('WorkflowCard — formatters', () => {
     expect(fmtDuration(480000)).toBe('8m');
     expect(fmtDuration(3_840_000)).toBe('1h 4m');
     expect(fmtDuration(null)).toBeNull();
+  });
+});
+
+describe('WorkflowCard — Phase D perf hardening', () => {
+  function largeWorkflow(status = 'completed', active = false): Workflow {
+    const agents = (n: number, phase: string, state: WorkflowAgent['state'] = 'done') =>
+      Array.from({ length: n }, (_, i) =>
+        mkAgent({ agentId: `${phase}-${i}`, label: `${phase}:${i}`, state }),
+      );
+    return mkWorkflow({
+      status,
+      active,
+      agentCount: 40,
+      done: 40,
+      total: 40,
+      phases: [
+        mkPhase({ index: 1, title: 'Implement', agents: agents(24, 'impl') }),
+        mkPhase({ index: 2, title: 'Verify', agents: agents(12, 'verify') }),
+        mkPhase({ index: 3, title: 'Wrap', agents: agents(4, 'wrap') }),
+      ],
+    });
+  }
+
+  it('a finished card rests as a one-line summary; tap expands; ▾ re-collapses (D1)', () => {
+    const { container } = render(h(WorkflowCard, { workflow: specimen() }));
+    const collapsed = container.querySelector('.wf-card--collapsed');
+    expect(collapsed).toBeTruthy();
+    expect(container.querySelectorAll('.wf-agent').length).toBe(0);
+    expect(collapsed?.textContent).toContain('claudex-plan-review-fanout');
+    expect(collapsed?.textContent).toContain('6/6');
+    fireEvent.click(collapsed as HTMLElement);
+    expect(container.querySelector('.wf-card--collapsed')).toBeNull();
+    expect(container.querySelectorAll('.wf-agent').length).toBe(6);
+    fireEvent.click(container.querySelector('.wf-collapse-btn') as HTMLElement);
+    expect(container.querySelector('.wf-card--collapsed')).toBeTruthy();
+  });
+
+  it('a running card mounts expanded (no collapse control while live)', () => {
+    const wf = mkWorkflow({
+      status: 'running',
+      active: true,
+      phases: [mkPhase({ agents: [mkAgent({ agentId: 'r', state: 'running' })] })],
+    });
+    const { container } = render(h(WorkflowCard, { workflow: wf }));
+    expect(container.querySelector('.wf-card--collapsed')).toBeNull();
+    expect(container.querySelector('.wf-collapse-btn')).toBeNull();
+  });
+
+  it('DOM at rest is O(phases): expanding the 40-agent card mounts phase heads, zero rows', () => {
+    const { container } = renderCard(largeWorkflow());
+    // All three phases are completed -> collapsed by default (D4): no rows.
+    expect(container.querySelectorAll('.wf-phase').length).toBe(3);
+    expect(container.querySelectorAll('.wf-agent').length).toBe(0);
+  });
+
+  it('expanding a 24-agent phase mounts only the 20-row window + "show 4 more" (D1)', () => {
+    const { container } = renderCard(largeWorkflow());
+    const implHead = container.querySelectorAll('button.wf-phase-head')[0] as HTMLElement;
+    fireEvent.click(implHead);
+    expect(container.querySelectorAll('.wf-agent').length).toBe(20);
+    const more = container.querySelector('.wf-show-more');
+    expect(more?.textContent).toContain('show 4 more');
+    fireEvent.click(more as HTMLElement);
+    expect(container.querySelectorAll('.wf-agent').length).toBe(24);
+    expect(container.querySelector('.wf-show-more')).toBeNull();
+  });
+
+  it("one agent's tick re-renders exactly one row (D2 render probe)", () => {
+    const wf = mkWorkflow({
+      status: 'running',
+      active: true,
+      phases: [
+        mkPhase({
+          agents: [
+            mkAgent({ agentId: 'a', label: 'row-a', state: 'running', lastToolName: 'Bash', resultPreview: null }),
+            mkAgent({ agentId: 'b', label: 'row-b', state: 'running', lastToolName: 'Read', resultPreview: null }),
+            mkAgent({ agentId: 'c', label: 'row-c', state: 'done' }),
+          ],
+        }),
+      ],
+    });
+    const { rerender } = render(h(WorkflowCard, { workflow: wf }));
+    const before = _agentRowRenderCountForTest();
+    // A fresh run object (as each poll produces) where ONLY agent b advanced.
+    const next: Workflow = JSON.parse(JSON.stringify(wf));
+    next.phases[0].agents = next.phases[0].agents.map((a) =>
+      a.agentId === 'b' ? { ...a, lastToolName: 'Edit', tokens: (a.tokens ?? 0) + 500 } : { ...a },
+    );
+    rerender(h(WorkflowCard, { workflow: next }));
+    expect(_agentRowRenderCountForTest() - before).toBe(1);
   });
 });
