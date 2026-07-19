@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -21,12 +21,15 @@ jobs:
 
       # Backend (Node built-in test runner). The suite is hermetic — no tmux,
       # ffmpeg, or whisper are required (create-session + transcribe tests stub
-      # their externals).
+      # their externals). Runs via `npm test` (scoped to test/*.test.js) rather
+      # than a bare `node --test` — bare recursive discovery also picks up
+      # collab-engine/'s own `*.test.ts` files, a separate sub-package with its
+      # own tsx-loader test script, once Node's default test glob includes .ts.
       - name: Install backend deps
         run: npm ci
 
       - name: Backend tests
-        run: node --test
+        run: npm test
 
       # Web (Vite build + Vitest).
       - name: Install web deps
