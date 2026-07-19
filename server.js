@@ -1983,6 +1983,17 @@ const ptyBridge = createPtyBridge({
       if (!s || !tmux.isValidTarget(s.target)) return null;
       return { target: s.target };
     }
+    // Cmd+J agent-pane mirror (AgentTerminalOverlay): raw bidirectional
+    // pass-through to the session's LIVE agent tmux pane — the pane the
+    // agent itself runs in, distinct from the cc-shell scratch terminal
+    // above. `mode: 'agent-pane'` tells the bridge to use the fifo/pipe-pane
+    // mirror instead of a `tmux attach` spawn (see lib/pty-bridge.js's
+    // module header, "AGENT-MODE MIRROR").
+    if (sessionId.startsWith('agent:')) {
+      const s = sessionById(sessionId.slice('agent:'.length));
+      if (!s || !tmux.isValidTarget(s.target)) return null;
+      return { target: s.target, mode: 'agent-pane' };
+    }
     return null;
   },
 });
