@@ -1,6 +1,7 @@
 import type { ConnState } from '../lib/ws';
 import type { ResourceState } from '../hooks/useCockpit';
 import type { PushController } from '../hooks/usePushNotifications';
+import { isNativeShell } from '../lib/nativeShell';
 import { NotifyBell } from './NotifyBell';
 import { FullscreenButton } from './FullscreenButton';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
@@ -38,7 +39,14 @@ export function ResourceHud({
   const power = snap?.power;
 
   return (
-    <div className="hud" data-warn={over ? 'true' : 'false'} role="status">
+    <div
+      className="hud"
+      data-warn={over ? 'true' : 'false'}
+      role="status"
+      /* Desktop shell: the HUD row doubles as the window drag region (children
+         still receive clicks — the drag handler only fires on the bar itself). */
+      {...(isNativeShell ? { 'data-tauri-drag-region': 'true' } : {})}
+    >
       <span className="hud-brand">
         <ClaudeRobotIcon size={18} />
         claude control

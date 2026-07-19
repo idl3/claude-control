@@ -89,6 +89,7 @@ import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
 import { loadCosmosPref } from './lib/cosmosPrefs';
 import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
+import { isNativeShell, notifySessionNative } from './lib/nativeShell';
 import { loadPerfDiagnosticsEnabled, recordPerfEvent, savePerfDiagnosticsEnabled } from './lib/perfDiagnostics';
 
 
@@ -1332,6 +1333,7 @@ function AppInner() {
   // claudeWorking() over cockpit.sessions. See lib/shootingStars.ts's
   // detectTurnCompletions for the pure edge-detection logic.
   const turnActiveRef = useRef<Map<string, boolean>>(new Map());
+  const askPendingRef = useRef<Map<string, boolean>>(new Map());
   useEffect(() => {
     const { completed, nextActive } = detectTurnCompletions(
       turnActiveRef.current,
@@ -1340,6 +1342,32 @@ function AppInner() {
     );
     turnActiveRef.current = nextActive;
     if (completed.length) fireShootingStar();
+    // Desktop shell: WKWebView gets no Web Push, so mirror the server's push
+    // triggers (lib/push-trigger.js) natively when the window is unfocused —
+    // the turn-completion edges above plus ask-raised edges below. Clicking
+    // the banner deep-links via the shell's UNUserNotificationCenter handler,
+    // which sets location.hash = <sessionId> (same route as sw.js).
+    if (isNativeShell) {
+      const unfocused = !document.hasFocus();
+      const nameOf = (id: string) =>
+        cockpit.sessions.find((s) => s.id === id)?.name || 'Claude session';
+      if (unfocused) {
+        for (const id of completed)
+          notifySessionNative(id, nameOf(id), '✅ Turn finished');
+      }
+      for (const s of cockpit.sessions) {
+        const was = askPendingRef.current.get(s.id) ?? false;
+        const now = !!s.pending;
+        if (!was && now && unfocused) {
+          notifySessionNative(
+            s.id,
+            s.name || 'Claude session',
+            s.pendingQuestion || 'Needs your input',
+          );
+        }
+        askPendingRef.current.set(s.id, now);
+      }
+    }
   }, [cockpit.sessions, fireShootingStar]);
 
   // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
