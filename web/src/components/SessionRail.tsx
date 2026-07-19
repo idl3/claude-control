@@ -298,7 +298,7 @@ function RemoteRow({
             olam-side SPA change to surface message_usage lands separately. */}
         {s.model || s.ctxPct != null ? (
           <div className="session-meta">
-            {s.model ? <span className="meta-model">{formatModel(s.model)}</span> : null}
+            {s.model ? <ModelBadge model={s.model} /> : null}
             {remoteEffort ? (
               <span className={effortClass(remoteEffort, remoteIsCodex)}>{remoteEffort}</span>
             ) : null}
@@ -471,6 +471,38 @@ export function formatModel(model: string): string {
   return normalizeModel(model).replace(EFFORT_RE, '');
 }
 
+/** Coarse provider classification from a model id — the same prefix families the
+ *  auth-worker routes by: `gpt-` to OpenAI, `kimi-` or `moonshot-` to Moonshot,
+ *  `claude-` to Anthropic. Drives the model-badge tint so GPT/Kimi read distinctly
+ *  from Claude. Returns null for ids we don't recognise (badge keeps default hue). */
+export function modelProvider(model: string): 'anthropic' | 'openai' | 'moonshot' | null {
+  const m = model.trim().toLowerCase().replace(/\s+/g, '-');
+  if (m.startsWith('claude-') || /^(opus|sonnet|haiku|fable)-/.test(m)) return 'anthropic';
+  if (m.startsWith('gpt-') || /^o[1-9]-/.test(m)) return 'openai';
+  if (m.startsWith('kimi-') || m.startsWith('moonshot-')) return 'moonshot';
+  return null;
+}
+
+/** A model-badge base class plus its provider tint (`mp-openai`…), or the base
+ *  alone when the provider is unknown. Used by field-object render paths that pass
+ *  a className string rather than JSX. */
+export function modelBadgeClass(model: string, base = 'meta-model'): string {
+  const p = modelProvider(model);
+  return p ? `${base} mp-${p}` : base;
+}
+
+/** Model badge: the formatted model id, provider-tinted, raw id on hover. Single
+ *  render path for every model chip (rail, workflow rows, sub-agent chips) so a
+ *  real Claudex/Claudemi session shows "gpt-5.6-sol" / "kimi-k3" clearly instead
+ *  of a raw, untinted string. */
+export function ModelBadge({ model, className = 'meta-model' }: { model: string; className?: string }) {
+  return (
+    <span className={modelBadgeClass(model, className)} title={model}>
+      {formatModel(model)}
+    </span>
+  );
+}
+
 /** The reasoning effort baked into a model id (e.g. "gpt-5.5-xhigh" → "xhigh"),
  *  or null when the model carries none (all Claude models, most Codex ones).
  *  Exported for RailTokenConfig's live preview. */
@@ -533,7 +565,7 @@ function paneMetaFields(
     return s.cwd ? [{ key: 'cwd', text: basename(s.cwd), className: 'meta-cwd' }] : [];
   }
   const fields: MetaField[] = [];
-  if (s.model) fields.push({ key: 'model', text: formatModel(s.model), className: 'meta-model' });
+  if (s.model) fields.push({ key: 'model', text: formatModel(s.model), className: modelBadgeClass(s.model) });
   // Effort is a third rotating dimension: Claude reports it natively
   // (s.effort, from the statusLine's `.effort.level`); Codex has no dedicated
   // field so it stays parsed out of the model id suffix. Absent entirely for
