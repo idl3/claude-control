@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-spa",
+  "description": "Grants the tailnet-served SPA (remote origin) the minimal IPC it needs: the app's notify_session command and window dragging for the HUD drag region.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://*.ts.net", "https://*.ts.net:*", "http://*.ts.net:*"]
+  },
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}
