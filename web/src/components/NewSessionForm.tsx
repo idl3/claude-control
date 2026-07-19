@@ -13,10 +13,10 @@ interface NewSessionFormProps {
 }
 
 const FILTER_TITLE: Record<SessionFilter, string> = {
-  all: 'Showing all panes — tap to show agents (Claude + Claudex + Codex)',
-  agents: 'Showing agents (Claude + Claudex + Codex) — tap to show only Claude',
+  all: 'Showing all panes — tap to show agents (Claude + Claudex + Claudemi + Codex)',
+  agents: 'Showing agents (Claude + Claudex + Claudemi + Codex) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
-  codex: 'Showing Codex-flavored sessions (Claudex + legacy Codex) — tap to show only terminals',
+  codex: 'Showing Codex-flavored sessions (Claudex + Claudemi + legacy Codex) — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
 };
 
@@ -29,8 +29,10 @@ export function defaultName(now: number = Date.now()): string {
  *  Codex-flavored option (claudex-integration design decision 7, locked):
  *  a Codex-ish rail filter seeds the draft with claudex, while the legacy
  *  codex CLI/RPC harness stays reachable under the picker's "Legacy" label.
- *  Claude remains the overall default for every other filter. */
-export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' | 'claudex' {
+ *  Claude remains the overall default for every other filter. Claudemi (the
+ *  same claude binary → olam auth-worker → Kimi) mirrors claudex's shape but
+ *  is never auto-selected as a default — it's picker-reachable only. */
+export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' | 'claudex' | 'claudemi' {
   return filter === 'codex' ? 'claudex' : 'claude';
 }
 

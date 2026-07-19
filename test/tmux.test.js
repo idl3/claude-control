@@ -720,7 +720,7 @@ describe('assertTmuxSupportsEnv', () => {
     const { _run } = versionRun('tmux 3.1b\n');
     await assert.rejects(
       () => assertTmuxSupportsEnv({ _run }),
-      /tmux >= 3\.2 required for claudex env injection \(new-session -e\); found 3\.1 — brew upgrade tmux/,
+      /tmux >= 3\.2 required for claudex\/claudemi env injection \(new-session -e\); found 3\.1 — brew upgrade tmux/,
     );
   });
 
@@ -728,7 +728,7 @@ describe('assertTmuxSupportsEnv', () => {
     const { _run } = versionRun('tmux 2.9a\n');
     await assert.rejects(
       () => assertTmuxSupportsEnv({ _run }),
-      /tmux >= 3\.2 required for claudex env injection \(new-session -e\); found 2\.9 — brew upgrade tmux/,
+      /tmux >= 3\.2 required for claudex\/claudemi env injection \(new-session -e\); found 2\.9 — brew upgrade tmux/,
     );
   });
 

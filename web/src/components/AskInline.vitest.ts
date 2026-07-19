@@ -249,7 +249,7 @@ describe('AskInline plan-review mode (kind=prompt + planMarkdown)', () => {
 
 // ── Codex single-select detection (agentName) ─────────────────────────────────
 
-type SessionKind = 'claude' | 'claudex' | 'codex' | 'terminal';
+type SessionKind = 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal';
 
 function deriveAgentName(kind: SessionKind | undefined): string {
   return kind === 'codex' ? 'Codex' : 'Claude';
@@ -269,6 +269,12 @@ describe('AskInline agentName derivation', () => {
   // (design decision 7); pane-level agentName/icon treatment stays claude-like.
   it('uses "Claude" for claudex sessions', () => {
     expect(deriveAgentName('claudex')).toBe('Claude');
+  });
+
+  // claudemi (the same claude binary, pointed at Kimi via the olam
+  // auth-worker) mirrors claudex's pane-level treatment exactly.
+  it('uses "Claude" for claudemi sessions', () => {
+    expect(deriveAgentName('claudemi')).toBe('Claude');
   });
 
   it('uses "Claude" for terminal sessions', () => {
