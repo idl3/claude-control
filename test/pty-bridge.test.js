@@ -647,6 +647,322 @@ test('a failure after the ephemeral session was created (e.g. set-option/select-
   assert.equal(bridge.liveCount(), 0);
 });
 
+// ---------------------------------------------------------------------------
+// 7. Agent-kind (kind: 'agent') — the Cmd+J raw bidirectional mirror onto a
+//    session's LIVE agent tmux pane. No ephemeral session, no node-pty spawn:
+//    a fifo + `pipe-pane -O` for output, `send-keys -l` for input, a per-client
+//    `capture-pane`+cursor seed on attach, and resize as a structural no-op.
+//    See lib/pty-bridge.js's module header, "AGENT-MODE MIRROR".
+// ---------------------------------------------------------------------------
+
+/** A minimal fifo-read-stream fake: an EventEmitter with a `destroy()`. */
+class FakeFifoStream extends EventEmitter {
+  constructor() {
+    super();
+    this.destroyed = false;
+  }
+  destroy() { this.destroyed = true; }
+}
+
+/**
+ * Agent-kind deps preset layered on `baseDeps`: `resolveTarget` resolves
+ * every session id straight through to itself with `mode: 'agent-pane'`
+ * (mirrors server.js's real `agent:<id>` branch, minus the prefix — these
+ * tests exercise the BRIDGE, not server.js's resolveTarget), and every
+ * agent-kind seam (`mkfifo`/`makeFifoPath`/`unlinkFifo`/`pipePane`/
+ * `pipePaneOff`/`sendLiteral`/`capturePane`/`cursorPosition`/
+ * `createReadStream`) defaults to a hermetic no-op/fake — NO real tmux, NO
+ * real filesystem, matching every other test in this file.
+ */
+function agentDeps(overrides = {}) {
+  return baseDeps({
+    resolveTarget: (sessionId) => ({ target: sessionId, mode: 'agent-pane' }),
+    mkfifo: async () => {},
+    makeFifoPath: (target) => `/tmp/fake-fifo-${String(target).replace(/[:.]/g, '_')}`,
+    unlinkFifo: async () => {},
+    pipePane: async () => {},
+    pipePaneOff: async () => {},
+    sendLiteral: async () => {},
+    capturePane: async () => '',
+    cursorPosition: async () => ({ x: 0, y: 0 }),
+    createReadStream: () => new FakeFifoStream(),
+    ...overrides,
+  });
+}
+
+test('agent-kind attach: no ephemeral tmux session or node-pty spawn — pipe-pane starts the fifo mirror instead', async () => {
+  let spawnCount = 0;
+  const tmuxCalls = [];
+  const pipePaneCalls = [];
+  const bridge = createPtyBridge(agentDeps({
+    spawn: () => { spawnCount += 1; return makeFakePty(); },
+    runTmuxCmd: async (tmuxBin, args) => { tmuxCalls.push(args); return { stdout: '', stderr: '' }; },
+    pipePane: async (target, cmd) => { pipePaneCalls.push({ target, cmd }); },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  assert.equal(spawnCount, 0, 'no node-pty spawn for an agent-kind attach');
+  assert.ok(!tmuxCalls.some((a) => a[2] === 'new-session'), 'no ephemeral grouped session for an agent-kind attach');
+  assert.equal(pipePaneCalls.length, 1, 'pipe-pane started exactly once');
+  assert.equal(pipePaneCalls[0].target, 'main:0');
+  assert.match(pipePaneCalls[0].cmd, /^cat >> /, 'pipe-pane writes into the fifo via cat');
+  assert.equal(jsonFrames(ws)[0]?.type, 'attached');
+  assert.equal(bridge.liveCount(), 1);
+});
+
+test('agent-kind dedupe: two clients attaching the same session start pipe-pane exactly once', async () => {
+  let pipePaneCount = 0;
+  const bridge = createPtyBridge(agentDeps({
+    pipePane: async () => { pipePaneCount += 1; },
+  }));
+
+  const wsA = new FakeWs();
+  const wsB = new FakeWs();
+  bridge.handleConnection(wsA, fakeReq());
+  bridge.handleConnection(wsB, fakeReq());
+  attach(wsA, 'main:0');
+  attach(wsB, 'main:0');
+  await tick();
+
+  assert.equal(pipePaneCount, 1, 'only one pipe-pane started for two concurrent attaches to the same session');
+  assert.equal(bridge.liveCount(), 1);
+});
+
+test('agent-kind attach seeds EACH newly-attached client with a capture-pane + cursor redraw frame, sent before it is registered as a broadcast recipient', async () => {
+  const bridge = createPtyBridge(agentDeps({
+    capturePane: async () => 'line one\nline two',
+    cursorPosition: async () => ({ x: 3, y: 1 }),
+  }));
+
+  const wsA = new FakeWs();
+  bridge.handleConnection(wsA, fakeReq());
+  attach(wsA, 'main:0');
+  await tick();
+
+  const framesA = binaryFrames(wsA);
+  assert.equal(framesA.length, 1, 'exactly one seed frame sent to the first attaching client');
+  const bodyA = framesA[0].subarray(1).toString('utf8');
+  assert.ok(bodyA.startsWith('\x1b[2J\x1b[H'), 'seed clears the screen and homes the cursor first');
+  assert.ok(bodyA.includes('line one\r\nline two'), 'seed carries the captured pane text (CRLF-joined)');
+  assert.ok(bodyA.endsWith('\x1b[2;4H'), 'seed repositions the cursor (1-indexed x/y)');
+
+  // A second client dedupe-attaching to the SAME already-live session gets
+  // its OWN independent seed too (the seed is per-client, not per-entry —
+  // every viewer needs its own screen painted on attach).
+  const wsB = new FakeWs();
+  bridge.handleConnection(wsB, fakeReq());
+  attach(wsB, 'main:0');
+  await tick();
+
+  assert.equal(binaryFrames(wsB).length, 1, 'the second attacher gets its own seed frame');
+  assert.equal(binaryFrames(wsA).length, 1, 'the first attacher does not get a duplicate seed from the second attach');
+});
+
+test('agent-kind input: a binary keystroke frame is sent via send-keys -l (sendLiteral) to the live tmux pane, never pty.write (there is no pty)', async () => {
+  const sendLiteralCalls = [];
+  const bridge = createPtyBridge(agentDeps({
+    sendLiteral: async (target, text) => { sendLiteralCalls.push({ target, text }); },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  const keystroke = Buffer.concat([Buffer.from([PTY_CHANNEL_DATA]), Buffer.from('y\n', 'utf8')]);
+  ws.emit('message', keystroke, true);
+  await tick();
+
+  assert.equal(sendLiteralCalls.length, 1);
+  assert.deepEqual(sendLiteralCalls[0], { target: 'main:0', text: 'y\n' });
+});
+
+test('agent-kind input ordering: two frames sent back-to-back deliver in strict FIFO order even when the first send is slow (regression for the fire-and-forget race)', async () => {
+  // The bug: the handler used to fire `_sendLiteral(...).catch(...)` per
+  // frame with no ordering guarantee, so two `tmux send-keys -l` execs raced
+  // and could COMPLETE (i.e. actually deliver bytes to the pane) in whatever
+  // order the OS scheduled them — not the order the frames arrived in. This
+  // fake makes the FIRST call's underlying "exec" resolve much later than the
+  // second call's would if fired concurrently, which is exactly the shape of
+  // that race: it reproduces the reordering on the old fire-and-forget code
+  // (delivered ends up ['b', 'a']) and proves the per-entry send chain fixes
+  // it (delivered is ['a', 'b']) by recording order at RESOLUTION time, not
+  // invocation time — invocation order alone can't distinguish the two.
+  const delivered = [];
+  let callCount = 0;
+  const bridge = createPtyBridge(agentDeps({
+    sendLiteral: async (target, text) => {
+      callCount += 1;
+      if (callCount === 1) await tick(20);
+      delivered.push(text);
+    },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  const frame1 = Buffer.concat([Buffer.from([PTY_CHANNEL_DATA]), Buffer.from('a', 'utf8')]);
+  const frame2 = Buffer.concat([Buffer.from([PTY_CHANNEL_DATA]), Buffer.from('b', 'utf8')]);
+  ws.emit('message', frame1, true);
+  ws.emit('message', frame2, true);
+  await tick(150);
+
+  assert.deepEqual(delivered, ['a', 'b'], 'bytes must be delivered in the order the frames arrived, not in whatever order the underlying sends happen to complete');
+});
+
+test('agent-kind resize is a structural no-op: no crash, no sendLiteral/pipePane call, entry stays alive', async () => {
+  const sendLiteralCalls = [];
+  const bridge = createPtyBridge(agentDeps({
+    sendLiteral: async (target, text) => { sendLiteralCalls.push({ target, text }); },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+
+  resize(ws, 120, 40);
+  await tick();
+
+  assert.equal(sendLiteralCalls.length, 0, 'a resize never sends any bytes to the pane');
+  assert.equal(bridge.liveCount(), 1, 'the entry is untouched by a resize (no size negotiation for agent-kind)');
+});
+
+test('agent-kind output: fifo stream data fans out to every attached client, framed with the 0x00 channel header', async () => {
+  let stream = null;
+  const bridge = createPtyBridge(agentDeps({
+    createReadStream: () => { stream = new FakeFifoStream(); return stream; },
+  }));
+
+  const wsA = new FakeWs();
+  const wsB = new FakeWs();
+  bridge.handleConnection(wsA, fakeReq());
+  bridge.handleConnection(wsB, fakeReq());
+  attach(wsA, 'main:0');
+  attach(wsB, 'main:0');
+  await tick();
+
+  // Clear the per-client seed frames so only the fan-out frame is asserted below.
+  wsA.sent = [];
+  wsB.sent = [];
+
+  stream.emit('data', Buffer.from('agent output\n', 'utf8'));
+
+  const framesA = binaryFrames(wsA);
+  const framesB = binaryFrames(wsB);
+  assert.equal(framesA.length, 1);
+  assert.equal(framesB.length, 1);
+  assert.equal(framesA[0][0], PTY_CHANNEL_DATA);
+  assert.equal(framesA[0].subarray(1).toString('utf8'), 'agent output\n');
+  assert.deepEqual(framesA[0], framesB[0], 'both attached clients receive the identical framed chunk');
+});
+
+test('agent-kind teardown (last client detaches): pipe-pane is stopped, the read stream is destroyed, and the fifo is unlinked', async () => {
+  let stream = null;
+  const pipePaneOffTargets = [];
+  const unlinkedPaths = [];
+  const bridge = createPtyBridge(agentDeps({
+    createReadStream: () => { stream = new FakeFifoStream(); return stream; },
+    pipePaneOff: async (target) => { pipePaneOffTargets.push(target); },
+    unlinkFifo: async (fifoPath) => { unlinkedPaths.push(fifoPath); },
+    scheduleIdleReap: (fn) => { fn(); return null; },
+    clearIdleReap: () => {},
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+  assert.equal(bridge.liveCount(), 1);
+
+  ws.emit('close');
+  await tick();
+
+  assert.equal(bridge.liveCount(), 0, 'entry removed once the last client detaches');
+  assert.deepEqual(pipePaneOffTargets, ['main:0'], 'pipe-pane was turned off for the target');
+  assert.equal(stream.destroyed, true, 'the fifo read stream was destroyed');
+  assert.deepEqual(unlinkedPaths, ['/tmp/fake-fifo-main_0'], 'the fifo file was unlinked');
+});
+
+test('agent-kind pane death mid-session (fifo stream ends) tears down and notifies clients with dead-target + close 4000', async () => {
+  let stream = null;
+  const pipePaneOffTargets = [];
+  const bridge = createPtyBridge(agentDeps({
+    createReadStream: () => { stream = new FakeFifoStream(); return stream; },
+    pipePaneOff: async (target) => { pipePaneOffTargets.push(target); },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'main:0');
+  await tick();
+  assert.equal(bridge.liveCount(), 1);
+
+  stream.emit('end');
+  await tick();
+
+  const frames = jsonFrames(ws);
+  assert.equal(frames.at(-1).type, 'error');
+  assert.equal(frames.at(-1).code, 'dead-target');
+  assert.equal(ws.closedWith?.code, 4000);
+  assert.equal(bridge.liveCount(), 0, 'entry torn down when the agent pane ends mid-use');
+  assert.deepEqual(pipePaneOffTargets, ['main:0'], 'teardown still turns pipe-pane off even on a pane-death end event');
+});
+
+test('agent-kind dead base target: has-session fails -> DeadTargetError, mkfifo/pipe-pane never attempted', async () => {
+  let mkfifoCount = 0;
+  let pipePaneCount = 0;
+  const bridge = createPtyBridge(agentDeps({
+    runTmuxCmd: async (tmuxBin, args) => {
+      if (args[2] === 'has-session') throw new Error(`can't find session: ${args[4]}`);
+      return { stdout: '', stderr: '' };
+    },
+    mkfifo: async () => { mkfifoCount += 1; },
+    pipePane: async () => { pipePaneCount += 1; },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'ghost:1');
+  await tick();
+
+  assert.equal(mkfifoCount, 0, 'no fifo created for a dead base target');
+  assert.equal(pipePaneCount, 0, 'pipe-pane never started for a dead base target');
+  const frames = jsonFrames(ws);
+  assert.equal(frames[0]?.code, 'dead-target');
+  assert.equal(ws.closedWith?.code, 4000);
+  assert.equal(bridge.liveCount(), 0);
+});
+
+test('LRU cap evicts an idle agent-kind entry via pipe-pane-off + fifo teardown, never pty.kill', async () => {
+  const pipePaneOffTargets = [];
+  const bridge = createPtyBridge(agentDeps({
+    pipePaneOff: async (target) => { pipePaneOffTargets.push(target); },
+    maxPtys: 1,
+  }));
+
+  const wsA = new FakeWs();
+  bridge.handleConnection(wsA, fakeReq());
+  attach(wsA, 'a:1');
+  await tick();
+  wsA.emit('close'); // idle, no idle-grace override -> stays registered but 0 clients
+  await tick();
+
+  const wsB = new FakeWs();
+  bridge.handleConnection(wsB, fakeReq());
+  attach(wsB, 'b:1');
+  await tick();
+
+  assert.equal(bridge.liveCount(), 1, 'stays at the cap');
+  assert.ok(pipePaneOffTargets.includes('a:1'), 'the idle agent-kind entry was evicted via pipe-pane-off teardown');
+});
+
 test('bridge init sweeps and kills orphaned _ccpty_* sessions left by a prior crash, without touching non-matching sessions', async () => {
   const killed = [];
   const bridge = createPtyBridge(baseDeps({

@@ -10316,6 +10316,48 @@ select.config-input {
   flex-direction: column;
   background: var(--bg);
 }
+
+/* --- AgentTerminalOverlay (⌘J): full-screen raw mirror of the session's
+   LIVE agent tmux pane (the pane the agent itself runs in) — distinct from
+   the composer's `>_` cc-shell scratch terminal (.composer-term-canvas,
+   bounded to the composer card). Same full-screen-takeover tier as
+   .studio-overlay (300, see comment above) since the two are mutually
+   exclusive at runtime and share the same "hero surface, not a bottom-sheet
+   modal" role — .modal-backdrop/.modal's bounded 560px/90dvh sizing doesn't
+   fit a terminal takeover. */
+.agent-term-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: #0b0d10;
+  display: flex;
+  flex-direction: column;
+}
+.agent-term-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Focus-handoff wrapper (AgentTerminalOverlay.tsx queries its one <textarea>
+   descendant) — needs the same flex-child sizing as .agent-term-canvas below
+   so it passes a definite height down to XtermHost's own wrap. */
+.agent-term-canvas-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Mirrors .terminal-view-canvas: the flex-child sizing XtermHost's
+   .term-canvas-wrap/.term-canvas (position:relative / absolute+inset:0)
+   need to fill definitely rather than grow with content (no-fit-loop fix,
+   see XtermHost.tsx's applyFit comment). */
+.agent-term-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #0b0d10;
+}
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
    Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;

@@ -50,6 +50,7 @@ import type { ActivePrompt } from './components/AskInline';
 import { SubAgentPanel } from './components/SubAgentPanel';
 import { WorkflowAgentView } from './components/WorkflowAgentView';
 import { ProcessPanel } from './components/ProcessPanel';
+import { AgentTerminalOverlay } from './components/AgentTerminalOverlay';
 import { RawEventPanel } from './components/RawEventPanel';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { PerfDiagnostics } from './components/PerfDiagnostics';
@@ -927,6 +928,10 @@ function AppInner() {
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  // Cmd+J: full-screen raw mirror of the selected session's LIVE agent tmux
+  // pane (AgentTerminalOverlay) — separate surface from the composer's `>_`
+  // cc-shell scratch terminal (openTerminal/toggleTerminal above).
+  const [agentTerminalOpen, setAgentTerminalOpen] = useState(false);
   // Session artifact gallery (Phase D): the disclosure toggle lives in the
   // header beside Rename; ArtifactGallery itself is now a controlled lens
   // (open/onCountChange props) rather than owning its own head button.
@@ -958,6 +963,7 @@ function AppInner() {
     setViewingAgentId(null);
     setViewingWorkflowAgent(null);
     setRawOpen(false);
+    setAgentTerminalOpen(false);
   }, [cockpit.selectedId]);
   // Pill click → show inline transcript; does NOT open the side panel.
   const openAgent = useCallback((agentId: string) => {
@@ -1939,18 +1945,26 @@ function AppInner() {
   }, [openDraft]);
 
   // Detail-head shortcuts (these mirror the header icon buttons + their reveal
-  // badges): ⌘J raw terminal · ⌘U sub-agents · ⌘B minimise sidebar. (Rename has
-  // NO shortcut — ⌘/Ctrl+E is left free; Ctrl+E is end-of-line in the shell.)
+  // badges): ⌘J agent-pane terminal (AgentTerminalOverlay — a live mirror of
+  // the session's own agent pane, NOT the `>_` cc-shell scratch terminal,
+  // which has no shortcut of its own) · ⌘U sub-agents · ⌘B minimise sidebar.
+  // (Rename has NO shortcut — ⌘/Ctrl+E is left free; Ctrl+E is end-of-line in
+  // the shell.) Guarded by the aria-modal check (like the ⌘N handler above)
+  // so an open dialog owns the keys instead of double-handling here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog owns the keys
       const k = e.key.toLowerCase();
       if (k === 'b') {
         e.preventDefault();
         toggleRail();
       } else if (k === 'j' && selectedSession) {
         e.preventDefault();
-        toggleTerminal();
+        // Not a toggle: the aria-modal guard above already blocks this branch
+        // while the overlay (or any other dialog) is open, and closing it is
+        // Cmd+Esc/X-button only (bare Escape must reach the mirrored pane).
+        setAgentTerminalOpen(true);
       } else if (k === 'u' && cockpit.subagents.length > 0) {
         e.preventDefault();
         setPanelAgentId(null); // ⌘U opens the list, not a focused agent
@@ -1959,7 +1973,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedSession, cockpit.subagents.length, toggleRail, toggleTerminal]);
+  }, [selectedSession, cockpit.subagents.length, toggleRail]);
 
   // Claude panes ⌘1-9 can address: VISIBLE, LOCAL RUNNING sessions only — filter
   // must allow Claude (not 'terminal'), exclude remote/olam cloud sessions (they
@@ -2636,9 +2650,7 @@ function AppInner() {
                       type="button"
                       className="detail-action"
                       aria-label="Open raw terminal"
-                      title="Raw terminal (⌘J)"
-                      data-hotkey="⌘J"
-                      data-hotkey-dir="down"
+                      title="Raw terminal — scratch shell"
                       onClick={openTerminal}
                     >
                       <TerminalSquareIcon />
@@ -2966,6 +2978,15 @@ function AppInner() {
 
         {paletteOpen ? (
           <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
+        ) : null}
+
+        {agentTerminalOpen && selectedSession ? (
+          <ErrorBoundary label="Agent terminal failed to render">
+            <AgentTerminalOverlay
+              session={selectedSession}
+              onClose={() => setAgentTerminalOpen(false)}
+            />
+          </ErrorBoundary>
         ) : null}
 
         <ErrorBoundary label="Device diagnostics failed to render">
