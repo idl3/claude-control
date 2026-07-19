@@ -10358,6 +10358,18 @@ select.config-input {
   min-height: 0;
   background: #0b0d10;
 }
+/* Pane-scale mode (XtermHost's `paneScale` prop): the grid is pinned to the
+   real tmux pane's size and the RENDERED text is zoomed (fontSize) to fill
+   whichever dimension is limiting — the other dimension is letterboxed, not
+   stretched. `.xterm` has no explicit width/height of its own (xterm.css),
+   so as a flex item here it shrinks to its actual rendered size (driven by
+   `.xterm-screen`'s JS-set pixel dimensions) instead of the block-default
+   100%-width stretch that produced the black gap this fixes. */
+.agent-term-canvas .term-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
    Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;
