@@ -66,7 +66,7 @@ mod notifications {
                             // encodeURIComponent to mirror App.tsx's own hash writes
                             // (session ids can contain '%', e.g. tmux pane ids).
                             if let Ok(json) = serde_json::to_string(&sid) {
-                                let _ = w.eval(&format!(
+                                let _ = w.eval(format!(
                                     "location.hash = encodeURIComponent({json})"
                                 ));
                             }
@@ -88,21 +88,19 @@ mod notifications {
     /// Request authorization + install the click delegate. Call once at setup,
     /// from the main thread, only when bundled.
     pub fn init(app: tauri::AppHandle) {
-        unsafe {
-            let center = UNUserNotificationCenter::currentNotificationCenter();
-            let opts = UNAuthorizationOptions::Alert
-                | UNAuthorizationOptions::Sound
-                | UNAuthorizationOptions::Badge;
-            let auth_block =
-                block2::StackBlock::new(|_granted: Bool, _err: *mut NSError| {}).copy();
-            center.requestAuthorizationWithOptions_completionHandler(opts, &auth_block);
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let opts = UNAuthorizationOptions::Alert
+            | UNAuthorizationOptions::Sound
+            | UNAuthorizationOptions::Badge;
+        let auth_block =
+            block2::StackBlock::new(|_granted: Bool, _err: *mut NSError| {}).copy();
+        center.requestAuthorizationWithOptions_completionHandler(opts, &auth_block);
 
-            let delegate = Delegate::new(app);
-            center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-            // The center holds its delegate weakly; keep it alive for the app's
-            // lifetime.
-            std::mem::forget(delegate);
-        }
+        let delegate = Delegate::new(app);
+        center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        // The center holds its delegate weakly; keep it alive for the app's
+        // lifetime.
+        std::mem::forget(delegate);
     }
 
     pub fn notify(session_id: &str, title: &str, body: &str) {
