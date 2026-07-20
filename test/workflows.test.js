@@ -688,3 +688,30 @@ test('new-format: declaredPhases, promptPreview and lastReply enrichment', () =>
   assert.equal(noTranscript.promptPreview, null);
   assert.equal(noTranscript.lastReply, null);
 });
+
+// 19. Legacy docs record 'error' as a REAL agent state (runtime exhausted
+// retries) plus the attempt count — both must pass through (clamping error →
+// queued would hide finished-run failures), and roll up into run.failed.
+test('legacy: error agent state + attempt pass through; run.failed tallies', () => {
+  _resetWorkflowCache();
+  const { transcriptPath, base } = makeNewSession();
+  const wfDir = path.join(base, 'workflows');
+  writeRun(wfDir, 'witherr', makeRunDoc({
+    runId: 'witherr',
+    name: 'witherr',
+    status: 'completed',
+    startTime: 1000,
+    phases: [{ index: 1, title: 'Find' }],
+    agents: [
+      { index: 1, label: 'a', phaseIndex: 1, phaseTitle: 'Find', agentId: 'a1', state: 'done', attempt: 1 },
+      { index: 2, label: 'b (retry 1)', phaseIndex: 1, phaseTitle: 'Find', agentId: 'a2', state: 'error', attempt: 2 },
+    ],
+  }));
+  const runs = computeWorkflowActivity({ transcriptPath });
+  const run = runs.find((r) => r.runId === 'witherr');
+  assert.equal(run.failed, 1);
+  assert.equal(run.done, 1);
+  const errAgent = run.phases[0].agents.find((a) => a.agentId === 'a2');
+  assert.equal(errAgent.state, 'error');
+  assert.equal(errAgent.attempts, 2);
+});
