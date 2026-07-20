@@ -71,11 +71,17 @@ const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, monospace";
 // pane-scale only: a safety floor for `applyPaneScale`'s convergence loop so
 // a mid-layout/zero-sized measure (a rect read before the box has settled)
 // can't converge to an unreadably small font. NOT a target to force up to —
-// a floor set above the actual width-limited size would clip the pane's
-// right-hand columns off-screen, so keep this conservative and tune it
-// on-device (measured against a real iOS pane mirror, not a simulator
-// default).
+// keep this conservative and tune it on-device (measured against a real iOS
+// pane mirror, not a simulator default).
 const MIN_PANE_FONT_PX = 9;
+
+// pane-scale only: a safety ceiling for the same loop. Convergence is
+// height-only (see applyPaneScale below) — a pane with few rows relative to
+// the viewport's height (a short pane, or a tall phone viewport) would
+// otherwise converge to an oversized font. 22 stays comfortably above the
+// 14px construction default (room for genuinely short panes to look
+// intentional, not just "big") without tipping into a cartoonish scale.
+const MAX_PANE_FONT_PX = 22;
 
 /**
  * Owns ONE `@xterm/xterm` `Terminal` instance + its `pty-client.ts` socket —
@@ -218,12 +224,19 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
     let lastPaneSize: { cols: number; rows: number } | null = null;
 
     // pane-scale only: pin the grid to the pane's exact size, then converge
-    // fontSize so the rendered `.xterm-screen` fills whichever dimension of
-    // the container is limiting (the other dimension letterboxes at the
-    // top/left via the flex-start CSS on .agent-term-canvas .term-canvas).
-    // Font-size scaling — not a CSS transform — is deliberate: xterm redraws
-    // each glyph natively at the new size, so text stays crisp instead of
-    // being raster-scaled.
+    // fontSize so the rendered `.xterm-screen` fills the container's HEIGHT
+    // (rows letterbox top-aligned via the flex-start CSS on
+    // .agent-term-canvas .term-canvas — there's no vertical slack to fill).
+    // Width is deliberately NOT part of convergence: a wide pane (many
+    // columns) is left to overflow horizontally at this same legible font
+    // rather than being shrunk to fit — `.term-canvas-wrap.agent-term-canvas`
+    // is a horizontal scroll container (styles.css) so every column stays
+    // reachable by panning. A pane that already fits within the viewport's
+    // width naturally gets no scrollbar; nothing here special-cases that —
+    // it falls out of the browser's own overflow calculation. Font-size
+    // scaling — not a CSS transform — is deliberate: xterm redraws each
+    // glyph natively at the new size, so text stays crisp instead of being
+    // raster-scaled.
     const applyPaneScale = (cols: number, rows: number) => {
       const el = containerRef.current;
       if (!el) return;
@@ -236,17 +249,29 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       // lands within a pixel or two — a few more tighten it up. Capped so a
       // box that's still mid-layout (0-sized, or xterm's own resize hasn't
       // repainted yet) can't spin forever.
+      let safeFontSize: number | null = null;
       for (let i = 0; i < 6; i += 1) {
         const rect = screen.getBoundingClientRect();
-        const cw = el.clientWidth;
         const ch = el.clientHeight;
-        if (rect.width < 1 || rect.height < 1 || cw < 2 || ch < 2) return;
-        const ratio = Math.min(cw / rect.width, ch / rect.height);
+        if (rect.width < 1 || rect.height < 1 || el.clientWidth < 2 || ch < 2) return;
+        // Cell height is quantized to whole device pixels, so for some row
+        // counts no fontSize hits the target exactly and the ratio below
+        // can oscillate between the nearest-under and nearest-over pixel
+        // height instead of settling. `overflow-y: hidden` on this element
+        // (styles.css) means an OVERshoot clips bottom rows with no way to
+        // reach them, while an UNDERshoot just letterboxes (an already-
+        // accepted outcome) — remember the last fontSize that fit and fall
+        // back to it below if the loop can't settle cleanly.
+        if (rect.height <= ch) safeFontSize = term.options.fontSize ?? safeFontSize;
+        const ratio = ch / rect.height;
         if (Math.abs(ratio - 1) < 0.01) return;
         const current = term.options.fontSize ?? 12;
-        const next = Math.max(MIN_PANE_FONT_PX, current * ratio);
-        if (Math.abs(next - current) < 0.05) return;
+        const next = Math.min(MAX_PANE_FONT_PX, Math.max(MIN_PANE_FONT_PX, current * ratio));
+        if (Math.abs(next - current) < 0.05) break;
         term.options.fontSize = next;
+      }
+      if (safeFontSize != null && screen.getBoundingClientRect().height > el.clientHeight) {
+        term.options.fontSize = safeFontSize;
       }
     };
 
