@@ -3320,14 +3320,18 @@ async function handleClientMessage(ws, msg) {
       // move-window renumbers the window's index in its new session, so the
       // pre-move target string is stale — recompute it by the moved window's
       // STABLE pane id (%N survives the move) rather than trusting any index
-      // math. A lookup failure (e.g. pane vanished mid-move) degrades to
+      // math. Force a fresh registry rebuild (refreshNow, not refresh — a
+      // periodic tick may already be in flight from before the move and would
+      // otherwise no-op) so sessionById/subscribe resolve the new id
+      // immediately instead of racing the next 4s poll and erroring "unknown
+      // session". A lookup failure (e.g. pane vanished mid-move) degrades to
       // newId: null rather than failing the whole op — the move itself
       // already succeeded.
       let newId = null;
       try {
-        const panes = await tmux.listPanes();
-        const moved = panes.find((p) => p.paneId === srcPaneId);
-        newId = moved ? moved.target : null;
+        await registry.refreshNow();
+        const moved = registry.getSessions().find((s) => s.paneId === srcPaneId);
+        newId = moved ? moved.id : null;
       } catch {
         /* newId stays null — move already succeeded */
       }
