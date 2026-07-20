@@ -4,6 +4,7 @@ import { mergeMessages } from '../lib/messages';
 import type {
   AnswerSelection,
   Msg,
+  OrgHealth,
   PanePrompt,
   Pending,
   RawEvent,
@@ -54,6 +55,13 @@ export interface CockpitStore {
    * session id then `runId`. Server-parsed in lib/workflows.js.
    */
   workflowsById: Record<string, Workflow[]>;
+  /**
+   * Row-independent per-org health, keyed by org slug (server.js
+   * olamOrgHealth() — RemoteSessionSource.health()). Lets a cloud tab's
+   * empty-state distinguish "genuinely no sessions" from "Access session
+   * expired" even when zero rows for that org have ever arrived.
+   */
+  orgHealth: Record<string, OrgHealth>;
   /**
    * On-demand workflow-agent transcripts, keyed `${runId}::${agentId}`. Loaded
    * via requestWorkflowAgent when the Agent View opens "full transcript"; fed to
@@ -172,6 +180,8 @@ export function useCockpit(): CockpitStore {
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
   // Pane-scrape picker signal: open:true means a TUI picker is on screen right now.
   const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
+  // Per-org health, rides every 'sessions' frame — see the CockpitStore field doc.
+  const [orgHealth, setOrgHealth] = useState<Record<string, OrgHealth>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -220,6 +230,7 @@ export function useCockpit(): CockpitStore {
           setRawEventsById((prev) => pruneRecord(prev, retainedIds));
           setPromptById((prev) => pruneRecord(prev, retainedIds));
           setPickerOpenById((prev) => pruneRecord(prev, retainedIds));
+          if (msg.orgHealth) setOrgHealth(msg.orgHealth);
           break;
         }
         case 'messages':
@@ -594,6 +605,7 @@ export function useCockpit(): CockpitStore {
     runningSubagentCountById,
     workflowsById,
     workflowAgentById,
+    orgHealth,
     conn,
     resources,
     resourceHistory,

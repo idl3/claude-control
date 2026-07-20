@@ -1,6 +1,17 @@
 // Mirrors claude-cockpit's backend contract (server.js / CONTRACT.md).
 // These are read-only on the client; never mutate in place.
 
+/** Row-independent per-org health (lib/olam-sessions.js RemoteSessionSource.health()) —
+ *  works even when an org has zero known rows (e.g. a lapsed Access session
+ *  before anything was ever fetched). `capped` marks the org's last
+ *  listSessions() page as truncated at the backend page-size limit — the
+ *  tab count may be a lower bound, not the true total. */
+export interface OrgHealth {
+  status: 'green' | 'amber' | 'red' | 'unknown';
+  reason: string | null;
+  capped?: boolean;
+}
+
 export interface Session {
   id: string;
   sessionId?: string;
@@ -59,7 +70,7 @@ export interface Session {
   /** Row is last-known data from an unreachable org (render greyed). */
   stale?: boolean;
   /** Per-org probe state the row was fetched under. */
-  orgHealth?: { status: 'green' | 'amber' | 'red' | 'unknown'; reason: string | null };
+  orgHealth?: OrgHealth;
   /** Owning operator's email (org scope=all list). */
   ownerEmail?: string | null;
   /** True when owned by a different operator — view-only (steering disabled). */
@@ -331,7 +342,10 @@ export interface RawEvent {
 
 // Server -> client WebSocket frames.
 export type ServerMessage =
-  | { type: 'sessions'; sessions: Session[] }
+  // orgHealth: per-configured-org row-independent health, keyed by org slug
+  // (server.js olamOrgHealth() — RemoteSessionSource.health()). Absent/empty
+  // when no olam.json orgs are configured.
+  | { type: 'sessions'; sessions: Session[]; orgHealth?: Record<string, OrgHealth> }
   | { type: 'messages'; id: string; messages: Msg[]; pending: Pending | null }
   | { type: 'append'; id: string; messages: Msg[] }
   | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }

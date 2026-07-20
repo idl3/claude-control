@@ -149,6 +149,56 @@ test('health() exposes per-org probe state for the API/frontend', async () => {
   assert.equal(src.health().atlas.status, 'green');
 });
 
+test('health() defaults capped to false when the client never truncated a page', async () => {
+  const { src } = sourceWith({ listSessions: async () => [] });
+  await src.tick();
+  assert.equal(src.health().atlas.capped, false);
+});
+
+test('health() surfaces capped:true when the client hit its page-size limit (honest "N+" signal)', async () => {
+  const olamConfig = {
+    orgs: [{ org: 'atlas', runnerUrl: 'https://r.test', spaBase: 'https://s.test', brainUrl: null }],
+  };
+  const reg = makeRegistry();
+  const client = {
+    capped: false,
+    async listSessions() {
+      // Mirrors the real OlamOrgClient contract: it sets `.capped` itself as
+      // a side effect of the fetch, RemoteSessionSource just reads it back.
+      this.capped = true;
+      return [{ org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null }];
+    },
+    enrich: async (rows) => rows,
+    cfg: { spaBase: 'https://s.test' },
+  };
+  const probe = { probe: async () => ({ status: 'green', reason: null }), state: { status: 'green', reason: null } };
+  const src = new RemoteSessionSource(olamConfig, reg, {
+    clientFactory: () => client,
+    probeFactory: () => probe,
+  });
+  await src.tick();
+  assert.equal(src.health().atlas.capped, true);
+});
+
+test('a catch-path fetch failure is reflected in health() immediately, not just on row orgHealth', async () => {
+  // Regression guard: the classifyOrgError() result inside _fetchOrg's catch
+  // block used to be dropped on the floor for the row-independent health()
+  // surface (only written onto rows, which don't exist when a red org has
+  // zero known sessions) — an empty-state UI reading health() would show
+  // stale 'green' for a full tick after the real failure.
+  let fail = true;
+  const { src } = sourceWith({
+    listSessions: async () => {
+      if (fail) throw new Error('cloudflared access login https://s.test');
+      return [];
+    },
+  });
+  await src.tick();
+  const health = src.health().atlas;
+  assert.equal(health.status, 'red');
+  assert.match(health.reason, /cloudflared access login/);
+});
+
 // --- Phase A (task A4) regression guard: liveness is NEVER polled -------------
 //
 // R5: liveness is fetched ONLY on session select and immediately before a

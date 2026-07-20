@@ -250,6 +250,91 @@ describe('ConfigModal — Harness section: skip permission prompts toggle', () =
   });
 });
 
+// Fix 3 (cloud-local-tabs): the "Olam cloud" settings section is a read-only
+// setup guide — explains the olam.json shape, lists configured orgs with
+// LIVE health (green/red + reason + exact re-auth command), and the
+// zero-orgs empty state points at how to create olam.json. Never renders a
+// secret value — only reasons/commands/spaBase (server.js's olamOrgs +
+// olamHealth fields, GET /api/config).
+describe('ConfigModal — Olam cloud section (Fix 3 setup guide)', () => {
+  it('zero configured orgs shows guidance on how to create olam.json, not an org list', async () => {
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText(/No Olam cloud clusters configured yet/)).toBeTruthy();
+    expect(screen.getByText('olam.json')).toBeTruthy();
+    expect(screen.getByText('~/.claude-control/olam.json')).toBeTruthy();
+    expect(document.querySelector('.config-olam-orgs')).toBeNull();
+  });
+
+  it('a red (unhealthy) org lists its health dot + the exact re-auth command, never a secret value', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'grain', spaBase: 'https://grain.olam.example' }],
+      olamHealth: {
+        grain: {
+          status: 'red',
+          reason: 'Access session expired — run: cloudflared access login https://grain.olam.example',
+        },
+      },
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText('grain')).toBeTruthy();
+    const link = screen.getByRole('link', { name: 'https://grain.olam.example' }) as HTMLAnchorElement;
+    expect(link.href).toBe('https://grain.olam.example/');
+    const reason = screen.getByRole('note');
+    expect(reason.textContent).toBe(
+      'Access session expired — run: cloudflared access login https://grain.olam.example',
+    );
+    const dot = document.querySelector('.remote-health') as HTMLElement;
+    expect(dot.className).toContain('remote-health-red');
+  });
+
+  it('a healthy org shows no reason banner and no capped notice', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'atlas', spaBase: 'https://atlas.olam.example' }],
+      olamHealth: { atlas: { status: 'green', reason: null } },
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText('atlas')).toBeTruthy();
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(document.querySelector('.config-olam-org-capped')).toBeNull();
+    const dot = document.querySelector('.remote-health') as HTMLElement;
+    expect(dot.className).toContain('remote-health-green');
+  });
+
+  it('a capped org surfaces the lower-bound notice', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'atlas', spaBase: 'https://atlas.olam.example' }],
+      olamHealth: { atlas: { status: 'green', reason: null, capped: true } },
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText(/hit the fetch page limit/)).toBeTruthy();
+  });
+
+  it('an org missing from olamHealth entirely still renders (unknown status), never crashes', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'pleri', spaBase: null }],
+      olamHealth: {},
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText('pleri')).toBeTruthy();
+    const dot = document.querySelector('.remote-health') as HTMLElement;
+    expect(dot.className).toContain('remote-health-unknown');
+  });
+});
+
 describe('ConfigModal — a11y', () => {
   it('the active nav item is the only one carrying aria-current="page"', async () => {
     await renderModal();

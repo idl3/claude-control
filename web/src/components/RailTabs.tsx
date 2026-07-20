@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Session } from '../lib/types';
+import type { OrgHealth, Session } from '../lib/types';
 import { CloudIcon } from './icons';
 
 /**
@@ -16,6 +16,14 @@ export interface RailTab {
   label: string;
   count: number;
   kind: 'local' | 'org' | 'unconfigured';
+  /**
+   * True when this org's last fetched page hit the backend's page-size
+   * ceiling (lib/olam-client.js LIST_SESSIONS_LIMIT, threaded through
+   * RemoteSessionSource.health()) — the org may have MORE sessions than
+   * `count` reflects. Renders as an honest "N+" instead of a possibly-wrong
+   * exact count. Always false/absent for the 'local' and 'unconfigured' tabs.
+   */
+  capped?: boolean;
 }
 
 /** Title-case an org slug for its default display label: 'grain' → 'Grain',
@@ -49,6 +57,7 @@ export function computeRailTabs(
   sessions: Session[],
   configuredOrgs: string[],
   customNames: Record<string, string> = {},
+  orgHealth: Record<string, OrgHealth> = {},
 ): RailTab[] {
   const localCount = sessions.filter((s) => s.kind !== 'remote').length;
   const localTab: RailTab = { id: 'local', label: 'Local', count: localCount, kind: 'local' };
@@ -63,6 +72,7 @@ export function computeRailTabs(
     label: resolveOrgLabel(org, customNames),
     count: sessions.filter((s) => s.kind === 'remote' && s.org === org).length,
     kind: 'org',
+    capped: !!orgHealth[org]?.capped,
   }));
   return [localTab, ...orgTabs];
 }
@@ -172,7 +182,10 @@ export function RailTabs({ tabs, activeTab, onSelect, onRename, customNames }: R
               {tab.kind === 'unconfigured' ? <CloudIcon size={14} /> : null}
               <span className="rail-tab-label">{tab.label}</span>
               {tab.kind !== 'unconfigured' ? (
-                <span className="rail-tab-count">{tab.count}</span>
+                <span className="rail-tab-count" title={tab.capped ? `${tab.count}+ — more may exist past the fetch limit` : undefined}>
+                  {tab.count}
+                  {tab.capped ? '+' : ''}
+                </span>
               ) : null}
             </button>
           );

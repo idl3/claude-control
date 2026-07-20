@@ -1,12 +1,18 @@
-import { describe, it, expect } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, describe, it, expect } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
 import {
   computeRailTabs,
   defaultOrgLabel,
   resolveOrgLabel,
   resolveTabAction,
+  RailTabs,
   type RailTab,
 } from './RailTabs';
-import type { Session } from '../lib/types';
+import type { OrgHealth, Session } from '../lib/types';
+
+afterEach(() => cleanup());
 
 function local(partial: Partial<Session> = {}): Session {
   return { id: `local:${Math.random()}`, kind: 'claude', ...partial } as Session;
@@ -68,6 +74,90 @@ describe('computeRailTabs — tab partition + counts', () => {
   it('dedupes a configuredOrgs list with a repeated slug', () => {
     const tabs = computeRailTabs([], ['atlas', 'atlas']);
     expect(tabs.filter((t) => t.id === 'atlas')).toHaveLength(1);
+  });
+
+  // Fix 2a: the tab badge must be a TRUE total, not just the "current"
+  // (non-earlier, non-archived) subset SessionRail's groupRemoteByOrg splits
+  // rows into for display. computeRailTabs counts every matching session
+  // unconditionally — earlier/idle and archived rows are never excluded —
+  // so this locks in that the two concepts (rail display grouping vs. tab
+  // count) stay decoupled rather than the count silently adopting the
+  // display split's exclusions.
+  it('org + local counts include archived and old-idle ("earlier") rows, not just current ones', () => {
+    const sessions = [
+      local({ kind: 'terminal' }),
+      remote('atlas', { archived: true }),
+      remote('atlas', { archived: false, lastActivity: Date.parse('2020-01-01T00:00:00Z') }), // ancient → "earlier" in the rail, still counted here
+      remote('atlas', { archived: false, lastActivity: Date.now() }),
+    ];
+    const tabs = computeRailTabs(sessions, ['atlas']);
+    expect(tabs.find((t) => t.id === 'local')!.count).toBe(1);
+    expect(tabs.find((t) => t.id === 'atlas')!.count).toBe(3);
+  });
+});
+
+describe('computeRailTabs — capped badge (Fix 2b)', () => {
+  function health(capped: boolean): OrgHealth {
+    return { status: 'green', reason: null, capped };
+  }
+
+  it('an org tab is capped when orgHealth reports capped for that org', () => {
+    const tabs = computeRailTabs([], ['atlas'], {}, { atlas: health(true) });
+    expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(true);
+  });
+
+  it('an org tab is NOT capped when orgHealth reports capped:false or is absent', () => {
+    const tabs = computeRailTabs([], ['atlas', 'grain'], {}, { atlas: health(false) });
+    expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(false);
+    expect(tabs.find((t) => t.id === 'grain')!.capped).toBe(false);
+  });
+
+  it('the Local tab is never capped, regardless of orgHealth contents', () => {
+    const tabs = computeRailTabs([], ['atlas'], {}, { atlas: health(true) });
+    expect(tabs.find((t) => t.id === 'local')!.capped).toBeFalsy();
+  });
+
+  it('omitting the orgHealth argument entirely defaults every tab to uncapped (back-compat)', () => {
+    const tabs = computeRailTabs([], ['atlas']);
+    expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(false);
+  });
+});
+
+describe('RailTabs — capped badge renders as "N+" (Fix 2b)', () => {
+  it('renders "50+" with a title hint when the tab is capped', () => {
+    const tabs: RailTab[] = [
+      { id: 'local', label: 'Local', count: 5, kind: 'local' },
+      { id: 'atlas', label: 'Atlas', count: 50, kind: 'org', capped: true },
+    ];
+    render(
+      createElement(RailTabs, {
+        tabs,
+        activeTab: 'local',
+        onSelect: () => {},
+        onRename: () => {},
+        customNames: {},
+      }),
+    );
+    const count = screen.getByText('50+');
+    expect(count.getAttribute('title')).toBe('50+ — more may exist past the fetch limit');
+  });
+
+  it('renders the plain count with no "+" and no title when the tab is not capped', () => {
+    const tabs: RailTab[] = [
+      { id: 'local', label: 'Local', count: 5, kind: 'local' },
+      { id: 'grain', label: 'Grain', count: 16, kind: 'org', capped: false },
+    ];
+    render(
+      createElement(RailTabs, {
+        tabs,
+        activeTab: 'local',
+        onSelect: () => {},
+        onRename: () => {},
+        customNames: {},
+      }),
+    );
+    const count = screen.getByText('16');
+    expect(count.getAttribute('title')).toBeNull();
   });
 });
 
