@@ -5443,13 +5443,18 @@ body.is-external-display .composer {
   -webkit-overflow-scrolling: touch;
   padding: 6px 10px;
 }
+/* Compact pill, deliberately mirroring .subagent-pill's sizing/shape (same
+   tight asymmetric padding, 999px radius, --txt-meta font, and the ~0.75
+   idle -> 1.0 active opacity grammar) rather than a full-height chunky
+   button — these are lightweight source switches, not primary actions. No
+   fixed height: the pill's compact height falls out of the tight padding +
+   line-height, same as .subagent-pill. */
 .rail-tab {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 10px;
+  padding: 5px 10px 5px 8px;
   background: var(--bg-2);
   color: var(--text-dim);
   border: 1px solid var(--line);
@@ -5458,16 +5463,20 @@ body.is-external-display .composer {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+  opacity: 0.75;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms,
+    background var(--ease) 150ms, opacity var(--ease) 150ms, box-shadow var(--ease) 150ms;
 }
 .rail-tab:hover {
   color: var(--text);
   border-color: var(--accent);
 }
-/* Active state is a 1px accent ring + text color, never a filled gradient —
-   shape+text carries the state, not color alone. */
+/* Active state is a 1px accent ring + full opacity + text color, never a
+   filled gradient — shape+ring carries the state, opacity is the secondary
+   read (mirrors .subagent-pill[data-active='true']). */
 .rail-tab[aria-selected='true'] {
   color: var(--text);
+  opacity: 1;
   background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
@@ -5491,7 +5500,6 @@ body.is-external-display .composer {
 }
 .rail-tab-rename-input {
   flex: 0 0 auto;
-  height: 30px;
   width: 140px;
   font-size: var(--txt-meta);
   font-weight: 600;
@@ -5499,12 +5507,15 @@ body.is-external-display .composer {
   background: var(--bg);
   border: 1px solid var(--accent);
   border-radius: 999px;
-  padding: 0 10px;
+  padding: 5px 10px;
   outline: none;
 }
+/* Mobile keeps the pre-existing 44px min touch target (WCAG/Apple HIG) —
+   deliberately UNCHANGED by the compact-pill pass above, which only affects
+   the desktop resting size; a bigger tap target still wins on touch. */
 @media (max-width: 759px) {
   .rail-tab {
-    height: 44px; /* 44px min touch target */
+    height: 44px;
     padding: 0 14px;
   }
   .rail-tab-rename-input {
@@ -6645,15 +6656,27 @@ select.config-input {
   padding: 0;
   list-style: none;
 }
+/* Column layout so a red org's reason/capped notice (full sentences) get
+   their own line below the org/status header row instead of squeezing into
+   that row's flex line (which is align-items:center, single-row). */
 .config-olam-org-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   padding: 6px 10px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--accent);
+}
+.config-olam-org-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.config-olam-org-reason,
+.config-olam-org-capped {
+  margin-left: 20px; /* aligns under the name, past the health dot + icon */
 }
 .config-olam-org-name {
   color: var(--text);

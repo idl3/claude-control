@@ -11,6 +11,7 @@ import {
   type OptimizeBackend,
   type ModelsInfo,
 } from '../lib/api';
+import type { OrgHealth } from '../lib/types';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
 import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
 import {
@@ -665,10 +666,18 @@ function SessionSection({
  * This is deliberately NOT a disk editor — olam.json (per-org runner URL,
  * SPA base, and secret-lookup config) is operator-edited on disk, since it
  * declares where org bearer tokens live. This panel only explains the
- * shape and shows what's currently configured, read from the same
- * GET /api/config payload the rail tabs use (server.js's olamOrgs field).
+ * shape, shows what's currently configured, and surfaces LIVE health per
+ * org (green/red + reason + the exact re-auth command) — read-only, no
+ * secret values are ever rendered here, from the same GET /api/config
+ * payload the rail tabs use (server.js's olamOrgs + olamHealth fields).
  */
-function OlamSection({ olamOrgs }: { olamOrgs: { org: string; spaBase: string | null }[] }) {
+function OlamSection({
+  olamOrgs,
+  olamHealth,
+}: {
+  olamOrgs: { org: string; spaBase: string | null }[];
+  olamHealth: Record<string, OrgHealth>;
+}) {
   return (
     <>
       <h2 className="config-section-heading">Olam cloud</h2>
@@ -688,22 +697,45 @@ function OlamSection({ olamOrgs }: { olamOrgs: { org: string; spaBase: string | 
             </span>
           ) : (
             <ul className="config-olam-orgs">
-              {olamOrgs.map((o) => (
-                <li key={o.org} className="config-olam-org-row">
-                  <CloudIcon size={14} />
-                  <span className="config-olam-org-name">{o.org}</span>
-                  {o.spaBase ? (
-                    <a
-                      href={o.spaBase}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="config-olam-org-spa"
-                    >
-                      {o.spaBase}
-                    </a>
-                  ) : null}
-                </li>
-              ))}
+              {olamOrgs.map((o) => {
+                const health = olamHealth[o.org] ?? { status: 'unknown' as const, reason: null };
+                return (
+                  <li key={o.org} className="config-olam-org-row">
+                    <div className="config-olam-org-row-head">
+                      <span
+                        className={`remote-health remote-health-${health.status}`}
+                        title={health.reason ?? health.status}
+                        aria-label={`org ${o.org} health ${health.status}`}
+                      />
+                      <CloudIcon size={14} />
+                      <span className="config-olam-org-name">{o.org}</span>
+                      {o.spaBase ? (
+                        <a
+                          href={o.spaBase}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="config-olam-org-spa"
+                        >
+                          {o.spaBase}
+                        </a>
+                      ) : null}
+                    </div>
+                    {/* health.reason already spells out the exact fix (e.g. "Access
+                        session expired — run: cloudflared access login <spaBase>")
+                        when unhealthy — read-only, never a credential value. */}
+                    {health.reason ? (
+                      <div className="config-hint config-olam-org-reason" role="note">
+                        {health.reason}
+                      </div>
+                    ) : null}
+                    {health.capped ? (
+                      <div className="config-hint config-olam-org-capped">
+                        Session count may be a lower bound — this org hit the fetch page limit.
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
           <span className="config-hint">
@@ -756,6 +788,10 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
   // Configured Olam cloud clusters, for the 'olam' section's status list —
   // same payload the rail's cloud tabs are built from (App.tsx).
   const [olamOrgs, setOlamOrgs] = useState<{ org: string; spaBase: string | null }[]>([]);
+  // Live per-org health (server.js olamOrgHealth() — row-independent, works
+  // even before any session has ever been fetched for that org). Keyed by
+  // org slug; absent entries render as 'unknown'.
+  const [olamHealth, setOlamHealth] = useState<Record<string, OrgHealth>>({});
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -822,6 +858,7 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
         setSkipPermissions(c.skipPermissions ?? true);
         setRestartSupported(c.restartSupported ?? false);
         setOlamOrgs(c.olamOrgs ?? []);
+        setOlamHealth(c.olamHealth ?? {});
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -1096,7 +1133,9 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
                 setIntervalMs={setRailIntervalMs}
               />
             ) : null}
-            {activeSection === 'olam' ? <OlamSection olamOrgs={olamOrgs} /> : null}
+            {activeSection === 'olam' ? (
+              <OlamSection olamOrgs={olamOrgs} olamHealth={olamHealth} />
+            ) : null}
           </div>
         </div>
 
