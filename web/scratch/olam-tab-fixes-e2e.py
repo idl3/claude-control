@@ -314,7 +314,7 @@ def main() -> int:
             log(f'Fix 1 verified (red): grain shows reason banner: {reason_text!r}')
 
             shot_grain = SCREENSHOT_DIR / 'grain-expired-empty-state.png'
-            page.locator('.session-rail, .rail-panel, main').first.screenshot(path=str(shot_grain))
+            page.locator('aside.rail').first.screenshot(path=str(shot_grain))
             log(f'captured grain-expired-empty-state screenshot: {shot_grain}')
 
             # ---- (b) pleri (green, genuinely empty) shows the generic
