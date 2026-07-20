@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude Control</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center;
+    font: 400 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    color: #e7e9ee;
+    background:
+      radial-gradient(120% 90% at 50% -10%, #1b2740 0%, #0c1018 55%, #070a0f 100%);
+    -webkit-user-select: none; user-select: none;
+    overflow: hidden;
+  }
+  .card { width: min(420px, 86vw); text-align: center; }
+  .mark {
+    font: 700 13px/1 "SF Mono", ui-monospace, monospace;
+    letter-spacing: .22em; text-transform: uppercase;
+    color: #7fa4ff; margin-bottom: 22px;
+  }
+  h1 { font-size: 26px; font-weight: 640; letter-spacing: -.01em; margin: 0 0 6px; }
+  .sub { color: #8b93a3; font-size: 13.5px; margin: 0 0 26px; }
+  .sub.err { color: #e0a68f; }
+  .dots { display: inline-flex; gap: 7px; height: 8px; margin-top: 4px; }
+  .dots i {
+    width: 8px; height: 8px; border-radius: 50%; background: #37476b;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .dots i:nth-child(2){ animation-delay: .18s } .dots i:nth-child(3){ animation-delay: .36s }
+  @keyframes pulse { 0%,100%{ opacity:.3; transform: translateY(0) } 50%{ opacity:1; transform: translateY(-3px) } }
+  .counter { margin-top: 30px; font: 500 12px/1 "SF Mono", ui-monospace, monospace; color: #5b647a; letter-spacing: .04em; }
+  .counter b { color: #9fb4e0; }
+  /* first-run URL prompt */
+  form { display: none; margin-top: 22px; gap: 10px; flex-direction: column; align-items: stretch; }
+  form.show { display: flex; }
+  input {
+    width: 100%; padding: 11px 13px; border-radius: 10px;
+    border: 1px solid #2b3550; background: #10151f; color: #e7e9ee;
+    font: 400 14px/1.2 -apple-system, system-ui, sans-serif; outline: none;
+  }
+  input:focus { border-color: #4f6bb0; }
+  button {
+    padding: 11px 14px; border-radius: 10px; border: 0;
+    background: linear-gradient(180deg, #4f74d6, #3f5fc0); color: #fff;
+    font: 600 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer;
+  }
+  button:active { transform: translateY(1px); }
+  .hint { color: #6b7488; font-size: 11.5px; margin-top: 2px; }
+  .prompt-only { display: none; }
+  form.show ~ .dots, form.show ~ .counter { display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark">Claude&nbsp;Control</div>
+    <h1 id="title">Connecting…</h1>
+    <p class="sub" id="sub">Opening your cockpit over Tailscale.</p>
+
+    <form id="setup" autocomplete="off">
+      <input id="url" type="url" inputmode="url" placeholder="https://your-host.ts.net/"
+             value="https://" spellcheck="false">
+      <button type="submit">Save &amp; open</button>
+      <span class="hint">Your cockpit's tailnet URL. HTTPS (via <code>tailscale serve</code>) is recommended so the mic works. The URL is only saved after it answers.</span>
+    </form>
+
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="counter">native opens: <b id="n">0</b></div>
+  </div>
+
+<script>
+  // ── Disposable adoption spike (Phase A) ──────────────────────────────────────
+  // Wraps the ALREADY-SHIPPED cockpit SPA in a native WKWebView. Zero backend
+  // change: it navigates to your *.ts.net origin, which server.js isAllowedOrigin
+  // already permits. First run asks for the URL; later runs go straight in. The
+  // "native opens" counter is the disposable adoption signal — compare it
+  // against how often you still reach for the browser.
+  //
+  // The URL is committed to storage ONLY after a successful reachability probe,
+  // and Esc during the connect splash cancels auto-open and reopens the form —
+  // a typo (or a down tailnet) can never brick the app into a dead redirect
+  // loop. (It happened: wrong URL stored pre-probe, no way back but wiping
+  // ~/Library/WebKit/<bundle-id>.)
+  //
+  // To hard-code the URL instead of the first-run prompt, set CONFIGURED below.
+  const CONFIGURED = "";                 // e.g. "https://kurokuma.tail6a8a60.ts.net/"
+
+  const KEY_URL = "cc_target_url";
+  const KEY_OPENS = "cc_native_opens";
+  const target = CONFIGURED || localStorage.getItem(KEY_URL) || "";
+  const $ = (id) => document.getElementById(id);
+
+  let cancelled = false;   // set by Esc: block any in-flight probe/redirect
+
+  // no-cors fetch resolves (opaque) if anything answers at that origin and
+  // rejects on DNS failure / connection refused / timeout — exactly the
+  // "is this a cockpit-shaped URL" signal we need without CORS cooperation.
+  function probe(url, ms = 5000) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms);
+    return fetch(url, { mode: "no-cors", cache: "no-store", signal: ctl.signal })
+      .finally(() => clearTimeout(t));
+  }
+
+  function showForm(prefill, error) {
+    $("title").textContent = error ? "Can't reach that cockpit" : "Point me at your cockpit";
+    const sub = $("sub");
+    sub.textContent = error || "One-time setup.";
+    sub.classList.toggle("err", Boolean(error));
+    $("setup").classList.add("show");
+    const input = $("url");
+    if (prefill) input.value = prefill;
+    input.focus();
+    input.select();
+  }
+
+  function connect(url) {
+    cancelled = false;
+    $("setup").classList.remove("show");
+    $("title").textContent = "Connecting…";
+    const sub = $("sub");
+    sub.textContent = "Opening your cockpit over Tailscale — press Esc to change the URL.";
+    sub.classList.remove("err");
+    probe(url).then(() => {
+      if (cancelled) return;
+      localStorage.setItem(KEY_URL, url);   // commit only after the probe answers
+      const opens = Number(localStorage.getItem(KEY_OPENS) || 0) + 1;
+      localStorage.setItem(KEY_OPENS, String(opens));
+      $("n").textContent = opens;
+      setTimeout(() => { if (!cancelled) location.replace(url); }, 550);
+    }).catch(() => {
+      if (cancelled) return;
+      showForm(url, "No response from " + url + " — check the address (and your tailnet), then retry.");
+    });
+  }
+
+  addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    cancelled = true;
+    // prefill the stored URL only if the field is untouched — don't clobber a mid-edit value
+    showForm($("url").value === "https://" ? (target || undefined) : undefined);
+  });
+
+  $("n").textContent = localStorage.getItem(KEY_OPENS) || 0;
+
+  $("setup").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let v = $("url").value.trim();
+    if (!/^https?:\/\/.+/i.test(v)) { $("url").focus(); return; }
+    if (!v.endsWith("/")) v += "/";
+    connect(v);
+  });
+
+  if (target) connect(target);
+  else showForm();
+</script>
+</body>
+</html>
