@@ -10602,24 +10602,47 @@ select.config-input {
 }
 /* Pane-scale mode (XtermHost's `paneScale` prop): the grid is pinned to the
    real tmux pane's size and the RENDERED text is zoomed (fontSize) to fill
-   whichever dimension is limiting — the other dimension is letterboxed, not
-   stretched. `.xterm` has no explicit width/height of its own (xterm.css),
-   so as a flex item here it shrinks to its actual rendered size (driven by
-   `.xterm-screen`'s JS-set pixel dimensions) instead of the block-default
-   100%-width stretch that produced the black gap this fixes. On a tall phone
-   the 80-col pane is WIDTH-limited, so the old flex-center + the shared
-   `.term-canvas { padding: 8px }` (below) both worked against filling the
-   screen: centering left a large dead band above the letterboxed block, and
-   the padding shaved ~16px off the width the fontSize convergence was
-   solving for. Top/left-align + zero this host's own padding (the shared
-   rule stays untouched for the composer/inline hosts that still want it) so
-   the mirrored pane reads as a full-screen terminal starting just below the
-   header, with no dead top band. */
+   the container's HEIGHT — width is deliberately not part of convergence
+   (see applyPaneScale in XtermHost.tsx), so a wide pane's `.xterm` can be
+   wider than this box. `.xterm` has no explicit width/height of its own
+   (xterm.css), so as a flex item here it shrinks to its actual rendered size
+   (driven by `.xterm-screen`'s JS-set pixel dimensions) instead of the
+   block-default 100%-width stretch that produced the black gap this fixes.
+   On a tall phone the 80-col pane is WIDTH-limited, so the old flex-center +
+   the shared `.term-canvas { padding: 8px }` (below) both worked against
+   filling the screen: centering left a large dead band above the
+   letterboxed block, and the padding shaved ~16px off the width the
+   fontSize convergence was solving for. Top/left-align + zero this host's
+   own padding (the shared rule stays untouched for the composer/inline
+   hosts that still want it) so the mirrored pane reads as a full-screen
+   terminal starting just below the header, with no dead top band.
+
+   overflow-x: auto makes THIS element (not the .agent-term-canvas-wrap
+   ancestor) the horizontal scroll container — its child `.xterm` can render
+   wider than this box (flexbox's default min-width:auto keeps it from being
+   squeezed to fit) and that excess is captured here as reachable scrollable
+   overflow instead of being clipped by the shared `.term-canvas-wrap {
+   overflow: hidden }` rule further up. Scoping the scroll container to this
+   element specifically — rather than the wrap — keeps `.term-conn-pill` /
+   `.term-copy-tools` (siblings of `.term-canvas`, absolutely positioned
+   against the wrap) pinned to the viewport corner instead of panning away
+   with the content. overflow-y stays hidden: applyPaneScale's convergence
+   loop (XtermHost.tsx) never lets rows OVERSHOOT this box — quantized cell
+   heights mean it can UNDERshoot and letterbox a few px instead, but never
+   clip — so there's no vertical slack to scroll and no second scrollbar to
+   fight the horizontal one for touch gestures.
+   A pane that already fits within the viewport's width gets no scrollbar at
+   all — nothing here special-cases that, it falls out of the browser's own
+   overflow calculation once scrollWidth <= clientWidth. */
 .agent-term-canvas .term-canvas {
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
   padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
