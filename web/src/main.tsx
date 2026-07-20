@@ -3,6 +3,7 @@ import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { reportClientError } from './lib/reportError';
 import { isNativeShell } from './lib/nativeShell';
+import { computeScreenH } from './lib/screenHeight';
 import 'slot-text/style.css';
 import './styles.css';
 import './highlight-theme.css';
@@ -20,18 +21,31 @@ if (isNativeShell) document.documentElement.dataset.nativeShell = 'true';
 // EVERY viewport unit under-reports — 100dvh / 100vh / 100% / window.innerHeight /
 // visualViewport.height ALL equal screen-height minus the status-bar (793 of 852 on
 // an iPhone 15 Pro), so a .app sized with any of them leaves a ~59px dead band of
-// background below the footer. window.screen.height is the only value equal to the
-// FULL physical screen, and the PWA manifest locks portrait so it's stable. We fill
-// the full screen ONLY in standalone (Safari, where the units are correct and track
-// the browser chrome, keeps the dvh behavior — no pwa-fill class). See styles.css
+// background below the footer. window.screen.width/height are the only values equal
+// to the FULL physical screen, but they are ORIENTATION-BLIND on iOS/iPadOS —
+// window.screen.height stays pinned to the device's native/portrait height in BOTH
+// orientations. On an iPhone (portrait-locked by the manifest) that's harmless. On
+// an iPad, which supports landscape, reading it raw pins .app to the taller portrait
+// height even in landscape, shoving the composer and the sidebar rail-footer off the
+// bottom of the (shorter) landscape viewport. computeScreenH derives the correct
+// dimension for the CURRENT orientation from the screen's own two measurements
+// instead of trusting whichever one the platform labels "height". We fill the full
+// screen ONLY in standalone (Safari, where the units are correct and track the
+// browser chrome, keeps the dvh behavior — no pwa-fill class). See styles.css
 // `html.pwa-fill`.
 (function fillStandaloneViewport() {
   const standalone =
     window.matchMedia?.('(display-mode: standalone)').matches ||
     (window.navigator as { standalone?: boolean }).standalone === true;
   if (!standalone) return;
-  const setScreenH = () =>
-    document.documentElement.style.setProperty('--screen-h', `${window.screen.height}px`);
+  const setScreenH = () => {
+    const { width, height } = window.screen;
+    const landscape = window.matchMedia('(orientation: landscape)').matches;
+    document.documentElement.style.setProperty(
+      '--screen-h',
+      `${computeScreenH(width, height, landscape)}px`,
+    );
+  };
   setScreenH();
   document.documentElement.classList.add('pwa-fill');
   window.addEventListener('resize', setScreenH);
