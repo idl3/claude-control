@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"a1647bc8cb0abc358","type":"user","uuid":"u1","timestamp":1,"message":{"role":"user","content":"cd into your worktree ..."}}
+{"parentUuid":"u1","isSidechain":true,"agentId":"a1647bc8cb0abc358","type":"assistant","uuid":"a1","timestamp":2,"message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"working"}]}}
