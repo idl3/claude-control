@@ -245,6 +245,11 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       }
       const screen = el.querySelector('.xterm-screen');
       if (!screen) return;
+      // Cleared up front, re-set at the tail only if the converged screen still
+      // overflows (Bug 1 — see the tail comment). Clearing here (not only in the
+      // tail) covers the fit-case early-return below, so a pane that grows back
+      // to fitting drops the bottom-align flag.
+      delete el.dataset.paneOverflow;
       // Glyph raster size scales ~linearly with fontSize, so one pass usually
       // lands within a pixel or two — a few more tighten it up. Capped so a
       // box that's still mid-layout (0-sized, or xterm's own resize hasn't
@@ -282,6 +287,19 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       }
       if (safeFontSize != null && screen.getBoundingClientRect().height > el.clientHeight) {
         term.options.fontSize = safeFontSize;
+      }
+      // Bug 1 fix: a tall pane (more rows than fit at MIN_PANE_FONT_PX) can't be
+      // shrunk further, so `.xterm-screen` ends up TALLER than this container.
+      // With the default top-align + `overflow-y: hidden` (styles.css) the
+      // OVERFLOW clips the pane's BOTTOM — the live output and the input/cursor
+      // row — off the bottom of the viewport (behind the keyboard when it's up):
+      // the operator's "input is slightly lower than the UI". Flag the overflow
+      // so the CSS bottom-aligns the pane instead, keeping its bottom (input)
+      // flush and visible; the older TOP rows clip instead, exactly like every
+      // scrolled terminal. The fitting case (screen <= container) leaves the flag
+      // cleared and keeps the deliberate top-align (no dead band under header).
+      if (screen.getBoundingClientRect().height > el.clientHeight + 1) {
+        el.dataset.paneOverflow = 'y';
       }
     };
 
