@@ -13174,3 +13174,14 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
 .mp-openai { color: oklch(72% 0.14 165); }    /* OpenAI / GPT — green */
 .mp-moonshot { color: oklch(70% 0.16 300); }  /* Moonshot / Kimi — violet */
 .mp-anthropic { color: var(--accent-2); }     /* Claude — home accent */
+
+/* Workflows tab in the Agents panel (Phase E): the same live WorkflowCards,
+   stacked in the drawer body. Cards keep their own chrome; the container just
+   spaces them within the panel's scroll area. */
+.sa-workflows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.sa-workflows .wf-card { margin: 0; }

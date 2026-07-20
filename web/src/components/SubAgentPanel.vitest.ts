@@ -140,3 +140,107 @@ describe('SubAgentPanel — drawer open animation (containing-block regression)'
     expect(panel!.style.transform).toBe('');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase E — Workflows tab: the panel hosts the same live WorkflowCards, and a
+// live-dock tap lands on the Workflows tab with that run expanded.
+// ---------------------------------------------------------------------------
+import type { Workflow } from '../lib/types';
+import { fireEvent, screen } from '@testing-library/react';
+
+function panelWorkflow(over: Partial<Workflow> = {}): Workflow {
+  return {
+    runId: 'wf_panel-1',
+    workflowName: 'panel-fanout',
+    summary: 'panel test run',
+    status: 'completed',
+    agentCount: 2,
+    startTime: 100,
+    durationMs: 60000,
+    totalTokens: 5000,
+    totalToolCalls: 4,
+    done: 2,
+    total: 2,
+    active: false,
+    phases: [
+      {
+        index: 1,
+        title: 'Implement',
+        detail: null,
+        agents: [
+          {
+            index: 1, label: 'impl:a', agentId: 'wa1', agentType: 'workflow',
+            model: 'claude-sonnet-5', state: 'done', startedAt: 1, queuedAt: 0,
+            durationMs: 1000, tokens: 100, toolCalls: 2, lastToolName: null,
+            promptPreview: null, resultPreview: 'ok',
+          },
+          {
+            index: 2, label: 'impl:b', agentId: 'wa2', agentType: 'workflow',
+            model: 'claude-sonnet-5', state: 'done', startedAt: 2, queuedAt: 0,
+            durationMs: 1200, tokens: 120, toolCalls: 2, lastToolName: null,
+            promptPreview: null, resultPreview: 'ok',
+          },
+        ],
+      },
+    ],
+    ...over,
+  };
+}
+
+describe('SubAgentPanel — Workflows tab (Phase E)', () => {
+  it('shows a Workflows tab with a count only when runs exist', () => {
+    const { rerender } = render(
+      createElement(SubAgentPanel, { subagents: noSubAgents, open: true, onClose: () => {} }),
+    );
+    expect(screen.queryByRole('tab', { name: /Workflows/ })).toBeNull();
+    rerender(
+      createElement(SubAgentPanel, {
+        subagents: noSubAgents, open: true, onClose: () => {},
+        workflows: [panelWorkflow()],
+      }),
+    );
+    expect(screen.getByRole('tab', { name: /Workflows/ })).toBeTruthy();
+  });
+
+  it('renders the run cards under the Workflows tab (resting one-liner by default)', () => {
+    const { container } = render(
+      createElement(SubAgentPanel, {
+        subagents: noSubAgents, open: true, onClose: () => {},
+        workflows: [panelWorkflow()],
+      }),
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /Workflows/ }));
+    expect(container.querySelector('.sa-workflows')).toBeTruthy();
+    // Finished run rests as the D1 one-liner inside the panel too.
+    expect(container.querySelector('.wf-card--collapsed')).toBeTruthy();
+  });
+
+  it('focusWorkflowRunId lands on the Workflows tab with that run expanded', () => {
+    const { container } = render(
+      createElement(SubAgentPanel, {
+        subagents: noSubAgents, open: true, onClose: () => {},
+        workflows: [panelWorkflow()],
+        focusWorkflowRunId: 'wf_panel-1',
+      }),
+    );
+    // Tab auto-selected; the focused card mounts expanded (startExpanded).
+    expect((screen.getByRole('tab', { name: /Workflows/ }) as HTMLElement).getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('.wf-card--collapsed')).toBeNull();
+    expect(container.querySelectorAll('.wf-agent').length).toBe(2);
+  });
+
+  it('wires agent-transcript opens through onOpenWorkflowAgent with the runId', () => {
+    const spy = vi.fn();
+    const { container } = render(
+      createElement(SubAgentPanel, {
+        subagents: noSubAgents, open: true, onClose: () => {},
+        workflows: [panelWorkflow()],
+        focusWorkflowRunId: 'wf_panel-1',
+        onOpenWorkflowAgent: spy,
+      }),
+    );
+    fireEvent.click(container.querySelector('.wf-agent-row') as HTMLElement);
+    fireEvent.click(container.querySelector('.wf-open-transcript') as HTMLElement);
+    expect(spy).toHaveBeenCalledWith('wf_panel-1', 'wa1', 'impl:a');
+  });
+});
