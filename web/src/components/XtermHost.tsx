@@ -49,6 +49,16 @@ export interface XtermHostProps {
    * container" flow.
    */
   paneScale?: boolean;
+  /**
+   * Select/copy mode (agent-kind sessions only, toggled by
+   * `AgentTerminalOverlay`'s header button): when true, keystrokes are NEVER
+   * forwarded to the pty (see the `onData` gate below) so a drag-select or
+   * "Select all" can grab text without racing input off to the live agent.
+   * Also blurs xterm's hidden textarea (drops the mobile soft keyboard and
+   * stops the cursor while selecting) and, on exit, clears the selection and
+   * refocuses for typing.
+   */
+  copyMode?: boolean;
 }
 
 const TYPED_ERROR_FRAME =
@@ -57,6 +67,15 @@ const TYPED_ERROR_FRAME =
 // A11y/legibility: match the monospace stack already used everywhere else in
 // this app's terminal-flavoured surfaces (terminal-view-body, term-key, …).
 const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, monospace";
+
+// pane-scale only: a safety floor for `applyPaneScale`'s convergence loop so
+// a mid-layout/zero-sized measure (a rect read before the box has settled)
+// can't converge to an unreadably small font. NOT a target to force up to —
+// a floor set above the actual width-limited size would clip the pane's
+// right-hand columns off-screen, so keep this conservative and tune it
+// on-device (measured against a real iOS pane mirror, not a simulator
+// default).
+const MIN_PANE_FONT_PX = 9;
 
 /**
  * Owns ONE `@xterm/xterm` `Terminal` instance + its `pty-client.ts` socket —
@@ -69,13 +88,18 @@ const TERMINAL_FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, monospace";
  * — that omission IS the T6 "OSC-52 disabled by default" mitigation (a
  * decision to withhold code, not a config flag; see A1 §3).
  */
-export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, autoFocus, paneScale }: XtermHostProps) {
+export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, autoFocus, paneScale, copyMode }: XtermHostProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connState, setConnState] = useState<PtyConnState>('connecting');
   // Keep the latest onExit callable without re-running the attach effect (its
   // sole dep is sessionId — the custom key handler is installed once per attach).
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  // Live ref so the `onData` gate (installed once per attach, closure-captured
+  // at mount) always reads the CURRENT copyMode rather than the value from
+  // whenever the effect last ran — same pattern as onExitRef above.
+  const copyModeRef = useRef(copyMode);
+  copyModeRef.current = copyMode;
   // Live Terminal instance, reachable from the Copy button's click handler
   // (rendered outside the mount effect's closure). null while unmounted/torn
   // down between session attaches.
@@ -95,7 +119,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       cursorBlink: true,
       scrollback: 10000,
       fontFamily: TERMINAL_FONT_FAMILY,
-      fontSize: 12,
+      fontSize: 14,
       allowProposedApi: true,
     });
 
@@ -195,10 +219,11 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
 
     // pane-scale only: pin the grid to the pane's exact size, then converge
     // fontSize so the rendered `.xterm-screen` fills whichever dimension of
-    // the container is limiting (the other letterboxes via the flex-center
-    // CSS on .agent-term-canvas .term-canvas). Font-size scaling — not a CSS
-    // transform — is deliberate: xterm redraws each glyph natively at the
-    // new size, so text stays crisp instead of being raster-scaled.
+    // the container is limiting (the other dimension letterboxes at the
+    // top/left via the flex-start CSS on .agent-term-canvas .term-canvas).
+    // Font-size scaling — not a CSS transform — is deliberate: xterm redraws
+    // each glyph natively at the new size, so text stays crisp instead of
+    // being raster-scaled.
     const applyPaneScale = (cols: number, rows: number) => {
       const el = containerRef.current;
       if (!el) return;
@@ -219,7 +244,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
         const ratio = Math.min(cw / rect.width, ch / rect.height);
         if (Math.abs(ratio - 1) < 0.01) return;
         const current = term.options.fontSize ?? 12;
-        const next = Math.max(4, current * ratio);
+        const next = Math.max(MIN_PANE_FONT_PX, current * ratio);
         if (Math.abs(next - current) < 0.05) return;
         term.options.fontSize = next;
       }
@@ -284,6 +309,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       : () => {};
 
     const disposeOnData = term.onData((data) => {
+      if (copyModeRef.current) return; // copy/select mode: never forward to the agent pty
       client.write(data);
     });
 
@@ -356,23 +382,59 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onEscapeElsewhere]);
 
+  // Select/copy mode transitions. Entering: blur xterm's hidden textarea so
+  // the mobile soft keyboard drops and the cursor stops blinking mid-drag.
+  // Exiting: clear whatever was selected and refocus for typing, so the very
+  // next keystroke reaches the pty immediately.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    if (copyMode) {
+      term.textarea?.blur();
+    } else {
+      term.clearSelection();
+      try { term.focus(); } catch { /* not ready */ }
+    }
+  }, [copyMode]);
+
   return (
-    <div className={`term-canvas-wrap${className ? ` ${className}` : ''}`}>
+    <div
+      className={`term-canvas-wrap${className ? ` ${className}` : ''}`}
+      data-copy-mode={copyMode ? 'true' : undefined}
+    >
       {(connState === 'connecting' || connState === 'reconnecting') && (
         <span className={`term-conn-pill conn-dot conn-${connState}`} role="status">
           {connState === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
         </span>
       )}
       <div ref={containerRef} className="term-canvas" tabIndex={0} />
-      {copyButtonLabel && (
-        <button
-          type="button"
-          className="term-copy-btn"
-          data-copied={copyButtonLabel === 'Copied ✓' ? 'true' : undefined}
-          onClick={handleCopyButtonClick}
-        >
-          {copyButtonLabel}
-        </button>
+      {(copyMode || copyButtonLabel) && (
+        <div className="term-copy-tools">
+          {copyMode && (
+            <button
+              type="button"
+              className="term-copy-btn"
+              onClick={() => {
+                const term = termRef.current;
+                if (!term) return;
+                term.selectAll();
+                setCopyButtonLabel('Copy');
+              }}
+            >
+              Select all
+            </button>
+          )}
+          {copyButtonLabel && (
+            <button
+              type="button"
+              className="term-copy-btn"
+              data-copied={copyButtonLabel === 'Copied ✓' ? 'true' : undefined}
+              onClick={handleCopyButtonClick}
+            >
+              {copyButtonLabel}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
