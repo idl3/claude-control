@@ -10800,9 +10800,21 @@ select.config-input {
 /* Copy/select mode: neutralize the horizontal-pan scroll container so a
    hold-drag reaches xterm's native selection instead of panning. Typing mode
    keeps overflow-x:auto (pan). touch-action:none lets a touch drag reach
-   xterm's pointer/touch handlers rather than being claimed as a browser pan. */
+   xterm's pointer/touch handlers rather than being claimed as a browser pan.
+   Per the CSS touch-action spec, a touch's ALLOWED default actions are the
+   intersection of touch-action across the target's ancestor chain, so
+   `touch-action:none` here already reaches descendants like `.xterm-screen`
+   for hit-testing purposes (confirmed: xterm's own xterm.css sets no
+   touch-action anywhere). The explicit re-statement below is defense-in-
+   depth against engines that don't fully implement that ancestor-
+   intersection semantics, and documents exactly which element the
+   XtermHost.tsx touch->mouse selection bridge attaches its listeners to. */
 .agent-term-canvas.term-canvas-wrap[data-copy-mode='true'] .term-canvas {
   overflow-x: hidden;
+  touch-action: none;
+}
+.agent-term-canvas.term-canvas-wrap[data-copy-mode='true'] .term-canvas .xterm-viewport,
+.agent-term-canvas.term-canvas-wrap[data-copy-mode='true'] .term-canvas .xterm-screen {
   touch-action: none;
 }
 /* Bug 1 fix: when the mirrored pane is too tall to fit even at MIN_PANE_FONT_PX,

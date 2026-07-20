@@ -451,6 +451,87 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
     }
   }, [copyMode]);
 
+  // Touch drag-select bridge (copy mode only). xterm 6's text selection is
+  // entirely MOUSE-driven: xterm's SelectionService listens for `mousedown`
+  // on the outer `.xterm` element (bubbled up from wherever inside it the
+  // press landed, e.g. `.xterm-screen`), extends the selection via
+  // `mousemove` listeners it adds to `document` on mousedown, and finalizes
+  // on `mouseup`. xterm's own touchstart/move/end handlers only ever drive
+  // viewport pan-scroll, never selection — and iOS WebKit does NOT synthesize
+  // `mousemove` during a native finger-drag, so a finger alone can extend
+  // nothing. Bridge the two: while copy mode is on, re-dispatch each touch as
+  // the matching synthetic mouse event at `.xterm-screen` (bubbles up to
+  // `.xterm`, exactly like a real mouse press) so the SAME engine that
+  // already drives pointer drag-select (onSelectionChange -> the floating
+  // Copy button, Cmd/Ctrl+C, "Select all") drives finger drag-select too — no
+  // new selection/copy plumbing needed. Typing mode attaches nothing here:
+  // native pan (`.term-canvas`'s `overflow-x:auto`) + keystroke passthrough
+  // stay exactly as they were.
+  useEffect(() => {
+    if (copyMode !== true) return;
+    const term = termRef.current;
+    const container = containerRef.current;
+    if (!term || !container) return;
+    const screen = container.querySelector('.xterm-screen');
+    if (!screen) return;
+
+    // bubbles:true so the event dispatched at `.xterm-screen` reaches both
+    // xterm's `mousedown` listener on the ancestor `.xterm` element AND the
+    // `document`-level mousemove/mouseup listeners it registers once a
+    // mousedown starts (see this effect's doc comment above). `detail: 1`
+    // matters: xterm's `handleMouseDown` branches on `e.detail` (1/2/3 ->
+    // single/double/triple-click) to decide whether to start a selection at
+    // all — a real browser mousedown always carries `detail >= 1`, but the
+    // `MouseEvent` constructor defaults `detail` to 0, which xterm treats as
+    // "not a click" and silently does nothing. mousemove/mouseup don't
+    // participate in that branch, so they're left at the constructor default.
+    const synth = (type: string, clientX: number, clientY: number, buttons: number, detail = 0) =>
+      screen.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true, cancelable: true, view: window, button: 0, buttons, clientX, clientY, detail,
+        }),
+      );
+
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      e.preventDefault(); // suppress the browser's compat-mouse events (would double-drive xterm) + any native gesture
+      synth('mousedown', t.clientX, t.clientY, 1, 1);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      e.preventDefault(); // REQUIRED: without this iOS treats the drag as a scroll/gesture instead of firing this handler
+      synth('mousemove', t.clientX, t.clientY, 1);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      if (!t) return;
+      synth('mouseup', t.clientX, t.clientY, 0);
+    };
+    // Interrupted gestures (an incoming call, a system edge-swipe stealing
+    // the touch stream, …) still finalize the in-flight mousedown so xterm's
+    // SelectionService never gets stuck waiting for a `mouseup` that never
+    // arrives — reuse the last known coordinate isn't available on
+    // `touchcancel`, so fall back to whatever `changedTouches` reports.
+    const onTouchCancel = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      if (!t) return;
+      synth('mouseup', t.clientX, t.clientY, 0);
+    };
+
+    screen.addEventListener('touchstart', onTouchStart as EventListener, { passive: false });
+    screen.addEventListener('touchmove', onTouchMove as EventListener, { passive: false });
+    screen.addEventListener('touchend', onTouchEnd as EventListener, { passive: false });
+    screen.addEventListener('touchcancel', onTouchCancel as EventListener, { passive: false });
+    return () => {
+      screen.removeEventListener('touchstart', onTouchStart as EventListener);
+      screen.removeEventListener('touchmove', onTouchMove as EventListener);
+      screen.removeEventListener('touchend', onTouchEnd as EventListener);
+      screen.removeEventListener('touchcancel', onTouchCancel as EventListener);
+    };
+  }, [copyMode]);
+
   return (
     <div
       className={`term-canvas-wrap${className ? ` ${className}` : ''}`}
