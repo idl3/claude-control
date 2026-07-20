@@ -894,6 +894,19 @@ body.is-external-display .rail {
     opacity: 1;
   }
 }
+/* "Move window to another session" drag-and-drop (SessionRail): ring the
+   hovered group's header while a pane is dragged over it, dim the pane row
+   currently being dragged. See MoveWindowModal for the confirm step this
+   drop fires (never a move-on-drop). */
+.session-group-head[data-drag-over='true'] {
+  color: var(--text);
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.session-item[data-dragging='true'] {
+  opacity: 0.4;
+  cursor: grabbing;
+}
 .session-window {
   display: flex;
   flex-direction: column;
@@ -2494,6 +2507,31 @@ body.is-external-display .rail {
 .pin-row-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-faint); }
 .pin-row-cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pin-row-when { margin-left: auto; white-space: nowrap; }
+
+/* ── Move-window confirm modal (Cmd+K palette + rail drag-drop) ── */
+.move-window-sentence {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.move-window-sentence strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.move-window-select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.move-window-select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
 
 /* ── Sub-agent panel (drawer) + header toggle ─────────────────── */
 .pin-toggle {

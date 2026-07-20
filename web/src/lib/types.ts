@@ -346,7 +346,13 @@ export type ServerMessage =
   // permission / trust / plan / custom menu) appearing or disappearing on
   // the Claude pane's visible screen.  open:true = picker is ON SCREEN right now.
   | { type: 'picker'; id: string; open: boolean }
-  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string }
+  // `newId` is populated on a successful 'move-window' ack: the moved pane's
+  // client session id changes (the tmux target string is session-scoped —
+  // e.g. A:2.1 -> B:5.1), even though transcript/pins follow automatically
+  // server-side (keyed by the stable tmux pane id). null/absent means the
+  // caller should leave the current selection and let the next sessions poll
+  // reconcile it.
+  | { type: 'ack'; op: string; ok: boolean; error?: string; transport?: string; reqId?: string; newId?: string | null }
   // D2: pushed whenever lib/media-watch.js's MediaAppWatcher observes a
   // settled write under the media apps/ dir (a rebuilt/versioned micro-app).
   // `path` is media-root-relative ("apps/<name>.html" or
@@ -361,6 +367,11 @@ export type ClientMessage =
   | { type: 'unsubscribe'; id: string }
   | { type: 'reply'; id: string; text: string; reqId?: string; attachments?: number; viaAnswer?: boolean; hardSteer?: boolean }
   | { type: 'answer'; id: string; toolUseId: string; selections: AnswerSelection[] }
+  // Move a tmux WINDOW (this client session's pane) to another tmux SESSION —
+  // sent only after the operator confirms via MoveWindowModal (Cmd+K palette
+  // action or rail drag-and-drop). `id` is the source session, `dest` the
+  // target tmux session NAME. See the 'ack' ServerMessage variant's `newId`.
+  | { type: 'move-window'; id: string; dest: string; reqId: string }
   | { type: 'subagent-load'; id: string; agentId: string }
   | { type: 'workflow-agent-load'; id: string; runId: string; agentId: string }
   | { type: 'capture'; id: string; lines?: number; escapes?: boolean }
