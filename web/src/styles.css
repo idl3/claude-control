@@ -10797,6 +10797,14 @@ select.config-input {
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
 }
+/* Copy/select mode: neutralize the horizontal-pan scroll container so a
+   hold-drag reaches xterm's native selection instead of panning. Typing mode
+   keeps overflow-x:auto (pan). touch-action:none lets a touch drag reach
+   xterm's pointer/touch handlers rather than being claimed as a browser pan. */
+.agent-term-canvas.term-canvas-wrap[data-copy-mode='true'] .term-canvas {
+  overflow-x: hidden;
+  touch-action: none;
+}
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
    Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;
