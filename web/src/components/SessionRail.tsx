@@ -3,7 +3,7 @@ import { SlotText } from 'slot-text/react';
 import type { Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon, CloudIcon, PencilIcon } from './icons';
+import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
@@ -638,7 +638,7 @@ function WorkflowRailGlyph({ s }: { s: Session }) {
       title={sum.name ? `workflow ${sum.name} — ${status}` : `workflow ${status}`}
       aria-label={`workflow ${sum.done} of ${sum.total} agents, ${status}`}
     >
-      <span aria-hidden="true">⚙</span> {sum.done}/{sum.total}
+      <SettingsIcon size={12} aria-hidden="true" /> {sum.done}/{sum.total}
     </span>
   );
 }
