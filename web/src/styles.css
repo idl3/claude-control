@@ -3352,9 +3352,22 @@ details.block-plan > summary.block-tool-use {
    height, which doesn't move on a same-field blur/refocus, so toggling
    `body.kbd-up` is stable across button taps — unlike :focus-within. When
    the keyboard is actually up, the safe-area inset is dead space floating
-   above it, so we tighten (not zero) the padding there instead. Widened to
-   1400px alongside the `.app` kbd-up pin above — see that comment. */
-@media (max-width: 1400px) {
+   above it, so we tighten (not zero) the padding there instead. Scoped to
+   touch devices by input capability, not viewport width: the unconditional
+   `12px` floor in the unfocused rule below is NOT a no-op when
+   env(safe-area-inset-bottom) is 0 (desktop, any width) — it forces a flat
+   12px over the base rule's 8px. A prior `max-width: 1400px` version of this
+   query caught mouse-primary desktop windows narrower than 1400px (e.g. a
+   13" MacBook at ~1280px logical) and regressed their resting composer
+   padding from 8px to 12px. `(hover: none) and (pointer: coarse)` targets
+   touch as the primary input instead: iPad reports this (true even with a
+   Magic Keyboard/trackpad attached, since touch remains the primary
+   pointer), so iPad still gets the tightened padding + kbd-up handling;
+   desktop reports `hover: hover`/`pointer: fine` and is excluded at every
+   width. The `.app` kbd-up pin above stays on `max-width: 1400px` — it only
+   fires with `body.kbd-up`, which desktop never sets (no on-screen
+   keyboard), so it was never at risk of this regression. */
+@media (hover: none) and (pointer: coarse) {
   .composer {
     /* Unfocused: sit ~8px higher off the bottom contour (matches the rail-foot
        clearance so both bottom bars read consistently above the home indicator). */
