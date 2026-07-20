@@ -7,6 +7,7 @@ import { TerminalSquareIcon, CloudIcon, PencilIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
+import { defaultOrgLabel } from './RailTabs';
 import {
   loadRailTokens,
   orderMetaFields,
@@ -73,6 +74,16 @@ interface SessionRailProps {
    * with presetDest so the operator still confirms before anything is sent.
    */
   onRequestMove?: (srcId: string, destSessionName: string) => void;
+  /**
+   * Active rail tab (docs/plans/cloud-local-tabs): null/undefined = the
+   * fixed "Local" tab (tmux/terminal groups render, remote org sections
+   * don't); a string = that Olam org slug's cloud tab (remote rows for
+   * THAT org render, local groups don't). Supersedes the old behavior
+   * where remote org sections rendered inline under the local list on the
+   * 'all'/'agents' filter — that mixed view is gone now that orgs have
+   * their own tab.
+   */
+  cloudOrg?: string | null;
 }
 
 /**
@@ -892,6 +903,7 @@ export function SessionRail({
   onToast,
   cmdHeld,
   onRequestMove,
+  cloudOrg = null,
 }: SessionRailProps) {
   // Operator-configured meta-slot token order + rotation interval (Settings →
   // Rail tokens, see lib/railTokenPrefs.ts). SessionRail is the only
@@ -968,7 +980,10 @@ export function SessionRail({
     }
   };
   // Apply the kind filter BEFORE grouping so empty groups/windows drop out.
+  // A cloud tab active (cloudOrg set) empties the local rail entirely — see
+  // remoteGroups below, which takes over in that state.
   const groups = useMemo(() => {
+    if (cloudOrg) return [];
     const visible = sessions.filter((s) => {
       if (s.kind === 'remote') return false; // remote rows render in their own org sections
       if (filter === 'all') return true;
@@ -990,19 +1005,24 @@ export function SessionRail({
       return s.kind === 'claude' || s.kind === undefined;
     });
     return groupByTmux(visible);
-  }, [sessions, filter]);
+  }, [sessions, filter, cloudOrg]);
 
-  // Remote (olam) org sections — shown under 'all' and 'agents' filters.
+  // Remote (olam) rows for the ACTIVE cloud tab only (docs/plans/
+  // cloud-local-tabs) — the rail-tab row is now the sole switch between
+  // local and a given org's remote sessions; this no longer piggybacks on
+  // the local kind filter (previously gated on 'all'/'agents').
   const remoteGroups = useMemo(() => {
-    if (filter !== 'all' && filter !== 'agents') return [];
-    return groupRemoteByOrg(sessions.filter((s) => s.kind === 'remote'));
-  }, [sessions, filter]);
+    if (!cloudOrg) return [];
+    return groupRemoteByOrg(sessions.filter((s) => s.kind === 'remote' && s.org === cloudOrg));
+  }, [sessions, cloudOrg]);
 
   if (groups.length === 0 && remoteGroups.length === 0) {
     return (
       <div className="session-list" role="listbox" aria-label="Sessions">
         <div className="session-empty">
-          {filter === 'all' ? 'no tmux panes' : `no ${filter} sessions`}
+          {cloudOrg
+            ? `No ${defaultOrgLabel(cloudOrg)} cloud sessions`
+            : filter === 'all' ? 'no tmux panes' : `no ${filter} sessions`}
         </div>
       </div>
     );

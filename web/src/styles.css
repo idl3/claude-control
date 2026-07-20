@@ -5396,6 +5396,122 @@ body.is-external-display .composer {
   flex: 0 0 auto;
 }
 
+/* ── Rail tabs: Local + one per configured Olam cloud org ────────── */
+/*
+ * .rail-tabs-wrap sits as a flex sibling BETWEEN .rail-scroll and .rail-foot
+ * inside <aside class="rail"> (App.tsx) — flex-shrink:0 like .rail-foot so
+ * it never eats the footer's space (regressions #329/#334 fixed the
+ * footer's fixed-height guarantee; this row must not reintroduce that
+ * class of bug). It never scrolls with the session list.
+ */
+.rail-tabs-wrap {
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+/* Edge fade: a soft mask on both ends signals "more tabs offscreen" without
+   a hard clip line, consistent with the cosmos chrome's soft edges
+   elsewhere (e.g. .subagent-strip's fades). Skipped when there's nothing to
+   scroll (short tab lists render with no visual cost). */
+.rail-tabs-wrap::before,
+.rail-tabs-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+  z-index: 1;
+}
+.rail-tabs-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg), transparent);
+}
+.rail-tabs-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg), transparent);
+}
+.rail-tabs {
+  display: flex;
+  flex-wrap: nowrap; /* overflow scrolls horizontally, mirrors .subagent-pills */
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 10px;
+}
+.rail-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--txt-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--ease) 150ms, border-color var(--ease) 150ms, background var(--ease) 150ms;
+}
+.rail-tab:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* Active state is a 1px accent ring + text color, never a filled gradient —
+   shape+text carries the state, not color alone. */
+.rail-tab[aria-selected='true'] {
+  color: var(--text);
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.rail-tab[data-kind='unconfigured'] {
+  color: var(--text-faint);
+  border-style: dashed;
+}
+.rail-tab-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-dim);
+}
+.rail-tab[aria-selected='true'] .rail-tab-count {
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg));
+  color: var(--accent);
+}
+.rail-tab-rename-input {
+  flex: 0 0 auto;
+  height: 30px;
+  width: 140px;
+  font-size: var(--txt-meta);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0 10px;
+  outline: none;
+}
+@media (max-width: 759px) {
+  .rail-tab {
+    height: 44px; /* 44px min touch target */
+    padding: 0 14px;
+  }
+  .rail-tab-rename-input {
+    height: 44px;
+  }
+}
+
 /* ── Rail footer: filter + new-session (bottom bar) ─────────────── */
 /*
  * .rail-foot (NewSessionForm's own root) is a flex sibling AFTER
@@ -6519,6 +6635,43 @@ select.config-input {
 .config-proj-dir-add {
   align-self: flex-start;
   margin-top: 2px;
+}
+/* Olam cloud section: read-only status list of configured clusters. */
+.config-olam-orgs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.config-olam-org-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--accent);
+}
+.config-olam-org-name {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.config-olam-org-spa {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-olam-org-spa:hover {
+  color: var(--text-dim);
+  text-decoration: underline;
 }
 .config-icon-actions {
   display: flex;
