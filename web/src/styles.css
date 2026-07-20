@@ -10805,6 +10805,16 @@ select.config-input {
   overflow-x: hidden;
   touch-action: none;
 }
+/* Bug 1 fix: when the mirrored pane is too tall to fit even at MIN_PANE_FONT_PX,
+   applyPaneScale (XtermHost.tsx) sets data-pane-overflow='y'. Bottom-align the
+   letterboxed `.xterm` so the pane's BOTTOM (live output + the input/cursor row)
+   stays flush and visible above the keyboard; the excess clips off the TOP
+   instead — the top-align default clipped the input off the BOTTOM (input painted
+   below the visible UI). Scoped to the overflow flag so the fitting case keeps
+   the deliberate top-align (content starts just below the header, no dead band). */
+.agent-term-canvas .term-canvas[data-pane-overflow='y'] {
+  align-items: flex-end;
+}
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
    Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;
