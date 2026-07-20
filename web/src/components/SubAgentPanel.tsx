@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap, { prefersReducedMotion } from '../lib/anim';
-import type { SubAgent, AgentDef, NestedSubAgent } from '../lib/types';
+import type { SubAgent, AgentDef, NestedSubAgent, Workflow } from '../lib/types';
 import { SubAgentThread } from './SubAgentThread';
 import { ModelBadge } from './SessionRail';
+import { WorkflowCard } from './WorkflowCard';
 
 interface SubAgentPanelProps {
   subagents: SubAgent[];
@@ -11,13 +12,22 @@ interface SubAgentPanelProps {
   onLoadAgent?: (agentId: string) => void;
   /** When set on open, jump straight into this agent's transcript (strip click). */
   focusAgentId?: string | null;
+  /** The selected session's workflow runs — rendered under a Workflows tab
+   *  (Phase E). The tab only appears when at least one run exists. */
+  workflows?: Workflow[];
+  /** When set on open, switch to the Workflows tab with this run expanded
+   *  (live-dock tap). */
+  focusWorkflowRunId?: string | null;
+  /** Open one workflow agent's full transcript overlay (B3 Agent View). */
+  onOpenWorkflowAgent?: (runId: string, agentId: string, label: string) => void;
 }
 
-type Tab = 'active' | 'completed' | 'all';
+type Tab = 'active' | 'completed' | 'all' | 'workflows';
 const TAB_LABELS: Record<Tab, string> = {
   active: 'Active',
   completed: 'Completed',
   all: 'All',
+  workflows: 'Workflows',
 };
 
 /** Resolve the effective model: transcript wins, then def front-matter. */
@@ -120,7 +130,16 @@ function AgentBadge({ agent }: { agent: SubAgent }) {
  * chat). Tabs filter Active / Completed / All; selecting an agent opens its
  * transcript as a nested chat you can follow live, then back to the list.
  */
-export function SubAgentPanel({ subagents, open, onClose, onLoadAgent, focusAgentId }: SubAgentPanelProps) {
+export function SubAgentPanel({
+  subagents,
+  open,
+  onClose,
+  onLoadAgent,
+  focusAgentId,
+  workflows = [],
+  focusWorkflowRunId,
+  onOpenWorkflowAgent,
+}: SubAgentPanelProps) {
   const [tab, setTab] = useState<Tab>('active');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -130,11 +149,21 @@ export function SubAgentPanel({ subagents, open, onClose, onLoadAgent, focusAgen
     if (open && focusAgentId) setSelectedId(focusAgentId);
   }, [open, focusAgentId]);
 
+  // When opened via the live dock, land on the Workflows tab (list view, not a
+  // stale agent detail). The focused run renders expanded below.
+  useEffect(() => {
+    if (open && focusWorkflowRunId) {
+      setTab('workflows');
+      setSelectedId(null);
+    }
+  }, [open, focusWorkflowRunId]);
+
   const running = subagents.filter((a) => a.status === 'running').length;
   const counts: Record<Tab, number> = {
     active: running,
     completed: subagents.length - running,
     all: subagents.length,
+    workflows: workflows.length,
   };
   const selected = selectedId
     ? subagents.find((a) => a.agentId === selectedId) ?? null
@@ -243,7 +272,9 @@ export function SubAgentPanel({ subagents, open, onClose, onLoadAgent, focusAgen
       </header>
 
       <div className="sa-tabs" role="tablist">
-        {(['active', 'completed', 'all'] as Tab[]).map((t) => (
+        {(['active', 'completed', 'all'] as Tab[])
+          .concat(workflows.length > 0 ? (['workflows'] as Tab[]) : [])
+          .map((t) => (
           <button
             key={t}
             type="button"
@@ -260,7 +291,24 @@ export function SubAgentPanel({ subagents, open, onClose, onLoadAgent, focusAgen
       </div>
 
       <div className="sa-panel-body">
-        {list.length === 0 ? (
+        {tab === 'workflows' ? (
+          // The same live WorkflowCards as the transcript, stacked. The dock-
+          // focused run mounts expanded; the rest keep their resting state.
+          <div className="sa-workflows">
+            {workflows.map((w) => (
+              <WorkflowCard
+                key={w.runId}
+                workflow={w}
+                startExpanded={w.runId === focusWorkflowRunId}
+                onOpenAgentTranscript={
+                  onOpenWorkflowAgent
+                    ? (agentId, label) => onOpenWorkflowAgent(w.runId, agentId, label)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : list.length === 0 ? (
           <div className="sa-empty">
             No {tab === 'all' ? '' : `${tab} `}sub-agents.
           </div>

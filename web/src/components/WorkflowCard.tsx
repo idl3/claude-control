@@ -336,9 +336,12 @@ export interface WorkflowCardProps {
   /** Opens one agent's full transcript overlay (wired in B3 via WorkflowContext).
    *  Absent → the card renders read-only with no transcript affordance. */
   onOpenAgentTranscript?: (agentId: string, label: string) => void;
+  /** Mount expanded even when the run is already finished (Phase E: the panel's
+   *  dock-focused card) — overrides the D1 one-line resting state once, at mount. */
+  startExpanded?: boolean;
 }
 
-export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardProps) {
+export function WorkflowCard({ workflow, onOpenAgentTranscript, startExpanded }: WorkflowCardProps) {
   const status = chipStatus(workflow);
   const phases = workflow.phases ?? [];
   const solo = phases.length === 1;
@@ -347,7 +350,7 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
   // (historical transcript) rests as a one-line summary — tap to expand. A card
   // that finishes while mounted stays expanded (no jarring collapse mid-read);
   // the initializer runs once, so a live running→completed flip never re-arms it.
-  const [collapsed, setCollapsed] = useState(() => status !== 'running');
+  const [collapsed, setCollapsed] = useState(() => !startExpanded && status !== 'running');
 
   // Stable phase keys (index, else title, else position) for expansion state
   // and React keys. Pipelined/multi-run runs keep first-appearance order.
@@ -390,7 +393,6 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
     return (
       <button
         type="button"
-        id={`wf-card-${workflow.runId}`}
         className="wf-card wf-card--collapsed"
         data-status={status}
         aria-expanded={false}
@@ -419,7 +421,6 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
 
   return (
     <section
-      id={`wf-card-${workflow.runId}`}
       className="wf-card"
       data-status={status}
       aria-label={`Workflow ${name}, ${CHIP_TEXT[status]}`}
