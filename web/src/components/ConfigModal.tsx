@@ -20,12 +20,15 @@ import {
   DEFAULT_RAIL_INTERVAL_MS,
   type RailToken,
 } from '../lib/railTokenPrefs';
-import { TypeIcon, TerminalSquareIcon } from './icons';
+import { TypeIcon, TerminalSquareIcon, CloudIcon } from './icons';
 import { RailTokenConfig } from './RailTokenConfig';
 
 interface ConfigModalProps {
   onClose: () => void;
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;
+  /** Section to land on when the modal opens — e.g. the rail's cloud tabs
+   *  route an unconfigured-org tap straight to 'olam'. Defaults to 'general'. */
+  initialSection?: SectionId;
 }
 
 // Section-nav icons not already in ./icons.tsx. Kept local (rather than added
@@ -92,7 +95,7 @@ function RepeatNavIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens';
+export type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens' | 'olam';
 
 const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { id: 'general', label: 'General', Icon: TypeIcon },
@@ -100,6 +103,7 @@ const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size
   { id: 'voice', label: 'Voice Control', Icon: MicNavIcon },
   { id: 'session', label: 'Session Defaults', Icon: FolderNavIcon },
   { id: 'railtokens', label: 'Rail tokens', Icon: RepeatNavIcon },
+  { id: 'olam', label: 'Olam cloud', Icon: CloudIcon },
 ];
 
 interface GeneralSectionProps {
@@ -657,6 +661,62 @@ function SessionSection({
 }
 
 /**
+ * Guidance + status for the rail's cloud tabs (docs/plans/cloud-local-tabs).
+ * This is deliberately NOT a disk editor — olam.json (per-org runner URL,
+ * SPA base, and secret-lookup config) is operator-edited on disk, since it
+ * declares where org bearer tokens live. This panel only explains the
+ * shape and shows what's currently configured, read from the same
+ * GET /api/config payload the rail tabs use (server.js's olamOrgs field).
+ */
+function OlamSection({ olamOrgs }: { olamOrgs: { org: string; spaBase: string | null }[] }) {
+  return (
+    <>
+      <h2 className="config-section-heading">Olam cloud</h2>
+      <div className="config-body">
+        <div className="config-field config-field--wide">
+          <span className="config-label">Configured clusters</span>
+          {olamOrgs.length === 0 ? (
+            <span className="config-hint config-field--wide">
+              No Olam cloud clusters configured yet. Add an <code>orgs</code> entry to{' '}
+              <code>olam.json</code> in the cockpit's data dir (
+              <code>~/.claude-control/olam.json</code> by default, or the{' '}
+              <code>CLAUDE_CONTROL_DATA</code>/<code>COCKPIT_DATA</code> dir when set) — each
+              entry needs an <code>org</code> slug, an https <code>runnerUrl</code>, and an
+              https <code>spaBase</code>; <code>brainUrl</code> is optional. Restart the
+              cockpit after editing. Once configured, that cluster's Olam SPA sessions get
+              their own tab in the rail above the "+ New session" bar.
+            </span>
+          ) : (
+            <ul className="config-olam-orgs">
+              {olamOrgs.map((o) => (
+                <li key={o.org} className="config-olam-org-row">
+                  <CloudIcon size={14} />
+                  <span className="config-olam-org-name">{o.org}</span>
+                  {o.spaBase ? (
+                    <a
+                      href={o.spaBase}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="config-olam-org-spa"
+                    >
+                      {o.spaBase}
+                    </a>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          <span className="config-hint">
+            Cloud tabs are personalizable — double-click the active tab's label in the rail
+            to rename it (device-local; doesn't change the org slug used for filtering).
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
  * Settings modal: edit the launch command (run in each new session's pane) and
  * the default cwd. Loads current config on open; Save validates server-side and
  * toasts the result. Small, keyboard-dismissable, matches the app's dark tokens.
@@ -667,9 +727,9 @@ function SessionSection({
  * form state and Save always sends the complete payload, across every section,
  * in a single request (see `save()` below).
  */
-export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
+export function ConfigModal({ onClose: rawClose, onToast, initialSection }: ConfigModalProps) {
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
-  const [activeSection, setActiveSection] = useState<SectionId>('general');
+  const [activeSection, setActiveSection] = useState<SectionId>(initialSection ?? 'general');
   const [launchCommand, setLaunchCommand] = useState('');
   const [claudeBin, setClaudeBin] = useState('');
   const [codexLaunchCommand, setCodexLaunchCommand] = useState('');
@@ -693,6 +753,9 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(true);
   const [restartSupported, setRestartSupported] = useState(false);
+  // Configured Olam cloud clusters, for the 'olam' section's status list —
+  // same payload the rail's cloud tabs are built from (App.tsx).
+  const [olamOrgs, setOlamOrgs] = useState<{ org: string; spaBase: string | null }[]>([]);
   const [models, setModels] = useState<ModelsInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -758,6 +821,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
         setProjectDirs(c.projectDirs ?? []);
         setSkipPermissions(c.skipPermissions ?? true);
         setRestartSupported(c.restartSupported ?? false);
+        setOlamOrgs(c.olamOrgs ?? []);
       })
       .catch((err) => onToast(`Load config failed: ${err.message}`, 'error'))
       .finally(() => {
@@ -1032,6 +1096,7 @@ export function ConfigModal({ onClose: rawClose, onToast }: ConfigModalProps) {
                 setIntervalMs={setRailIntervalMs}
               />
             ) : null}
+            {activeSection === 'olam' ? <OlamSection olamOrgs={olamOrgs} /> : null}
           </div>
         </div>
 

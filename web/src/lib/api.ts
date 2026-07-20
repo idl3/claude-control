@@ -332,6 +332,13 @@ export interface ControlConfig {
    * dev process, where exiting would not respawn.
    */
   restartSupported: boolean;
+  /**
+   * Configured Olam cloud clusters (orgs), sourced server-side from
+   * olam.json (lib/olam-config.js). Absent on older servers — callers must
+   * treat `undefined` the same as `[]`. Drives the rail's cloud tabs; the
+   * runner/token fields on each org entry are never exposed to the client.
+   */
+  olamOrgs?: { org: string; spaBase: string | null }[];
 }
 
 export interface OptimizeResult {
