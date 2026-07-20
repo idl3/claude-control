@@ -10118,12 +10118,27 @@ select.config-input {
 .ask-answered[data-answered='false'] .ask-answered-q {
   color: var(--amber); /* fixed amber, no flashing */
 }
+/* `background-image` (NOT the `background` shorthand) — same minifier
+   hardening as .composer-card::before / .subagent-pill[data-status='running']
+   ::before above, but a different mechanism: lightningcss expands an oklch
+   color inside a shorthand `background: linear-gradient(...)` into extra
+   `@supports` fallback tiers (display-p3, lab) that ALSO redeclare the full
+   `background` shorthand — which resets `background-clip` back to its
+   initial `border-box` for browsers matching a later tier, un-clipping the
+   gradient from the text glyphs into a solid filled bar with invisible
+   (color:transparent) text on top (confirmed via Playwright computed-style
+   diff against the built, not source, CSS). Every other gradient-clipped
+   text rule in this file (.meta-effort-rainbow, .cot-label/.cot-last/
+   .cot-reasoning, .shimmer-text, .ultrathink-text, .composer-ultrathink)
+   already uses the `background-image` longhand for exactly this reason —
+   this rule was the one holdout still on the shorthand. */
 .ask-answered[data-answered='false'] .ask-answered-waiting {
-  background: linear-gradient(90deg, var(--amber) 0%, oklch(96% 0.07 95) 45%, var(--amber) 80%);
+  background-image: linear-gradient(90deg, var(--amber) 0%, oklch(96% 0.07 95) 45%, var(--amber) 80%);
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  -webkit-text-fill-color: transparent;
   animation: ask-await-sweep 2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -10133,8 +10148,9 @@ select.config-input {
   }
   .ask-answered[data-answered='false'] .ask-answered-waiting {
     animation: none;
-    background: none;
+    background-image: none;
     color: var(--amber);
+    -webkit-text-fill-color: var(--amber);
   }
 }
 
