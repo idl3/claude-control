@@ -1005,6 +1005,24 @@ function AppInner() {
   );
   const closeWorkflowAgent = useCallback(() => setViewingWorkflowAgent(null), []);
 
+  // Retry the agent-transcript request until it lands. ws send() drops messages
+  // when the socket isn't OPEN (mid-reconnect), so a single fire-and-forget
+  // request can leave the overlay stuck at "loading transcript…" forever.
+  useEffect(() => {
+    if (!viewingWorkflowAgent) return;
+    const { runId, agentId } = viewingWorkflowAgent;
+    const key = `${runId}::${agentId}`;
+    if (cockpit.workflowAgentById[key]?.loaded) return;
+    const t = setInterval(() => {
+      if (cockpit.workflowAgentById[key]?.loaded) {
+        clearInterval(t);
+        return;
+      }
+      cockpit.requestWorkflowAgent(runId, agentId);
+    }, 2000);
+    return () => clearInterval(t);
+  }, [viewingWorkflowAgent, cockpit.workflowAgentById, cockpit.requestWorkflowAgent]);
+
   // Live workflow slice for the selected session, keyed by runId — consumed by
   // the inline WorkflowCard (MessageParts' WorkflowPart) to bind to the polled
   // run, not the frozen tool_result. `openAgent` opens the transcript overlay.

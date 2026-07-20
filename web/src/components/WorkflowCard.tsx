@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { Workflow, WorkflowPhase, WorkflowAgent } from '../lib/types';
 import { ModelBadge } from './SessionRail';
+import { SettingsIcon } from './icons';
 
 // ---------------------------------------------------------------------------
 // Formatting — pure, total. All model-authored strings render as React text
@@ -108,6 +109,16 @@ export function _agentRowRenderCountForTest(): number {
   return rowRenders;
 }
 
+/** resultPreview is a serialized-JSON string; pretty-print it when it parses so
+ *  the detail pane reads structured, never as one dense blob. Fallback: raw. */
+function prettyJson(s: string): string {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
+  }
+}
+
 function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
   rowRenders += 1;
   const state = agentDotState(agent);
@@ -142,6 +153,11 @@ function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
         {agent.agentType && agent.label ? (
           <span className="wf-agent-type">{agent.agentType}</span>
         ) : null}
+        {agent.attempts != null && agent.attempts > 1 ? (
+          <span className="wf-agent-attempts" title={`${agent.attempts} attempts (runtime retried this agent)`}>
+            ×{agent.attempts}
+          </span>
+        ) : null}
         {agent.model ? <ModelBadge model={agent.model} className="meta-model wf-agent-model" /> : null}
         {/* Running rows show the live tool name; finished rows show cost/time. */}
         {state === 'running' ? (
@@ -158,16 +174,22 @@ function AgentRowImpl({ agent, onOpenTranscript }: AgentRowProps) {
 
       {expandable && expanded ? (
         <div className="wf-agent-detail">
-          {/* provenance/cost row */}
-          <div className="wf-agent-provenance">
-            {agent.model ? <ModelBadge model={agent.model} /> : null}
-            {tokens ? <span>{tokens} tok</span> : null}
-            {agent.toolCalls != null ? <span>{agent.toolCalls} calls</span> : null}
-            {duration ? <span>{duration}</span> : null}
-          </div>
-          {/* resultPreview (done) or promptPreview/live (running) — escaped text */}
-          {agent.resultPreview ? (
-            <p className="wf-agent-preview">{agent.resultPreview}</p>
+          {/* provenance/cost row — model stays in the row header's badge; repeat
+              it here only when real cost fields ride along (never a bare dupe). */}
+          {tokens || agent.toolCalls != null || duration ? (
+            <div className="wf-agent-provenance">
+              {agent.model ? <ModelBadge model={agent.model} /> : null}
+              {tokens ? <span>{tokens} tok</span> : null}
+              {agent.toolCalls != null ? <span>{agent.toolCalls} calls</span> : null}
+              {duration ? <span>{duration}</span> : null}
+            </div>
+          ) : null}
+          {/* last-reply tail (done, transcript present) → pretty result JSON →
+              prompt task snippet → nothing. All escaped text nodes. */}
+          {agent.lastReply ? (
+            <p className="wf-agent-preview">{agent.lastReply}</p>
+          ) : agent.resultPreview ? (
+            <p className="wf-agent-preview wf-agent-preview--result">{prettyJson(agent.resultPreview)}</p>
           ) : agent.promptPreview ? (
             <p className="wf-agent-preview wf-agent-preview--prompt">{agent.promptPreview}</p>
           ) : (
@@ -197,6 +219,8 @@ export function agentRowPropsEqual(prev: AgentRowProps, next: AgentRowProps): bo
     a.state === b.state &&
     a.lastToolName === b.lastToolName &&
     a.tokens === b.tokens &&
+    a.lastReply === b.lastReply &&
+    a.attempts === b.attempts &&
     prev.onOpenTranscript === next.onOpenTranscript
   );
 }
@@ -252,13 +276,18 @@ function PhaseGroup({ phase, phaseKey, solo, open, onToggle, onOpenTranscript }:
   return (
     <section className="wf-phase" data-activity={activity} data-solo={solo ? 'true' : undefined}>
       {solo ? (
-        <div className="wf-phase-head wf-phase-head--solo">
-          <span className="wf-phase-title">{title}</span>
-          {phase.detail ? <span className="wf-phase-detail">{phase.detail}</span> : null}
-          <span className="wf-phase-count">
-            {done}/{total}
-          </span>
-        </div>
+        // An untitled solo group (new-format runs: phases aren't journal-derivable)
+        // gets NO head — a bare "Phase" label above every agent adds nothing; the
+        // declared pipeline shows in the card header instead.
+        phase.title ? (
+          <div className="wf-phase-head wf-phase-head--solo">
+            <span className="wf-phase-title">{title}</span>
+            {phase.detail ? <span className="wf-phase-detail">{phase.detail}</span> : null}
+            <span className="wf-phase-count">
+              {done}/{total}
+            </span>
+          </div>
+        ) : null
       ) : (
         <button
           type="button"
@@ -368,7 +397,7 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
         aria-label={`Workflow ${name}, ${CHIP_TEXT[status]}, ${workflow.done} of ${workflow.total} agents. Expand.`}
         onClick={() => setCollapsed(false)}
       >
-        <span className="wf-glyph" aria-hidden="true">⚙</span>
+        <span className="wf-glyph" aria-hidden="true"><SettingsIcon size={15} /></span>
         <span className="wf-name">{name}</span>
         <span className="wf-status-chip" data-status={status}>
           <span className="wf-status-dot" aria-hidden="true" />
@@ -377,6 +406,7 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
         <span className="wf-progress">
           {workflow.done}/{workflow.total}
         </span>
+        {workflow.failed ? <span className="wf-failed">{workflow.failed} failed</span> : null}
         <span className="wf-collapsed-meta">
           {agentCount} agents
           {tokens ? ` · ${tokens}` : ''}
@@ -397,7 +427,7 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
       <header className="wf-header">
         <div className="wf-header-main">
           <span className="wf-glyph" aria-hidden="true">
-            ⚙
+            <SettingsIcon size={15} />
           </span>
           <span className="wf-name">{name}</span>
           <span className="wf-status-chip" data-status={status}>
@@ -407,6 +437,11 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
           <span className="wf-progress">
             {workflow.done}/{workflow.total}
           </span>
+          {workflow.failed ? (
+            <span className="wf-failed" title="agents that failed after runtime retries">
+              {workflow.failed} failed
+            </span>
+          ) : null}
           {status !== 'running' ? (
             <button
               type="button"
@@ -420,6 +455,11 @@ export function WorkflowCard({ workflow, onOpenAgentTranscript }: WorkflowCardPr
           ) : null}
         </div>
         {workflow.summary ? <p className="wf-summary">{workflow.summary}</p> : null}
+        {workflow.declaredPhases && workflow.declaredPhases.length > 0 ? (
+          <p className="wf-declared-phases" aria-label="Declared phases">
+            {workflow.declaredPhases.join(' → ')}
+          </p>
+        ) : null}
         <div className="wf-aggregate">
           <span>{agentCount} agents</span>
           {tokens ? <span>{tokens}</span> : null}
