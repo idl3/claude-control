@@ -512,7 +512,16 @@ const _handler = (req, res) => {
   }
   if (u.pathname === '/api/config') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
-    if (req.method === 'GET') return endJson(res, 200, { ...readConfig(), restartSupported: isServiceManaged() });
+    if (req.method === 'GET') {
+      return endJson(res, 200, {
+        ...readConfig(),
+        restartSupported: isServiceManaged(),
+        // Rail cloud-tab enumeration (docs/plans/cloud-local-tabs): runner
+        // URLs/tokens/GSM fields stay server-side — only the org slug + SPA
+        // base (needed for the cockpit UI) cross the wire.
+        olamOrgs: OLAM.orgs.map((o) => ({ org: o.org, spaBase: o.spaBase ?? null })),
+      });
+    }
     if (req.method === 'POST') return handleConfigSave(req, res);
     return endJson(res, 405, { error: 'method not allowed' });
   }

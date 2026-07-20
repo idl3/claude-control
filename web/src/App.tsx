@@ -23,6 +23,7 @@ import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
 import { renameSession, getConfig, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
+import { RailTabs, computeRailTabs, resolveTabAction } from './components/RailTabs';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
 import type { ComposerHandle } from './components/Composer';
@@ -42,7 +43,7 @@ import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { PermissionBanner } from './components/PermissionBanner';
-import { ConfigModal } from './components/ConfigModal';
+import { ConfigModal, type SectionId as ConfigSectionId } from './components/ConfigModal';
 import { NewSessionForm } from './components/NewSessionForm';
 import { NewSessionDraft } from './components/NewSessionDraft';
 import { TokenGate } from './components/TokenGate';
@@ -861,6 +862,11 @@ function AppInner() {
 
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
+  // Section to land the Settings modal on — set by the rail's unconfigured
+  // "Cloud" tab (routes straight to 'olam') before opening; reset to
+  // undefined (→ ConfigModal's 'general' default) on close so every OTHER
+  // setConfigOpen(true) call site keeps opening to General, unchanged.
+  const [configSection, setConfigSection] = useState<ConfigSectionId | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // "Move window to another session" confirm step — opened by either the
   // Cmd+K palette command (no presetDest, shows a picker) or the rail
@@ -1171,6 +1177,118 @@ function AppInner() {
       return next;
     });
   }, []);
+  // Rail tabs (docs/plans/cloud-local-tabs): "Local" + one tab per configured
+  // Olam cloud org, filtering the rail below the tab row instead of
+  // requiring the funnel chip. Configured orgs come from GET /api/config's
+  // olamOrgs (server.js, sourced from olam.json) — fetched once here,
+  // independent of ConfigModal's own copy of the same call (same pattern as
+  // the font-size effect above: several call sites each fetch what they need).
+  const [olamOrgs, setOlamOrgs] = useState<{ org: string; spaBase: string | null }[]>([]);
+  const [olamOrgsLoaded, setOlamOrgsLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getConfig()
+      .then((c) => {
+        if (alive) setOlamOrgs(c.olamOrgs ?? []);
+      })
+      .catch(() => { /* non-fatal — cloud tabs fall back to the empty/local state */ })
+      .finally(() => {
+        if (alive) setOlamOrgsLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // Defensive fallback (older server with no olamOrgs field, but remote
+  // sessions already present via the poll): derive the org set from the
+  // sessions themselves rather than showing zero cloud tabs.
+  const configuredOrgs = useMemo(() => {
+    const fromConfig = olamOrgs.map((o) => o.org);
+    if (fromConfig.length > 0) return fromConfig;
+    const derived = new Set<string>();
+    for (const s of cockpit.sessions) {
+      if (s.kind === 'remote' && s.org) derived.add(s.org);
+    }
+    return [...derived];
+  }, [olamOrgs, cockpit.sessions]);
+
+  const [railTab, setRailTabState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('cockpit:railTab') || 'local';
+    } catch {
+      return 'local';
+    }
+  });
+  const setRailTab = useCallback((id: string) => {
+    setRailTabState(id);
+    try {
+      localStorage.setItem('cockpit:railTab', id);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  // Once we know the real configured-org set, drop a stale persisted
+  // selection (an org that's since been removed from olam.json) back to
+  // Local rather than leaving the rail on a tab that no longer exists.
+  useEffect(() => {
+    if (!olamOrgsLoaded) return;
+    if (railTab !== 'local' && !configuredOrgs.includes(railTab)) {
+      setRailTab('local');
+    }
+  }, [olamOrgsLoaded, configuredOrgs, railTab, setRailTab]);
+
+  // Operator-renamed cloud-tab labels (device-local personalization, no
+  // server counterpart) — loaded once from every `cloudTabName:<org>` key.
+  const [cloudTabNames, setCloudTabNames] = useState<Record<string, string>>(() => {
+    const names: Record<string, string> = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('cloudTabName:')) {
+          const val = localStorage.getItem(key);
+          if (val) names[key.slice('cloudTabName:'.length)] = val;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return names;
+  });
+  const renameCloudTab = useCallback((org: string, label: string) => {
+    const trimmed = label.trim();
+    setCloudTabNames((prev) => {
+      const next = { ...prev };
+      if (trimmed) next[org] = trimmed;
+      else delete next[org];
+      return next;
+    });
+    try {
+      if (trimmed) localStorage.setItem(`cloudTabName:${org}`, trimmed);
+      else localStorage.removeItem(`cloudTabName:${org}`);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const railTabs = useMemo(
+    () => computeRailTabs(cockpit.sessions, configuredOrgs, cloudTabNames),
+    [cockpit.sessions, configuredOrgs, cloudTabNames],
+  );
+  const onSelectRailTab = useCallback(
+    (id: string) => {
+      const action = resolveTabAction(id, railTabs);
+      if (action.type === 'open-settings') {
+        // Unconfigured 'cloud' pseudo-tab (or a stale/unknown id) — route to
+        // Settings → Olam cloud instead of changing the filter.
+        setConfigSection('olam');
+        setConfigOpen(true);
+        return;
+      }
+      setRailTab(action.id);
+    },
+    [railTabs, setRailTab],
+  );
+
   const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem('cc:collapsedSessions') || '[]'));
@@ -2580,8 +2698,19 @@ function AppInner() {
                   const source = cockpit.sessions.find((s) => s.id === srcId);
                   if (source) setMoveModal({ source, presetDest: destSessionName });
                 }}
+                cloudOrg={railTab === 'local' ? null : railTab}
               />
             </div>
+            {/* Tab row (docs/plans/cloud-local-tabs): Local + one per configured
+                Olam cloud org, pinned above .rail-foot — flex-shrink:0, never
+                scrolls with the list, never steals the footer's space. */}
+            <RailTabs
+              tabs={railTabs}
+              activeTab={railTab}
+              onSelect={onSelectRailTab}
+              onRename={renameCloudTab}
+              customNames={cloudTabNames}
+            />
             {/* Bottom bar, pinned below .rail-scroll (never scrolls with the list):
                 filter on the left, "+ New session" (primary action) on the right. */}
             <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
@@ -3001,7 +3130,11 @@ function AppInner() {
 
         {configOpen ? (
           <ConfigModal
-            onClose={() => setConfigOpen(false)}
+            initialSection={configSection}
+            onClose={() => {
+              setConfigOpen(false);
+              setConfigSection(undefined);
+            }}
             onToast={showToast}
           />
         ) : null}
