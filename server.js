@@ -3294,6 +3294,36 @@ async function handleClientMessage(ws, msg) {
       const text = await tmux.capturePane(session.target, lines, !!msg.escapes);
       return send(ws, { type: 'capture', id: msg.id, text });
     }
+    // Move a tmux WINDOW from its current session into a different,
+    // already-existing tmux session (sidebar drag-to-session). `id` must be
+    // a live registry session (T1 trust); `dest` is re-validated against the
+    // live tmux session list inside tmux.moveWindow (defence in depth).
+    case 'move-window': {
+      const session = sessionById(msg.id);
+      if (!session) throw new Error('unknown session');
+      if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
+      const dest = String(msg.dest || '');
+      if (!dest) throw new Error('missing destination');
+      const srcSession = session.sessionName ?? session.target.split(':')[0];
+      if (dest === srcSession) throw new Error('destination is the current session');
+      const srcPaneId = session.paneId;
+      await tmux.moveWindow(session.target, dest);
+      // move-window renumbers the window's index in its new session, so the
+      // pre-move target string is stale — recompute it by the moved window's
+      // STABLE pane id (%N survives the move) rather than trusting any index
+      // math. A lookup failure (e.g. pane vanished mid-move) degrades to
+      // newId: null rather than failing the whole op — the move itself
+      // already succeeded.
+      let newId = null;
+      try {
+        const panes = await tmux.listPanes();
+        const moved = panes.find((p) => p.paneId === srcPaneId);
+        newId = moved ? moved.target : null;
+      } catch {
+        /* newId stays null — move already succeeded */
+      }
+      return send(ws, { type: 'ack', op: 'move-window', ok: true, reqId: msg.reqId, newId });
+    }
     // Interactive terminal panes: forward keystrokes to ANY pane by id (the
     // selected one). Mirrors the cc-shell shell-* ops but target-addressed.
     case 'pane-text': {

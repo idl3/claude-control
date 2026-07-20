@@ -58,6 +58,7 @@ import { HotkeyHints } from './components/HotkeyHints';
 import { AppFrameLayer } from './components/AppFrameLayer';
 import { useHotkeySuppressionInterceptor } from './lib/hotkeySuppression';
 import { StudioModal } from './components/StudioModal';
+import { MoveWindowModal } from './components/MoveWindowModal';
 import {
   PencilIcon,
   TerminalSquareIcon,
@@ -73,7 +74,7 @@ import {
   GalleryIcon,
 } from './components/icons';
 import { TranscriptSearch } from './components/TranscriptSearch';
-import type { AnswerSelection, Pending, ServerMessage, Workflow } from './lib/types';
+import type { AnswerSelection, Pending, ServerMessage, Session, Workflow } from './lib/types';
 import { hasOpenQuestion } from './lib/askGuard';
 import {
   echoMatches,
@@ -862,6 +863,18 @@ function AppInner() {
   // Settings modal + Cmd/Ctrl+K command palette.
   const [configOpen, setConfigOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // "Move window to another session" confirm step — opened by either the
+  // Cmd+K palette command (no presetDest, shows a picker) or the rail
+  // drag-and-drop drop handler (presetDest already chosen). See
+  // MoveWindowModal + SessionRail's onRequestMove.
+  const [moveModal, setMoveModal] = useState<{ source: Session; presetDest?: string } | null>(
+    null,
+  );
+  // Correlates the 'move-window' reqId back to the requested destination name
+  // for the success toast ("Moved to <dest>") — the ack payload itself only
+  // carries {op, ok, reqId, newId}, never the dest. See the ack-success
+  // listener below (declared after `select`, which it calls with newId).
+  const pendingMoveRef = useRef<{ reqId: string; dest: string } | null>(null);
   const [perfDiagnosticsOpen, setPerfDiagnosticsOpen] = useState(() => loadPerfDiagnosticsEnabled());
   const setPerfDiagnostics = useCallback(
     (open: boolean) => {
@@ -1499,6 +1512,28 @@ function AppInner() {
     },
     [cockpit],
   );
+
+  // 'move-window' SUCCESS handling: the generic cockpit:ack listener above
+  // already covers the FAILURE toast (`${ack.op} failed: ...`) for every op,
+  // move-window included. This one only handles ok:true — re-selecting
+  // `newId` (the moved pane's client session id, which CHANGES on a
+  // cross-session move even though transcript/pins already followed
+  // server-side) so the operator doesn't lose their selection. Declared
+  // after `select` so it's in scope for the effect's dependency array.
+  useEffect(() => {
+    const onAck = (e: Event) => {
+      const ack = (e as CustomEvent<Extract<ServerMessage, { type: 'ack' }>>).detail;
+      if (ack.op !== 'move-window' || !ack.ok) return;
+      const pending = pendingMoveRef.current;
+      if (!pending || pending.reqId !== ack.reqId) return;
+      pendingMoveRef.current = null;
+      if (ack.newId) select(ack.newId);
+      // else: leave the current selection — the next sessions poll reconciles it.
+      showToast(`Moved to ${pending.dest}`, 'ok');
+    };
+    window.addEventListener('cockpit:ack', onAck);
+    return () => window.removeEventListener('cockpit:ack', onAck);
+  }, [select, showToast]);
 
   // New session created from the draft screen: land the user in its
   // transcript, same as tapping it in the rail (the rail itself picks it up
@@ -2204,6 +2239,16 @@ function AppInner() {
         run: () => openTerminal(),
       },
       {
+        id: 'act:move-window',
+        label: 'Move window to another session…',
+        hint: selectedSession ? undefined : 'select a session first',
+        group: 'Actions',
+        keywords: 'tmux move window session relocate',
+        run: () => {
+          if (selectedSession) setMoveModal({ source: selectedSession });
+        },
+      },
+      {
         id: 'act:new-session',
         label: 'New session',
         group: 'Actions',
@@ -2533,6 +2578,10 @@ function AppInner() {
                 runningSubagentCountById={cockpit.runningSubagentCountById}
                 onToast={showToast}
                 cmdHeld={cmdHeld}
+                onRequestMove={(srcId, destSessionName) => {
+                  const source = cockpit.sessions.find((s) => s.id === srcId);
+                  if (source) setMoveModal({ source, presetDest: destSessionName });
+                }}
               />
             </div>
             {/* Bottom bar, pinned below .rail-scroll (never scrolls with the list):
@@ -3018,6 +3067,20 @@ function AppInner() {
 
         {paletteOpen ? (
           <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
+        ) : null}
+
+        {moveModal ? (
+          <MoveWindowModal
+            source={moveModal.source}
+            presetDest={moveModal.presetDest}
+            sessions={cockpit.sessions}
+            onToast={showToast}
+            onClose={() => setMoveModal(null)}
+            onConfirm={(dest) => {
+              const reqId = cockpit.sendMoveWindow(moveModal.source.id, dest);
+              if (reqId) pendingMoveRef.current = { reqId, dest };
+            }}
+          />
         ) : null}
 
         {agentTerminalOpen && selectedSession ? (

@@ -65,6 +65,14 @@ interface SessionRailProps {
    *  than a second listener in here) so each row's right-hand meta slot can
    *  swap to the tmux pane name in JS, not just CSS visibility. */
   cmdHeld?: boolean;
+  /**
+   * Rail drag-and-drop entry point for "move window to another session": a
+   * pane row is dragged onto a DIFFERENT group's header. This fires on DROP
+   * with the dragged session's id + the target tmux session name — it does
+   * NOT perform the move itself. The caller (App.tsx) opens MoveWindowModal
+   * with presetDest so the operator still confirms before anything is sent.
+   */
+  onRequestMove?: (srcId: string, destSessionName: string) => void;
 }
 
 /**
@@ -634,6 +642,9 @@ function PaneRow({
   cmdHeld,
   metaTick,
   railTokens,
+  dragging,
+  onDragStart,
+  onDragEnd,
 }: {
   s: Session;
   selected: boolean;
@@ -655,6 +666,13 @@ function PaneRow({
    *  see lib/railTokenPrefs.ts) — owned/loaded by SessionRail (the only
    *  consumer) and threaded down here for the paneMetaFields call. */
   railTokens: RailToken[];
+  /** True while THIS row is the one being dragged (move-window DnD). */
+  dragging?: boolean;
+  /** Drag started on this row — reports the dragged session's id up to
+   *  SessionRail, which tracks the single in-flight draggingId. */
+  onDragStart?: (id: string) => void;
+  /** Drag ended (drop or cancel) — clears the rail's drag state. */
+  onDragEnd?: () => void;
 }) {
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
@@ -767,6 +785,8 @@ function PaneRow({
       data-selected={selected ? 'true' : 'false'}
       data-kind={s.kind ?? 'claude'}
       data-pending={s.pending ? 'true' : undefined}
+      data-dragging={dragging ? 'true' : undefined}
+      draggable
       onClick={() => onSelect(s.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -774,6 +794,15 @@ function PaneRow({
           onSelect(s.id);
         }
       }}
+      onDragStart={(e) => {
+        // "move window to another session" DnD — the group header's onDrop
+        // reads this back via getData; effectAllowed communicates intent to
+        // the OS drag cursor (confirmed via MoveWindowModal, not on drop).
+        e.dataTransfer.setData('text/cockpit-session', s.id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart?.(s.id);
+      }}
+      onDragEnd={() => onDragEnd?.()}
     >
       <div className="session-top">
         {/* One icon per row: Claude vs terminal. Active tmux pane = full
@@ -862,6 +891,7 @@ export function SessionRail({
   runningSubagentCountById,
   onToast,
   cmdHeld,
+  onRequestMove,
 }: SessionRailProps) {
   // Operator-configured meta-slot token order + rotation interval (Settings →
   // Rail tokens, see lib/railTokenPrefs.ts). SessionRail is the only
@@ -896,6 +926,18 @@ export function SessionRail({
   const [renameDraft, setRenameDraft] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
   const renameSubmittingRef = useRef(false);
+
+  // "Move window to another session" drag-and-drop: draggingId is the pane
+  // currently being dragged (drives PaneRow's data-dragging affordance);
+  // dragOverSession is the tmux session name the drag is hovering (drives the
+  // target group header's data-drag-over ring). Both clear on drop AND on a
+  // cancelled drag (dragend fires either way) — see PaneRow's onDragEnd.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverSession, setDragOverSession] = useState<string | null>(null);
+  const clearDrag = () => {
+    setDraggingId(null);
+    setDragOverSession(null);
+  };
 
   useEffect(() => {
     if (renamingSession !== null) renameInputRef.current?.select();
@@ -977,6 +1019,27 @@ export function SessionRail({
             <div
               className="session-group-head"
               data-renaming={isRenamingThis ? 'true' : undefined}
+              data-drag-over={dragOverSession === g.sessionName ? 'true' : undefined}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOverSession !== g.sessionName) setDragOverSession(g.sessionName);
+              }}
+              onDragLeave={() =>
+                setDragOverSession((cur) => (cur === g.sessionName ? null : cur))
+              }
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverSession(null);
+                const srcId = e.dataTransfer.getData('text/cockpit-session');
+                if (!srcId) return;
+                const src = sessions.find((s) => s.id === srcId);
+                // Guard: dropping onto the dragged pane's OWN group is a no-op
+                // (never offered as a destination — see MoveWindowModal too).
+                if (src && src.sessionName !== g.sessionName) {
+                  onRequestMove?.(srcId, g.sessionName);
+                }
+              }}
             >
               <button
                 type="button"
@@ -1055,6 +1118,9 @@ export function SessionRail({
                           cmdHeld={cmdHeld}
                           metaTick={metaTick}
                           railTokens={railTokens}
+                          dragging={s.id === draggingId}
+                          onDragStart={setDraggingId}
+                          onDragEnd={clearDrag}
                         />
                       ))}
                     </ul>
