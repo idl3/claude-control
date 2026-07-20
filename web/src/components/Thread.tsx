@@ -45,11 +45,6 @@ interface ThreadProps {
   onOpenWorkflowCard?: (runId: string) => void;
   /** Open a specific running agent's transcript (pill click → inline view). */
   onOpenAgent: (agentId: string) => void;
-  /** Open the full-screen live agent-pane mirror (⌘J on desktop). Forwarded to
-   *  Composer so its always-visible toolbar can offer a touch-reachable
-   *  trigger — Cmd+J has no equivalent on a screen with no physical Cmd key.
-   *  Undefined when no session is selected, matching the ⌘J guard in App. */
-  onOpenAgentTerminal?: () => void;
   /** The sub-agent whose transcript is shown inline (null = show session). */
   viewingAgent?: SubAgent | null;
   /** Clear the inline agent view (back to session transcript). */
@@ -184,7 +179,6 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   workflows,
   onOpenWorkflowCard,
   onOpenAgent,
-  onOpenAgentTerminal,
   viewingAgent = null,
   onCloseAgent,
   working,
@@ -348,7 +342,6 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
         onKey={onKey}
         onSelect={onSelect}
         onReply={onReply}
-        onOpenAgentTerminal={onOpenAgentTerminal}
       />
     </ThreadPrimitive.Root>
   );

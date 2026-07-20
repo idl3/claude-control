@@ -234,11 +234,16 @@ html.pwa-fill .app {
    the on-screen keyboard) and the composer was left wherever iOS's own
    imprecise scroll-into-view happened to land it — a large dead gap above
    the keyboard. Dropping the `html.pwa-fill` requirement covers both cases
-   with the one mechanism; `@media (max-width: 760px)` keeps it mobile-only
+   with the one mechanism; `@media (max-width: 1400px)` keeps it touch-only
    (desktop never gets `body.kbd-up` in the first place — there's no
    on-screen keyboard to shrink visualViewport — but this stays scoped to
-   match `body.kbd-up .composer`'s own mobile-only rule below). */
-@media (max-width: 760px) {
+   match `body.kbd-up .composer`'s own touch-only rule below). Widened from
+   760px to 1400px to also cover iPad (portrait ~820px, landscape up to
+   ~1366px on 12.9"): the on-screen keyboard covers the same fraction of an
+   iPad's screen as a phone's, and without this pin the rail-foot/composer
+   simply render behind it — the "composer + sidebar footer both invisible
+   while typing" iPad bug. */
+@media (max-width: 1400px) {
   body.kbd-up .app {
     position: fixed;
     left: 0;
@@ -559,7 +564,15 @@ html.pwa-fill .app {
   align-items: center;
   gap: 8px;
   /* Content height only — the fixed 3px top/bottom padding below is what
-     brings the rendered bar to the full --hud-h (see token comment). */
+     brings the rendered bar to the full --hud-h (see token comment).
+     content-box is REQUIRED for that math: the page-wide `* { box-sizing:
+     border-box }` reset would otherwise make `height` include padding, so on
+     a Dynamic-Island phone (--safe-top ~59px) `padding-top` alone (~62px)
+     would exceed this whole box and squeeze the icon/stat row to ~0px —
+     exactly the "HUD clipped under the Island" bug. Matches the
+     `html[data-native-shell='true'] .hud` override below, which already
+     needed content-box for the same reason. */
+  box-sizing: content-box;
   height: calc(var(--hud-h) - 6px);
   padding: 0 8px;
   padding-top: calc(var(--safe-top) + 3px);
@@ -3339,8 +3352,9 @@ details.block-plan > summary.block-tool-use {
    height, which doesn't move on a same-field blur/refocus, so toggling
    `body.kbd-up` is stable across button taps — unlike :focus-within. When
    the keyboard is actually up, the safe-area inset is dead space floating
-   above it, so we tighten (not zero) the padding there instead. */
-@media (max-width: 760px) {
+   above it, so we tighten (not zero) the padding there instead. Widened to
+   1400px alongside the `.app` kbd-up pin above — see that comment. */
+@media (max-width: 1400px) {
   .composer {
     /* Unfocused: sit ~8px higher off the bottom contour (matches the rail-foot
        clearance so both bottom bars read consistently above the home indicator). */
@@ -10373,6 +10387,18 @@ select.config-input {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+/* .agent-term-backdrop is position:fixed inset:0 with no safe-area offset of
+   its own, so without this the header + "Agent terminal" title render under
+   the iOS status bar / Dynamic Island. Added ON TOP of the existing 8px
+   padding (shared .modal-head rule), scoped to this overlay only — other
+   modals reusing .modal-head are unaffected. .agent-term-canvas-wrap below is
+   a flex:1 1 auto sibling with no fixed-height assumption and XtermHost's
+   paneScale fit reads the wrap's own rendered rect at fit time, so a taller
+   header just leaves it a smaller (still correct) box — scale-to-fit still
+   holds. */
+.agent-term-panel .modal-head {
+  padding-top: calc(var(--safe-top) + 8px);
 }
 /* Focus-handoff wrapper (AgentTerminalOverlay.tsx queries its one <textarea>
    descendant) — needs the same flex-child sizing as .agent-term-canvas below

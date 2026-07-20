@@ -55,6 +55,18 @@ export function TerminalSquareIcon(p: IconProps) {
   );
 }
 
+// Bare (unboxed) `>_` glyph — distinct from TerminalSquareIcon's bordered
+// variant. Shared by the composer's own scratch-shell toggle and the header
+// action bar's "Open agent terminal" button (moved out of Composer.tsx so
+// both call sites use one definition).
+export function TerminalIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 8l4 4-4 4M12 16h7" />
+    </Svg>
+  );
+}
+
 export function BotIcon(p: IconProps) {
   return (
     <Svg {...p}>

@@ -36,7 +36,7 @@ import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import type { SubAgentMode } from '../lib/subAgent';
 import type { AnswerSelection } from '../lib/types';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
-import { StopIcon, BotIcon, ArrowUpIcon, MicIcon, MonitorIcon } from './icons';
+import { StopIcon, BotIcon, ArrowUpIcon, MicIcon, TerminalIcon } from './icons';
 import { ComposerAttachButton, ComposerMicButton, ComposerRawSendButton, ComposerSendButton } from './ComposerActionBar';
 import { AskInline, type ActivePrompt } from './AskInline';
 import { composerHighlightSegments } from '../lib/composerHighlight';
@@ -144,11 +144,6 @@ interface ComposerProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
-  /** Open the full-screen live agent-pane mirror (⌘J on desktop). Renders a
-   *  touch-reachable toolbar button next to the `>_` terminal-mode toggle —
-   *  Cmd+J has no equivalent for touch users. Button is omitted entirely
-   *  when undefined (no session selected). */
-  onOpenAgentTerminal?: () => void;
   services?: Partial<ComposerServices>;
 }
 
@@ -286,7 +281,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   onKey,
   onSelect,
   onReply,
-  onOpenAgentTerminal,
   services,
 }: ComposerProps, ref) {
   const composer = useComposerRuntime();
@@ -2173,27 +2167,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <TerminalIcon />
             </button>
           ) : null}
-          {/* Live-agent mirror (⌘J on desktop): a full-screen, read-mostly
-              mirror of this session's actual live Claude/codex tmux pane —
-              distinct from the `>_` toggle above, which opens a throwaway
-              cc-shell scratch terminal. This is the ONLY way to reach it on
-              touch devices (no physical Cmd key), so it lives in the
-              always-visible composer toolbar rather than the collapsible
-              header action bar. Omitted entirely when no session is
-              selected (onOpenAgentTerminal is undefined). */}
-          {!voice && onOpenAgentTerminal ? (
-            <button
-              type="button"
-              className="composer-skills-btn composer-agent-term-toggle"
-              aria-label="Open agent terminal"
-              title="Agent terminal — live mirror of this session's agent pane (⌘J)"
-              data-hotkey="⌘J"
-              data-hotkey-dir="down"
-              onClick={onOpenAgentTerminal}
-            >
-              <MonitorIcon size={16} />
-            </button>
-          ) : null}
           {/* Terminal mode: the special-keys bar JOINS the action row, inline
               next to the `>_` toggle (NOT a separate strip inside a panel).
               Scrolls horizontally on narrow widths. Keys route through shell.key
@@ -2509,20 +2482,6 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRe
         </button>
       </div>
     </div>
-  );
-}
-
-function TerminalIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M5 8l4 4-4 4M12 16h7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 
