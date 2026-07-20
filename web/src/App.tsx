@@ -944,6 +944,9 @@ function AppInner() {
   const [panelOpen, setPanelOpen] = useState(false);
   // When the panel is opened from a strip row, focus that specific agent.
   const [panelAgentId, setPanelAgentId] = useState<string | null>(null);
+  // When the panel is opened from the live dock, land on the Workflows tab
+  // with this run expanded (Phase E).
+  const [panelWorkflowRunId, setPanelWorkflowRunId] = useState<string | null>(null);
   // Inline agent transcript: set by clicking a pill, cleared on session switch or back.
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
@@ -982,6 +985,7 @@ function AppInner() {
     setPanelOpen(false);
     setViewingAgentId(null);
     setViewingWorkflowAgent(null);
+    setPanelWorkflowRunId(null);
     setRawOpen(false);
     setAgentTerminalOpen(false);
   }, [cockpit.selectedId]);
@@ -1050,12 +1054,13 @@ function AppInner() {
     return runs;
   }, [cockpit.selectedId, cockpit.workflowsById]);
 
-  // Dock tap → bring the inline card into view. The card mounts ungrouped at
-  // its tool block (see Messages.tsx INTERACTIVE_TOOLS), carrying this DOM id.
+  // Dock tap → open the Agents panel on its Workflows tab with this run
+  // expanded (Phase E) — the panel card is the same live-bound WorkflowCard,
+  // reachable without scrolling the transcript.
   const openWorkflowCard = useCallback((runId: string) => {
-    document
-      .getElementById(`wf-card-${runId}`)
-      ?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+    setPanelAgentId(null);
+    setPanelWorkflowRunId(runId);
+    setPanelOpen(true);
   }, []);
 
   // Inline session rename: null when not editing, else the draft name. Opening
@@ -2164,7 +2169,7 @@ function AppInner() {
         // while the overlay (or any other dialog) is open, and closing it is
         // Cmd+Esc/X-button only (bare Escape must reach the mirrored pane).
         setAgentTerminalOpen(true);
-      } else if (k === 'u' && cockpit.subagents.length > 0) {
+      } else if (k === 'u' && (cockpit.subagents.length > 0 || (selectedWorkflows?.length ?? 0) > 0)) {
         e.preventDefault();
         setPanelAgentId(null); // ⌘U opens the list, not a focused agent
         setPanelOpen((v) => !v);
@@ -2172,7 +2177,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedSession, cockpit.subagents.length, toggleRail]);
+  }, [selectedSession, cockpit.subagents.length, selectedWorkflows, toggleRail]);
 
   // Claude panes ⌘1-9 can address: VISIBLE, LOCAL RUNNING sessions only — filter
   // must allow Claude (not 'terminal'), exclude remote/olam cloud sessions (they
@@ -2899,7 +2904,7 @@ function AppInner() {
                         <span className="detail-action-count">{Math.min(cockpit.rawEvents.length, 99)}</span>
                       ) : null}
                     </button>
-                    {cockpit.subagents.length > 0 ? (
+                    {cockpit.subagents.length > 0 || (selectedWorkflows?.length ?? 0) > 0 ? (
                       <button
                         type="button"
                         className="detail-action detail-action--count"
@@ -3160,10 +3165,13 @@ function AppInner() {
         <ErrorBoundary label="Sub-agent panel failed to render">
           <SubAgentPanel
             subagents={cockpit.subagents}
-            open={panelOpen && cockpit.subagents.length > 0}
-            onClose={() => setPanelOpen(false)}
+            open={panelOpen && (cockpit.subagents.length > 0 || (selectedWorkflows?.length ?? 0) > 0)}
+            onClose={() => { setPanelOpen(false); setPanelWorkflowRunId(null); }}
             onLoadAgent={cockpit.requestSubagent}
             focusAgentId={panelAgentId}
+            workflows={selectedWorkflows}
+            focusWorkflowRunId={panelWorkflowRunId}
+            onOpenWorkflowAgent={openWorkflowAgent}
           />
         </ErrorBoundary>
 
