@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useModalTransition } from '../lib/anim';
 import type { Session } from '../lib/types';
 import { XtermHost } from './XtermHost';
-import { XIcon } from './icons';
+import { XIcon, TypeIcon, MousePointerIcon } from './icons';
 
 interface AgentTerminalOverlayProps {
   session: Session;
@@ -32,6 +32,10 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const title = session.name || session.id;
+  // Select/copy mode: flips XtermHost out of pty-passthrough so a drag-select
+  // (or the guaranteed "Select all") + Copy can grab text without every
+  // keystroke racing off to the live agent. See XtermHost's `copyMode` prop.
+  const [copyMode, setCopyMode] = useState(false);
 
   // useModalTransition's own mount effect (registered above, so it fires
   // first — React runs one component's effects in hook-call order) moves
@@ -41,15 +45,30 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
   // focused xterm's hidden textarea a moment earlier (its effect runs
   // first of all, as a child) — this effect runs last and hands focus back,
   // so a keystroke reaches the pane immediately on open with no extra click.
+  // Skipped in copy mode: stealing focus back to the textarea there would
+  // raise the soft keyboard right after XtermHost's own blur put it away.
   useEffect(() => {
+    if (copyMode) return;
     canvasWrapRef.current?.querySelector('textarea')?.focus();
-  }, []);
+  }, [copyMode]);
 
   return (
     <div className="agent-term-backdrop" ref={rootRef}>
       <div className="agent-term-panel" role="dialog" aria-modal={true} aria-label={`Agent terminal — ${title}`}>
         <div className="modal-head">
           <span className="modal-title">Agent terminal — {title}</span>
+          <button
+            type="button"
+            className="modal-copytoggle"
+            aria-pressed={copyMode}
+            data-active={copyMode ? 'true' : undefined}
+            aria-label={copyMode ? 'Selection mode on — return to typing' : 'Enter selection / copy mode'}
+            title={copyMode ? 'Typing mode' : 'Select / copy'}
+            onClick={() => setCopyMode((v) => !v)}
+          >
+            {copyMode ? <TypeIcon size={16} /> : <MousePointerIcon size={16} />}
+            <span className="modal-copytoggle-label">{copyMode ? 'Typing' : 'Select'}</span>
+          </button>
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
             <XIcon size={16} />
           </button>
@@ -62,6 +81,7 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
             autoFocus
             onExit={onClose}
             paneScale
+            copyMode={copyMode}
           />
         </div>
       </div>
