@@ -17,11 +17,13 @@ vi.mock('./XtermHost', () => ({
     className?: string;
     autoFocus?: boolean;
     onExit?: () => void;
+    copyMode?: boolean;
   }) =>
     createElement('div', {
       'data-testid': 'xterm-host',
       'data-session-id': props.sessionId,
       'data-auto-focus': props.autoFocus ? 'true' : 'false',
+      'data-copy-mode': props.copyMode ? 'true' : 'false',
       className: props.className,
       onClick: () => props.onExit?.(),
     }),
@@ -89,5 +91,22 @@ describe('AgentTerminalOverlay', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('toggles select/copy mode via the header button, flipping XtermHost copyMode', () => {
+    renderOverlay();
+    const toggle = screen.getByRole('button', { name: 'Enter selection / copy mode' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('xterm-host').getAttribute('data-copy-mode')).toBe('false');
+
+    fireEvent.click(toggle);
+    const toggleActive = screen.getByRole('button', { name: 'Selection mode on — return to typing' });
+    expect(toggleActive.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('xterm-host').getAttribute('data-copy-mode')).toBe('true');
+
+    fireEvent.click(toggleActive);
+    const toggleBack = screen.getByRole('button', { name: 'Enter selection / copy mode' });
+    expect(toggleBack.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('xterm-host').getAttribute('data-copy-mode')).toBe('false');
   });
 });
