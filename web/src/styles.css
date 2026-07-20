@@ -272,6 +272,18 @@ html.pwa-fill .app {
   body.kbd-up .new-session-draft-placeholder {
     flex: 0 1 auto;
   }
+  /* The ⌘J overlay is a separate position:fixed layer (inset:0, viewport-
+     relative — no transform/contain ancestor), so `body.kbd-up .app`'s pin
+     never reaches it and its bottom (the agent's input line) hides behind the
+     keyboard. Pin it to the same visible-viewport box so the flex column
+     (.agent-term-canvas-wrap flex:1 1 auto) shrinks and XtermHost's paneScale
+     re-fits the whole pane above the keyboard. Touch-only + desktop never sets
+     body.kbd-up, so desktop is unaffected. */
+  body.kbd-up .agent-term-backdrop {
+    top: var(--vv-top, 0px);
+    bottom: auto;
+    height: var(--vv-h, 100dvh);
+  }
 }
 
 /* ── Cosmic backdrop — deep-space base + a two-tone static nebula wash +
@@ -1875,6 +1887,12 @@ body.is-external-display .rail {
   position: relative;
   overflow: hidden;
 }
+/* Select/copy mode (AgentTerminalOverlay's header toggle → XtermHost's
+   `copyMode` prop): cosmetic hint that dragging now selects text instead of
+   typing into the pty. */
+.term-canvas-wrap[data-copy-mode='true'] .term-canvas {
+  cursor: text;
+}
 .term-canvas {
   /* Absolutely fill the (definite-height) wrap. Being OUT OF FLOW is
      load-bearing: the xterm canvas can never contribute to — and therefore
@@ -1907,14 +1925,21 @@ body.is-external-display .rail {
 /* Mobile copy affordance — the ONLY copy path touch users have (no physical
    Cmd key, and the WebGL canvas has no native selection→copy). Floats above
    `.term-canvas` whenever XtermHost's `onSelectionChange` reports an active
-   selection; shares `.term-conn-pill`'s top-right corner (the two are
-   practically mutually exclusive — the pill only shows before a selection is
-   even possible), one z-index higher so it wins if they ever do overlap. */
-.term-copy-btn {
+   selection, OR (agent overlay) whenever select/copy mode is on — see
+   `.term-copy-tools` below, which now owns the floating position so
+   Select-all + Copy can sit side by side; shares `.term-conn-pill`'s
+   top-right corner (the two are practically mutually exclusive — the pill
+   only shows before a selection is even possible), one z-index higher so it
+   wins if they ever do overlap. */
+.term-copy-tools {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+.term-copy-btn {
   min-height: 32px;
   padding: 6px 14px;
   border: 1px solid var(--line);
@@ -4586,6 +4611,41 @@ body.is-external-display .composer {
   font-size: 16px;
   cursor: pointer;
   padding: 4px 8px;
+}
+/* AgentTerminalOverlay's typing⇄select-mode header toggle — sits immediately
+   before `.modal-close`, same ghost-button chrome so the two read as one
+   header action-bar cluster. `[data-active='true']` (select mode on) picks
+   up the accent color so the mode is legible at a glance, not just via the
+   icon swap. */
+.modal-copytoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--r-sm, 6px);
+}
+.modal-copytoggle[data-active='true'] {
+  color: var(--accent);
+}
+.modal-copytoggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.modal-copytoggle-label {
+  white-space: nowrap;
+}
+@media (max-width: 360px) {
+  .modal-copytoggle-label {
+    display: none;
+  }
 }
 .modal-body {
   padding: 8px;
@@ -10546,11 +10606,20 @@ select.config-input {
    stretched. `.xterm` has no explicit width/height of its own (xterm.css),
    so as a flex item here it shrinks to its actual rendered size (driven by
    `.xterm-screen`'s JS-set pixel dimensions) instead of the block-default
-   100%-width stretch that produced the black gap this fixes. */
+   100%-width stretch that produced the black gap this fixes. On a tall phone
+   the 80-col pane is WIDTH-limited, so the old flex-center + the shared
+   `.term-canvas { padding: 8px }` (below) both worked against filling the
+   screen: centering left a large dead band above the letterboxed block, and
+   the padding shaved ~16px off the width the fontSize convergence was
+   solving for. Top/left-align + zero this host's own padding (the shared
+   rule stays untouched for the composer/inline hosts that still want it) so
+   the mirrored pane reads as a full-screen terminal starting just below the
+   header, with no dead top band. */
 .agent-term-canvas .term-canvas {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0;
 }
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
