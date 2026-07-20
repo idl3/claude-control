@@ -1294,8 +1294,8 @@ function AppInner() {
   }, []);
 
   const railTabs = useMemo(
-    () => computeRailTabs(cockpit.sessions, configuredOrgs, cloudTabNames),
-    [cockpit.sessions, configuredOrgs, cloudTabNames],
+    () => computeRailTabs(cockpit.sessions, configuredOrgs, cloudTabNames, cockpit.orgHealth),
+    [cockpit.sessions, configuredOrgs, cloudTabNames, cockpit.orgHealth],
   );
   const onSelectRailTab = useCallback(
     (id: string) => {
@@ -2722,6 +2722,7 @@ function AppInner() {
                   if (source) setMoveModal({ source, presetDest: destSessionName });
                 }}
                 cloudOrg={railTab === 'local' ? null : railTab}
+                orgHealth={cockpit.orgHealth}
               />
             </div>
             {/* Tab row (docs/plans/cloud-local-tabs): Local + one per configured

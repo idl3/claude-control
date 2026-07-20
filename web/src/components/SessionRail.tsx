@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SlotText } from 'slot-text/react';
-import type { Session } from '../lib/types';
+import type { OrgHealth, Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons';
@@ -84,6 +84,14 @@ interface SessionRailProps {
    * their own tab.
    */
   cloudOrg?: string | null;
+  /**
+   * Row-independent per-org health, keyed by org slug (server.js
+   * olamOrgHealth() — lib/olam-sessions.js RemoteSessionSource.health()).
+   * Lets the active cloud tab's empty state tell "genuinely no sessions"
+   * apart from "Access session expired" even when the org has zero rows —
+   * a row-derived health can't do that (there's no row to read it off of).
+   */
+  orgHealth?: Record<string, OrgHealth>;
 }
 
 /**
@@ -172,7 +180,7 @@ function groupByTmux(sessions: Session[]): SessionGroup[] {
 
 interface RemoteOrgGroup {
   org: string;
-  health: { status: string; reason: string | null };
+  health: OrgHealth;
   /** Non-archived AND current (live or active in the last 48h) — shown by default. */
   rows: Session[];
   /** Non-archived but older-idle rows — collapsed under "Earlier (N)", default
@@ -217,8 +225,17 @@ export function isCurrentRemote(s: Session, now: number = Date.now()): boolean {
 }
 
 /** Group remote (olam) rows per org into current / earlier / archived, newest
- *  activity first within each. `now` is injectable for deterministic tests. */
-export function groupRemoteByOrg(sessions: Session[], now: number = Date.now()): RemoteOrgGroup[] {
+ *  activity first within each. `now` is injectable for deterministic tests.
+ *  `orgHealthMap` (server-pushed, row-independent — see SessionRailProps.orgHealth)
+ *  takes priority over the row-derived `all[0]?.orgHealth` when present, since
+ *  the latter is unavailable (and always was `undefined` before this existed)
+ *  the moment an org has zero known rows — exactly the lapsed-Access case
+ *  Fix 1 needs to surface. */
+export function groupRemoteByOrg(
+  sessions: Session[],
+  now: number = Date.now(),
+  orgHealthMap?: Record<string, OrgHealth>,
+): RemoteOrgGroup[] {
   const byOrg = new Map<string, Session[]>();
   for (const s of sessions) {
     const org = s.org ?? '?';
@@ -231,7 +248,7 @@ export function groupRemoteByOrg(sessions: Session[], now: number = Date.now()):
       const active = all.filter((s) => !s.archived);
       return {
         org,
-        health: all[0]?.orgHealth ?? { status: 'unknown', reason: null },
+        health: orgHealthMap?.[org] ?? all[0]?.orgHealth ?? { status: 'unknown', reason: null },
         rows: active.filter((s) => isCurrentRemote(s, now)).sort(byRecentActivity),
         earlierRows: active.filter((s) => !isCurrentRemote(s, now)).sort(byRecentActivity),
         archivedRows: all.filter((s) => s.archived).sort(byRecentActivity),
@@ -359,7 +376,13 @@ function RemoteOrgSection({
         <div className="remote-group-reason" role="note">{g.health.reason}</div>
       ) : null}
       {g.rows.length === 0 && g.earlierRows.length === 0 && g.archivedRows.length === 0 ? (
-        <div className="session-empty">no remote sessions</div>
+        // A reason banner (above) already explains the empty state when the
+        // org is unhealthy (e.g. lapsed Access session) — don't also show the
+        // generic "no sessions" copy underneath it. A genuinely-empty-but-
+        // healthy org (no reason) still gets the plain fallback message.
+        g.health.reason ? null : (
+          <div className="session-empty">{`No ${defaultOrgLabel(g.org)} cloud sessions`}</div>
+        )
       ) : (
         // .session-window (no header — olam rows have no tmux window concept)
         // matches the left-border indent local PaneRow lists get for free.
@@ -904,6 +927,7 @@ export function SessionRail({
   cmdHeld,
   onRequestMove,
   cloudOrg = null,
+  orgHealth = {},
 }: SessionRailProps) {
   // Operator-configured meta-slot token order + rotation interval (Settings →
   // Rail tokens, see lib/railTokenPrefs.ts). SessionRail is the only
@@ -1013,16 +1037,34 @@ export function SessionRail({
   // the local kind filter (previously gated on 'all'/'agents').
   const remoteGroups = useMemo(() => {
     if (!cloudOrg) return [];
-    return groupRemoteByOrg(sessions.filter((s) => s.kind === 'remote' && s.org === cloudOrg));
-  }, [sessions, cloudOrg]);
+    const rows = sessions.filter((s) => s.kind === 'remote' && s.org === cloudOrg);
+    const grouped = groupRemoteByOrg(rows, undefined, orgHealth);
+    if (grouped.length > 0) return grouped;
+    // Zero rows have EVER arrived for this org (e.g. a lapsed Access session
+    // discovered before anything was fetched) — groupRemoteByOrg has nothing
+    // to group, so synthesize an empty group from the row-independent
+    // orgHealth map. Without this, the tab would silently fall through to
+    // the generic "no tmux panes" fallback below instead of ever rendering
+    // RemoteOrgSection's health dot + reason banner (Fix 1's root cause).
+    return [
+      {
+        org: cloudOrg,
+        health: orgHealth[cloudOrg] ?? { status: 'unknown' as const, reason: null },
+        rows: [],
+        earlierRows: [],
+        archivedRows: [],
+      },
+    ];
+  }, [sessions, cloudOrg, orgHealth]);
 
+  // remoteGroups always has >=1 entry once cloudOrg is set (see the useMemo
+  // above — it synthesizes an empty group from orgHealth when there are zero
+  // rows), so this fallback only ever fires for the LOCAL tab now.
   if (groups.length === 0 && remoteGroups.length === 0) {
     return (
       <div className="session-list" role="listbox" aria-label="Sessions">
         <div className="session-empty">
-          {cloudOrg
-            ? `No ${defaultOrgLabel(cloudOrg)} cloud sessions`
-            : filter === 'all' ? 'no tmux panes' : `no ${filter} sessions`}
+          {filter === 'all' ? 'no tmux panes' : `no ${filter} sessions`}
         </div>
       </div>
     );

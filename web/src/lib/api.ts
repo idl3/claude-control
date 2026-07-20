@@ -5,6 +5,7 @@
 import { getToken, clearToken } from './auth';
 import type { PerfDeviceInfo, PerfSample } from './perfDiagnostics';
 import type { SessionLiveness } from './olamMode';
+import type { OrgHealth } from './types';
 
 // --- 401 handling -----------------------------------------------------------
 // When any authenticated request comes back 401, the stored token is stale or
@@ -339,6 +340,13 @@ export interface ControlConfig {
    * runner/token fields on each org entry are never exposed to the client.
    */
   olamOrgs?: { org: string; spaBase: string | null }[];
+  /**
+   * Live per-org health, keyed by org slug (server.js olamOrgHealth() —
+   * RemoteSessionSource.health()). Same shape as the WS 'sessions' frame's
+   * orgHealth — the Settings → Olam cloud guide's source of truth for
+   * green/red + reason + capped, independent of the WS connection.
+   */
+  olamHealth?: Record<string, OrgHealth>;
 }
 
 export interface OptimizeResult {

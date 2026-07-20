@@ -169,6 +169,12 @@ const OLAM = loadOlamConfig();
 assertAuthWithRemoteOrgs(OLAM, CONFIG.token);
 /** @type {import('./lib/olam-sessions.js').RemoteSessionSource|null} */
 let olamSource = null;
+/** Per-org health snapshot for the 'sessions' WS payload + /api/config — the
+ * row-independent signal a cloud tab's empty-state needs to tell "genuinely
+ * empty" apart from "Access session expired" (docs/plans/cloud-local-tabs). */
+function olamOrgHealth() {
+  return olamSource?.health() ?? {};
+}
 // Phase A (cloud-session-chat, task A4): on-demand liveness cache. Populated
 // ONLY from the /api/olam/liveness route (session select) and the WS 'reply'
 // handler's pre-send check (getSessionLiveness, below) — NEVER from
@@ -520,6 +526,9 @@ const _handler = (req, res) => {
         // URLs/tokens/GSM fields stay server-side — only the org slug + SPA
         // base (needed for the cockpit UI) cross the wire.
         olamOrgs: OLAM.orgs.map((o) => ({ org: o.org, spaBase: o.spaBase ?? null })),
+        // Live per-org health for the Settings → Olam cloud guide (Fix 3) —
+        // {status, reason, capped} per org, never secret material.
+        olamHealth: olamOrgHealth(),
       });
     }
     if (req.method === 'POST') return handleConfigSave(req, res);
@@ -2693,7 +2702,7 @@ wss.on('connection', (ws) => {
   // a zero-client pause (no-op otherwise — see lib/ws-poll-gate.js).
   wsPollGate.onConnect();
 
-  send(ws, { type: 'sessions', sessions: registry.getSessions() });
+  send(ws, { type: 'sessions', sessions: registry.getSessions(), orgHealth: olamOrgHealth() });
   send(ws, { type: 'resources', snapshot: resources.snapshot() });
   ws._subs = new Set();
 
@@ -3525,7 +3534,7 @@ registry.on('change', (sessions) => {
   }
   for (const s of sessions) upgradeSubscriptionIfTranscriptReady(s.id);
   pushTrigger.onChange(sessions);
-  broadcast({ type: 'sessions', sessions });
+  broadcast({ type: 'sessions', sessions, orgHealth: olamOrgHealth() });
 });
 resources.on('sample', (snapshot) => broadcast({ type: 'resources', snapshot }));
 resources.on('overlimit', (snapshot) => {
