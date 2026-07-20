@@ -3347,6 +3347,19 @@ details.block-plan > summary.block-tool-use {
      position:fixed hoisted iframes (z-index 1) — see .detail-head's
      matching comment above for the full invariant. */
   z-index: 2;
+  /* Ceiling so a long prompt + many attachments can never push the composer's
+     top edge above the top bar (composer sits in .thread-root's column next
+     to a shrinkable .thread-viewport — flex-shrink:0 above means composer
+     never yields space on its own; without a max-height here its content
+     could grow past the whole column's box, visually overlapping/hiding the
+     top bar). Same "topbar zone" token .app-top-fade uses (--safe-top + the
+     52px it reserves) — flex's used-size clamp respects max-height even with
+     flex-shrink:0, so composer's laid-out height is capped here regardless.
+     Below this ceiling .composer-card sizes normally; the textarea
+     (.composer-input) is the piece that actually gives — see its own
+     max-height for the matching reserved-chrome budget that keeps the sum
+     of composer-card's parts at or under this same line. */
+  max-height: calc(100dvh - var(--safe-top) - 52px);
 }
 /* Terminal (>_) mode: the composer must visually cover the top bars (.hud,
    z-index:auto/0; .detail-head, z-index:2; .app-top-fade, z-index:40) and any
@@ -4115,11 +4128,20 @@ body.is-external-display .composer {
   display: none;
 }
 
-/* attachment chips below the input */
+/* attachment chips below the input — single row, horizontal scroll once they
+   overflow (was flex-wrap:wrap, letting several attachments stack into
+   multiple rows and eat vertical composer real estate — worst on mobile,
+   where that space is already tight and every extra row pushes the
+   composer's own height budget, see .composer's max-height above). Mirrors
+   .subagent-pills' horizontal-scroll treatment above it in this file. */
 .composer-attachments {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 .composer-attachments:empty {
   display: none;
@@ -4129,6 +4151,10 @@ body.is-external-display .composer {
   align-items: center;
   gap: 8px;
   max-width: 220px;
+  /* Keep each chip at its natural size — the row scrolls horizontally
+     instead of squeezing chips to fit (default flex-shrink:1 would
+     otherwise compress them once the row's nowrap content overflows). */
+  flex-shrink: 0;
   padding: 4px 4px 4px 8px;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -4286,7 +4312,28 @@ body.is-external-display .composer {
 .composer-input {
   width: 100%;
   resize: none;
-  max-height: 40dvh;
+  /* Ceiling on how tall the textarea grows before IT scrolls internally
+     (react-textarea-autosize sets an inline px height as you type, but
+     max-height always clamps a used height regardless of how it was set —
+     that's what makes this the actual backstop). Smaller of two caps:
+       - 40dvh: the original "don't hog a tall screen" cap, kept as-is so
+         behavior on generously tall viewports is unchanged.
+       - 100dvh minus the topbar zone (--safe-top + 52px, same token
+         .composer's own max-height above uses) minus ~130px reserved for
+         the rest of composer-card's chrome on a single line (toolbar
+         ~34px + one attachment row ~34px + column gaps ~16px + card
+         padding/border ~18px + composer's own bottom padding ~8px + a
+         ~20px buffer for the rarer skill-chip/compacting/resuming/errored
+         strips) minus the home-indicator safe area. This is what actually
+         keeps composer-card's total height at or under .composer's
+         max-height on short viewports — the scenario where 40dvh alone
+         used to leave the composer taller than the room the top bar left
+         it. 120px floor (~2.5 lines) so it never collapses to near-zero. */
+  max-height: min(
+    40dvh,
+    max(120px, calc(100dvh - var(--safe-top) - 52px - 130px - env(safe-area-inset-bottom)))
+  );
+  overflow-y: auto;
   /* Default to ~2 lines of room before scrolling (2 × line-height + padding). */
   min-height: calc(2 * 1.45em + 4px);
   padding: 2px;
