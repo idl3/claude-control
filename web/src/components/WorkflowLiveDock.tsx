@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Workflow, WorkflowAgent } from '../lib/types';
 import { fmtDuration } from './WorkflowCard';
+import { SettingsIcon } from './icons';
 
 /**
  * Live Dock (Phase C1) — a compact progress strip pinned above the composer
@@ -108,7 +109,7 @@ export function WorkflowLiveDock({ workflows, onOpenCard }: WorkflowLiveDockProp
         aria-label={`Workflow ${name}, ${state}, ${shown.done} of ${shown.total} agents. Open card.`}
       >
         <span className="wf-dock-glyph" aria-hidden="true">
-          {run ? '⚙' : failed ? '✕' : '✓'}
+          {run ? <SettingsIcon size={14} /> : failed ? '✕' : '✓'}
         </span>
         <span className="wf-dock-main">
           <span className="wf-dock-head">

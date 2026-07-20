@@ -12743,6 +12743,23 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   flex: 0 0 auto;
 }
 .wf-summary { margin: 0; color: var(--text-dim); font-size: calc(var(--txt-meta) + 1px); }
+
+/* Declared pipeline (new-format runs): "Find → Verify" under the summary. */
+.wf-declared-phases { margin: 2px 0 0; color: var(--text-dim); font-size: var(--txt-meta); letter-spacing: 0.02em; opacity: 0.8; }
+
+/* Settings-cog glyph spins perpetually while the run is live (running only). */
+.wf-glyph svg { display: block; }
+@keyframes wf-spin { to { transform: rotate(360deg); } }
+.wf-card[data-status='running'] .wf-glyph svg,
+.wf-dock[data-state='running'] .wf-dock-glyph svg,
+.wf-rail-glyph[data-status='running'] svg {
+  animation: wf-spin 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wf-card[data-status='running'] .wf-glyph svg,
+  .wf-dock[data-state='running'] .wf-dock-glyph svg,
+  .wf-rail-glyph[data-status='running'] svg { animation: none; }
+}
 .wf-aggregate {
   display: flex;
   gap: 10px;
@@ -12912,6 +12929,23 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   overflow: auto;
 }
 .wf-agent-preview--empty { font-style: italic; color: var(--text-faint); }
+.wf-agent-preview--result { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--txt-meta); }
+.wf-agent-attempts {
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--warn, #d97706) 55%, transparent);
+  color: var(--warn, #d97706);
+  font-size: var(--txt-meta);
+  font-variant-numeric: tabular-nums;
+}
+.wf-failed {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--danger, #dc2626) 55%, transparent);
+  color: var(--danger, #dc2626);
+  font-size: var(--txt-meta);
+  font-variant-numeric: tabular-nums;
+}
 .wf-open-transcript {
   align-self: flex-start;
   padding: 3px 4px;
