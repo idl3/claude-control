@@ -262,11 +262,21 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
         // reach them, while an UNDERshoot just letterboxes (an already-
         // accepted outcome) — remember the last fontSize that fit and fall
         // back to it below if the loop can't settle cleanly.
-        if (rect.height <= ch) safeFontSize = term.options.fontSize ?? safeFontSize;
+        if (rect.height <= ch) {
+          const fs = term.options.fontSize;
+          // Integer snap (BUG 1 fix, recipe step 1): a fractional fontSize
+          // produces a fractional cell height, which the DOM renderer (active
+          // whenever the WebGL addon is unavailable — notably Safari/iOS)
+          // rounds per-row to whole device pixels, accumulating drift down
+          // the pane until the bottom/cursor row visibly misaligns. Rounding
+          // here keeps the "last fontSize that fit" fallback integer too.
+          safeFontSize = fs != null ? Math.round(fs) : safeFontSize;
+        }
         const ratio = ch / rect.height;
         if (Math.abs(ratio - 1) < 0.01) return;
         const current = term.options.fontSize ?? 12;
-        const next = Math.min(MAX_PANE_FONT_PX, Math.max(MIN_PANE_FONT_PX, current * ratio));
+        // Integer snap (BUG 1 fix, recipe step 1) — see comment above.
+        const next = Math.round(Math.min(MAX_PANE_FONT_PX, Math.max(MIN_PANE_FONT_PX, current * ratio)));
         if (Math.abs(next - current) < 0.05) break;
         term.options.fontSize = next;
       }
