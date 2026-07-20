@@ -61,6 +61,7 @@ import { StudioModal } from './components/StudioModal';
 import {
   PencilIcon,
   TerminalSquareIcon,
+  TerminalIcon,
   BotIcon,
   PanelLeftIcon,
   EllipsisIcon,
@@ -2686,6 +2687,17 @@ function AppInner() {
                     <button
                       type="button"
                       className="detail-action"
+                      aria-label="Open agent terminal"
+                      title="Agent terminal — live mirror of this session's agent pane (⌘J)"
+                      data-hotkey="⌘J"
+                      data-hotkey-dir="down"
+                      onClick={() => setAgentTerminalOpen(true)}
+                    >
+                      <TerminalIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-action"
                       aria-pressed={searchOpen}
                       data-on={searchOpen ? 'true' : undefined}
                       aria-label="Search transcript"
@@ -2916,7 +2928,6 @@ function AppInner() {
                     onOpenAgent={openAgent}
                     viewingAgent={viewingAgent}
                     onCloseAgent={closeAgent}
-                    onOpenAgentTerminal={selectedSession ? () => setAgentTerminalOpen(true) : undefined}
                     working={agentWorking}
                     compacting={!!selectedSession?.compacting}
                     resuming={resuming?.sessionId === cockpit.selectedId}
