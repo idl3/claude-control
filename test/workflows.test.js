@@ -622,3 +622,69 @@ test('new-format: legacy-only session (no subagents/workflows) is unaffected', (
   assert.equal(runs.length, 1);
   assert.equal(runs[0].runId, 'onlylegacy');
 });
+
+// 16. Retries collapse: the runtime retries a failed agent under the SAME key
+// with a NEW agentId — attempts must roll up into ONE logical agent.
+test('new-format: retried key collapses attempts into one logical agent', () => {
+  _resetWorkflowCache();
+  const { transcriptPath, base } = makeNewSession();
+  const dir = writeNewRun(base, 'wf_retry1', [
+    { type: 'started', key: 'v2:k1', agentId: 'attempt1' },
+    { type: 'started', key: 'v2:k1', agentId: 'attempt2' },
+    { type: 'result', key: 'v2:k1', agentId: 'attempt2', result: { ok: 1 } },
+    { type: 'started', key: 'v2:k2', agentId: 'solo1' },
+  ]);
+  // keep the run "live": journal mtime is now (just written) → k2 stays running
+  const runs = computeWorkflowActivity({ transcriptPath });
+  const run = runs.find((r) => r.runId === 'wf_retry1');
+  assert.equal(run.total, 2, 'two logical agents, not three attempts');
+  assert.equal(run.done, 1);
+  const retried = run.phases[0].agents.find((a) => a.agentId === 'attempt2');
+  assert.equal(retried.state, 'done');
+  assert.equal(retried.attempts, 2, 'attempt count surfaces the retry');
+  assert.equal(retried.resultPreview, JSON.stringify({ ok: 1 }));
+});
+
+// 17. A resultless agent whose artifacts all go stale reads 'error', and a run
+// with no live attempts left reads 'failed' — never "working…" forever.
+test('new-format: stale resultless agent → error; exhausted run → failed', () => {
+  _resetWorkflowCache();
+  const { transcriptPath, base } = makeNewSession();
+  const dir = writeNewRun(base, 'wf_stale1', [
+    { type: 'started', key: 'v2:k1', agentId: 'dead1' },
+    { type: 'started', key: 'v2:k2', agentId: 'dead2' },
+  ]);
+  // backdate the journal past the staleness window; no meta/transcripts exist
+  const old = new Date(Date.now() - 10 * 60 * 1000);
+  fs.utimesSync(path.join(dir, 'journal.jsonl'), old, old);
+
+  const runs = computeWorkflowActivity({ transcriptPath });
+  const run = runs.find((r) => r.runId === 'wf_stale1');
+  assert.equal(run.status, 'failed');
+  assert.equal(run.active, false);
+  assert.equal(run.failed, 2);
+  assert.equal(run.done, 0);
+  assert.ok(run.phases[0].agents.every((a) => a.state === 'error'));
+});
+
+// 18. Enrichment: declared phase titles from the script meta, task snippet +
+// last-reply tail from the agent transcript.
+test('new-format: declaredPhases, promptPreview and lastReply enrichment', () => {
+  _resetWorkflowCache();
+  const { transcriptPath } = makeNewSession();
+
+  const runs = computeWorkflowActivity({ transcriptPath });
+  const run = runs[0];
+  assert.deepEqual(run.declaredPhases, ['Build', 'Verify']);
+
+  // the fixture ships ONE transcript (a1647bc8cb0abc358, a done agent):
+  // user "cd into your worktree …", assistant "working"
+  const enriched = run.phases[0].agents.find((a) => a.agentId === 'a1647bc8cb0abc358');
+  assert.ok(enriched.promptPreview && enriched.promptPreview.includes('cd into your worktree'), 'task snippet from prompt');
+  assert.equal(enriched.lastReply, 'working');
+
+  // agents without transcripts tolerate null previews (never throw)
+  const noTranscript = run.phases[0].agents.find((a) => a.agentId === 'a7ea931d46e0ad412');
+  assert.equal(noTranscript.promptPreview, null);
+  assert.equal(noTranscript.lastReply, null);
+});

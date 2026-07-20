@@ -120,7 +120,9 @@ export interface WorkflowAgent {
   agentId: string | null;
   agentType: string | null;
   model: string | null;
-  state: 'queued' | 'running' | 'done';
+  // New-format runs only: resultless agents past the staleness window flip to
+  // 'error' (runtime retries exhaust or never re-fire).
+  state: 'queued' | 'running' | 'done' | 'error';
   startedAt: number | null;
   queuedAt: number | null;
   durationMs: number | null;
@@ -129,6 +131,10 @@ export interface WorkflowAgent {
   lastToolName: string | null;
   promptPreview: string | null;
   resultPreview: string | null;
+  /** Tail of the agent's last assistant turn (new-format runs; null pre-result). */
+  lastReply?: string | null;
+  /** Runtime-retry attempts observed for this logical agent (1 = no retries). */
+  attempts?: number;
 }
 
 /** A phase group — a `workflow_phase` marker plus the agents bound to it. */
@@ -144,6 +150,10 @@ export interface Workflow {
   runId: string;
   workflowName: string | null;
   summary: string | null;
+  /** Script-declared phase titles (new-format runs only — per-agent phase
+   *  membership is not recorded by the journal, so these render as the
+   *  declared pipeline in the header, not as group titles). */
+  declaredPhases?: string[] | null;
   status: string;
   agentCount: number;
   startTime: number | null;
@@ -152,6 +162,8 @@ export interface Workflow {
   totalToolCalls: number | null;
   done: number;
   total: number;
+  /** Resultless-stale (failed) logical agents — new-format runs. */
+  failed?: number;
   active: boolean;
   phases: WorkflowPhase[];
 }
