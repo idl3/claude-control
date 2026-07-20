@@ -135,29 +135,6 @@ export async function setPin(
   return json.pins ?? {};
 }
 
-/** Reset ONE session's binding: clear its pin and re-match to the current
- *  transcript (the SessionStart-hook binding). Use after /clear or a new session
- *  that's stuck showing an old conversation. */
-export async function resetBinding(id: string): Promise<Record<string, string>> {
-  return setPin(id, null);
-}
-
-/** Clear ALL manual pins and re-match every window to its current transcript. */
-export async function rematchAll(): Promise<Record<string, string>> {
-  const res = await authFetch('/api/pins', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ all: true }),
-  });
-  const json = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    pins?: Record<string, string>;
-    error?: string;
-  };
-  if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
-  return json.pins ?? {};
-}
-
 /** Recent transcripts across all projects, for the pin picker. */
 export async function listTranscripts(): Promise<TranscriptInfo[]> {
   const res = await authFetch('/api/transcripts');

@@ -21,7 +21,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
-import { renameSession, getConfig, resetBinding, rematchAll, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
+import { renameSession, getConfig, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { ResourceHud } from './components/ResourceHud';
 import { Thread } from './components/Thread';
@@ -68,7 +68,6 @@ import {
   EllipsisIcon,
   ActivityIcon,
   SearchIcon,
-  RefreshIcon,
   SteeringWheelIcon,
   ExternalLinkIcon,
   GalleryIcon,
@@ -2351,18 +2350,6 @@ function AppInner() {
         },
       },
       {
-        id: 'act:rematch-all',
-        label: 'Re-match all windows (clear stale pins)',
-        group: 'Actions',
-        keywords: 'rebind pin transcript stale stuck old conversation rematch',
-        run: () => {
-          showToast('Re-matching all windows…');
-          rematchAll()
-            .then(() => showToast('All windows re-matched →', 'ok'))
-            .catch((err) => showToast(`Re-match failed: ${(err as Error).message}`, 'error'));
-        },
-      },
-      {
         id: 'act:reload',
         label: 'Reload app',
         group: 'Actions',
@@ -2717,23 +2704,6 @@ function AppInner() {
                       {artifactCount > 0 ? (
                         <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
                       ) : null}
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-action"
-                      aria-label="Reset transcript binding"
-                      title="Reset binding — re-match this window to its current transcript (after /clear or a new session)"
-                      onClick={async () => {
-                        const id = selectedSession.id;
-                        try {
-                          await resetBinding(id);
-                          showToast('Re-matching transcript →', 'ok');
-                        } catch (err) {
-                          showToast(`Reset failed: ${(err as Error).message}`, 'error');
-                        }
-                      }}
-                    >
-                      <RefreshIcon />
                     </button>
                     <button
                       type="button"
