@@ -2840,9 +2840,8 @@ function AppInner() {
                     >
                       <PencilIcon />
                     </button>
-                    {/* Artifacts toggle sits between Rename and Reset. Inside
-                        .detail-actions (visible by default; on mobile it shows
-                        with the rest of the bar, ⋯ collapses it). */}
+                    {/* Inside .detail-actions (visible by default; on mobile it
+                        shows with the rest of the bar, ⋯ collapses it). */}
                     <button
                       type="button"
                       className="detail-action detail-action--artifacts"
