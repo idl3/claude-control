@@ -389,6 +389,7 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
+    if (copyMode === undefined) return; // only the agent overlay opts into copy mode; never touch composer/inline focus
     if (copyMode) {
       term.textarea?.blur();
     } else {
