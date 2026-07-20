@@ -563,6 +563,10 @@ html.pwa-fill .app {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Lock height: as a child of the .app flex column, an unspecified flex
+     basis defaults to flex:0 1 auto (shrinkable) and gets cramped when the
+     column is squeezed (transcript mount / a pinned .app). Never shrink. */
+  flex: 0 0 auto;
   /* Content height only — the fixed 3px top/bottom padding below is what
      brings the rendered bar to the full --hud-h (see token comment).
      content-box is REQUIRED for that math: the page-wide `* { box-sizing:
@@ -585,6 +589,10 @@ html.pwa-fill .app {
   color: var(--text-dim);
   white-space: nowrap;
   overflow-x: auto;
+  /* overflow-x:auto coerces overflow-y:visible → auto (CSS overflow rule),
+     which renders a phantom VERTICAL scrollbar track under the stats row on
+     iOS. Pin overflow-y explicitly so only the horizontal stat row scrolls. */
+  overflow-y: hidden;
 }
 /* Desktop shell (Tauri WKWebView, titleBarStyle: Overlay): the macOS traffic
    lights float over the top-left of this row (trafficLightPosition centers

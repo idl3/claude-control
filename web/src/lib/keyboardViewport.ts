@@ -30,3 +30,67 @@ export function keyboardIsUp(
 ): boolean {
   return layoutHeight - visualViewportHeight > threshold;
 }
+
+/**
+ * Minimum fraction of the (stable) layout-viewport height the visible viewport
+ * must drop by before we treat it as a soft keyboard — on top of the absolute
+ * px floor. Belt-and-suspenders with the focused-editable gate: on a tall
+ * layout (iPad portrait ~1194px) a Safari toolbar collapse or a transcript-load
+ * reflow can exceed the flat 120px floor with NO keyboard; only a real
+ * on-screen keyboard covers ~25%+ of the viewport.
+ */
+export const KEYBOARD_UP_MIN_RATIO = 0.25;
+
+const NON_KEYBOARD_INPUT_TYPES = new Set([
+  'button', 'submit', 'reset', 'checkbox', 'radio',
+  'range', 'color', 'file', 'image', 'hidden',
+]);
+
+/**
+ * True only when a text-editable element is focused. The soft keyboard cannot
+ * be up without one. Gating kbd-up on this stops iPad from mistaking a toolbar
+ * collapse / transcript-load reflow (which shrink visualViewport with NO
+ * keyboard and NO focused field) for a keyboard — which would erroneously pin
+ * `.app` (position:fixed at a stale height) and push the composer + rail footer
+ * off-screen with no keyboard to dismiss. Non-text input types never raise a
+ * keyboard.
+ */
+export function isEditableElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA') return true;
+  if (tag === 'INPUT') {
+    const type = ((el as HTMLInputElement).type || 'text').toLowerCase();
+    return !NON_KEYBOARD_INPUT_TYPES.has(type);
+  }
+  return (el as HTMLElement).isContentEditable === true;
+}
+
+/**
+ * Soft keyboard is up IFF a text-editable element is focused AND the visible
+ * viewport has dropped BOTH past the absolute px floor AND past the ratio of
+ * the (stable) layout-viewport height. See keyboardIsUp for why layoutHeight
+ * must be documentElement.clientHeight (not window.innerHeight) and why
+ * offsetTop is never subtracted.
+ */
+export function softKeyboardIsUp(params: {
+  layoutHeight: number;
+  visualViewportHeight: number;
+  hasEditableFocus: boolean;
+  minDropPx?: number;
+  minDropRatio?: number;
+}): boolean {
+  const {
+    layoutHeight,
+    visualViewportHeight,
+    hasEditableFocus,
+    minDropPx = KEYBOARD_UP_THRESHOLD_PX,
+    minDropRatio = KEYBOARD_UP_MIN_RATIO,
+  } = params;
+  if (!hasEditableFocus) return false;
+  const drop = layoutHeight - visualViewportHeight;
+  return (
+    keyboardIsUp(layoutHeight, visualViewportHeight, minDropPx) &&
+    drop > layoutHeight * minDropRatio
+  );
+}

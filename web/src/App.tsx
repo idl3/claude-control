@@ -36,7 +36,7 @@ import { ArtifactPanel } from './components/ArtifactPanel';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
 import { loadFontSize } from './lib/fontSizePrefs';
-import { keyboardIsUp } from './lib/keyboardViewport';
+import { softKeyboardIsUp, isEditableElement } from './lib/keyboardViewport';
 import { TerminalPane } from './components/TerminalPane';
 import { ShellContext } from './components/ShellContext';
 import { ToastView, type ToastMessage } from './components/Toast';
@@ -2457,7 +2457,11 @@ function AppInner() {
       if (se && se.scrollTop !== 0) se.scrollTop = 0;
       // Stable layout-viewport height (see invariant 1); offsetTop deliberately
       // NOT subtracted (see keyboardIsUp).
-      const up = keyboardIsUp(document.documentElement.clientHeight, vv.height);
+      const up = softKeyboardIsUp({
+        layoutHeight: document.documentElement.clientHeight,
+        visualViewportHeight: vv.height,
+        hasEditableFocus: isEditableElement(document.activeElement),
+      });
       document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
       document.documentElement.style.setProperty('--vv-h', `${vv.height}px`);
       if (up !== lastUp) {
@@ -2479,9 +2483,16 @@ function AppInner() {
     commit();
     vv.addEventListener('resize', onViewportChange);
     vv.addEventListener('scroll', onViewportChange);
+    // Recompute on focus changes too: kbd-up is gated on a focused editable,
+    // so it must re-evaluate (and CLEAR) the instant focus leaves a field, not
+    // only when a visualViewport event happens to fire.
+    window.addEventListener('focusin', scheduleCommit);
+    window.addEventListener('focusout', scheduleCommit);
     return () => {
       vv.removeEventListener('resize', onViewportChange);
       vv.removeEventListener('scroll', onViewportChange);
+      window.removeEventListener('focusin', scheduleCommit);
+      window.removeEventListener('focusout', scheduleCommit);
       if (rafId != null) cancelAnimationFrame(rafId);
       if (settleTimer != null) clearTimeout(settleTimer);
       document.body.classList.remove('kbd-up');
