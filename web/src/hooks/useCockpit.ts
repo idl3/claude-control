@@ -97,6 +97,16 @@ export interface CockpitStore {
   select: (id: string) => void;
   resubscribe: () => void;
   sendReply: (text: string, attachments?: number, viaAnswer?: boolean, hardSteer?: boolean) => string | null;
+  /**
+   * Move a tmux WINDOW (a client session) to another tmux SESSION by name.
+   * Unlike sendReply/sendAnswer, `srcId` is an explicit argument — not read
+   * off `selectedRef` — because the rail drag-and-drop path can move a pane
+   * that isn't the currently selected session. Returns a reqId (same
+   * timestamp+counter idiom as sendReply) the caller correlates against the
+   * `ack` op:'move-window' frame — see that frame's `newId` doc comment
+   * (lib/types.ts) for why the client must re-select after a successful move.
+   */
+  sendMoveWindow: (srcId: string, dest: string) => string | null;
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: AnswerSelection[]) => boolean;
@@ -387,6 +397,16 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
+  const sendMoveWindow = useCallback(
+    (srcId: string, dest: string): string | null => {
+      if (!srcId || !dest) return null;
+      const reqId = `r${Date.now().toString(36)}${(replySeq.current++).toString(36)}`;
+      const ok = socket.send({ type: 'move-window', id: srcId, dest, reqId });
+      return ok ? reqId : null;
+    },
+    [socket],
+  );
+
   const sendAnswer = useCallback(
     (toolUseId: string, selections: AnswerSelection[]): boolean => {
       const id = selectedRef.current;
@@ -585,6 +605,7 @@ export function useCockpit(): CockpitStore {
     select,
     resubscribe,
     sendReply,
+    sendMoveWindow,
     sendPromptKey,
     sendPromptSelect,
     sendAnswer,
