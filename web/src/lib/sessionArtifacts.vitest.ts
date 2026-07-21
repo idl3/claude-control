@@ -17,10 +17,17 @@ vi.mock('./appVersion', async (importOriginal) => {
   return { ...actual, fetchAppManifest: (...args: Parameters<typeof actual.fetchAppManifest>) => fetchAppManifestMock(...args) };
 });
 
-function listing(name: string, filename: string, version: string): AppVersionListing {
+function listing(
+  name: string,
+  filename: string,
+  version: string,
+  manifestUrl: string | null = `apps/${name}/${filename.replace(/\.html$/, '.manifest.json')}`,
+): AppVersionListing {
   return {
     name,
-    versions: [{ filename, version, label: null, url: `apps/${name}/${filename}`, latest: true }],
+    versions: [
+      { filename, version, label: null, url: `apps/${name}/${filename}`, latest: true, manifest: manifestUrl != null, manifestUrl },
+    ],
     latest: filename,
   };
 }
@@ -96,6 +103,22 @@ describe('resolveSessionArtifacts', () => {
   it('returns [] for an empty names list without calling authFetch', async () => {
     expect(await resolveSessionArtifacts([])).toEqual([]);
     expect(authFetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips fetchAppManifest for a manifest-less version (manifestUrl null) — kind stays prototype, no doomed manifest request', async () => {
+    // A plain-HTML `--write-app --html` app: listVersions reports the version
+    // with manifest:false / manifestUrl:null. resolveOne must NOT fetch a
+    // manifest that does not exist (it would 404, or 401 tokenless over a
+    // remote/Tailscale origin — the "manifest failed to load" the operator hit).
+    authFetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(listing('plain', '2026-07-21T00-00-00Z.html', '2026-07-21T00-00-00Z', null)),
+    });
+    const result = await resolveSessionArtifacts(['plain']);
+    expect(result).toEqual([
+      { name: 'plain', url: 'apps/plain/2026-07-21T00-00-00Z.html', latestVersion: '2026-07-21T00-00-00Z', artifactKind: 'prototype' },
+    ]);
+    expect(fetchAppManifestMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the flat url + prototype kind + "latest" version when the versions-fetch fails for one name, while other names still resolve normally', async () => {

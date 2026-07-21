@@ -16,6 +16,10 @@ export interface AppVersionEntry {
   url: string;
   /** true when this is the file the `latest` pointer currently names. */
   latest: boolean;
+  /** Whether a sibling `<stamp>.manifest.json` exists for this version (server-provided by listVersions). */
+  manifest?: boolean;
+  /** media-root-relative url of the sibling manifest, or null when absent. */
+  manifestUrl?: string | null;
 }
 
 export interface AppVersionListing {
