@@ -1652,9 +1652,33 @@ async function handleSessionNew(req, res) {
         }
       }
     }
+    // The client navigates to (select) and opens a WS `subscribe` for the target
+    // we return here — sessionById(returnedTarget) must therefore MATCH the id
+    // the session registry assigns, or the subscribe errors "unknown session",
+    // the client is never re-subscribed (ws.ts only (re)subscribes on select or
+    // reconnect), and the New Session UI detaches to whatever was last shown
+    // with no self-heal until the operator manually clicks the row. Two things
+    // are needed for that match:
+    //
+    // (1) SHAPE. createWindow* return the WINDOW target "session:windowIndex",
+    //     but the registry keys every session by the PANE target
+    //     "session:windowIndex.paneIndex" (lib/tmux.js listPanes) — so the raw
+    //     window target never string-matches sessionById's id. Resolve it to the
+    //     pane target the registry uses. resolvePaneTarget is idempotent on an
+    //     already-resolved target (the print path already computed printPaneTarget
+    //     this way), so this is a no-op there.
+    // (2) FRESHNESS. Rebuild the registry so the just-created pane is present
+    //     before the client can subscribe, instead of racing the next ~4s poll.
+    //     refreshNow (not refresh) is required — a periodic tick may already be
+    //     in flight from BEFORE createWindow ran and would otherwise no-op. Same
+    //     fix + rationale as the move-window handler below. Non-fatal: the create
+    //     already succeeded, so a refresh failure degrades to the 4s poll rather
+    //     than turning a real session into a 500.
+    const returnTarget = await resolvePaneTarget(printPaneTarget);
+    await registry.refreshNow().catch(() => {});
     return endJson(res, 200, {
       ok: true,
-      target: printPaneTarget,
+      target: returnTarget,
       name,
       agent,
       transport: agent === 'codex' ? codexTransport : claudeTransport,
