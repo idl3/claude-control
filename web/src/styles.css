@@ -5456,8 +5456,10 @@ body.is-external-display .composer {
   color: var(--text);
   opacity: 1;
   background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  /* Match the active agent pill's ring exactly (.subagent-pill[data-active]):
+     70%-accent border + a soft 2px halo, not a solid full-accent ring. */
+  border-color: color-mix(in oklch, var(--accent) 70%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 25%, transparent);
 }
 .rail-tab[data-kind='unconfigured'] {
   color: var(--text-faint);
