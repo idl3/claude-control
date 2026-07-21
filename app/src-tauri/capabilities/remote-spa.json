@@ -4,7 +4,13 @@
   "description": "Grants the tailnet-served SPA (remote origin) the minimal IPC it needs: the app's notify_session command and window dragging for the HUD drag region.",
   "windows": ["main"],
   "remote": {
-    "urls": ["https://*.ts.net", "https://*.ts.net:*", "http://*.ts.net:*"]
+    "urls": [
+      "https://*.ts.net",
+      "https://*.ts.net:*",
+      "http://*.ts.net:*",
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
   },
   "permissions": ["core:default", "core:window:allow-start-dragging"]
 }
