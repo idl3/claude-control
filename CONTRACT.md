@@ -1,16 +1,17 @@
-# claude-cockpit — module contract (authoritative)
+# claude-control — module contract (authoritative)
 
 All files are **ESM** (`"type":"module"`). Node ≥20. Only runtime dependency: `ws`.
 Everything else uses Node built-ins. Bind to **127.0.0.1 only**. Never pass user
 strings through a shell — always `execFile`/`spawn` with an args array.
 
-Environment knobs (read in `server.js`, with defaults):
-- `COCKPIT_PORT` (default `4317`)
-- `COCKPIT_HOST` (default `127.0.0.1` — do not default to 0.0.0.0)
-- `COCKPIT_PROJECTS` (default `~/.claude/projects`)
-- `COCKPIT_TMUX` (default: auto-resolved tmux binary)
-- `COCKPIT_RSS_LIMIT_MB` (default `350`) — self-RSS soft cap
-- `COCKPIT_TOKEN` (optional) — if set, `/api/*` requires `Authorization: Bearer <token>` and the WS upgrade must offer the token as a `Sec-WebSocket-Protocol` subprotocol (alongside the `claude-control` label). The token is never accepted in a `?token=` URL query — URLs leak via history/logs/referrer. (`CLAUDE_CONTROL_TOKEN` is the current name; `COCKPIT_TOKEN` remains a legacy alias.)
+Environment knobs (read in `server.js`, with defaults). The pre-rename legacy
+env-var aliases were REMOVED (hard break) — only `CLAUDE_CONTROL_*` is read:
+- `CLAUDE_CONTROL_PORT` (default `4317`)
+- `CLAUDE_CONTROL_HOST` (default `127.0.0.1` — do not default to 0.0.0.0)
+- `CLAUDE_CONTROL_PROJECTS` (default `~/.claude/projects`)
+- `CLAUDE_CONTROL_TMUX` (default: auto-resolved tmux binary)
+- `CLAUDE_CONTROL_RSS_LIMIT_MB` (default `350`) — self-RSS soft cap
+- `CLAUDE_CONTROL_TOKEN` (optional) — if set, `/api/*` requires `Authorization: Bearer <token>` and the WS upgrade must offer the token as a `Sec-WebSocket-Protocol` subprotocol (alongside the `claude-control` label). The token is never accepted in a `?token=` URL query — URLs leak via history/logs/referrer.
 
 ## Resource doctrine (the whole point — "don't go overboard")
 - **Never read a transcript fully.** Files reach 200 MB+. Initial load reads only a
@@ -27,7 +28,7 @@ Environment knobs (read in `server.js`, with defaults):
 
 ## lib/tmux.js
 ```js
-export async function resolveTmuxBin(): Promise<string>   // honor COCKPIT_TMUX, else probe
+export async function resolveTmuxBin(): Promise<string>   // honor CLAUDE_CONTROL_TMUX, else probe
                                                           // /opt/homebrew/bin/tmux, /usr/local/bin/tmux,
                                                           // /usr/bin/tmux, then `command -v tmux`
 export function isValidTarget(target: string): boolean    // ^[A-Za-z0-9_.-]+:\d+(\.\d+)?$
