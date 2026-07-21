@@ -6948,6 +6948,14 @@ select.config-input {
   opacity: 0.6;
   cursor: default;
 }
+/* Restart now lives inside the Debug section body (a flex-column
+   .config-field), not the footer's right-aligned flex row. Drop the footer-
+   only margin-right:auto push and size the button to its own content instead
+   of stretching the full field width. */
+.config-body .config-restart {
+  align-self: flex-start;
+  margin-right: 0;
+}
 /* Mobile: nav collapses to a horizontal scrollable pill row above the
    content; fields go single-column; full-height sheet anchored to the bottom. */
 @media (max-width: 640px) {
