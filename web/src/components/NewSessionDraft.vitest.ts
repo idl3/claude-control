@@ -1060,7 +1060,10 @@ describe('NewSessionDraft directory picker', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults the working-directory dropdown to the entry matching this workspace', async () => {
+  // No auto-select: projectDirs is operator-configured (empty by default), so
+  // there is no built-in private-org path to preselect. The picker starts on
+  // "(default)" and lists every configured directory as a manual choice.
+  it('does NOT auto-select any project directory — the picker starts on (default)', async () => {
     stubApi({
       projectDirs: [
         { label: 'other-project', path: '/Users/x/Projects/other-project' },
@@ -1075,11 +1078,17 @@ describe('NewSessionDraft directory picker', () => {
     }));
 
     const trigger = await screen.findByLabelText('Working directory');
-    await waitFor(() => expect(trigger.textContent).toContain('pleri-org'));
+    // Even with a pleri-org entry present, nothing is preselected.
+    await waitFor(() => expect(trigger.textContent).toContain('(default)'));
+    const menu = openDropdown('Working directory');
+    expect(within(menu).getByText('other-project')).toBeTruthy();
+    expect(within(menu).getByText('pleri-org')).toBeTruthy();
   });
 
-  it('falls back to the (default) option when no directory matches this workspace', async () => {
-    stubApi({ projectDirs: [{ label: 'other-project', path: '/Users/x/Projects/other-project' }] });
+  it('sends no cwd when left on (default), even with configured directories', async () => {
+    const { createCalls } = stubApi({
+      projectDirs: [{ label: 'other-project', path: '/Users/x/Projects/other-project' }],
+    });
     render(createElement(NewSessionDraft, {
       filter: 'all',
       onToast: () => {},
@@ -1089,8 +1098,10 @@ describe('NewSessionDraft directory picker', () => {
 
     const trigger = await screen.findByLabelText('Working directory');
     await waitFor(() => expect(trigger.textContent).toContain('(default)'));
-    const menu = openDropdown('Working directory');
-    expect(within(menu).getByText('other-project')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    // '' choice → server default → cwd omitted from the request.
+    expect(createCalls[0].cwd).toBeUndefined();
   });
 });
 

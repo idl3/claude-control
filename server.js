@@ -1268,7 +1268,7 @@ async function handleSessionNew(req, res) {
   const rawCwd =
     typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
   // Expand a leading ~ to the home directory so projectDirs paths like
-  // ~/Projects/atlas work (Node's fs.stat does not expand tilde).
+  // ~/Projects/myapp work (Node's fs.stat does not expand tilde).
   const cwd = rawCwd.startsWith('~/')
     ? path.join(os.homedir(), rawCwd.slice(2))
     : rawCwd === '~'

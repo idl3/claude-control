@@ -66,9 +66,6 @@ const DEFAULT_MODEL_OPTION: ClaudeModelInfo = { id: 'default', label: 'Default' 
 /** Sentinel value for the tmux-session dropdown's "New tmux session…" option. */
 const NEW_TMUX_SESSION = '__new__';
 
-/** Matches SessionRail.tsx's own default-directory heuristic for this workspace. */
-const DEFAULT_DIR_HINT = /pleri-org/i;
-
 /**
  * New-chat draft screen, shown in the main content area in place of the
  * transcript. Structured as a mirror of `.thread-root`: an empty flex
@@ -268,21 +265,10 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     });
   }, [agentInfos]);
 
-  // Default-select the project directory whose path/label looks like this
-  // workspace, once projectDirs arrive. Only applies while the user hasn't
-  // already picked something (guards against clobbering a manual choice made
-  // before the fetch resolves).
-  useEffect(() => {
-    if (projectDirs.length === 0) return;
-    setCwdChoice((prev) => {
-      if (prev) return prev;
-      const match = projectDirs.find((d) => DEFAULT_DIR_HINT.test(d.path) || DEFAULT_DIR_HINT.test(d.label));
-      return match ? match.path : prev;
-    });
-  }, [projectDirs]);
-
-  // Default-select the first tmux session, once the list arrives. Same
-  // don't-clobber guard as the cwd effect above.
+  // Default-select the first tmux session, once the list arrives. The cwd
+  // dropdown has no auto-select: projectDirs is operator-configured (empty by
+  // default), so there is no private-org path to preselect — the picker starts
+  // on "(default)" until the user chooses.
   useEffect(() => {
     setTmuxChoice((prev) => (prev ? prev : (tmuxSessions[0]?.name ?? '')));
   }, [tmuxSessions]);

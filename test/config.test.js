@@ -261,13 +261,10 @@ test('readConfig does NOT warn when claudemiModel is simply absent', () => {
 
 // ── projectDirs fields ────────────────────────────────────────────────────────
 
-test('readConfig returns seed projectDirs by default', () => {
+test('readConfig returns an empty projectDirs list by default (no built-in org paths)', () => {
   const cfg = readConfig();
   assert.ok(Array.isArray(cfg.projectDirs));
-  assert.equal(cfg.projectDirs.length, 3);
-  assert.deepEqual(cfg.projectDirs[0], { label: 'Atlas', path: '~/Projects/atlas' });
-  assert.deepEqual(cfg.projectDirs[1], { label: 'Grain', path: '~/Projects/grain' });
-  assert.deepEqual(cfg.projectDirs[2], { label: 'Pleri', path: '~/Projects/pleri-org' });
+  assert.deepEqual(cfg.projectDirs, []);
 });
 
 test('writeConfig persists a valid projectDirs list and round-trips', () => {
