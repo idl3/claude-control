@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { reportClientError } from './lib/reportError';
 import { isNativeShell } from './lib/nativeShell';
 import { computeScreenH } from './lib/screenHeight';
+import { loadRingRotation, applyRingRotation } from './lib/ringRotationPref';
 import 'slot-text/style.css';
 import './styles.css';
 import './highlight-theme.css';
@@ -15,6 +16,11 @@ if (!root) throw new Error('#root not found');
 // paint so shell-only CSS (traffic-light clearance on the HUD) applies without
 // a flash of the browser layout.
 if (isNativeShell) document.documentElement.dataset.nativeShell = 'true';
+
+// Active-ring rotation preference (auto/on/off) — applied before first paint
+// so styles.css's `[data-ring-rotation]` gating (see that file) never flashes
+// the wrong state on load. See lib/ringRotationPref.ts.
+applyRingRotation(loadRingRotation());
 
 // iOS installed-PWA (standalone) viewport fix. Measured on an iOS 26 sim: in an
 // installed PWA (display-mode: standalone, black-translucent, viewport-fit=cover)

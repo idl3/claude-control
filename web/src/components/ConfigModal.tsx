@@ -14,6 +14,7 @@ import {
 import type { OrgHealth } from '../lib/types';
 import { loadFontSize, saveFontSize } from '../lib/fontSizePrefs';
 import { loadCosmosPref, saveCosmosPref } from '../lib/cosmosPrefs';
+import { loadRingRotation, saveRingRotation, applyRingRotation, type RingRotation } from '../lib/ringRotationPref';
 import {
   loadRailTokens,
   saveRailTokens,
@@ -114,6 +115,8 @@ interface GeneralSectionProps {
   setTranscriptFontSize: (n: number) => void;
   externalFontSize: number;
   setExternalFontSize: (n: number) => void;
+  ringRotation: RingRotation;
+  onRingRotationChange: (v: RingRotation) => void;
   cosmosBackground: boolean;
   setCosmosBackground: (b: boolean) => void;
   cosmosParallax: boolean;
@@ -134,6 +137,8 @@ function GeneralSection({
   setTranscriptFontSize,
   externalFontSize,
   setExternalFontSize,
+  ringRotation,
+  onRingRotationChange,
   cosmosBackground,
   setCosmosBackground,
   cosmosParallax,
@@ -211,6 +216,24 @@ function GeneralSection({
             Sample transcript at the size above — updates instantly, no need to save first.
           </span>
         </div>
+
+        <label className="config-field">
+          <span className="config-label">Active ring rotation</span>
+          <select
+            className="config-input"
+            value={ringRotation}
+            disabled={loading}
+            onChange={(e) => onRingRotationChange(e.target.value as RingRotation)}
+          >
+            <option value="auto">Auto (desktop only)</option>
+            <option value="on">On (all devices)</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="config-hint">
+            Rotate the active tab/session/composer gradient ring. Auto = desktop only; On
+            also animates on touch. Always respects Reduce Motion.
+          </span>
+        </label>
 
         <label className="config-checkbox-field">
           <input
@@ -842,6 +865,10 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
   // 0 = CSS default (auto); non-zero = user-chosen px value.
   const [transcriptFontSize, setTranscriptFontSize] = useState(0);
   const [externalFontSize, setExternalFontSize] = useState(0);
+  // Active-ring rotation — device-local only, no server counterpart, no Save
+  // button needed: applied live (setAttribute) the instant it changes. See
+  // lib/ringRotationPref.ts and the onRingRotationChange handler below.
+  const [ringRotation, setRingRotationState] = useState<RingRotation>('auto');
   // Device-local only (no server counterpart) — loaded straight from
   // localStorage below, not from getConfig(). See lib/cosmosPrefs.ts.
   const [cosmosBackground, setCosmosBackground] = useState(true);
@@ -895,8 +922,11 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
   }, []);
 
   // Cosmos toggles have no server counterpart — load once from this
-  // device's localStorage (see lib/cosmosPrefs.ts).
+  // device's localStorage (see lib/cosmosPrefs.ts). Ring rotation is already
+  // applied to <html> by main.tsx before first paint; this just syncs the
+  // select's displayed value to match.
   useEffect(() => {
+    setRingRotationState(loadRingRotation());
     setCosmosBackground(loadCosmosPref('background'));
     setCosmosParallax(loadCosmosPref('parallax'));
     setCosmosShootingStars(loadCosmosPref('shootingStars'));
@@ -946,6 +976,15 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Instant, per-device, no Save button — unlike font size/cosmos (which
+  // batch into the Save handler below), the ring's a plain DOM attribute so
+  // there's no live-apply event to dispatch; setAttribute IS the apply.
+  const onRingRotationChange = (v: RingRotation) => {
+    setRingRotationState(v);
+    saveRingRotation(v);
+    applyRingRotation(v);
+  };
 
   const onPickIcon = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1144,6 +1183,8 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
                 setTranscriptFontSize={setTranscriptFontSize}
                 externalFontSize={externalFontSize}
                 setExternalFontSize={setExternalFontSize}
+                ringRotation={ringRotation}
+                onRingRotationChange={onRingRotationChange}
                 cosmosBackground={cosmosBackground}
                 setCosmosBackground={setCosmosBackground}
                 cosmosParallax={cosmosParallax}
