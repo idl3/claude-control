@@ -318,6 +318,42 @@ describe('convertMessages — tool_result folding by toolUseId', () => {
     expect(toolResult(parts(out[0])[0].result)?.text).toBe('second');
   });
 
+  it('dedupes repeated tool_use ids before assistant-ui builds tool resources', () => {
+    const msgs: Msg[] = [
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ kind: 'tool_use', id: 'Bash_96', name: 'Bash' }],
+      },
+      {
+        uuid: 'u1',
+        role: 'user',
+        blocks: [{ kind: 'tool_result', forId: 'Bash_96', text: 'first output' }],
+      },
+      {
+        uuid: 'a2',
+        role: 'assistant',
+        blocks: [{ kind: 'tool_use', id: 'Bash_96', name: 'Bash' }],
+      },
+      {
+        uuid: 'u2',
+        role: 'user',
+        blocks: [{ kind: 'tool_result', forId: 'Bash_96', text: 'second output' }],
+      },
+    ];
+    const out = convertMessages(msgs);
+    // Result-only user messages are dropped, so the two assistant tool calls
+    // become adjacent and merge into one assistant-ui message. If both parts
+    // keep toolCallId="Bash_96", assistant-ui throws:
+    // "Duplicate key toolCallId-Bash_96 in useResources".
+    expect(out).toHaveLength(1);
+    const ps = parts(out[0]);
+    expect(ps.map((p) => p.toolCallId)).toEqual(['Bash_96', 'Bash_96__dup2']);
+    expect(new Set(ps.map((p) => p.toolCallId)).size).toBe(ps.length);
+    expect(toolResult(ps[0].result)?.text).toBe('first output');
+    expect(toolResult(ps[1].result)?.text).toBe('second output');
+  });
+
   it('keeps mixed text + tool_use in the same assistant message', () => {
     const msgs: Msg[] = [
       {
