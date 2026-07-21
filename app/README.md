@@ -4,7 +4,7 @@ A **disposable** native macOS shell that wraps the already-shipped Claude Contro
 web SPA in a WKWebView. Its only job: answer one question before we invest in a
 real native head — **do you actually reach for a native app, or keep using the browser?**
 
-- **Zero backend change.** The shell navigates to your `*.ts.net` cockpit URL, an
+- **Zero backend change.** The shell navigates to your `*.ts.net` Claude Control URL, an
   origin `server.js` already allows (`isAllowedOrigin`, server.js:314). Nothing on
   the server changes for this spike.
 - **Zero SPA change.** It loads the same deployed SPA you use in a browser today.
@@ -39,7 +39,7 @@ Verify: `! cargo tauri --version` should print a `2.x` version.
 ! cd app && cargo tauri dev
 ```
 
-First launch shows a one-time prompt for your cockpit URL — paste your tailnet
+First launch shows a one-time prompt for your Claude Control URL — paste your tailnet
 address and hit **Save & open**:
 
 - **Recommended (HTTPS):** `https://<host>.ts.net/` — set up once with
