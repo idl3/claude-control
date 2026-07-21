@@ -13,6 +13,7 @@ import {
 } from './NewSessionForm';
 import type { SessionFilter } from './SessionRail';
 import { WelcomeHero } from './WelcomeHero';
+import { ConfirmCreateFolderModal } from './ConfirmCreateFolderModal';
 import { Dropdown, type DropdownOption } from './Dropdown';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { MicIcon } from './icons';
@@ -26,6 +27,10 @@ import {
 /** Claude model picker value: 'default' (omit --model) or a full model id
  *  from ClaudeModelInfo.id (e.g. 'claude-opus-4-8'), fetched via getModels(). */
 export type ClaudeModel = 'default' | string;
+
+/** The exact options object createSession() accepts — resolved once in submit()
+ *  and reused verbatim by runCreate() (including the create-folder retry). */
+type CreateOpts = NonNullable<Parameters<typeof createSession>[0]>;
 
 /** A file attached to the draft. `path` is null while the eager upload
  *  (see handleFilesPicked below) is still in flight — submit() waits for
@@ -102,6 +107,10 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   const [newTmuxSessionName, setNewTmuxSessionName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
+  // Set when a create attempt came back code:'cwd_missing' — drives the
+  // create-folder confirm modal. Holds the resolved createSession options so
+  // the retry (with createCwd:true) reuses the EXACT same request.
+  const [pendingCwdConfirm, setPendingCwdConfirm] = useState<{ cwd: string; opts: CreateOpts } | null>(null);
   const [agentInfos, setAgentInfos] = useState<SpawnAgentInfo[]>([]);
   const [claudeModels, setClaudeModels] = useState<ClaudeModelInfo[]>([]);
   const [codexModels, setCodexModels] = useState<ClaudeModelInfo[]>([]);
@@ -334,9 +343,84 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     };
   }, [creating, agent, showAdvanced, cwdChoice, tmuxChoice]);
 
-  const submit = useCallback(async () => {
+  // Fire the actual create request with a pre-resolved options object. `extra`
+  // is merged over `opts` (used to add `createCwd: true` on the create-folder
+  // retry). Owns the center→bottom slide handoff + the error paths, including
+  // the cwd_missing branch that raises the create-folder confirm modal.
+  const runCreate = useCallback(
+    async (opts: CreateOpts, extra?: Partial<CreateOpts>) => {
+      setCreating(true);
+      onToast('Creating session…');
+
+      // Center→bottom handoff: slide the composer card down to its live-slot
+      // position (transform only) while fading out the option row and the hero
+      // (opacity only) — both compositor-friendly. Gated by
+      // prefers-reduced-motion, in which case it jumps straight to the end
+      // state. onCreated() is called only once BOTH this animation and the
+      // createSession() call below have settled, so the live <Thread> mounts
+      // into an already-bottom-anchored composer with no visible pop.
+      const wrap = composerWrapRef.current;
+      const fade = fadeRef.current;
+      const hero = heroRef.current;
+      const reduced = prefersReducedMotion();
+
+      function slideToBottom(): Promise<void> {
+        if (!wrap || reduced) {
+          if (wrap) gsap.set(wrap, { y: 0 });
+          if (fade) gsap.set(fade, { opacity: 0 });
+          if (hero) gsap.set(hero, { opacity: 0 });
+          return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+          const tl = gsap.timeline({ onComplete: resolve });
+          tl.to(wrap, { y: 0, duration: ANIM.base, ease: ANIM.enterEase }, 0);
+          if (fade) tl.to(fade, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
+          if (hero) tl.to(hero, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
+        });
+      }
+
+      function slideBackToCenter(): void {
+        if (!wrap || reduced) {
+          if (wrap) gsap.set(wrap, { y: liftRef.current });
+          if (fade) gsap.set(fade, { opacity: 1 });
+          if (hero) gsap.set(hero, { opacity: 1 });
+          return;
+        }
+        const tl = gsap.timeline();
+        tl.to(wrap, { y: liftRef.current, duration: ANIM.base, ease: ANIM.exitEase }, 0);
+        if (fade) tl.to(fade, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
+        if (hero) tl.to(hero, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
+      }
+
+      try {
+        const [result] = await Promise.all([
+          createSession({ ...opts, ...extra }),
+          slideToBottom(),
+        ]);
+        onToast(`Session created → ${result.name}`, 'ok');
+        onCreated(result);
+      } catch (err) {
+        // Keep the draft screen open (with the typed prompt intact) so the
+        // user can retry rather than losing their message, and slide the card
+        // back up to where it was.
+        slideBackToCenter();
+        const e = err as Error & { code?: string; cwd?: string };
+        if (e.code === 'cwd_missing') {
+          // The picked folder doesn't exist — offer to create it and retry
+          // rather than surfacing a dead-end error toast.
+          setPendingCwdConfirm({ cwd: e.cwd || opts.cwd || '', opts });
+        } else {
+          onToast(`New session failed: ${e.message}`, 'error');
+        }
+      } finally {
+        setCreating(false);
+      }
+    },
+    [onToast, onCreated],
+  );
+
+  const submit = useCallback(() => {
     if (creating || uploadingActive) return;
-    setCreating(true);
     // Same convention as the live composer's onNew (App.tsx): outgoing text
     // = [typedText, ...uploadedAbsolutePaths].filter(Boolean).join(' '). The
     // textarea itself never shows the paths — they're appended only here, at
@@ -361,77 +445,22 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
       tmuxChoice && tmuxChoice !== NEW_TMUX_SESSION ? tmuxChoice : undefined;
     const resolvedNewTmuxSession =
       tmuxChoice === NEW_TMUX_SESSION ? newTmuxSessionName.trim() || undefined : undefined;
-    onToast('Creating session…');
 
-    // Center→bottom handoff: slide the composer card down to its live-slot
-    // position (transform only) while fading out the option row and the hero
-    // (opacity only) — both compositor-friendly. Gated by
-    // prefers-reduced-motion, in which case it jumps straight to the end
-    // state. onCreated() is called only once BOTH this animation and the
-    // createSession() call below have settled, so the live <Thread> mounts
-    // into an already-bottom-anchored composer with no visible pop.
-    const wrap = composerWrapRef.current;
-    const fade = fadeRef.current;
-    const hero = heroRef.current;
-    const reduced = prefersReducedMotion();
-
-    function slideToBottom(): Promise<void> {
-      if (!wrap || reduced) {
-        if (wrap) gsap.set(wrap, { y: 0 });
-        if (fade) gsap.set(fade, { opacity: 0 });
-        if (hero) gsap.set(hero, { opacity: 0 });
-        return Promise.resolve();
-      }
-      return new Promise((resolve) => {
-        const tl = gsap.timeline({ onComplete: resolve });
-        tl.to(wrap, { y: 0, duration: ANIM.base, ease: ANIM.enterEase }, 0);
-        if (fade) tl.to(fade, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
-        if (hero) tl.to(hero, { opacity: 0, duration: ANIM.fast, ease: 'none' }, 0);
-      });
-    }
-
-    function slideBackToCenter(): void {
-      if (!wrap || reduced) {
-        if (wrap) gsap.set(wrap, { y: liftRef.current });
-        if (fade) gsap.set(fade, { opacity: 1 });
-        if (hero) gsap.set(hero, { opacity: 1 });
-        return;
-      }
-      const tl = gsap.timeline();
-      tl.to(wrap, { y: liftRef.current, duration: ANIM.base, ease: ANIM.exitEase }, 0);
-      if (fade) tl.to(fade, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
-      if (hero) tl.to(hero, { opacity: 1, duration: ANIM.fast, ease: 'none' }, 0);
-    }
-
-    try {
-      const [result] = await Promise.all([
-        createSession({
-          name: resolvedName,
-          cwd: resolvedCwd,
-          agent,
-          claudeTransport: agent === 'claude' ? claudeTransport : undefined,
-          codexTransport: agent === 'codex' ? codexTransport : undefined,
-          model: agent === 'claude' && model !== 'default' ? model : undefined,
-          codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
-          claudexModel: agent === 'claudex' && model !== 'default' ? model : undefined,
-          claudemiModel: agent === 'claudemi' && model !== 'default' ? model : undefined,
-          prompt: finalPrompt || undefined,
-          tmuxSession: resolvedTmuxSession,
-          newTmuxSession: resolvedNewTmuxSession,
-        }),
-        slideToBottom(),
-      ]);
-      onToast(`Session created → ${result.name}`, 'ok');
-      onCreated(result);
-    } catch (err) {
-      // Keep the draft screen open (with the typed prompt intact) so the
-      // user can retry rather than losing their message, and slide the card
-      // back up to where it was.
-      slideBackToCenter();
-      onToast(`New session failed: ${(err as Error).message}`, 'error');
-    } finally {
-      setCreating(false);
-    }
+    const opts: CreateOpts = {
+      name: resolvedName,
+      cwd: resolvedCwd,
+      agent,
+      claudeTransport: agent === 'claude' ? claudeTransport : undefined,
+      codexTransport: agent === 'codex' ? codexTransport : undefined,
+      model: agent === 'claude' && model !== 'default' ? model : undefined,
+      codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
+      claudexModel: agent === 'claudex' && model !== 'default' ? model : undefined,
+      claudemiModel: agent === 'claudemi' && model !== 'default' ? model : undefined,
+      prompt: finalPrompt || undefined,
+      tmuxSession: resolvedTmuxSession,
+      newTmuxSession: resolvedNewTmuxSession,
+    };
+    void runCreate(opts);
   }, [
     creating,
     uploadingActive,
@@ -447,8 +476,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     tmuxChoice,
     newTmuxSessionName,
     placeholder,
-    onToast,
-    onCreated,
+    runCreate,
   ]);
 
   // Helper: look up availability for an agent id.
@@ -969,6 +997,17 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
         </form>
       </div>
     </div>
+    {/* Create-folder confirm — raised when a create attempt returned
+        code:'cwd_missing'. Confirming retries the SAME request with
+        createCwd:true (server mkdir -p's the folder); dismissing leaves the
+        draft open with the typed prompt intact. */}
+    {pendingCwdConfirm ? (
+      <ConfirmCreateFolderModal
+        cwd={pendingCwdConfirm.cwd}
+        onConfirm={() => void runCreate(pendingCwdConfirm.opts, { createCwd: true })}
+        onClose={() => setPendingCwdConfirm(null)}
+      />
+    ) : null}
     </>
   );
 }
