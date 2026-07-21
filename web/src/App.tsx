@@ -566,6 +566,7 @@ function AppInner() {
         error?: string;
         transport?: string;
         prUrl?: string;
+        notice?: string;
       };
       if (d?.op !== 'reply' || !d.reqId) return;
       setPendingSends((q) =>
@@ -574,6 +575,11 @@ function AppInner() {
         ),
       );
       if (!d.ok) showToast(`Send failed: ${d.error ?? 'not delivered'}`, 'error');
+      // A steer-door send that only QUEUED (agent not live → mirrored:false)
+      // acks ok:true (the bubble is honestly 'sent' — the ledger row persisted)
+      // but carries a `notice`: surface it so the operator isn't misled that a
+      // LIVE steer landed when it will only apply on the next launch.
+      else if (d.notice) showToast(d.notice, '');
       // Phase C (task C5): a resume ack resolves the in-flight "resuming…"
       // state started in onNew, matched by reqId (not just session id) so a
       // stale ack from a superseded resume can't clobber a newer one.
