@@ -1,5 +1,5 @@
 ---
-feature: cockpit-prototype-studio
+feature: claude-control-prototype-studio
 phase: c
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 # Phase C — Manifest + cc-bridge + props editor (the seam)
 
 > **Scope**: build-time prop manifest, in-sandbox bridge runtime, studio props tab, dogfood rebuilds. Producer work spans the repo (web/) AND the global skill (~/.claude/skills/prototype-component — outside git, log loudly like pinned-artifacts D5).
-> **Design**: docs/design/cockpit-prototype-studio.md
+> **Design**: docs/design/claude-control-prototype-studio.md
 > **Branch**: feat/cockpit-prototype-studio-phase-c
 
 ## Status
@@ -45,7 +45,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 <!-- CP0 log: C2 done 2026-07-10, sha 4633de8. cc-bridge runtime implemented
      as a real, tested, git-tracked module — web/src/lib/ccBridgeRuntime.tsx
      (iframe-side, bundled INTO producer artifacts by esbuild/vite's normal
-     relative-import resolution) + web/src/lib/appBridge.ts (cockpit-side
+     relative-import resolution) + web/src/lib/appBridge.ts (claude-control-side
      protocol lib: isCcBridgeReadyShape/isTrustedCcBridgeSource/
      isValidCcBridgeReady mirror appBeacon.ts's validation trio exactly;
      sendCcPropsSet/sendCcPropsReset are the outbound SEND helpers). Design
@@ -200,7 +200,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
      minimal, necessary enabler for the live-probe tests above, not a
      scope expansion in itself. -->
 <!-- CP0 log: CP3-C audit fixes done 2026-07-10, sha 97e4248. FIX 1
-     [HIGH]: cc-bridge-ready had no cockpit-side listener at all —
+     [HIGH]: cc-bridge-ready had no claude-control-side listener at all —
      isValidCcBridgeReady (appBridge.ts) sat unused, and cc-props-set fired
      on the blind 150ms debounce regardless of whether the artifact's own
      message listener had mounted yet, silently dropping a props-set that
@@ -260,7 +260,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 
 ### C2 — cc-bridge runtime (producer-injected)
 > **Goal**: artifacts built with a component entry embed the bridge: announces cc-bridge-ready{manifestVersion}; handles cc-props-set (merge into a state wrapper spreading onto the root — React reconciliation preserves component state; Reset = key bump), reserves cc-capture-request/cc-dom-outline-request/cc-console-entry message names; ALL inbound validated by source identity (parent) + strict shape, mirroring appBeacon.
-> **Files**: producer bridge template (skill scripts dir), web/src/lib/appBridge.ts (cockpit-side protocol lib, new) + appBridge.vitest.ts
+> **Files**: producer bridge template (skill scripts dir), web/src/lib/appBridge.ts (claude-control-side protocol lib, new) + appBridge.vitest.ts
 > **Acceptance**: unit: spoofed-source rejected, malformed shapes rejected, props-set round-trip re-renders fixture w/ preserved internal state, reset remounts; bridge adds <15KB pre-capture-lib.
 > **Verification**: cd web && npx vitest run && npx tsc -b --pretty false
 > **Depends on**: C1
@@ -287,7 +287,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 C1 → C2 → C3; C4 needs C1+C2 (parallel-safe with C3).
 
 ## Review sign-off checklist
-- [ ] Invalid-value injection exercises app error path, never cockpit crash
+- [ ] Invalid-value injection exercises app error path, never claude-control crash
 - [ ] Manifest-less degrade path proven
 - [ ] Skill-file changes logged (no git there)
 - [ ] PR targets umbrella branch

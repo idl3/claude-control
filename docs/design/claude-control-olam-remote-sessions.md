@@ -1,4 +1,4 @@
-# Design — Cockpit ⇄ Olam remote sandbox sessions
+# Design — Claude Control ⇄ Olam remote sandbox sessions
 
 > Scaffolded by /100x:commit-plan from `~/.claude/plans/cockpit-olam-remote-sessions.md` (pass 3).
 > TODO: fill prose as phases land. Rubric rows harvested from the plan's `## Risk candidates`.
@@ -11,7 +11,7 @@
 | T2 | Secret drift (reproduced live in A0: 2 of 3 atlas token copies stale) | GSM-first + rotation-file fallback; 401 → single re-read + non-secret digest audit log + 3-strikes/60s backoff + red badge; probe spans runner/SPA/brain. |
 | T3 | Operator-JWT refresh brittleness (CF Access session expiry mid-stream) | `cloudflared access token` auto-refresh; UI re-login prompt; named upgrade = ADR-063-pattern additive automation bearer on the SPA worker. |
 | T4 | Sending into an approval-gated session via dispatch does the wrong thing | Composer modes (steer/approve/read-only) driven by session state; approve routes via gateway automation bearer or Linear deep-link. |
-| T5 | Cockpit process compromise exposes bearers in memory | Cockpit auth token mandatory-on with remote orgs (fail-loud startup); localhost bind default; `ulimit -c 0` documented; token-file path validation; no token logging. |
+| T5 | Claude Control process compromise exposes bearers in memory | Claude Control auth token mandatory-on with remote orgs (fail-loud startup); localhost bind default; `ulimit -c 0` documented; token-file path validation; no token logging. |
 | T6 | Dispatch failure classes (429 rate-cap / 402 budget / 502 cost-unknown) eaten silently | Surfaced verbatim in-thread, retriable; covered by `test/olam-transport-steer.test.js`. |
 
 ## Performance findings
@@ -19,7 +19,7 @@
 | # | Concern | Target / How measured |
 |---|---|---|
 | P1 | Polling fan-out across 3 orgs | list+status ≤0.3 req/s total; ≤1 chunks long-poll open (selected session only); counted at the org client. |
-| P2 | Chunk→append mapping cost | O(new rows), bounded initial backfill (row-count analogue of 64KB/1MB tail bounds); stream latency p95 ≤5s cockpit-added, Neon/Electric lag excluded (measured once in Phase B bring-up). |
+| P2 | Chunk→append mapping cost | O(new rows), bounded initial backfill (row-count analogue of 64KB/1MB tail bounds); stream latency p95 ≤5s claude-control-added, Neon/Electric lag excluded (measured once in Phase B bring-up). |
 
 ## Simplicity findings
 
@@ -35,4 +35,4 @@ Seam: all remote state enters through one per-org `OlamOrgClient` adapter over o
 
 ## Unwind cost
 
-Falsified recipe → hybrid fallback (cockpit list + SPA deep-links), confined to `lib/olam-client.js` / `lib/olam-transcript.js`; Phases A/D survive. Full rollback: remove `~/.cockpit/olam.json` (feature-flag) or `git revert` per-phase commits; no data migration.
+Falsified recipe → hybrid fallback (claude-control list + SPA deep-links), confined to `lib/olam-client.js` / `lib/olam-transcript.js`; Phases A/D survive. Full rollback: remove `~/.cockpit/olam.json` (feature-flag) or `git revert` per-phase commits; no data migration.

@@ -1,9 +1,9 @@
-# cockpit-olam-remote-sessions — tracker index
+# claude-control-olam-remote-sessions — tracker index
 
-One unified cockpit pane that lists, watches (conversation-grade, live), and steers every ongoing remote olam agent session (atlas/grain/pleri, incl. Linear-delegated) alongside local tmux sessions — org credentials confined to the cockpit server process.
+One unified claude-control pane that lists, watches (conversation-grade, live), and steers every ongoing remote olam agent session (atlas/grain/pleri, incl. Linear-delegated) alongside local tmux sessions — org credentials confined to the claude-control server process.
 
 - Plan: `~/.claude/plans/cockpit-olam-remote-sessions.md` (pass 3, tier epic, autonomous: true, confidence 97)
-- Design: [docs/design/cockpit-olam-remote-sessions.md](../../design/cockpit-olam-remote-sessions.md)
+- Design: [docs/design/claude-control-olam-remote-sessions.md](../../design/claude-control-olam-remote-sessions.md)
 - Umbrella branch: `feat/cockpit-olam-remote-sessions-integration` (phase PRs target this; umbrella PR is the single review surface)
 
 | Phase | Tracker | Goal | Milestone |
@@ -18,4 +18,4 @@ Dependency topology: A → (B ∥ C ∥ D). B/C/D have no edges between them.
 ## Out of scope
 
 - Olam-side changes beyond the two named escape hatches (additive SELECT columns; ADR-063-pattern automation bearer) — deploy via `/pleri-deploy-orgs` if they fire.
-- Container lifecycle actions from cockpit (teardown/exec); multi-operator attribution; mobile-specific UI; replay recording pipeline; full Linear-API delegation reconciliation.
+- Container lifecycle actions from claude-control (teardown/exec); multi-operator attribution; mobile-specific UI; replay recording pipeline; full Linear-API delegation reconciliation.
