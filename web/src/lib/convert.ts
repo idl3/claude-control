@@ -19,6 +19,8 @@ type ToolCallPart = {
 // tool renderer can show a tight header without re-deriving it.
 const SUMMARY_KEY = '__cockpitSummary';
 
+type ToolResultEntry = CockpitToolResult;
+
 // Reserved shape of the result we hand to the native tool renderer. The raw
 // tool_result is plain text in our transcript, so we wrap it as an object the
 // renderer knows how to read (and which serializes cleanly if inspected).
@@ -96,12 +98,17 @@ export function transcriptHasToolUse(messages: Msg[], name: string, id: string):
  */
 function linkFreeTextReplies(
   messages: Msg[],
-  resultsById: Map<string, CockpitToolResult>,
+  resultsById: Map<string, ToolResultEntry[]>,
 ): void {
+  const seenResultCounts = new Map<string, number>();
   messages.forEach((msg, i) => {
     for (const block of msg.blocks ?? []) {
       if (block.kind !== 'tool_result') continue;
-      const res = resultsById.get(block.forId);
+      const resultIndex = seenResultCounts.get(block.forId) ?? 0;
+      seenResultCounts.set(block.forId, resultIndex + 1);
+      const entries = resultsById.get(block.forId);
+      if (!entries) continue;
+      const res = entries[resultIndex];
       if (!res || res.isError) continue;
       if (!res.text.includes(ANSWERED_SIG) || !FREE_TEXT_ANSWER_RE.test(res.text)) continue;
 
@@ -124,7 +131,7 @@ function linkFreeTextReplies(
         /(=")(?:type something|chat about this)(")/gi,
         (_m, lead: string, tail: string) => `${lead}${safe}${tail}`,
       );
-      resultsById.set(block.forId, { ...res, text: rewritten });
+      entries[resultIndex] = { ...res, text: rewritten };
     }
   });
 }
@@ -144,15 +151,23 @@ function linkFreeTextReplies(
  * passed through dangerouslySetInnerHTML — React escapes all of it.
  */
 export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
-  // Pass 1: index tool_result blocks by the tool_use id they answer.
-  const resultsById = new Map<string, CockpitToolResult>();
+  // Pass 1: index tool_result blocks by the tool_use id they answer. Keep every
+  // result, not just the last one: compacted/resumed transcripts can repeat a
+  // tool_use id, and each occurrence may have its own matching result.
+  const resultsById = new Map<string, ToolResultEntry[]>();
+  const toolUseCountById = new Map<string, number>();
   for (const msg of messages) {
     for (const block of msg.blocks ?? []) {
+      if (block.kind === 'tool_use') {
+        toolUseCountById.set(block.id, (toolUseCountById.get(block.id) ?? 0) + 1);
+      }
       if (block.kind === 'tool_result') {
-        resultsById.set(block.forId, {
+        const entries = resultsById.get(block.forId) ?? [];
+        entries.push({
           text: block.text ?? '',
           isError: !!block.isError,
         });
+        resultsById.set(block.forId, entries);
       }
     }
   }
@@ -183,13 +198,26 @@ export function convertMessages(messages: Msg[]): ThreadMessageLike[] {
   // messages share an id. Compacted/resumed transcripts can repeat a uuid, so
   // dedupe defensively: suffix any repeat with its index (always unique).
   const seenIds = new Set<string>();
+  // assistant-ui also creates one resource per tool-call keyed by toolCallId.
+  // Claude transcripts can repeat tool_use ids after compaction/resume (real
+  // crash: "Duplicate key toolCallId-Bash_96 in useResources"), especially once
+  // consecutive assistant records are merged into one turn below. Keep the first
+  // id unchanged for continuity and suffix repeats before they enter the runtime.
+  const seenToolCallIds = new Map<string, number>();
+  const consumedResultCounts = new Map<string, number>();
   messages.forEach((msg, i) => {
     // Skip a queued placeholder whose text already exists as a real user message.
     if (msg.queued) {
       const t = normText((msg.blocks ?? []).map((b) => ('text' in b ? b.text ?? '' : '')).join(' '));
       if (t && realUserText.has(t)) return;
     }
-    const parts = buildParts(msg.blocks ?? [], resultsById, msg.role === 'user');
+    const parts = buildParts(msg.blocks ?? [], {
+      resultsById,
+      toolUseCountById,
+      seenToolCallIds,
+      consumedResultCounts,
+      isUser: msg.role === 'user',
+    });
     if (parts.length === 0) return;
 
     // A Skill invocation arrives as a normal `user` turn (Claude Code echoes the
@@ -293,8 +321,13 @@ export function compactSystemText(text: string): string | null {
 
 function buildParts(
   blocks: Block[],
-  resultsById: Map<string, CockpitToolResult>,
-  isUser = false,
+  state: {
+    resultsById: Map<string, ToolResultEntry[]>;
+    toolUseCountById: Map<string, number>;
+    seenToolCallIds: Map<string, number>;
+    consumedResultCounts: Map<string, number>;
+    isUser?: boolean;
+  },
 ): Array<TextPart | ReasoningPart | ToolCallPart> {
   const parts: Array<TextPart | ReasoningPart | ToolCallPart> = [];
 
@@ -303,7 +336,7 @@ function buildParts(
       case 'text': {
         // Empty text parts are dropped by assistant-ui; skip to avoid noise.
         if (block.text && block.text.length > 0) {
-          const compact = isUser ? compactSystemText(block.text) : null;
+          const compact = state.isUser ? compactSystemText(block.text) : null;
           parts.push({ type: 'text', text: compact ?? block.text });
         }
         break;
@@ -315,7 +348,19 @@ function buildParts(
         break;
       }
       case 'tool_use': {
-        const result = resultsById.get(block.id);
+        const seen = state.seenToolCallIds.get(block.id) ?? 0;
+        state.seenToolCallIds.set(block.id, seen + 1);
+        const toolCallId = seen === 0 ? block.id : `${block.id}__dup${seen + 1}`;
+
+        const entries = state.resultsById.get(block.id) ?? [];
+        const result =
+          (state.toolUseCountById.get(block.id) ?? 0) <= 1
+            ? entries[entries.length - 1]
+            : entries[state.consumedResultCounts.get(block.id) ?? 0];
+        state.consumedResultCounts.set(
+          block.id,
+          (state.consumedResultCounts.get(block.id) ?? 0) + 1,
+        );
         // Structured input becomes the part's `args`; the precomputed summary
         // rides along under a reserved key the renderer strips back out.
         const input =
@@ -326,7 +371,7 @@ function buildParts(
               : {};
         parts.push({
           type: 'tool-call',
-          toolCallId: block.id,
+          toolCallId,
           toolName: block.name || 'tool',
           args: { ...input, [SUMMARY_KEY]: block.inputSummary ?? '' },
           argsText: block.inputSummary ?? '',
