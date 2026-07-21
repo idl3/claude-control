@@ -1,5 +1,5 @@
 ---
-feature: cockpit-olam-remote-sessions
+feature: claude-control-olam-remote-sessions
 phase: a
 tier: epic
 autonomous: true
@@ -17,7 +17,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 # Phase A — Org config + read-only fleet (SessionSource)
 
 > **Scope**: Per-org config + GSM-first secrets, `OlamOrgClient` (list + status enrichment + operator-JWT auth), health probe, `RemoteSessionSource` merged into `SessionRegistry`, frontend fleet view. Read-only — no steering, no streaming.
-> **Design**: docs/design/cockpit-olam-remote-sessions.md
+> **Design**: docs/design/claude-control-olam-remote-sessions.md
 > **Branch**: feat/cockpit-olam-remote-sessions-phase-a
 
 ## Status
@@ -43,7 +43,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 | Rubric | Covered by | Reuse-ref |
 |---|---|---|
-| T1 | A2, A6 | cockpit auth token config pattern (lib/auth.js) |
+| T1 | A2, A6 | claude-control auth token config pattern (lib/auth.js) |
 | T2 | A2, A4 | GSM-first + rotation-file fallback (plan A0-4) |
 | T3 | A3 | cloudflared access token flow |
 | T5 | A2 | lib/auth.js checkToken/checkWsToken |
@@ -73,15 +73,15 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 <!-- A1 partial: 3 SPA subtasks blocked on operator SSO (cloudflared access login https://olam.dev-atlas.kitchen) -->
 <!-- live finding: GSM olam-atlas-sandbox-runner-token stale (401) vs rotation file (200) - probe-arbitrated; GSM version refresh escalated -->
 
-### A2 — Org config + GSM-first secret loading + mandatory cockpit auth
+### A2 — Org config + GSM-first secret loading + mandatory claude-control auth
 
-> **Goal**: Cockpit loads per-org config from `~/.cockpit/olam.json`, resolves secrets GSM-first with rotation-file fallback, and refuses to start remote sources without its own auth token enabled.
+> **Goal**: Claude Control loads per-org config from `~/.cockpit/olam.json`, resolves secrets GSM-first with rotation-file fallback, and refuses to start remote sources without its own auth token enabled.
 > **Files**: lib/olam-config.js, server.js, test/olam-config.test.js
-> **Acceptance**: Config with `{org, runnerUrl, spaBase, gsmProject, secrets}` parses; GSM read path (`gcloud secrets versions access`) preferred with file fallback; startup with orgs configured + no cockpit token exits 1 with a clear message; token values never appear in logs; token-file paths validated (absolute, no traversal/symlink escape).
+> **Acceptance**: Config with `{org, runnerUrl, spaBase, gsmProject, secrets}` parses; GSM read path (`gcloud secrets versions access`) preferred with file fallback; startup with orgs configured + no claude-control token exits 1 with a clear message; token values never appear in logs; token-file paths validated (absolute, no traversal/symlink escape).
 > **Verification**: node --test test/olam-config.test.js
 > **Depends on**: none
 > **Reversibility**: clean-revert
-> **Regression surfaces**: server startup path (cockpit without olam.json must boot exactly as before)
+> **Regression surfaces**: server startup path (claude-control without olam.json must boot exactly as before)
 > **Integration-test**: node --test test/olam-config.test.js
 
 - [x] Config schema + loader (absent file → remote sources disabled, zero behavior change)
@@ -131,7 +131,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Verification**: node --test test/sessions-remote-merge.test.js test/ws-protocol-compat.test.js
 > **Depends on**: A3, A4
 > **Reversibility**: clean-revert
-> **Regression surfaces**: SessionRegistry refresh loop, WS session-list payloads (every cockpit client sees these)
+> **Regression surfaces**: SessionRegistry refresh loop, WS session-list payloads (every claude-control client sees these)
 > **Integration-test**: npm test
 
 - [x] RemoteSessionSource adapter (registry-facing shape)
@@ -142,7 +142,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 ### A6 — Frontend fleet view
 
 > **Goal**: The session list shows per-org groups below tmux groups with org badge, phase, Linear link, health badge, and loading/empty/error states; no org secret reaches the client.
-> **Files**: web/src/lib/types.ts, web/src/hooks/useCockpit.ts, web/src/components/** (session list + badges), test/no-secret-in-bundle.test.js
+> **Files**: web/src/lib/types.ts, web/src/hooks/useClaudeControl.ts, web/src/components/** (session list + badges), test/no-secret-in-bundle.test.js
 > **Acceptance**: Remote rows render grouped per org with states (loading skeleton, per-org error banner, empty "no remote sessions"); Linear link derives from session id; bundle-grep + WS-frame fixture test passes (only `?token=` HMAC URLs allowed client-side).
 > **Verification**: npm run build:web && node --test test/no-secret-in-bundle.test.js
 > **Depends on**: A5
@@ -161,7 +161,7 @@ A1 ∥ A2 → A3 → A4 → A5 → A6 (A1 informs A3's recipes; hard dep only if
 
 ## Cross-phase regression checks
 
-- After A5/A6 land: full `npm test` + manual smoke of a pure-local cockpit (no olam.json) — byte-identical session list and WS frames.
+- After A5/A6 land: full `npm test` + manual smoke of a pure-local claude-control (no olam.json) — byte-identical session list and WS frames.
 - Phase B/C/D worktrees branch off the umbrella tip — re-run `test/sessions-remote-merge.test.js` after each phase merges.
 
 ## Rollback rehearsal
@@ -175,7 +175,7 @@ cd ~/Projects/claude-cockpit && git revert "$PHASE_A_MERGE_SHA"                 
 
 - [ ] All 6 tasks done + verification commands green
 - [ ] T1/T2/T3/T5/P1 rubric rows demonstrably covered (see Audit item coverage)
-- [ ] Local-only cockpit behavior byte-identical (snapshots)
+- [ ] Local-only claude-control behavior byte-identical (snapshots)
 - [ ] docs/olam-contract.md committed with live-verified recipes
 
 ## Assumptions log

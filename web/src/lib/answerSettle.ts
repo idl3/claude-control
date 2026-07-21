@@ -17,7 +17,7 @@
  *
  * AUTHORITATIVE SIGNAL: server broadcasts {type:'picker', open:false} the
  * moment the TUI picker disappears (server.js:1831-1833), mapped to
- * cockpit.pickerOpen in useCockpit. This is the "picker is gone" ground truth,
+ * cockpit.pickerOpen in useClaudeControl. This is the "picker is gone" ground truth,
  * but it must be combined with "prompt also gone" to fully close the window.
  *
  * INVARIANT: suppression holds while (answerSettling=true AND hasPrompt=true),

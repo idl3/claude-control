@@ -16,7 +16,7 @@ interface WorkflowAgentViewProps {
  * exact single sub-agent viewer (SubAgentThread) + the SubAgentPanel drawer
  * chrome (.sa-backdrop / .sa-panel), so a workflow agent's transcript reads
  * identically to a top-level sub-agent's (S4: no new viewer). Messages are
- * loaded on demand by useCockpit.requestWorkflowAgent → workflow-agent-load.
+ * loaded on demand by useClaudeControl.requestWorkflowAgent → workflow-agent-load.
  */
 export function WorkflowAgentView({ label, messages, loading, onClose }: WorkflowAgentViewProps) {
   const panelRef = useRef<HTMLDivElement>(null);

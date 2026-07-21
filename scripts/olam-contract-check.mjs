@@ -29,7 +29,7 @@ const exec = promisify(execFile);
 const GSM_ACCOUNT = "ernest.codes@gmail.com";
 const GSM_PROJECT = "pleri-500205";
 
-// ponytail: inline org registry; A2's ~/.cockpit/olam.json loader supersedes
+// ponytail: inline org registry; A2's ~/.claude-control/olam.json loader supersedes
 // this for cockpit runtime — the script keeps its own copy so it runs standalone.
 const ORGS = {
   atlas: {

@@ -1,5 +1,5 @@
 /**
- * claude-cockpit — frontend
+ * claude-control — frontend
  * Vanilla ESM, no framework, no CDN. All text via textContent (XSS-safe).
  */
 

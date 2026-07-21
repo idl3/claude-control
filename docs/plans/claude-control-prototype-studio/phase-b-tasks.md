@@ -1,5 +1,5 @@
 ---
-feature: cockpit-prototype-studio
+feature: claude-control-prototype-studio
 phase: b
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 # Phase B — Studio hosting + device modes
 
 > **Scope**: 'studio' arbitration tier + device-mode placeholder resizing. ⚠️ HARD PREREQUISITE: the in-flight scroll-sync PR (feat/app-hoist-scroll-sync — sync repositioning, fade-during-scroll, elevate attr) MUST be merged first; branch this phase off the umbrella AFTER rebasing the umbrella on the main that contains it (or merge main→umbrella).
-> **Design**: docs/design/cockpit-prototype-studio.md
+> **Design**: docs/design/claude-control-prototype-studio.md
 > **Branch**: feat/cockpit-prototype-studio-phase-b
 
 ## Status
@@ -36,7 +36,7 @@ Harness evidence (`web/scratch/studio-phase-b-harness/`, gitignored): stateful c
 **Deviation (loud, in-scope but beyond the literal "capture evidence" brief):** frame-by-frame video inspection (ffmpeg `fps=15` extraction, not visible in the discrete PNG stills alone) surfaced a real visual defect — `.embed-app-hoist` is portaled to `document.body`, a separate DOM subtree from `.studio-panel`, so `StudioModal`'s GSAP enter/exit tween (~280ms opacity/scale, `useModalTransition`) never reached the hoisted iframe. The iframe's rect is driven declaratively by JSX (`transform`/`width`/`height`, no `opacity` in that style object), so it snapped to its new bounds fully opaque while the surrounding backdrop/toolbar were still mid-fade — confirmed via real pre-fix video frames at both the open (~t=1.6s) and close (~t=4.4s) transitions. This directly regresses the B3 acceptance bar ("polished open/close ... correct clip/z at every step"), so it was fixed in-phase rather than filed for later: `shouldCrossFadeHoist(prevContext, nextContext)` (pure edge-detector, fires only on a studio enter/exit) imperatively zeroes the hoist span's opacity for one frame then releases it next rAF, letting the pre-existing unconditional `.embed-app-hoist { transition: opacity 100ms }` CSS rule (already shared with the scroll-fade mechanism) cross-fade it back in. No new CSS, no new deps — reuses existing infrastructure entirely. Re-captured evidence after the fix confirms the pop is gone at both transitions (fresh fps=15 frames f-023→f-026 open, f-064→f-067 close). 6 new regression tests added for `shouldCrossFadeHoist`.
 
 **Other deviations flagged:**
-- The coordinator's original re-brief referenced a `prototype-cockpit-uiproof` skill path that does not exist in this environment; the harness was built directly against the `prototype-component` skill's `run.mjs` pattern instead (same output contract: `~/.claude-control/media/prototypes/<slug>-<ISO>/`), with a standalone `hit-test.mjs` for the `elementFromPoint` proof since `run.mjs`'s step vocabulary has no generic "evaluate JS" action.
+- The coordinator's original re-brief referenced a `prototype-claude-control-uiproof` skill path that does not exist in this environment; the harness was built directly against the `prototype-component` skill's `run.mjs` pattern instead (same output contract: `~/.claude-control/media/prototypes/<slug>-<ISO>/`), with a standalone `hit-test.mjs` for the `elementFromPoint` proof since `run.mjs`'s step vocabulary has no generic "evaluate JS" action.
 - Hit a stray orphaned `node` process squatting on port 5199 (the `churn-spike` harness's dev-server port) during final re-verification, likely a leftover from an earlier session's harness run that never exited. Diagnosed via `lsof -i :5199`, killed (`kill -9`), re-ran clean.
 - **Budget**: complexity-budget was `{ files: 6, loc-delta: 500 }`. Actual cumulative phase diff (`202367a..HEAD`, i.e. all of B1+B2+B3 against the umbrella base): **6 files** (on budget), **563 insertions / 55 deletions** — net +508, ~8 lines over the 500 loc-delta budget. Minor, mechanical overage (test-file growth: `AppFrameLayer.vitest.ts` alone carries 246 of the 563 insertions across all three tasks) — flagged per policy, not gating.
 

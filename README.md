@@ -244,7 +244,7 @@ Version numbers follow npm semver (`claude-control --version`).
 
 ## Configuration
 
-All optional. Prefer `CLAUDE_CONTROL_*`; legacy `COCKPIT_*` names still work.
+All optional. Only `CLAUDE_CONTROL_*` is read — the pre-rename legacy env-var aliases were removed (hard break).
 
 | Env | Default | Purpose |
 |---|---|---|

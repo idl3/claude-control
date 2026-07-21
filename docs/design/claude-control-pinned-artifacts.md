@@ -1,4 +1,4 @@
-# Design — cockpit-pinned-artifacts
+# Design — claude-control-pinned-artifacts
 
 > Scaffolded by /100x:commit-plan from the plan's Risk candidates. TODO: fill prose as phases land.
 

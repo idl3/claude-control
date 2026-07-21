@@ -7,7 +7,7 @@
 //
 // The one real-tmux smoke case (rename-window naming semantics) gates on the
 // production resolveTmuxBin() so skip-semantics match the production resolver
-// (honours COCKPIT_TMUX + `command -v`, not just three hardcoded paths).
+// (honours CLAUDE_CONTROL_TMUX + `command -v`, not just three hardcoded paths).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile as _execFile } from 'node:child_process';
@@ -228,7 +228,7 @@ test('createWindow sanitizes the name before passing it to tmux', async () => {
 //
 // Uses an isolated tmux server so it never touches the operator's live sessions.
 // Gates on the same resolveTmuxBin() the production code uses, so skip-semantics
-// are identical (honours COCKPIT_TMUX + `command -v`, not just three paths).
+// are identical (honours CLAUDE_CONTROL_TMUX + `command -v`, not just three paths).
 
 test('tmux rename-window renames the window (real tmux smoke, production gating)', async (t) => {
   // Local-dev smoke only. CI is hermetic: createWindow's argv is fully covered by
@@ -252,7 +252,7 @@ test('tmux rename-window renames the window (real tmux smoke, production gating)
 
   try {
     // Isolated server: a detached window running `cat` (benign, NOT claude).
-    // ENOENT here means COCKPIT_TMUX points at a non-existent binary — skip.
+    // ENOENT here means CLAUDE_CONTROL_TMUX points at a non-existent binary — skip.
     let bootResult;
     try {
       bootResult = await execFile(bin, [...L, 'new-session', '-d', '-s', 'box', '-n', before, 'cat']);

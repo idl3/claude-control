@@ -15,7 +15,7 @@ cd "$ROOT" || exit 1
 DATA_DIR="${CLAUDE_CONTROL_DATA:-$HOME/.claude-control}"
 mkdir -p "$DATA_DIR"
 LOG="$DATA_DIR/update.log"
-PORT="${CLAUDE_CONTROL_PORT:-${COCKPIT_PORT:-4317}}"
+PORT="${CLAUDE_CONTROL_PORT:-4317}"
 
 # Triggered detached from the UI (or launchd), this can run under a stripped PATH
 # where `node`/`npm` aren't found — the restart then silently no-ops AND the

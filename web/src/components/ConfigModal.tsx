@@ -687,16 +687,27 @@ function OlamSection({
         <div className="config-field config-field--wide">
           <span className="config-label">Configured clusters</span>
           {olamOrgs.length === 0 ? (
-            <span className="config-hint config-field--wide">
-              No Olam cloud clusters configured yet. Add an <code>orgs</code> entry to{' '}
-              <code>olam.json</code> in the cockpit's data dir (
-              <code>~/.claude-control/olam.json</code> by default, or the{' '}
-              <code>CLAUDE_CONTROL_DATA</code>/<code>COCKPIT_DATA</code> dir when set) — each
-              entry needs an <code>org</code> slug, an https <code>runnerUrl</code>, and an
-              https <code>spaBase</code>; <code>brainUrl</code> is optional. Restart the
-              cockpit after editing. Once configured, that cluster's Olam SPA sessions get
-              their own tab in the rail above the "+ New session" bar.
-            </span>
+            <div className="config-hint config-field--wide">
+              <p>No Olam cloud clusters configured yet. Set one up:</p>
+              <ol>
+                <li>Install the Olam CLI.</li>
+                <li>
+                  Run <code>olam control setup</code>.
+                </li>
+                <li>
+                  Add an <code>orgs</code> entry to <code>olam.json</code> in the data dir
+                  (<code>~/.claude-control/olam.json</code> by default, or the{' '}
+                  <code>CLAUDE_CONTROL_DATA</code> dir when set) — each entry needs an{' '}
+                  <code>org</code> slug, an https <code>runnerUrl</code>, and an https{' '}
+                  <code>spaBase</code> (<code>brainUrl</code> optional). Restart to pick up
+                  the change.
+                </li>
+              </ol>
+              <p>
+                Once configured, that cluster's Olam SPA sessions get their own tab in the
+                rail above the &quot;+ New session&quot; bar.
+              </p>
+            </div>
           ) : (
             <ul className="config-olam-orgs">
               {olamOrgs.map((o) => {

@@ -72,7 +72,7 @@ function attachmentId(file: File): string {
 }
 
 /**
- * Composer attachment adapter wired to the cockpit upload endpoint.
+ * Composer attachment adapter wired to the claude-control upload endpoint.
  *
  * Upload happens EAGERLY in `add` (not deferred to send) so the chip reaches a
  * `complete` (uploaded) state with a thumbnail immediately — no perpetual
@@ -84,7 +84,7 @@ function attachmentId(file: File): string {
  * sweep (`sweepUploads`) reclaims orphans, so this is harmless and the UX win
  * (instant uploaded state) is worth it.
  */
-export function createCockpitAttachmentAdapter(
+export function createClaudeControlAttachmentAdapter(
   onToast: ToastFn,
 ): AttachmentAdapter {
   return {

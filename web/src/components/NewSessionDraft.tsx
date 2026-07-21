@@ -159,7 +159,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   }, [voice.status, voice.errorMsg, onToast]);
 
   // File attach: mirrors the live composer's attachment adapter
-  // (lib/attachments.ts createCockpitAttachmentAdapter) — upload happens
+  // (lib/attachments.ts createClaudeControlAttachmentAdapter) — upload happens
   // EAGERLY on pick (not deferred to submit) via the same uploadFile() call,
   // so the chip reaches an "uploaded" state immediately. Rides along on the
   // initial prompt at submit time (see submit() below), exactly like the
