@@ -1268,12 +1268,15 @@ async function handleSessionNew(req, res) {
   const rawCwd =
     typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : config.defaultCwd;
   // Expand a leading ~ to the home directory so projectDirs paths like
-  // ~/Projects/atlas work (Node's fs.stat does not expand tilde).
+  // ~/Projects/myapp work (Node's fs.stat does not expand tilde).
   const cwd = rawCwd.startsWith('~/')
     ? path.join(os.homedir(), rawCwd.slice(2))
     : rawCwd === '~'
       ? os.homedir()
       : rawCwd;
+  // When set, a missing cwd is created (mkdir -p) instead of rejected — the
+  // client sets this after the user confirms the create-folder prompt.
+  const createCwd = body.createCwd === true;
 
   // agent ∈ {'claude','codex','claudex','claudemi'}, default 'claude'. Claudex
   // = the claude binary backed by Codex via the olam auth-worker (ENV-only
@@ -1378,17 +1381,41 @@ async function handleSessionNew(req, res) {
     return endJson(res, 400, { error: `agent binary unavailable: ${binCheck.reason}` });
   }
 
-  // (ii) For structured transports: pre-validate cwd exists and is a directory
-  //      BEFORE createWindow, so a bad request creates NO window.
-  if (agent === 'codex' || (agent === 'claude' && claudeTransport === 'print')) {
-    try {
-      const st = await fsp.stat(cwd);
-      if (!st.isDirectory()) {
-        return endJson(res, 400, { error: `cwd is not a directory: ${cwd}` });
+  // (ii) cwd existence check — hoisted OUT of the structured-transport-only
+  //      block so it runs for EVERY agent/transport (fixes the 400-vs-500
+  //      inconsistency where tmux transports skipped the pre-check and only
+  //      failed later inside lib/tmux.js with a 500). When `createCwd` is set,
+  //      a missing directory is created on demand instead of rejected; the
+  //      client uses the `cwd_missing` code to offer a create-folder confirm.
+  //      The lib/tmux.js throws for a missing dir remain as defense-in-depth.
+  let st;
+  try {
+    st = await fsp.stat(cwd);
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      if (createCwd) {
+        try {
+          await fsp.mkdir(cwd, { recursive: true });
+          st = await fsp.stat(cwd);
+        } catch (m) {
+          return endJson(res, 400, { error: `failed to create cwd: ${cwd}` });
+        }
+      } else {
+        return endJson(res, 400, { error: `cwd does not exist: ${cwd}`, code: 'cwd_missing', cwd });
       }
-    } catch {
-      return endJson(res, 400, { error: `cwd does not exist: ${cwd}` });
+    } else {
+      // Any OTHER stat error (ENOTDIR from a file in a parent segment, EACCES on
+      // an unreadable dir, ELOOP on a symlink cycle — all plausible typos) must
+      // return a clean 400. Throwing here escapes the async handler: the route
+      // dispatcher returns the promise with no `.catch()`, so the rejection only
+      // hits the log-only `unhandledRejection` handler and the HTTP response is
+      // NEVER written — POST /api/session/new hangs forever and the New Session
+      // UI stays stuck in "Creating…". A 400 is the honest, prompt answer.
+      return endJson(res, 400, { error: `cannot access cwd: ${cwd} (${e.code || e.message})`, code: 'cwd_error', cwd });
     }
+  }
+  if (!st.isDirectory()) {
+    return endJson(res, 400, { error: `cwd is not a directory: ${cwd}` });
   }
 
   // (iii) tmux target: which session hosts the new window. Neither field set
