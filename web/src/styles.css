@@ -4794,6 +4794,158 @@ body.is-external-display .composer {
     min-width: min(340px, 52vw);
   }
 }
+/* ── Raw events: 2-tier (lean table + drill-in detail) ────────────────────────
+   The panel body below the search is a split: a lean scrollable table (left)
+   and a detail pane (right). On desktop (>760px) both show side-by-side; on
+   mobile (≤760px) it's a drill-in — selecting a row sets data-detail on the
+   split so the detail REPLACES the table (a Back affordance returns). Panel
+   itself starts collapsed (App owns rawOpen, default false). */
+.raw-search {
+  flex: 0 0 auto;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.raw-search-input {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--txt-body);
+}
+.raw-search-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.raw-split {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.raw-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  flex: 0 0 42%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+}
+.raw-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.raw-row:hover {
+  background: var(--bg-hover);
+}
+.raw-row[data-on] {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg-2));
+}
+.raw-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.raw-row-time {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: var(--txt-meta);
+  font-variant-numeric: tabular-nums;
+}
+.raw-row-chips {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.raw-row-summary {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--txt-body);
+  color: var(--text-dim);
+}
+.raw-detail-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+}
+.raw-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.raw-detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.raw-detail-empty {
+  margin: auto;
+  padding: 16px;
+  color: var(--muted);
+  font-size: var(--txt-body);
+  text-align: center;
+}
+.raw-back {
+  display: none; /* desktop: table + detail side-by-side, no drill-back */
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: var(--txt-meta);
+  cursor: pointer;
+}
+.raw-back:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+/* Mobile drill-in: one tier at a time. */
+@media (max-width: 760px) {
+  .raw-table {
+    flex: 1 1 auto;
+    border-right: 0;
+  }
+  .raw-split[data-detail] .raw-table {
+    display: none;
+  }
+  .raw-split:not([data-detail]) .raw-detail-pane {
+    display: none;
+  }
+  .raw-back {
+    display: inline-flex;
+  }
+}
 /* Plan-review modal: wider, the plan renders as a full-width markdown doc that
    scrolls with the body, and the approval options sit at the very bottom. */
 .modal-plan {
