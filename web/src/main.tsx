@@ -88,7 +88,7 @@ function clearCachedStateAndReload(): void {
 
 // ROOT firewall (fullscreen: safe-area-padded + centered so it isn't clipped under
 // the mobile notch): without this, ANY throw above the in-app boundaries (the rail,
-// a context provider, useCockpit, the app shell) unmounts the whole tree → a blank
+// a context provider, useClaudeControl, the app shell) unmounts the whole tree → a blank
 // black screen. This shows the actual error + stack instead, with Retry + recovery.
 //
 // StrictMode intentionally OMITTED: @assistant-ui/react's runtime keys off a

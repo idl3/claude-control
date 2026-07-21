@@ -24,7 +24,7 @@ type StateHandler = (state: ConnState) => void;
  * - On every (re)open, re-sends `subscribe` for the currently-selected session,
  *   because the server forgets subscriptions when a socket drops.
  */
-export class CockpitSocket {
+export class ClaudeControlSocket {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = RECONNECT_BASE_MS;

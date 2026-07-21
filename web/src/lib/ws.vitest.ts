@@ -17,7 +17,7 @@ vi.mock('./auth', () => ({
   WS_PROTOCOL: 'claude-control',
 }));
 
-import { CockpitSocket } from './ws';
+import { ClaudeControlSocket } from './ws';
 import type { ServerMessage } from './types';
 
 // --- Minimal controllable WebSocket double ---------------------------------
@@ -101,9 +101,9 @@ function parseSent(ws: FakeWebSocket): unknown[] {
   return ws.sent.map((s) => JSON.parse(s));
 }
 
-describe('CockpitSocket — connection', () => {
+describe('ClaudeControlSocket — connection', () => {
   it('emits connecting then connected across open', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     const states: string[] = [];
     s.onState((st) => states.push(st));
     s.connect();
@@ -114,7 +114,7 @@ describe('CockpitSocket — connection', () => {
   });
 
   it('does not open a second socket while one is connecting/open', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     s.connect();
     expect(FakeWebSocket.instances).toHaveLength(1);
@@ -124,31 +124,31 @@ describe('CockpitSocket — connection', () => {
   });
 });
 
-describe('CockpitSocket — token subprotocol auth', () => {
+describe('ClaudeControlSocket — token subprotocol auth', () => {
   it('offers no subprotocols when tokenless', () => {
     fakeToken = null;
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     expect(FakeWebSocket.last().protocols).toBeUndefined();
   });
 
   it('offers [WS_PROTOCOL, token] (safe label first, token second)', () => {
     fakeToken = 'secret-123';
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     expect(FakeWebSocket.last().protocols).toEqual(['claude-control', 'secret-123']);
   });
 
   it('connects to a clean URL with no ?token= in it', () => {
     fakeToken = 'secret-123';
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     expect(FakeWebSocket.last().url).toBe('ws://test/');
     expect(FakeWebSocket.last().url).not.toContain('token');
   });
 
   it('fires the unauthorized flow on a 1008 (auth) close and does NOT reconnect', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     const ws = FakeWebSocket.last();
     ws.open();
@@ -160,7 +160,7 @@ describe('CockpitSocket — token subprotocol auth', () => {
   });
 
   it('still reconnects on a non-auth close (e.g. 1006)', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     FakeWebSocket.last().drop(1006);
     expect(unauthorizedCalls.n).toBe(0);
@@ -169,9 +169,9 @@ describe('CockpitSocket — token subprotocol auth', () => {
   });
 });
 
-describe('CockpitSocket — message dispatch', () => {
+describe('ClaudeControlSocket — message dispatch', () => {
   it('routes parsed frames to all handlers', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     const a: ServerMessage[] = [];
     const b: ServerMessage[] = [];
     s.onMessage((m) => a.push(m));
@@ -185,7 +185,7 @@ describe('CockpitSocket — message dispatch', () => {
   });
 
   it('silently ignores non-JSON frames', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     const got: ServerMessage[] = [];
     s.onMessage((m) => got.push(m));
     s.connect();
@@ -196,7 +196,7 @@ describe('CockpitSocket — message dispatch', () => {
   });
 
   it('onMessage returns an unsubscribe that stops delivery', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     const got: ServerMessage[] = [];
     const off = s.onMessage((m) => got.push(m));
     s.connect();
@@ -208,9 +208,9 @@ describe('CockpitSocket — message dispatch', () => {
   });
 });
 
-describe('CockpitSocket — subscriptions', () => {
+describe('ClaudeControlSocket — subscriptions', () => {
   it('sends subscribe on select when open', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     const ws = FakeWebSocket.last();
     ws.open();
@@ -219,7 +219,7 @@ describe('CockpitSocket — subscriptions', () => {
   });
 
   it('unsubscribes the old id and subscribes the new on switch', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     const ws = FakeWebSocket.last();
     ws.open();
@@ -233,7 +233,7 @@ describe('CockpitSocket — subscriptions', () => {
   });
 
   it('is a no-op when selecting the already-selected id', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     const ws = FakeWebSocket.last();
     ws.open();
@@ -244,7 +244,7 @@ describe('CockpitSocket — subscriptions', () => {
   });
 
   it('re-subscribes the selected id automatically on reopen', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     let ws = FakeWebSocket.last();
     ws.open();
@@ -260,7 +260,7 @@ describe('CockpitSocket — subscriptions', () => {
   });
 
   it('select() before connect buffers nothing but applies on next open', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     // No socket yet: send returns false, nothing queued, but selectedId is set.
     s.select('sess-1');
     s.connect();
@@ -270,9 +270,9 @@ describe('CockpitSocket — subscriptions', () => {
   });
 });
 
-describe('CockpitSocket — reconnect / backoff', () => {
+describe('ClaudeControlSocket — reconnect / backoff', () => {
   it('schedules a reconnect after a drop and doubles the delay', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     FakeWebSocket.last().drop();
     // First retry at base (1000ms): nothing before, a new socket after.
@@ -290,7 +290,7 @@ describe('CockpitSocket — reconnect / backoff', () => {
   });
 
   it('resets backoff to base after a successful reopen', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     FakeWebSocket.last().drop();
     vi.advanceTimersByTime(1000); // retry #1
@@ -304,7 +304,7 @@ describe('CockpitSocket — reconnect / backoff', () => {
   });
 
   it('emits disconnected on drop', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     const states: string[] = [];
     s.onState((st) => states.push(st));
     s.connect();
@@ -314,7 +314,7 @@ describe('CockpitSocket — reconnect / backoff', () => {
   });
 
   it('does NOT reconnect after close()', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     s.connect();
     FakeWebSocket.last().open();
     s.close();
@@ -323,9 +323,9 @@ describe('CockpitSocket — reconnect / backoff', () => {
   });
 });
 
-describe('CockpitSocket — send guarding', () => {
+describe('ClaudeControlSocket — send guarding', () => {
   it('send returns false when the socket is not open', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     expect(s.send({ type: 'subscribe', id: 'x' })).toBe(false);
     s.connect();
     // still CONNECTING
@@ -335,7 +335,7 @@ describe('CockpitSocket — send guarding', () => {
   });
 
   it('isOpen reflects readyState', () => {
-    const s = new CockpitSocket();
+    const s = new ClaudeControlSocket();
     expect(s.isOpen()).toBe(false);
     s.connect();
     expect(s.isOpen()).toBe(false);

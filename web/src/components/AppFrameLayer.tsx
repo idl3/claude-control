@@ -1650,7 +1650,7 @@ export function AppFrameLayer() {
     }
     window.addEventListener('cockpit:app-reload', onAppReload);
 
-    // D2: track-latest hot reload. useCockpit.ts relays the server's
+    // D2: track-latest hot reload. useClaudeControl.ts relays the server's
     // 'media-app-changed' WS frame as this CustomEvent (same decoupling
     // idiom as cockpit:ack/cockpit:app-reload). Every tracked slot whose url
     // resolves to the frame's path gets shouldReloadOnFrame's panel-only,

@@ -23,7 +23,7 @@ interface SubAgentStripProps {
  *
  * `cockpit.subagents` accumulates every sub-agent dispatched all session
  * long (it's a map keyed by agentId, entries are never deleted — see
- * useCockpit.ts), so this can't just render "everything with status ===
+ * useClaudeControl.ts), so this can't just render "everything with status ===
  * 'done'" or the strip would resurrect agents from turns long past. Instead
  * a pill stays visible from the moment its agent starts running through the
  * moment the WHOLE current batch finishes: a sibling that finishes early

@@ -36,7 +36,7 @@ re-subscribes to the selected session on every (re)open.
 
 Uses the **external-store runtime** (`useExternalStoreRuntime`):
 
-- Our WebSocket is the single source of truth (`src/hooks/useCockpit.ts`). The
+- Our WebSocket is the single source of truth (`src/hooks/useClaudeControl.ts`). The
   transcript `Msg[]` is converted to assistant-ui `ThreadMessageLike[]` in
   `src/lib/convert.ts` and passed to the runtime as already-converted messages.
 - `onNew` (composer send) dispatches `{type:'reply',…}` over the WS. We do **not**
@@ -60,7 +60,7 @@ Thread/Composer/attachment UI and primitives.
 - `src/lib/api.ts` — token + upload helpers.
 - `src/lib/ws.ts` — reconnecting WebSocket client.
 - `src/lib/convert.ts` — `Msg[]` → assistant-ui messages.
-- `src/hooks/useCockpit.ts` — WS-backed store.
+- `src/hooks/useClaudeControl.ts` — WS-backed store.
 - `src/components/` — `Thread`, `Messages`, `MessageParts`, `Composer`,
   `SessionRail`, `ResourceHud`, `AskModal`, `Toast`.
 - `src/App.tsx` — wires the runtime, rail, HUD, modal, and toasts.

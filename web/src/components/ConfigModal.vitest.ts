@@ -270,6 +270,22 @@ describe('ConfigModal — Olam cloud section (Fix 3 setup guide)', () => {
     expect(document.querySelector('.config-olam-orgs')).toBeNull();
   });
 
+  it('empty-state guidance is an ordered list of setup steps naming the new `olam control setup` command, never the old cockpit-era command/env var', async () => {
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    const steps = Array.from(document.querySelectorAll('.config-body ol li')).map(
+      (li) => li.textContent,
+    );
+    expect(steps.length).toBe(3);
+    expect(steps[0]).toBe('Install the Olam CLI.');
+    expect(screen.getByText('olam control setup')).toBeTruthy();
+    expect(screen.getByText('CLAUDE_CONTROL_DATA')).toBeTruthy();
+
+    expect(document.body.textContent).not.toContain('olam cockpit init');
+    expect(document.body.textContent).not.toContain('COCKPIT_DATA');
+  });
+
   it('a red (unhealthy) org lists its health dot + the exact re-auth command, never a secret value', async () => {
     mockApi({
       ...FIXTURE_CONFIG,
