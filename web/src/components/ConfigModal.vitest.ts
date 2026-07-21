@@ -15,6 +15,7 @@ const getConfigMock = vi.fn();
 const saveConfigMock = vi.fn();
 const getModelsMock = vi.fn();
 const getVersionMock = vi.fn();
+const restartServiceMock = vi.fn();
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>();
   return {
@@ -23,6 +24,7 @@ vi.mock('../lib/api', async (importOriginal) => {
     saveConfig: (...args: unknown[]) => saveConfigMock(...args),
     getModels: (...args: unknown[]) => getModelsMock(...args),
     getVersion: (...args: unknown[]) => getVersionMock(...args),
+    restartService: (...args: unknown[]) => restartServiceMock(...args),
   };
 });
 
@@ -72,6 +74,7 @@ function mockApi(config: ControlConfig = FIXTURE_CONFIG): void {
   );
   getModelsMock.mockReset().mockResolvedValue(FIXTURE_MODELS);
   getVersionMock.mockReset().mockResolvedValue(null);
+  restartServiceMock.mockReset().mockResolvedValue({ ok: true });
 }
 
 // `.config-field` wraps the label span + control + a `.config-hint` span in
@@ -332,6 +335,54 @@ describe('ConfigModal — Olam cloud section (Fix 3 setup guide)', () => {
     expect(screen.getByText('pleri')).toBeTruthy();
     const dot = document.querySelector('.remote-health') as HTMLElement;
     expect(dot.className).toContain('remote-health-unknown');
+  });
+});
+
+// Item 4: "Restart service" moved out of the modal footer into a dedicated
+// Debug section (home for future debug tools). It is a two-click confirm and
+// stays visible-but-disabled with a tooltip when the cockpit isn't supervised.
+describe('ConfigModal — Debug section (Restart service moved here)', () => {
+  it('renders a Debug nav item; restart is NOT in the footer or any other section', async () => {
+    await renderModal();
+
+    expect(screen.getByRole('button', { name: /Debug/ })).toBeTruthy();
+    // Restart lives only inside the Debug section — not visible on General.
+    expect(screen.queryByRole('button', { name: /Restart service/ })).toBeNull();
+  });
+
+  it('shows the Restart service control inside the Debug section', async () => {
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Debug/ }));
+
+    const restart = screen.getByRole('button', { name: /Restart service/ }) as HTMLButtonElement;
+    expect(restart.closest('.config-body')).toBeTruthy();
+  });
+
+  it('is disabled with a supervisor tooltip when restartSupported is false', async () => {
+    mockApi({ ...FIXTURE_CONFIG, restartSupported: false });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Debug/ }));
+
+    const restart = screen.getByRole('button', { name: /Restart service/ }) as HTMLButtonElement;
+    expect(restart.disabled).toBe(true);
+    expect(restart.title).toMatch(/launchd\/pm2/);
+  });
+
+  it('when supported: first click asks to confirm, second click calls restartService', async () => {
+    mockApi({ ...FIXTURE_CONFIG, restartSupported: true });
+    const { onToast } = await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Debug/ }));
+
+    const restart = screen.getByRole('button', { name: /Restart service/ }) as HTMLButtonElement;
+    expect(restart.disabled).toBe(false);
+
+    fireEvent.click(restart);
+    expect(restart.textContent).toBe('Confirm restart?');
+    expect(restartServiceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(restart);
+    await waitFor(() => expect(restartServiceMock).toHaveBeenCalledTimes(1));
+    expect(onToast).toHaveBeenCalledWith('Restarting… the app will reconnect automatically', 'ok');
   });
 });
 
