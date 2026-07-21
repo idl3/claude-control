@@ -5487,7 +5487,7 @@ body.is-external-display .composer {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 2px;
+  padding: 1.5px;
   background: conic-gradient(
     from var(--composer-ring-angle),
     var(--accent),
