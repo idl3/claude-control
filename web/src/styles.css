@@ -5449,15 +5449,58 @@ body.is-external-display .composer {
   color: var(--text);
   border-color: var(--accent);
 }
-/* Active state is a 1px accent ring + full opacity + text color, never a
-   filled gradient — shape+ring carries the state, opacity is the secondary
-   read (mirrors .subagent-pill[data-active='true']). */
+/* Active state carries the composer's border + aura-glow treatment (operator:
+   "same border + aura glow as the composer, I like that UI"). See the shared
+   rule just below. */
 .rail-tab[aria-selected='true'] {
+  position: relative;
   color: var(--text);
   opacity: 1;
   background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+}
+/* Composer-style border + aura glow, shared by the active tab pill AND the
+   active session row. Mirrors .composer-card:focus-within (soft 3px accent
+   halo under the drop shadow) + .composer-card::before (a static accent→warm
+   gradient rim; the composer retired the ring's rotation for perf, so this is
+   its current look). Uses inset:0 (NOT the composer's -1.4px) so the rim never
+   clips against .session-item's overflow:hidden or the .rail-tabs horizontal
+   scroller. Longhand mask ONLY — the `mask:` + standalone `mask-composite`
+   shorthand is silently dropped by the Vite/lightningcss minifier (documented
+   at .composer-card::before); verify against the BUILT css, not source. */
+.rail-tab[aria-selected='true'],
+.session-item[aria-selected='true'] {
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.25),
+    0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
+}
+.session-item[aria-selected='true'] {
+  position: relative;
+  border-color: var(--accent);
+}
+.rail-tab[aria-selected='true']::before,
+.session-item[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--composer-ring-angle),
+    var(--accent),
+    var(--accent-warm),
+    var(--accent),
+    var(--accent-warm),
+    var(--accent)
+  );
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-clip: content-box, border-box;
+  mask-composite: exclude;
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-clip: content-box, border-box;
+  -webkit-mask-composite: xor;
+  opacity: 0.5;
+  pointer-events: none;
 }
 .rail-tab[data-kind='unconfigured'] {
   color: var(--text-faint);
