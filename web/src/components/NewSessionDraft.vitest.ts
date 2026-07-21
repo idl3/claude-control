@@ -827,6 +827,88 @@ describe('NewSessionDraft submit payload', () => {
   });
 });
 
+// ── Create-folder confirm flow ──────────────────────────────────────────────
+// A first create attempt that returns code:'cwd_missing' raises a confirm
+// modal offering to create the folder; confirming retries the SAME request
+// with createCwd:true instead of surfacing a dead-end error.
+describe('NewSessionDraft cwd_missing confirm-then-retry', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('raises the create-folder modal on cwd_missing, then retries with createCwd:true on confirm', async () => {
+    const onCreated = vi.fn();
+    // First attempt (no createCwd) → cwd_missing 400; retry (createCwd:true) → ok.
+    const { createCalls } = stubApi({
+      createResponse: (body) =>
+        body.createCwd === true
+          ? new Response(JSON.stringify({ ok: true, target: 'claude-control:1', name: 'made', agent: 'claude', transport: 'tmux' }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            })
+          : new Response(JSON.stringify({ error: 'cwd does not exist: /workspace/new', code: 'cwd_missing', cwd: '/workspace/new' }), {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            }),
+    });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated,
+    }));
+
+    await screen.findByLabelText('Model');
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    // First create fired and came back cwd_missing → confirm modal appears.
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].createCwd).toBeUndefined();
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/doesn.?t exist/)).toBeTruthy();
+    // The missing cwd from the response is shown in the prompt.
+    expect(dialog.textContent).toContain('/workspace/new');
+    // onCreated must NOT have fired yet.
+    expect(onCreated).not.toHaveBeenCalled();
+
+    // Confirm → retry with createCwd:true → success.
+    fireEvent.click(within(dialog).getByRole('button', { name: /Create .* launch/ }));
+    await waitFor(() => expect(createCalls.length).toBe(2));
+    expect(createCalls[1].createCwd).toBe(true);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+  });
+
+  it('dismissing the create-folder modal keeps the draft open and fires no retry', async () => {
+    const onCreated = vi.fn();
+    const { createCalls } = stubApi({
+      createResponse: () =>
+        new Response(JSON.stringify({ error: 'cwd does not exist: /workspace/new', code: 'cwd_missing', cwd: '/workspace/new' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated,
+    }));
+
+    const textarea = await screen.findByLabelText('Initial prompt') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'keep me' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    // Modal closes; no second create; the typed prompt survives.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(createCalls.length).toBe(1);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('keep me');
+  });
+});
+
 describe('NewSessionDraft tmux target picker', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -978,7 +1060,10 @@ describe('NewSessionDraft directory picker', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults the working-directory dropdown to the entry matching this workspace', async () => {
+  // No auto-select: projectDirs is operator-configured (empty by default), so
+  // there is no built-in private-org path to preselect. The picker starts on
+  // "(default)" and lists every configured directory as a manual choice.
+  it('does NOT auto-select any project directory — the picker starts on (default)', async () => {
     stubApi({
       projectDirs: [
         { label: 'other-project', path: '/Users/x/Projects/other-project' },
@@ -993,11 +1078,17 @@ describe('NewSessionDraft directory picker', () => {
     }));
 
     const trigger = await screen.findByLabelText('Working directory');
-    await waitFor(() => expect(trigger.textContent).toContain('pleri-org'));
+    // Even with a pleri-org entry present, nothing is preselected.
+    await waitFor(() => expect(trigger.textContent).toContain('(default)'));
+    const menu = openDropdown('Working directory');
+    expect(within(menu).getByText('other-project')).toBeTruthy();
+    expect(within(menu).getByText('pleri-org')).toBeTruthy();
   });
 
-  it('falls back to the (default) option when no directory matches this workspace', async () => {
-    stubApi({ projectDirs: [{ label: 'other-project', path: '/Users/x/Projects/other-project' }] });
+  it('sends no cwd when left on (default), even with configured directories', async () => {
+    const { createCalls } = stubApi({
+      projectDirs: [{ label: 'other-project', path: '/Users/x/Projects/other-project' }],
+    });
     render(createElement(NewSessionDraft, {
       filter: 'all',
       onToast: () => {},
@@ -1007,8 +1098,10 @@ describe('NewSessionDraft directory picker', () => {
 
     const trigger = await screen.findByLabelText('Working directory');
     await waitFor(() => expect(trigger.textContent).toContain('(default)'));
-    const menu = openDropdown('Working directory');
-    expect(within(menu).getByText('other-project')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    // '' choice → server default → cwd omitted from the request.
+    expect(createCalls[0].cwd).toBeUndefined();
   });
 });
 

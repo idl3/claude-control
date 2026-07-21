@@ -522,6 +522,12 @@ export async function createSession(opts?: {
   tmuxSession?: string;
   /** Create a brand-new tmux session with this name to host the new window. */
   newTmuxSession?: string;
+  /**
+   * When true, the server mkdir -p's a missing `cwd` instead of rejecting it.
+   * Set after the user confirms the create-folder prompt raised by a first
+   * attempt that came back with code:'cwd_missing'.
+   */
+  createCwd?: boolean;
 }): Promise<CreateSessionResult> {
   const res = await authFetch('/api/session/new', {
     method: 'POST',
@@ -530,10 +536,15 @@ export async function createSession(opts?: {
   });
   const json = (await res.json().catch(() => ({}))) as
     | CreateSessionResult
-    | { error?: string };
+    | { error?: string; code?: string; cwd?: string };
   if (!res.ok || !('ok' in json) || !json.ok) {
-    const err = ('error' in json && json.error) || `HTTP ${res.status}`;
-    throw new Error(err);
+    const errMsg = ('error' in json && json.error) || `HTTP ${res.status}`;
+    // Attach the structured code + cwd so callers can branch (e.g. offer a
+    // create-folder confirm on 'cwd_missing') instead of only showing a toast.
+    const e = new Error(errMsg) as Error & { code?: string; cwd?: string };
+    e.code = ('code' in json && json.code) || undefined;
+    e.cwd = ('cwd' in json && json.cwd) || undefined;
+    throw e;
   }
   return json;
 }
