@@ -783,7 +783,7 @@ type Slot = {
   logicalHeight: number | null;
 };
 
-type SlotEl = {
+export type SlotEl = {
   url: string;
   height: number;
   el: HTMLElement;
@@ -870,12 +870,32 @@ function readSlotEls(): SlotEl[] {
  * which is the only candidate in the pre-Phase-C (single placeholder) case,
  * so this is a strict generalization.
  */
-function pickHost(entries: SlotEl[]): SlotEl {
-  return (
-    entries.find((e) => e.context === 'studio') ??
-    entries.find((e) => e.context === 'panel') ??
-    entries[0]
-  );
+/** True when `el` vertically overlaps the viewport with a real (non-zero) box. */
+export function isInViewport(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  return r.height > 0 && r.width > 0 && r.bottom > 0 && r.top < vh;
+}
+
+// Exported for the regression test that locks the multi-same-url in-view host
+// arbitration (see AppFrameLayer.vitest.ts). The DOM-integration tests can't
+// easily assert viewport-based positioning under jsdom's no-layout rects.
+export function pickHost(entries: SlotEl[]): SlotEl {
+  const studio = entries.find((e) => e.context === 'studio');
+  if (studio) return studio;
+  const panel = entries.find((e) => e.context === 'panel');
+  if (panel) return panel;
+  // Multi-placeholder transcript case: a url embedded MORE THAN ONCE must host
+  // its single live iframe over the copy the user is actually looking at — not
+  // always the first in document order, which pinned the live frame to the
+  // topmost embed and left every later duplicate blank (confirmed: 4
+  // glow-ring-demo embeds, iframe stuck on #0 far above the viewport, #1–#3
+  // blank). Prefer the placeholder currently intersecting the viewport; fall
+  // back to document order when none is visible. pickHost runs each frame and a
+  // host switch only REPOSITIONS the iframe (never reloads — see the
+  // never-reload seam above), so following the in-view copy on scroll is free.
+  const inView = entries.find((e) => isInViewport(e.el));
+  return inView ?? entries[0];
 }
 
 // C2/L1 (Codex review): a shadow (non-host) placeholder's overlay chip. L1

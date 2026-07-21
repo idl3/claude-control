@@ -23,7 +23,10 @@ import {
   shouldEngageScrollFade,
   shouldCrossFadeHoist,
   shouldFadeSlot,
+  pickHost,
+  isInViewport,
   type RectLike,
+  type SlotEl,
 } from './AppFrameLayer';
 // C2: AppFrameLayer now calls useArtifactPanel() internally, so the mounted
 // rAF-gating test below needs a provider ancestor.
@@ -1771,5 +1774,55 @@ describe('Mobile transcript-embed blank-render fix (iOS Safari compositing, touc
   it('the base (non-touch) rule still promotes via will-change: transform — desktop scroll-lag fix is untouched', () => {
     const baseBlockMatch = css.match(/\.embed-app-hoist \{([\s\S]*?)\n\}/);
     expect(baseBlockMatch?.[1]).toMatch(/will-change:\s*transform/);
+  });
+});
+
+describe('pickHost — multi-same-url in-view arbitration (regression: duplicate embeds rendered blank)', () => {
+  // Minimal SlotEl with a stubbed rect. jsdom has no layout, so we stub
+  // getBoundingClientRect directly. window.innerHeight is jsdom's default (768).
+  function slot(top: number, over: Partial<SlotEl> = {}): SlotEl {
+    return {
+      url: 'apps/dup.html',
+      height: 320,
+      context: 'transcript',
+      explicitlyHidden: false,
+      trackLatest: true,
+      suspended: false,
+      elevate: false,
+      logicalWidth: null,
+      logicalHeight: null,
+      el: {
+        getBoundingClientRect: () =>
+          ({ top, bottom: top + 300, height: 300, width: 400, left: 0, right: 400, x: 0, y: top, toJSON: () => ({}) }) as DOMRect,
+      } as unknown as HTMLElement,
+      ...over,
+    } as SlotEl;
+  }
+
+  it('prefers the transcript duplicate currently in the viewport over the first in document order', () => {
+    const first = slot(-5000); // scrolled far above → out of view
+    const inView = slot(120); // on screen
+    expect(pickHost([first, inView])).toBe(inView);
+  });
+
+  it('falls back to document order when NO duplicate is in view', () => {
+    const first = slot(-5000);
+    const second = slot(-3000);
+    expect(pickHost([first, second])).toBe(first);
+  });
+
+  it('studio and panel contexts still win over an in-view transcript copy', () => {
+    const inViewTranscript = slot(120);
+    const offscreenPanel = slot(-5000, { context: 'panel' });
+    expect(pickHost([inViewTranscript, offscreenPanel])).toBe(offscreenPanel);
+    const offscreenStudio = slot(-9000, { context: 'studio' });
+    expect(pickHost([inViewTranscript, offscreenPanel, offscreenStudio])).toBe(offscreenStudio);
+  });
+
+  it('isInViewport: true on-screen, false scrolled far away', () => {
+    const on = { getBoundingClientRect: () => ({ top: 10, bottom: 310, height: 300, width: 400 }) } as unknown as HTMLElement;
+    const off = { getBoundingClientRect: () => ({ top: -9999, bottom: -9699, height: 300, width: 400 }) } as unknown as HTMLElement;
+    expect(isInViewport(on)).toBe(true);
+    expect(isInViewport(off)).toBe(false);
   });
 });
