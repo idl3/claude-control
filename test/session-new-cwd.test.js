@@ -10,6 +10,10 @@
  *   - missing cwd + createCwd:true → mkdir -p the directory, then proceed past
  *     the cwd check (the directory now exists on disk; the response is NOT the
  *     cwd_missing 400).
+ *   - non-ENOENT stat error (ENOTDIR when a parent segment is a regular file,
+ *     and by the same branch EACCES / ELOOP) → a prompt 400 code:'cwd_error',
+ *     NOT a hung request. Regression guard: the old code re-threw here, escaping
+ *     the async handler so the HTTP response was never written.
  *
  * Runs the actual server as a child process on an ephemeral port. Two guards
  * keep it hermetic:
@@ -154,4 +158,21 @@ test('session/new: cwd that is a file → 400 not a directory', async () => {
   assert.equal(res.status, 400, 'a file cwd must produce 400');
   const json = await res.json();
   assert.match(json.error, /not a directory/, 'error explains cwd is not a directory');
+});
+
+test('session/new: cwd whose parent segment is a file (ENOTDIR) → prompt 400 cwd_error, NOT a hang', async () => {
+  // A plausible typo: notes.txt/app. stat() throws ENOTDIR (a non-ENOENT
+  // error). The handler MUST return a clean 400 — the old `else { throw e }`
+  // escaped the async handler with no `.catch()`, so the response was never
+  // written and this fetch would hang until the test timeout. The `await`
+  // resolving at all is itself the regression assertion.
+  const filePath = path.join(dataDir, 'notes.txt');
+  fs.writeFileSync(filePath, 'x');
+  const badCwd = path.join(filePath, 'app'); // parent segment is a regular file
+  const res = await post(port, '/api/session/new', { agent: 'claude', cwd: badCwd, name: 'x' });
+  assert.equal(res.status, 400, 'ENOTDIR stat error must produce a 400');
+  const json = await res.json();
+  assert.equal(json.code, 'cwd_error', 'error code must be cwd_error');
+  assert.equal(json.cwd, badCwd, 'response echoes the offending cwd');
+  assert.match(json.error, /cannot access cwd/, 'error explains the stat failure');
 });

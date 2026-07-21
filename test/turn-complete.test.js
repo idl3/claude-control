@@ -4,10 +4,12 @@
  * Unit tests for extractTailRecord()'s `turnComplete` field — the hard JSONL
  * evidence the SessionRegistry uses to clear a stale "working…" indicator.
  *
- * turnComplete is true ONLY when the newest assistant record ended with a
- * terminal stop_reason (end_turn / stop_sequence / max_tokens) AND no user
- * tool_result follows it. `tool_use` and `pause_turn` are mid-turn → false;
- * a trailing tool_result (agent mid-tool-loop) → false.
+ * turnComplete is true ONLY when the NEWEST MAIN-LINE conversation record is a
+ * terminal assistant turn (stop_reason ∈ end_turn / stop_sequence / max_tokens).
+ * If any main-line record is newer than it — a fresh user turn, or a pending
+ * tool_result — the agent is still working → false. `tool_use` and `pause_turn`
+ * are mid-turn → false. Sub-agent (sidechain) records are skipped entirely: a
+ * sidechain's end_turn is not the main turn's end.
  *
  * Run: node --test test/turn-complete.test.js
  */
@@ -68,6 +70,23 @@ const userToolResult = (id) => ({
   cwd: '/x',
   sessionId: 's1',
 });
+// A sub-agent (sidechain) assistant record — marked isSidechain like a real
+// Claude Code Task transcript. Must NOT count as the main turn's end.
+const sidechainAssistant = (stopReason, text = 'subagent done') => ({
+  type: 'assistant',
+  isSidechain: true,
+  parentUuid: 'sc-parent',
+  message: {
+    role: 'assistant',
+    model: 'claude-opus-4-8',
+    stop_reason: stopReason,
+    content: [{ type: 'text', text }],
+    usage: { input_tokens: 5 },
+  },
+  timestamp: TS,
+  cwd: '/x',
+  sessionId: 's1',
+});
 
 test('turnComplete=true when the last assistant record ended with end_turn', async () => {
   const file = writeJsonl([userText('hi'), assistant('end_turn', 'done')]);
@@ -122,6 +141,33 @@ test('turnComplete=true when a completed assistant turn FOLLOWS a resolved tool 
 
 test('turnComplete=false when there is no assistant record at all', async () => {
   const file = writeJsonl([userText('hi'), userText('anyone there?')]);
+  const rec = await extractTailRecord(file, Date.now());
+  assert.equal(rec.turnComplete, false);
+});
+
+test('turnComplete=false when a NEW user turn follows a prior end_turn (P2 stale)', async () => {
+  // A long single-shot follow-up: the user sent a new message after the prior
+  // turn's end_turn, and the assistant is now generating (no new assistant
+  // record yet). Reading the STALE prior end_turn must NOT force-idle the
+  // still-working session — the newest main-line record is the user message.
+  const file = writeJsonl([
+    userText('hi'),
+    assistant('end_turn', 'first answer'),
+    userText('now do the big thing'),
+  ]);
+  const rec = await extractTailRecord(file, Date.now());
+  assert.equal(rec.turnComplete, false);
+});
+
+test('turnComplete=false when a sidechain end_turn is newest but the main line still works (P3)', async () => {
+  // Main line is mid-tool-loop (tool_use, no result yet). A sub-agent finished
+  // and wrote a sidechain end_turn as the newest record. The sidechain terminal
+  // record must be skipped: the main turn is NOT complete.
+  const file = writeJsonl([
+    userText('spawn a subagent and keep working'),
+    assistantToolUse('tu_1'),
+    sidechainAssistant('end_turn'),
+  ]);
   const rec = await extractTailRecord(file, Date.now());
   assert.equal(rec.turnComplete, false);
 });

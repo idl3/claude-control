@@ -1404,7 +1404,14 @@ async function handleSessionNew(req, res) {
         return endJson(res, 400, { error: `cwd does not exist: ${cwd}`, code: 'cwd_missing', cwd });
       }
     } else {
-      throw e;
+      // Any OTHER stat error (ENOTDIR from a file in a parent segment, EACCES on
+      // an unreadable dir, ELOOP on a symlink cycle — all plausible typos) must
+      // return a clean 400. Throwing here escapes the async handler: the route
+      // dispatcher returns the promise with no `.catch()`, so the rejection only
+      // hits the log-only `unhandledRejection` handler and the HTTP response is
+      // NEVER written — POST /api/session/new hangs forever and the New Session
+      // UI stays stuck in "Creating…". A 400 is the honest, prompt answer.
+      return endJson(res, 400, { error: `cannot access cwd: ${cwd} (${e.code || e.message})`, code: 'cwd_error', cwd });
     }
   }
   if (!st.isDirectory()) {
