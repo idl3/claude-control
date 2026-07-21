@@ -307,6 +307,69 @@ test('steer door: an unmapped status falls back to bounded body text, mirrors di
   assert.match(r.error, /HTTP 500: internal boom/);
 });
 
+// --- steer door true-delivery (mirrored) signal (202 queued-but-not-live) --------
+
+test('steer door: 202 with liveSteerRelay {ok:false, mirrored:false} → ok:true but mirrored:false (queued, not live-applied)', async () => {
+  const c = client(async () => jsonRes(202, { liveSteerRelay: { ok: false, mirrored: false, error: 'session_never_dispatched' } }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.status, 202);
+  assert.equal(r.mirrored, false);
+  assert.equal(r.door, 'steer-live');
+});
+
+test('steer door: 202 with liveSteerRelay {ok:true, mirrored:true} → mirrored:true (truly live-delivered)', async () => {
+  const c = client(async () => jsonRes(202, { liveSteerRelay: { ok: true, mirrored: true } }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.mirrored, true);
+  assert.equal(r.door, 'steer-live');
+});
+
+test('steer door: hardSteerRelay is honoured the same as liveSteerRelay (hard-mode mirror)', async () => {
+  const c = client(async () => jsonRes(200, { hardSteerRelay: { ok: false, mirrored: false } }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x', 'hard');
+  assert.equal(r.ok, true);
+  assert.equal(r.mirrored, false);
+});
+
+test('steer door: relay.ok:true but mirrored explicitly false → mirrored:false (relay ran but did not land)', async () => {
+  const c = client(async () => jsonRes(202, { liveSteerRelay: { ok: true, mirrored: false } }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.mirrored, false);
+});
+
+test('steer door: relay.ok:true with mirrored ABSENT → mirrored:true (mirrored !== false, not required to be present)', async () => {
+  const c = client(async () => jsonRes(202, { liveSteerRelay: { ok: true } }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.mirrored, true);
+});
+
+test('steer door: a 2xx body with NO relay object defaults mirrored:true (fail-soft, no regression)', async () => {
+  const c = client(async () => jsonRes(200, { ok: true }));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.mirrored, true);
+});
+
+test('steer door: a body-less / parse-failing 2xx defaults mirrored:true (never regress a delivered steer)', async () => {
+  // res(200) has no json() method → the parse attempt throws → fail-soft to true.
+  const c = client(async () => res(200));
+  const r = await dispatchLiveSteer(c, { sessionId: 's1', pool: 'linear' }, { state: 'live' }, 'x');
+  assert.equal(r.ok, true);
+  assert.equal(r.mirrored, true);
+});
+
+test('steer door: mirrored:false NEVER appears on the cloud-dispatch door (a 202 there is a legit new turn)', async () => {
+  // A plan/chat session (not execute-shaped) routes through dispatchSteer; its
+  // 202 has no relay to inspect, so no mirrored field rides — leave it success.
+  const c = client(async () => jsonRes(202, { liveSteerRelay: { ok: false, mirrored: false } }));
+  const r = await dispatchLiveSteer(c, { worldId: 'w1', sessionId: 's1' }, undefined, 'plan chat text');
+  assert.equal(r.ok, true);
+  assert.equal(r.door, 'dispatch');
+  assert.equal(r.mirrored, undefined);
+});
+
 test('DISPATCH_ERRORS.steerConflict/steerInvalid are non-numeric keys, excluded from the numeric-status exhaustive test above', () => {
   assert.equal(/^\d+$/.test('steerConflict'), false);
   assert.equal(/^\d+$/.test('steerInvalid'), false);

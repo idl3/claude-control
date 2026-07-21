@@ -2850,7 +2850,22 @@ async function handleClientMessage(ws, msg) {
         // two apart without a naming collision.
         const result = await dispatchLiveSteer(client, session, liveness, String(msg.text ?? ''), steerMode);
         if (result.ok) {
-          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode, door: result.door });
+          // A steer-door send returns 2xx even when the steer was only QUEUED on
+          // the ledger and NOT mirrored to a live in-container agent (agent died
+          // / never dispatched → liveSteerRelay.ok:false). It IS an ok send (the
+          // row persisted, so the bubble is honestly 'sent'), but the operator
+          // asked for a LIVE steer and didn't get one — surface that honestly via
+          // `notice` instead of implying instant delivery. `mirrored !== false`
+          // (true, or absent on the cloud-dispatch door) keeps the plain success.
+          if (result.door === 'steer-live' && result.mirrored === false) {
+            send(ws, {
+              type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode, door: result.door,
+              mirrored: false,
+              notice: "Steer queued, but the live agent isn't running — it will be applied on the session's next launch.",
+            });
+          } else {
+            send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'olam', reqId, mode, door: result.door });
+          }
         } else {
           send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: result.error, door: result.door });
         }
