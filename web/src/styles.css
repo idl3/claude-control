@@ -5457,7 +5457,10 @@ body.is-external-display .composer {
   color: var(--text);
   opacity: 1;
   background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
-  border-color: var(--accent);
+  /* Transparent, not accent: the gradient rim (::before) IS the visible
+     border. A solid accent border here would sit OUTSIDE the rim as a stray
+     bright line (the composer has no such line — its ring is the border). */
+  border-color: transparent;
 }
 /* Composer-style border + aura glow, shared by the active tab pill AND the
    active session row. Mirrors .composer-card:focus-within (soft 3px accent
@@ -5476,7 +5479,7 @@ body.is-external-display .composer {
 }
 .session-item[aria-selected='true'] {
   position: relative;
-  border-color: var(--accent);
+  border-color: transparent;
 }
 .rail-tab[aria-selected='true']::before,
 .session-item[aria-selected='true']::before {
