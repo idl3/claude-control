@@ -5410,28 +5410,6 @@ body.is-external-display .composer {
   background: var(--bg);
   border-top: 1px solid var(--line);
 }
-/* Edge fade: a soft mask on both ends signals "more tabs offscreen" without
-   a hard clip line, consistent with the cosmos chrome's soft edges
-   elsewhere (e.g. .subagent-strip's fades). Skipped when there's nothing to
-   scroll (short tab lists render with no visual cost). */
-.rail-tabs-wrap::before,
-.rail-tabs-wrap::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 18px;
-  pointer-events: none;
-  z-index: 1;
-}
-.rail-tabs-wrap::before {
-  left: 0;
-  background: linear-gradient(to right, var(--bg), transparent);
-}
-.rail-tabs-wrap::after {
-  right: 0;
-  background: linear-gradient(to left, var(--bg), transparent);
-}
 .rail-tabs {
   display: flex;
   flex-wrap: nowrap; /* overflow scrolls horizontally, mirrors .subagent-pills */
