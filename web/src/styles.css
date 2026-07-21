@@ -4000,6 +4000,39 @@ body.is-external-display .composer {
     0 2px 10px rgba(0, 0, 0, 0.25),
     0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
 }
+/* Drag-and-drop attachment overlay. position:absolute (inset:0) so it is out of
+   flow — it must NOT change .composer-card offsetHeight, which the voice/ask
+   GSAP height-morph measures. pointer-events:none so the drop reaches the
+   card's onDrop handler rather than being swallowed by the overlay. */
+.composer-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border-radius: 16px; /* match .composer-card */
+  border: 2px dashed color-mix(in oklch, var(--accent) 60%, transparent);
+  background: color-mix(in oklch, var(--accent) 14%, var(--bg-1));
+  animation: composer-drop-in 0.12s var(--ease);
+}
+.composer-drop-label {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 700;
+}
+@keyframes composer-drop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 
 /* ── Accent ring: an iridescent gradient ring on the BORDER only — the
    card body itself never moves. Operator feedback on the first pass (PR

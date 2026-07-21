@@ -8,6 +8,33 @@ import { uploadFile } from './api';
 // Files Claude can usefully read: images, PDF, and any text-ish file.
 export const ATTACH_ACCEPT = 'image/*,application/pdf,text/*,.md,.json,.csv,.log';
 
+/**
+ * Whether a dropped/picked file matches an HTML `accept` list. The native
+ * `<input accept>` filters the file picker, but drag-and-drop has no such gate,
+ * so the composer's drop handler screens files with this before uploading.
+ *
+ * Supports the three token shapes in ATTACH_ACCEPT:
+ *   - extension: `.md` → matches by filename suffix (covers files the OS gives
+ *     an empty/odd MIME type, e.g. .log)
+ *   - wildcard:  `image/*` / `text/*` → matches by MIME prefix
+ *   - exact MIME: `application/pdf`
+ * An empty accept list accepts everything (mirrors a missing `accept` attr).
+ */
+export function acceptsFile(file: File, accept: string = ATTACH_ACCEPT): boolean {
+  const patterns = accept
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  if (patterns.length === 0) return true;
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  return patterns.some((pattern) => {
+    if (pattern.startsWith('.')) return name.endsWith(pattern);
+    if (pattern.endsWith('/*')) return type.startsWith(pattern.slice(0, -1)); // keep "image/"
+    return type === pattern;
+  });
+}
+
 // Reserved key on a completed attachment's content text part carrying the
 // uploaded absolute server path. onNew reads it back to build the reply text.
 const PATH_PREFIX = ' cockpit-path:';

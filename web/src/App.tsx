@@ -3129,6 +3129,7 @@ function AppInner() {
                     onKey={onThreadKey}
                     onSelect={onThreadSelect}
                     onReply={onInlineReply}
+                    onToast={showToast}
                   />
                   </ErrorBoundary>
                 </WorkflowContext.Provider>
