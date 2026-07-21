@@ -4194,12 +4194,20 @@ body.is-external-display .composer {
     --composer-ring-angle: 360deg;
   }
 }
+/* Settings-controlled override (data-ring-rotation on <html>, see
+   lib/ringRotationPref.ts + ConfigModal.tsx): 'auto' (default, incl.
+   attr-absent) keeps the desktop-pointer-only gate above; 'on' spins on ALL
+   devices including touch; 'off' never spins. prefers-reduced-motion always
+   wins regardless of mode — the compound query right after this block. */
 @media (pointer: fine) {
-  .composer-card::before {
+  :root:not([data-ring-rotation='off']) .composer-card::before {
     animation: composer-ring-spin 3.5s linear infinite;
   }
 }
-@media (pointer: fine) and (prefers-reduced-motion: reduce) {
+:root[data-ring-rotation='on'] .composer-card::before {
+  animation: composer-ring-spin 3.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
   .composer-card::before {
     animation: none;
   }
@@ -5803,13 +5811,22 @@ body.is-external-display .composer {
     transform: translate(-50%, -50%) rotate(1turn);
   }
 }
+/* Settings-controlled override (data-ring-rotation on <html>, see
+   lib/ringRotationPref.ts + ConfigModal.tsx): 'auto' (default, incl.
+   attr-absent) keeps the desktop-pointer-only gate above; 'on' spins on ALL
+   devices including touch; 'off' never spins. prefers-reduced-motion always
+   wins regardless of mode — the compound query right after this block. */
 @media (pointer: fine) {
-  .rail-tab[aria-selected='true']::before,
-  .session-item[aria-selected='true']::before {
+  :root:not([data-ring-rotation='off']) .rail-tab[aria-selected='true']::before,
+  :root:not([data-ring-rotation='off']) .session-item[aria-selected='true']::before {
     animation: glow-ring-spin 3.5s linear infinite;
   }
 }
-@media (pointer: fine) and (prefers-reduced-motion: reduce) {
+:root[data-ring-rotation='on'] .rail-tab[aria-selected='true']::before,
+:root[data-ring-rotation='on'] .session-item[aria-selected='true']::before {
+  animation: glow-ring-spin 3.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
   .rail-tab[aria-selected='true']::before,
   .session-item[aria-selected='true']::before {
     animation: none;
