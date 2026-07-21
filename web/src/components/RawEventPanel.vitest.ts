@@ -95,6 +95,62 @@ describe('RawEventPanel — drill-in detail tier', () => {
     expect(detail.textContent).toContain('/tmp/secret.txt');
   });
 
+  // Regression coverage for the selectedIdx → selectedKey fix: selection must
+  // be anchored to a stable identity, not an array position, because the
+  // events array both (a) gets front-evicted (useCockpit caps at
+  // RAW_EVENT_CAP and slices from the front, shifting every later index down)
+  // and (b) can be swapped wholesale on a session switch. An index-based
+  // selection silently re-points at an unrelated event in both cases; a
+  // key-based selection either keeps tracking the SAME event (still present)
+  // or fails closed to null (evicted/gone) — never a neighbor.
+  it('surviving front-eviction: selection keeps tracking the same event by identity once its index shifts', () => {
+    const { rerender } = render(createElement(RawEventPanel, { events: EVENTS, onClose: vi.fn() }));
+
+    // Select the oldest event (ts 1000, index 0) — its newest-first row is last.
+    fireEvent.click(rows()[2]);
+    const detailBefore = document.querySelector('.raw-detail-body') as HTMLElement;
+    expect(detailBefore.textContent).toContain('bash guard fired');
+
+    // Simulate front-eviction: the front (oldest) entries get sliced away as
+    // new events arrive, but the selected event (ts 1000) is still present —
+    // just at a different array position than before.
+    const evicted: RawEvent[] = [
+      { ts: 1000, source: 'hook', kind: 'PreToolUse', summary: 'bash guard fired', detail: { cmd: 'ls' } },
+      { ts: 4000, source: 'ws', kind: 'message', summary: 'new chunk', detail: { text: 'more' } },
+    ];
+    rerender(createElement(RawEventPanel, { events: evicted, onClose: vi.fn() }));
+
+    const detailAfter = document.querySelector('.raw-detail-body') as HTMLElement;
+    expect(detailAfter.textContent).toContain('bash guard fired');
+    // NOT the neighboring event that an index-based selection would have
+    // silently drifted to.
+    expect(detailAfter.textContent).not.toContain('new chunk');
+  });
+
+  it('a session switch (or full eviction of the selected event) fails closed to null — never shows a neighboring event', () => {
+    const { rerender } = render(createElement(RawEventPanel, { events: EVENTS, onClose: vi.fn() }));
+
+    fireEvent.click(rows()[0]); // select ts-3000 (wrote a file / secret.txt)
+    expect(document.querySelector('.raw-split')?.getAttribute('data-detail')).toBe('true');
+
+    // A different session's events entirely (or the selected event evicted
+    // past the cap) — no matching identity key survives.
+    const otherSession: RawEvent[] = [
+      { ts: 500, source: 'ws', kind: 'message', summary: 'unrelated session event', detail: {} },
+    ];
+    rerender(createElement(RawEventPanel, { events: otherSession, onClose: vi.fn() }));
+
+    // Fails closed to the empty-detail hint, not a neighboring event's detail.
+    expect(document.querySelector('.raw-split')?.getAttribute('data-detail')).toBeNull();
+    expect(screen.getByText('Select an event to see its detail.')).toBeTruthy();
+    expect(document.querySelector('.raw-detail-body')).toBeNull();
+    // The new session's event legitimately appears as a table row — the
+    // regression this guards against is the DETAIL pane showing it as if it
+    // had been selected, which the above assertions already rule out.
+    const detailPane = document.querySelector('.raw-detail-pane') as HTMLElement;
+    expect(within(detailPane).queryByText('unrelated session event')).toBeNull();
+  });
+
   it('Escape drills back out of the detail first, then closes the panel', () => {
     const onClose = vi.fn();
     render(createElement(RawEventPanel, { events: EVENTS, onClose }));

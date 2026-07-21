@@ -24,19 +24,28 @@ function detailText(detail: unknown): string {
   }
 }
 
-// One event paired with its original index in the (chronological) events array.
-// The index is the stable selection key: it survives filtering, so narrowing the
-// search never silently re-points the open detail at a different event.
-interface IndexedEvent {
+// One event paired with its stable identity key (see keyOf below). The key —
+// not the array index — is the selection anchor: raw events have no unique
+// id, and the events array both gets filtered (search) AND front-evicted
+// (useCockpit caps at RAW_EVENT_CAP and slices from the front), so an
+// index-based selection silently drifts to an unrelated event over time. A
+// content-derived key survives both; it only "misses" if the exact
+// (ts, source, kind, summary) tuple repeats, which is an acceptable tradeoff
+// for a raw-debug view.
+interface KeyedEvent {
   event: RawEvent;
-  idx: number;
+  key: string;
+}
+
+function keyOf(event: RawEvent): string {
+  return `${event.ts}|${event.source}|${event.kind}|${event.summary}`;
 }
 
 export function RawEventPanel({ events, onClose }: RawEventPanelProps) {
   // Global search across source/kind/summary AND the serialized detail.
   const [query, setQuery] = useState('');
-  // Original-array index of the drilled-in event; null = table tier (no drill).
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // Stable identity key of the drilled-in event; null = table tier (no drill).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,26 +53,26 @@ export function RawEventPanel({ events, onClose }: RawEventPanelProps) {
       e.preventDefault();
       e.stopPropagation();
       // Escape drills back out of a selected event first, then closes the panel.
-      if (selectedIdx !== null) {
-        setSelectedIdx(null);
+      if (selectedKey !== null) {
+        setSelectedKey(null);
         return;
       }
       onClose();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, selectedIdx]);
+  }, [onClose, selectedKey]);
 
-  // Newest-first, each row carrying its stable original index.
-  const indexed = useMemo<IndexedEvent[]>(
-    () => events.map((event, idx) => ({ event, idx })).reverse(),
+  // Newest-first, each row carrying its stable identity key.
+  const indexed = useMemo<KeyedEvent[]>(
+    () => events.map((event) => ({ event, key: keyOf(event) })).reverse(),
     [events],
   );
 
   // Case-insensitive match across source, kind, summary, and the full detail
   // text — same detailText() the detail tier renders, so a hit in the JSON body
   // is findable even when the summary doesn't mention it.
-  const filtered = useMemo<IndexedEvent[]>(() => {
+  const filtered = useMemo<KeyedEvent[]>(() => {
     const q = query.trim().toLowerCase();
     if (!q) return indexed;
     return indexed.filter(({ event }) => {
@@ -74,10 +83,11 @@ export function RawEventPanel({ events, onClose }: RawEventPanelProps) {
     });
   }, [indexed, query]);
 
-  // The drilled-in event (guarded — a filter change can hide the selected row,
-  // but the detail keeps rendering from the stable original index until the user
-  // navigates away or picks another row).
-  const selected = selectedIdx !== null ? events[selectedIdx] ?? null : null;
+  // The drilled-in event, looked up by identity key on every render. A filter
+  // change can hide the selected row (detail still renders); a session switch
+  // or front-eviction that drops the selected event from the array makes the
+  // lookup fail closed to null instead of silently re-pointing at a neighbor.
+  const selected = selectedKey !== null ? events.find((e) => keyOf(e) === selectedKey) ?? null : null;
 
   return (
     <aside className="raw-panel" role="complementary" aria-label="Raw session events">
@@ -113,15 +123,15 @@ export function RawEventPanel({ events, onClose }: RawEventPanelProps) {
             {filtered.length === 0 ? (
               <div className="raw-empty">No events match “{query}”.</div>
             ) : (
-              filtered.map(({ event, idx }) => (
+              filtered.map(({ event, key }) => (
                 <button
                   type="button"
                   role="listitem"
-                  key={`${event.ts}-${idx}`}
+                  key={key}
                   className="raw-row"
-                  aria-current={idx === selectedIdx ? 'true' : undefined}
-                  data-on={idx === selectedIdx ? 'true' : undefined}
-                  onClick={() => setSelectedIdx(idx)}
+                  aria-current={key === selectedKey ? 'true' : undefined}
+                  data-on={key === selectedKey ? 'true' : undefined}
+                  onClick={() => setSelectedKey(key)}
                 >
                   <span className="raw-row-time">{formatTime(event.ts)}</span>
                   <span className="raw-row-chips">
@@ -137,7 +147,7 @@ export function RawEventPanel({ events, onClose }: RawEventPanelProps) {
           </div>
           <div className="raw-detail-pane">
             {selected ? (
-              <RawEventDetail event={selected} onBack={() => setSelectedIdx(null)} />
+              <RawEventDetail event={selected} onBack={() => setSelectedKey(null)} />
             ) : (
               <div className="raw-detail-empty">Select an event to see its detail.</div>
             )}

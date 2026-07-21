@@ -3141,6 +3141,7 @@ function AppInner() {
                 <ArtifactGallery transcriptText={transcriptText} open={galleryOpen} onCountChange={setArtifactCount} />
                 {rawOpen ? (
                   <RawEventPanel
+                    key={cockpit.selectedId}
                     events={cockpit.rawEvents}
                     onClose={() => setRawOpen(false)}
                   />

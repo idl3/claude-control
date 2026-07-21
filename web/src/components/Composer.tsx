@@ -1840,9 +1840,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     setDragActive(true);
   };
   const onDragOver = (e: React.DragEvent) => {
-    if (!dragEnabled || !dragHasFiles(e)) return;
-    // Required so the drop fires (and so the browser doesn't navigate to the file).
+    // Unconditional: without this, a drop while dragEnabled is false (terminal/
+    // voice/disabled mode) never gets its default action suppressed, so the
+    // browser navigates the tab to the dropped file's file:// URL — destroying
+    // the session (unsent text, terminal state, WS). Only the attach affordance
+    // (drop-effect cursor) below is gated on dragEnabled.
     e.preventDefault();
+    if (!dragEnabled || !dragHasFiles(e)) return;
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   };
   const onDragLeave = () => {
@@ -1854,8 +1858,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   };
   const onDrop = (e: React.DragEvent) => {
-    if (!dragEnabled) return;
+    // Unconditional for the same reason as onDragOver — swallow the drop in
+    // any mode so it never navigates away. Only the attach logic is gated.
     e.preventDefault();
+    if (!dragEnabled) return;
     dragDepthRef.current = 0;
     setDragActive(false);
     const files = Array.from(e.dataTransfer?.files ?? []);
@@ -1871,6 +1877,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       });
     }
   };
+  // If dragEnabled flips false mid-drag (e.g. terminal/voice toggled on while
+  // dragging a file over the composer), reset the overlay + depth counter so
+  // it doesn't get stuck showing "drop to attach" forever.
+  useEffect(() => {
+    if (!dragEnabled) {
+      dragDepthRef.current = 0;
+      setDragActive(false);
+    }
+  }, [dragEnabled]);
 
   return (
     <ComposerPrimitive.Root className="composer" data-ask-active={askActive ? 'true' : undefined}>
