@@ -131,6 +131,35 @@ mod notifications {
     }
 }
 
+mod server_supervisor;
+
+use std::sync::Arc;
+
+use server_supervisor::Supervisor;
+
+/// Tri-mode Phase 1 (docs/plans/tri-mode-shell/DESIGN.md §6): adopt a healthy
+/// local server, or spawn+supervise one from the git checkout. Async +
+/// spawn_blocking because the spawn path blocks up to ~21s waiting for health.
+#[tauri::command]
+async fn start_local_server(
+    sup: tauri::State<'_, Arc<Supervisor>>,
+) -> Result<server_supervisor::StartResult, String> {
+    let sup = Arc::clone(sup.inner());
+    tauri::async_runtime::spawn_blocking(move || sup.start())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn local_server_status(
+    sup: tauri::State<'_, Arc<Supervisor>>,
+) -> Result<server_supervisor::Status, String> {
+    let sup = Arc::clone(sup.inner());
+    tauri::async_runtime::spawn_blocking(move || sup.status())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn notify_session(session_id: String, title: String, body: String) {
     #[cfg(target_os = "macos")]
@@ -148,8 +177,23 @@ fn notify_session(session_id: String, title: String, body: String) {
 }
 
 fn main() {
+    let supervisor = Supervisor::new();
+    let exit_supervisor = Arc::clone(&supervisor);
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![notify_session])
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Second launch → focus the existing window instead of a second
+            // shell double-spawning a server (DESIGN.md §4.2 decision 4).
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+        }))
+        .manage(supervisor)
+        .invoke_handler(tauri::generate_handler![
+            notify_session,
+            start_local_server,
+            local_server_status
+        ])
         .setup(|_app| {
             #[cfg(target_os = "macos")]
             if notifications::is_bundled() {
@@ -157,6 +201,13 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Claude Control shell");
+        .build(tauri::generate_context!())
+        .expect("error while building Claude Control shell")
+        .run(move |_app, event| {
+            // Kill-on-exit: never leave an orphaned server for a later
+            // launchd boot's reap-siblings to fight.
+            if let tauri::RunEvent::Exit = event {
+                exit_supervisor.shutdown();
+            }
+        });
 }

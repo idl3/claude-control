@@ -50,6 +50,11 @@
     font: 600 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer;
   }
   button:active { transform: translateY(1px); }
+  button.alt {
+    background: transparent; border: 1px solid #2b3550; color: #9fb4e0;
+    display: none;
+  }
+  button.alt.show { display: block; }
   .hint { color: #6b7488; font-size: 11.5px; margin-top: 2px; }
   .prompt-only { display: none; }
   form.show ~ .dots, form.show ~ .counter { display: none; }
@@ -65,7 +70,8 @@
       <input id="url" type="url" inputmode="url" placeholder="https://your-host.ts.net/"
              value="https://" spellcheck="false">
       <button type="submit">Save &amp; open</button>
-      <span class="hint">Your Claude Control tailnet URL. HTTPS (via <code>tailscale serve</code>) is recommended so the mic works. The URL is only saved after it answers.</span>
+      <button type="button" class="alt" id="local">▶&nbsp; Run the server on this Mac</button>
+      <span class="hint">Your Claude Control tailnet URL. HTTPS (via <code>tailscale serve</code>) is recommended so the mic works. The URL is only saved after it answers. "Run the server" adopts an already-running local Claude Control, or starts one from your checkout.</span>
     </form>
 
     <div class="dots"><i></i><i></i><i></i></div>
@@ -91,8 +97,10 @@
 
   const KEY_URL = "cc_target_url";
   const KEY_OPENS = "cc_native_opens";
+  const KEY_MODE = "cc_mode";            // 'remote' | 'local' (tri-mode Phase 1)
   const target = CONFIGURED || localStorage.getItem(KEY_URL) || "";
   const $ = (id) => document.getElementById(id);
+  const canLocal = Boolean(window.__TAURI__?.core?.invoke);
 
   let cancelled = false;   // set by Esc: block any in-flight probe/redirect
 
@@ -112,10 +120,36 @@
     sub.textContent = error || "One-time setup.";
     sub.classList.toggle("err", Boolean(error));
     $("setup").classList.add("show");
+    $("local").classList.toggle("show", canLocal);
     const input = $("url");
     if (prefill) input.value = prefill;
     input.focus();
     input.select();
+  }
+
+  // Server+Client mode: adopt a healthy server on 127.0.0.1 or spawn+supervise
+  // one from the checkout (Rust side, start_local_server). The webview then
+  // loads the SERVER's SPA, so UI and server versions can never skew.
+  function localFlow() {
+    cancelled = false;
+    $("setup").classList.remove("show");
+    $("title").textContent = "Starting local server…";
+    const sub = $("sub");
+    sub.textContent = "Adopting a running Claude Control — or spawning one. Esc to change mode.";
+    sub.classList.remove("err");
+    window.__TAURI__.core.invoke("start_local_server").then((res) => {
+      if (cancelled) return;
+      localStorage.setItem(KEY_MODE, "local");
+      const opens = Number(localStorage.getItem(KEY_OPENS) || 0) + 1;
+      localStorage.setItem(KEY_OPENS, String(opens));
+      $("n").textContent = opens;
+      $("title").textContent = res.adopted ? "Connected" : "Server started";
+      setTimeout(() => { if (!cancelled) location.replace(res.url); }, 400);
+    }).catch((e) => {
+      if (cancelled) return;
+      localStorage.removeItem(KEY_MODE);
+      showForm(undefined, String(e));
+    });
   }
 
   function connect(url) {
@@ -152,10 +186,15 @@
     let v = $("url").value.trim();
     if (!/^https?:\/\/.+/i.test(v)) { $("url").focus(); return; }
     if (!v.endsWith("/")) v += "/";
+    localStorage.setItem(KEY_MODE, "remote");
     connect(v);
   });
 
-  if (target) connect(target);
+  $("local").addEventListener("click", localFlow);
+
+  const mode = localStorage.getItem(KEY_MODE);
+  if (mode === "local" && canLocal) localFlow();
+  else if (target) connect(target);
   else showForm();
 </script>
 </body>
