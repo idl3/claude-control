@@ -3995,10 +3995,12 @@ body.is-external-display .composer {
 .composer-card:focus-within {
   border-color: var(--accent);
   /* Subtle glow ring instead of a heavy outline — a soft, low-opacity halo
-     in the new accent layered under the existing drop shadow. */
+     in the new accent layered under the existing drop shadow. 2px spread
+     matches the rail rings' halo (both tuned together off the same
+     operator-approved prototype). */
   box-shadow:
     0 2px 10px rgba(0, 0, 0, 0.25),
-    0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
+    0 0 0 2px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 /* Drag-and-drop attachment overlay. position:absolute (inset:0) so it is out of
    flow — it must NOT change .composer-card offsetHeight, which the voice/ask
@@ -4038,11 +4040,12 @@ body.is-external-display .composer {
    card body itself never moves. Operator feedback on the first pass (PR
    #221) was explicit: the "living" treatment read as the whole window
    breathing, which was too loud; any treatment belongs on the edge, not
-   the surface. The ring is now fully STATIC for every user — a colored
-   gradient border frozen at its 0deg resting angle, constant opacity —
-   which is exactly the rendering reduced-motion users always had (the
-   retired 12s conic flow + 6s opacity breathe re-rastered the gradient
-   per frame, permanently; see the ::before block's comment).
+   the surface. The ring's OPACITY is fully static for every user — no more
+   6s opacity-breathe tween — but the ANGLE is once again animated on
+   desktop as of feat/animated-glow-ring (see the "re-enabled" note below):
+   for mobile/touch and prefers-reduced-motion it's still frozen at its
+   0deg resting angle exactly as before, which is exactly the rendering
+   reduced-motion users always had.
 
    Ring technique: ::before is sized 1.4px larger than the card on every edge,
    painted with a conic gradient that cycles --accent -> --accent-warm ->
@@ -4071,35 +4074,58 @@ body.is-external-display .composer {
    traded one non-rim-only failure mode for another; masking is the fix
    that actually guarantees rim-only, independent of paint order.)
 
-   The ring is STATIC. Its former "flow" animation tweened the registered
-   --composer-ring-angle custom property 0deg -> 360deg — and a custom-
-   property tween is style+paint work, NOT a compositor transform, so the
-   conic gradient re-rasterised on every frame of its 12s loop, on an
-   always-visible card-sized layer, forever (plus a second 6s pulse tween
-   on --composer-ring-pulse). Alongside the cosmos loops this was a top
-   standing burner at idle; both were retired for a static rim (exactly
-   what prefers-reduced-motion already rendered). The two vars remain as
-   registered properties parked at their initial values (0deg / 1) because
-   the gradient + the resting-opacity calc() below still read them; the
-   "alive" signal is carried entirely by the focus opacity step. Whisper-
-   faint at rest (opacity 0.16), fuller once focused (0.5), matching "most
-   visible on focus-within" — `:focus-within::before` sets a flat, literal
-   `opacity: 0.5` that wins on specificity over the resting calc().
+   The PULSE is retired for good: the former "flow" pass tweened both
+   --composer-ring-angle 0deg -> 360deg AND a second --composer-ring-pulse
+   opacity breathe every 6s, and a custom-property tween is style+paint
+   work, NOT a compositor transform — the conic gradient re-rasterised on
+   every frame of its 12s angle loop, on an always-visible card-sized
+   layer, forever. Alongside the cosmos loops this was a top standing
+   burner at idle; both were retired down to a static rim (exactly what
+   prefers-reduced-motion already rendered) — --composer-ring-pulse stays
+   parked at its initial value (1) forever; the resting-opacity calc()
+   below still reads it only for that reason, not because it still tweens.
+   Resting opacity is 0.5 (raised from the old 0.16 whisper-faint value per
+   the operator-approved prototype — the ring reads clearly even at rest
+   now), with a subtle focus boost to 0.7 so "most visible on focus-within"
+   still holds — `:focus-within::before` sets a flat, literal `opacity: 0.7`
+   that wins on specificity over the resting calc(). This opacity step, PLUS
+   the pulsing .sa-dot on .subagent-pill and other
+   still-live indicators elsewhere in the UI, is what carries "alive" on
+   touch/reduced-motion, where the angle (below) stays frozen too.
 
-   NOT converted to the rotating-transform technique (feat/animated-glow-ring,
-   which DID convert .rail-tab[aria-selected]/.session-item[aria-selected] —
-   see that block for the technique). That approach needs an opaque ::after
-   "cover" the same size as the card's own visible fill, painted over the
-   oversized rotating layer everywhere except a thin rim. It's safe on the two
-   rail surfaces (flat, opaque backgrounds) but NOT here: `.composer-card
-   [data-terminal]` deliberately renders a TRANSLUCENT `color-mix(...,
-   transparent)` fill + `backdrop-filter: blur()` so the page behind shows
-   through the terminal's frame — a static opaque cover would paint a flat,
-   unblurred patch right over that intentional see-through area, undoing it.
-   Rather than fork the technique per mode (rotating cover for normal mode,
-   static mask for terminal mode) and risk a seam between them, the composer
-   keeps ONE technique, unrotated, in both modes. If the terminal's
-   translucency treatment is ever dropped, this is the one to revisit. */
+   The ANGLE, unlike the pulse, is back — feat/animated-glow-ring re-enables
+   `--composer-ring-angle` 0deg -> 360deg as a desktop-only `animation`
+   (`composer-ring-spin`, applied to `.composer-card::before` below, gated
+   `@media (pointer: fine)` and turned back off under
+   `prefers-reduced-motion: reduce`, mirroring the rail rings' gating). This
+   IS the exact paint-bound custom-property tween described above, and that
+   tradeoff is deliberate and explicit here (operator direction): unlike the
+   rail rings, the composer's ring can't use the transform+cover technique
+   (see the next paragraph for why), and re-animating one small, single,
+   desktop-only conic layer at 3.5s/loop is judged an acceptable, bounded cost
+   — very different from the retired version's 12s angle + 6s pulse running
+   PERMANENTLY for every user including touch/reduced-motion. `syntax:
+   '<angle>'` on the @property registration below is exactly what makes this
+   legal — browsers only interpolate a registered custom property smoothly
+   through `animation`/`transition` when its syntax is a definite, animatable
+   type; an unregistered `--composer-ring-angle` would just snap at each
+   keyframe instead of sweeping.
+
+   NOT using the rotating-transform technique that .rail-tab[aria-selected]/
+   .session-item[aria-selected] use (see that block for the technique) —
+   that approach needs an opaque ::after "cover" the same size as the card's
+   own visible fill, painted over an oversized rotating layer everywhere
+   except a thin rim. It's safe on the two rail surfaces (flat, opaque
+   backgrounds) but NOT here: `.composer-card[data-terminal]` deliberately
+   renders a TRANSLUCENT `color-mix(..., transparent)` fill + `backdrop-
+   filter: blur()` so the page behind shows through the terminal's frame —
+   a static opaque cover would paint a flat, unblurred patch right over that
+   intentional see-through area, undoing it. Animating the angle instead
+   sidesteps this entirely: the mask stays exactly where it's always been
+   (no cover, no clip, no oversized layer), so both `.composer-card::before`
+   and `.composer-card[data-terminal]::before` — which only recolors the
+   SAME conic gradient, reading the SAME --composer-ring-angle — spin
+   identically for free, translucency intact. */
 @property --composer-ring-angle {
   syntax: '<angle>';
   inherits: false;
@@ -4146,12 +4172,40 @@ body.is-external-display .composer {
   -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
   -webkit-mask-clip: content-box, border-box;
   -webkit-mask-composite: xor;
-  opacity: calc(0.16 * var(--composer-ring-pulse));
+  opacity: calc(0.5 * var(--composer-ring-pulse));
   pointer-events: none;
   transition: opacity var(--ease) 200ms;
 }
+/* Desktop-only angle spin — see the "The ANGLE, unlike the pulse, is back"
+   paragraph above for the full tradeoff writeup. `to { --composer-ring-angle:
+   360deg }` sweeps the registered <angle> property from its 0deg initial
+   value; conic-gradient's `from <angle>` is measured clockwise from the top
+   (CSS spec), so this reads as a CLOCKWISE sweep — same sign convention as
+   the rail rings' `transform: rotate(1turn)` (positive = clockwise), so all
+   3 surfaces read as spinning the same direction side by side; no flip
+   needed. Same 3.5s/linear/infinite cadence as the rail rings for visual
+   coherence — all 3 surfaces tuned together off the same operator-approved
+   prototype. Gated identically: `@media (pointer: fine)` enables it, the
+   compound `(pointer: fine) and (prefers-reduced-motion: reduce)` query
+   right after turns it back off — touch and reduced-motion both keep the
+   frozen 0deg rim untouched. */
+@keyframes composer-ring-spin {
+  to {
+    --composer-ring-angle: 360deg;
+  }
+}
+@media (pointer: fine) {
+  .composer-card::before {
+    animation: composer-ring-spin 3.5s linear infinite;
+  }
+}
+@media (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .composer-card::before {
+    animation: none;
+  }
+}
 .composer-card:focus-within::before {
-  opacity: 0.5;
+  opacity: 0.7;
 }
 /* Terminal (>_) mode: keep the SAME living gradient ring/glow treatment as the
    default composer, but recolor its conic gradient to the terminal's red→yellow
@@ -5663,7 +5717,7 @@ body.is-external-display .composer {
   border-color: transparent;
 }
 /* Composer-style border + aura glow, shared by the active tab pill AND the
-   active session row. Mirrors .composer-card:focus-within (soft 3px accent
+   active session row. Mirrors .composer-card:focus-within (soft 2px accent
    halo under the drop shadow). UNLIKE the composer, this rim actually
    ROTATES on desktop — see the rotating-layer block below. (The composer
    itself deliberately stays on its static mask-rim technique — see the
@@ -5676,7 +5730,7 @@ body.is-external-display .composer {
   isolation: isolate;
   box-shadow:
     0 2px 10px rgba(0, 0, 0, 0.25),
-    0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
+    0 0 0 2px color-mix(in oklch, var(--accent) 20%, transparent);
 }
 .session-item[aria-selected='true'] {
   position: relative;
@@ -5752,7 +5806,7 @@ body.is-external-display .composer {
 @media (pointer: fine) {
   .rail-tab[aria-selected='true']::before,
   .session-item[aria-selected='true']::before {
-    animation: glow-ring-spin 8s linear infinite;
+    animation: glow-ring-spin 3.5s linear infinite;
   }
 }
 @media (pointer: fine) and (prefers-reduced-motion: reduce) {
