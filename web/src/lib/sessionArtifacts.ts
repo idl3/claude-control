@@ -87,7 +87,12 @@ async function resolveOne(name: string): Promise<SessionArtifact> {
     const latest = listing.versions?.find((v) => v.latest) ?? listing.versions?.[0];
     const url = latest?.url ?? flatAppUrl(name);
     const latestVersion = latest?.version ?? 'latest';
-    const manifest = await fetchAppManifest(url);
+    // Only fetch the prop-manifest when the listing says one exists. A
+    // manifest-less app (e.g. a plain-HTML `--write-app --html` prototype)
+    // otherwise fires a doomed request that 404s — or 401s tokenless over a
+    // remote/Tailscale origin before the bearer is attached — surfacing as a
+    // spurious "manifest failed to load" for a file that never existed.
+    const manifest = latest?.manifestUrl ? await fetchAppManifest(url) : null;
     return { name, url, latestVersion, artifactKind: manifest?.artifactKind ?? 'prototype' };
   } catch {
     return fallbackArtifact(name);
