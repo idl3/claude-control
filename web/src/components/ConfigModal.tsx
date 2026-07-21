@@ -21,7 +21,7 @@ import {
   DEFAULT_RAIL_INTERVAL_MS,
   type RailToken,
 } from '../lib/railTokenPrefs';
-import { TypeIcon, TerminalSquareIcon, CloudIcon } from './icons';
+import { TypeIcon, TerminalSquareIcon, CloudIcon, RotateIcon } from './icons';
 import { RailTokenConfig } from './RailTokenConfig';
 
 interface ConfigModalProps {
@@ -96,7 +96,7 @@ function RepeatNavIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-export type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens' | 'olam';
+export type SectionId = 'general' | 'harness' | 'voice' | 'session' | 'railtokens' | 'olam' | 'debug';
 
 const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { id: 'general', label: 'General', Icon: TypeIcon },
@@ -105,6 +105,8 @@ const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ size
   { id: 'session', label: 'Session Defaults', Icon: FolderNavIcon },
   { id: 'railtokens', label: 'Rail tokens', Icon: RepeatNavIcon },
   { id: 'olam', label: 'Olam cloud', Icon: CloudIcon },
+  // Home for restart + future debug tools (log tails, cache flush, diagnostics).
+  { id: 'debug', label: 'Debug', Icon: RotateIcon },
 ];
 
 interface GeneralSectionProps {
@@ -748,6 +750,62 @@ function OlamSection({
   );
 }
 
+interface DebugSectionProps {
+  restartSupported: boolean;
+  restartConfirming: boolean;
+  restarting: boolean;
+  loading: boolean;
+  saving: boolean;
+  onRestartClick: () => void;
+  onRestartBlur: () => void;
+}
+
+/**
+ * Debug tools. Home for operational actions that don't belong in the everyday
+ * settings sections — currently just "Restart service" (moved out of the modal
+ * footer), with room to grow (log tails, cache flush, diagnostics). Restart is
+ * a two-click confirm and stays visible-but-disabled with a tooltip when the
+ * cockpit isn't running as a service, so the operator learns it exists.
+ */
+function DebugSection({
+  restartSupported,
+  restartConfirming,
+  restarting,
+  loading,
+  saving,
+  onRestartClick,
+  onRestartBlur,
+}: DebugSectionProps) {
+  return (
+    <>
+      <h2 className="config-section-heading">Debug</h2>
+      <div className="config-body">
+        <div className="config-field config-field--wide">
+          <span className="config-label">Restart service</span>
+          <button
+            type="button"
+            className="config-restart"
+            title={
+              restartSupported
+                ? undefined
+                : 'Run cockpit as a service (launchd/pm2) to enable restart'
+            }
+            onClick={onRestartClick}
+            onBlur={onRestartBlur}
+            disabled={!restartSupported || loading || saving || restarting}
+          >
+            {restarting ? 'Restarting…' : restartConfirming ? 'Confirm restart?' : 'Restart service'}
+          </button>
+          <span className="config-hint">
+            Restarts the cockpit process — the app reconnects automatically. Requires running
+            under a supervisor (launchd/pm2) so the process comes back up.
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /**
  * Settings modal: edit the launch command (run in each new session's pane) and
  * the default cwd. Loads current config on open; Save validates server-side and
@@ -1136,6 +1194,17 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
             {activeSection === 'olam' ? (
               <OlamSection olamOrgs={olamOrgs} olamHealth={olamHealth} />
             ) : null}
+            {activeSection === 'debug' ? (
+              <DebugSection
+                restartSupported={restartSupported}
+                restartConfirming={restartConfirming}
+                restarting={restarting}
+                loading={loading}
+                saving={saving}
+                onRestartClick={onRestartClick}
+                onRestartBlur={() => setRestartConfirming(false)}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -1159,20 +1228,6 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
         </div>
 
         <div className="config-actions">
-          <button
-            type="button"
-            className="config-restart"
-            title={
-              restartSupported
-                ? undefined
-                : 'Run cockpit as a service (launchd/pm2) to enable restart'
-            }
-            onClick={onRestartClick}
-            onBlur={() => setRestartConfirming(false)}
-            disabled={!restartSupported || loading || saving || restarting}
-          >
-            {restarting ? 'Restarting…' : restartConfirming ? 'Confirm restart?' : 'Restart service'}
-          </button>
           <button
             type="button"
             className="config-cancel"

@@ -72,6 +72,8 @@ interface ThreadProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  /** Toast sink — forwarded to the Composer for drag-and-drop attachment feedback. */
+  onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
   /**
    * Override the empty-transcript state (default: the "What are we shipping
    * today?" welcome + chips, which implies the user should type first). Set
@@ -194,6 +196,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   onKey,
   onSelect,
   onReply,
+  onToast,
   emptyState = null,
 }: ThreadProps, ref) {
   const loaderTimedOut = useLoaderTimedOut(!!loading);
@@ -342,6 +345,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
         onKey={onKey}
         onSelect={onSelect}
         onReply={onReply}
+        onToast={onToast}
       />
     </ThreadPrimitive.Root>
   );

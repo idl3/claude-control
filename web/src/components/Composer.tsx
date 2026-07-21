@@ -40,6 +40,7 @@ import { StopIcon, BotIcon, ArrowUpIcon, MicIcon, TerminalIcon } from './icons';
 import { ComposerAttachButton, ComposerMicButton, ComposerRawSendButton, ComposerSendButton } from './ComposerActionBar';
 import { AskInline, type ActivePrompt } from './AskInline';
 import { composerHighlightSegments } from '../lib/composerHighlight';
+import { acceptsFile } from '../lib/attachments';
 
 // Module-level per-session cache so the skill list (live, session-discovered
 // via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
@@ -144,6 +145,8 @@ interface ComposerProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  /** Toast sink for drag-and-drop attachment feedback (rejected / failed files). */
+  onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
   services?: Partial<ComposerServices>;
 }
 
@@ -281,6 +284,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   onKey,
   onSelect,
   onReply,
+  onToast,
   services,
 }: ComposerProps, ref) {
   const composer = useComposerRuntime();
@@ -291,6 +295,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   );
   const customServices = services != null;
   const [empty, setEmpty] = useState(true);
+  // Drag-and-drop attachment overlay. dragDepthRef counts enter/leave across
+  // nested children so the overlay doesn't flicker as the pointer crosses the
+  // textarea/toolbar; it only clears once the count returns to 0.
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
   // NOTE: SkillBrowser now unreachable via UI (inline / typing replaced the
   // toolbar slash button). State + component kept to avoid risky dead-code removal.
   const [skillBrowserOpen, setSkillBrowserOpen] = useState(false);
@@ -1811,6 +1820,73 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     overlay.scrollLeft = ta.scrollLeft;
   }, [text]);
 
+  // ── Drag-and-drop attachments ───────────────────────────────────────────────
+  // Files dropped on the composer card go through the SAME runtime path as the
+  // 📎 button (composer.addAttachment → createCockpitAttachmentAdapter). Only
+  // active in normal mode — terminal (keystroke relay) and voice (recording)
+  // must not react. Files outside ATTACH_ACCEPT are rejected with a toast; the
+  // adapter handles the upload + success toast for accepted ones.
+  const dragEnabled = !disabled && !terminal && !voice;
+  // Only react to genuine FILE drags, never text-selection drags inside the
+  // textarea (which would otherwise flash the overlay and block text drops).
+  const dragHasFiles = (e: React.DragEvent) => {
+    const types = e.dataTransfer?.types;
+    return types ? Array.from(types).includes('Files') : false;
+  };
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!dragEnabled || !dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    // Unconditional: without this, a drop while dragEnabled is false (terminal/
+    // voice/disabled mode) never gets its default action suppressed, so the
+    // browser navigates the tab to the dropped file's file:// URL — destroying
+    // the session (unsent text, terminal state, WS). Only the attach affordance
+    // (drop-effect cursor) below is gated on dragEnabled.
+    e.preventDefault();
+    if (!dragEnabled || !dragHasFiles(e)) return;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = () => {
+    if (!dragEnabled) return;
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setDragActive(false);
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    // Unconditional for the same reason as onDragOver — swallow the drop in
+    // any mode so it never navigates away. Only the attach logic is gated.
+    e.preventDefault();
+    if (!dragEnabled) return;
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    for (const file of files) {
+      if (!acceptsFile(file)) {
+        onToast?.(`Can't attach ${file.name} — unsupported file type`, 'error');
+        continue;
+      }
+      // Same path as ComposerPrimitive.AddAttachment; the adapter uploads +
+      // toasts progress. Defensive catch in case the runtime rejects.
+      void composer.addAttachment(file).catch((err) => {
+        onToast?.(`Attach failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      });
+    }
+  };
+  // If dragEnabled flips false mid-drag (e.g. terminal/voice toggled on while
+  // dragging a file over the composer), reset the overlay + depth counter so
+  // it doesn't get stuck showing "drop to attach" forever.
+  useEffect(() => {
+    if (!dragEnabled) {
+      dragDepthRef.current = 0;
+      setDragActive(false);
+    }
+  }, [dragEnabled]);
+
   return (
     <ComposerPrimitive.Root className="composer" data-ask-active={askActive ? 'true' : undefined}>
       {/* Inline skill autocomplete: floats ABOVE the composer (the mobile
@@ -1854,7 +1930,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         className="composer-card"
         data-terminal={terminal ? 'true' : undefined}
         data-voice={voice ? 'true' : undefined}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
       >
+        {/* Drag-and-drop overlay: position:absolute + pointer-events:none, so it
+            never contributes to .composer-card offsetHeight (the voice/ask GSAP
+            height-morph measures that card) and never intercepts the drop (which
+            bubbles to the card's onDrop). Shown only while a file drag is over. */}
+        {dragActive ? (
+          <div className="composer-drop-overlay" aria-hidden="true">
+            <span className="composer-drop-label">Drop files to attach</span>
+          </div>
+        ) : null}
         {activeSkill ? (
           <div className="composer-skill-chip-row">
             <span className="skill-chip composer-skill-chip" title={`Invoking /${activeSkill}`}>
