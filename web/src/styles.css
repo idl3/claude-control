@@ -4084,7 +4084,22 @@ body.is-external-display .composer {
    "alive" signal is carried entirely by the focus opacity step. Whisper-
    faint at rest (opacity 0.16), fuller once focused (0.5), matching "most
    visible on focus-within" — `:focus-within::before` sets a flat, literal
-   `opacity: 0.5` that wins on specificity over the resting calc(). */
+   `opacity: 0.5` that wins on specificity over the resting calc().
+
+   NOT converted to the rotating-transform technique (feat/animated-glow-ring,
+   which DID convert .rail-tab[aria-selected]/.session-item[aria-selected] —
+   see that block for the technique). That approach needs an opaque ::after
+   "cover" the same size as the card's own visible fill, painted over the
+   oversized rotating layer everywhere except a thin rim. It's safe on the two
+   rail surfaces (flat, opaque backgrounds) but NOT here: `.composer-card
+   [data-terminal]` deliberately renders a TRANSLUCENT `color-mix(...,
+   transparent)` fill + `backdrop-filter: blur()` so the page behind shows
+   through the terminal's frame — a static opaque cover would paint a flat,
+   unblurred patch right over that intentional see-through area, undoing it.
+   Rather than fork the technique per mode (rotating cover for normal mode,
+   static mask for terminal mode) and risk a seam between them, the composer
+   keeps ONE technique, unrotated, in both modes. If the terminal's
+   translucency treatment is ever dropped, this is the one to revisit. */
 @property --composer-ring-angle {
   syntax: '<angle>';
   inherits: false;
@@ -5649,15 +5664,16 @@ body.is-external-display .composer {
 }
 /* Composer-style border + aura glow, shared by the active tab pill AND the
    active session row. Mirrors .composer-card:focus-within (soft 3px accent
-   halo under the drop shadow) + .composer-card::before (a static accent→warm
-   gradient rim; the composer retired the ring's rotation for perf, so this is
-   its current look). Uses inset:0 (NOT the composer's -1.4px) so the rim never
-   clips against .session-item's overflow:hidden or the .rail-tabs horizontal
-   scroller. Longhand mask ONLY — the `mask:` + standalone `mask-composite`
-   shorthand is silently dropped by the Vite/lightningcss minifier (documented
-   at .composer-card::before); verify against the BUILT css, not source. */
+   halo under the drop shadow). UNLIKE the composer, this rim actually
+   ROTATES on desktop — see the rotating-layer block below. (The composer
+   itself deliberately stays on its static mask-rim technique — see the
+   "not converted" note above .composer-card::before for why: its
+   translucent terminal-mode backdrop can't be safely painted over by an
+   opaque cover layer.) */
 .rail-tab[aria-selected='true'],
 .session-item[aria-selected='true'] {
+  overflow: hidden;
+  isolation: isolate;
   box-shadow:
     0 2px 10px rgba(0, 0, 0, 0.25),
     0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
@@ -5666,29 +5682,104 @@ body.is-external-display .composer {
   position: relative;
   border-color: transparent;
 }
+/* ── Rotating gradient rim (desktop only) ──────────────────────────────────
+   Same visual rim as before — an accent -> accent-warm conic gradient in a
+   thin band around the pill/row — but the ROTATION is now a compositor
+   `transform`, never a tweened custom property. The composer's original
+   `--composer-ring-angle` flow animation tweened `conic-gradient(from
+   <angle>)` every frame — that's style+paint work on an always-visible
+   layer, not a compositor operation, and it was retired for exactly that
+   cost (see the @property --composer-ring-angle comment down by
+   .composer-card::before). This rim never re-rasterises the gradient:
+
+     - Host gets `overflow: hidden` (clips the oversized rotating layer down
+       to the host's own rounded-rect every frame for free — a clip, not a
+       repaint) + `isolation: isolate` (scopes the two pseudo-elements'
+       stacking to this box, independent of DOM-order tie-breaks).
+     - ::before is an OVERSIZED square conic layer (140% of the host's own
+       width, aspect-ratio:1 forces a square even though these pills/rows are
+       much wider than tall), centered via top/left:50% +
+       translate(-50%,-50%). 140% guarantees the square's minimum reach in
+       any direction (half its side length) still clears the host's
+       half-diagonal at every rotation angle, so spinning it never uncovers
+       an empty corner. `rotate(1turn)` is GPU-composited: the browser
+       rasterises this layer once and rotates the already-painted bitmap
+       thereafter — no `from <angle>` on the conic-gradient itself, the
+       rotation is 100% the transform.
+     - ::after is a STATIC (non-rotating) cover, inset 1.5px, painted in the
+       host's own resolved background. It sits between the rotating layer
+       (z-index:0) and the real content (z-index:2), hiding everything
+       except the outer ~1.5px rim, so only the gradient's edge is ever
+       visible — never its fast-moving interior.
+     - Direct children (label/count spans, .session-top/.session-meta) get
+       `position: relative; z-index: 2` so text/icons stay fully visible and
+       interactive above both pseudo layers.
+
+   Gated to `@media (pointer: fine)` — desktop/trackpad only, never touch,
+   where a permanently-spinning layer isn't worth the (small but nonzero)
+   idle compositor cost for a device no one's hovering closely — and turned
+   back off under `prefers-reduced-motion: reduce` via the override block
+   right after (mirrors this file's other conditional-animation pattern,
+   e.g. `.composer-send[data-stop]` / `stop-pulse` above). Outside
+   `pointer: fine`, or under reduced motion, only the static rim renders
+   (::before painted, unanimated) — visually identical to the composer's own
+   resting frame. */
 .rail-tab[aria-selected='true']::before,
 .session-item[aria-selected='true']::before {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
+  top: 50%;
+  left: 50%;
+  width: 140%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
   background: conic-gradient(
-    from var(--composer-ring-angle),
     var(--accent),
     var(--accent-warm),
     var(--accent),
     var(--accent-warm),
     var(--accent)
   );
-  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
-  mask-clip: content-box, border-box;
-  mask-composite: exclude;
-  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
-  -webkit-mask-clip: content-box, border-box;
-  -webkit-mask-composite: xor;
-  opacity: 0.5;
+  z-index: 0;
   pointer-events: none;
+  will-change: transform;
+}
+@keyframes glow-ring-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(1turn);
+  }
+}
+@media (pointer: fine) {
+  .rail-tab[aria-selected='true']::before,
+  .session-item[aria-selected='true']::before {
+    animation: glow-ring-spin 8s linear infinite;
+  }
+}
+@media (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .rail-tab[aria-selected='true']::before,
+  .session-item[aria-selected='true']::before {
+    animation: none;
+  }
+}
+.rail-tab[aria-selected='true']::after,
+.session-item[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  inset: 1.5px;
+  border-radius: inherit;
+  z-index: 1;
+  pointer-events: none;
+}
+.rail-tab[aria-selected='true']::after {
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
+}
+.session-item[aria-selected='true']::after {
+  background: var(--bg-2);
+}
+.rail-tab[aria-selected='true'] > *,
+.session-item[aria-selected='true'] > * {
+  position: relative;
+  z-index: 2;
 }
 .rail-tab[data-kind='unconfigured'] {
   color: var(--text-faint);
