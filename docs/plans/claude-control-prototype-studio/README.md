@@ -1,7 +1,7 @@
-# cockpit-prototype-studio — tracker index
+# claude-control-prototype-studio — tracker index
 
 Plan: `~/.claude/plans/cockpit-prototype-studio.md` (pass 2, feature, autonomous, confidence 99)
-Design: [`docs/design/cockpit-prototype-studio.md`](../../design/cockpit-prototype-studio.md)
+Design: [`docs/design/claude-control-prototype-studio.md`](../../design/claude-control-prototype-studio.md)
 Umbrella: `feat/cockpit-prototype-studio-integration` (phase PRs merge-commit into it; umbrella squashes to main)
 
 > PR-first repo: local main is disposable. Phase worktrees branch off the umbrella tip.

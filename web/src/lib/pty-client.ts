@@ -1,11 +1,11 @@
 // web/src/lib/pty-client.ts — WS client for the A4 binary PTY bridge (`/pty`).
 //
-// Mirrors `./ws.ts`'s `CockpitSocket` structure deliberately (same bearer-auth
+// Mirrors `./ws.ts`'s `ClaudeControlSocket` structure deliberately (same bearer-auth
 // subprotocol dance, same exponential-backoff reconnect constants, same
 // auth-close → handleUnauthorized() convention) — see the A1 design doc
 // (docs/design/cockpit-protocol-split-native-heads.md, "Terminal panel design
 // (A1)" §4) for the full rationale. Extended with two PTY-specific failure
-// modes CockpitSocket never needs: a bounded outbound keystroke queue (so
+// modes ClaudeControlSocket never needs: a bounded outbound keystroke queue (so
 // typing during a transient reconnect isn't dropped) and a distinct
 // `session-ended` terminal state for A4's dead-target close code (4000).
 //
@@ -19,7 +19,7 @@ import { handleUnauthorized, wsUrl } from './api';
 import { getToken, WS_PROTOCOL } from './auth';
 import type { PtyClientMessage, PtyServerMessage } from './protocol';
 
-// Reused verbatim from ws.ts's CockpitSocket (not re-exported from there —
+// Reused verbatim from ws.ts's ClaudeControlSocket (not re-exported from there —
 // lib/ws.ts is explicitly "constants reused, not modified" per the A1 design's
 // cross-refs; duplicating three primitive constants here is simpler and safer
 // than adding a new export surface to the main socket for a single reuse).

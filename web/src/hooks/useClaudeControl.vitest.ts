@@ -28,7 +28,7 @@ vi.mock('../lib/auth', () => ({
   WS_PROTOCOL: 'claude-control',
 }));
 
-import { useCockpit } from './useCockpit';
+import { useClaudeControl } from './useClaudeControl';
 import type { Session } from '../lib/types';
 
 // --- Minimal controllable WebSocket double (mirrors lib/ws.vitest.ts) ------
@@ -100,7 +100,7 @@ afterEach(() => {
 
 /** Render the hook, open its socket, and push a `sessions` snapshot. */
 async function mountConnected(sessions: Session[]) {
-  const result = renderHook(() => useCockpit());
+  const result = renderHook(() => useClaudeControl());
   await act(async () => {
     FakeWebSocket.last().open();
     FakeWebSocket.last().message({ type: 'sessions', sessions });
@@ -108,7 +108,7 @@ async function mountConnected(sessions: Session[]) {
   return { ...result, ws: FakeWebSocket.last() };
 }
 
-describe('useCockpit — messagesLoaded (remote vs. local gating)', () => {
+describe('useClaudeControl — messagesLoaded (remote vs. local gating)', () => {
   it('remote session: stays false on an empty messages:[] frame, flips true only on olam-transcript-ready', async () => {
     const id = 'olam:acme:sess-1';
     const { result, ws } = await mountConnected([remoteSession(id)]);

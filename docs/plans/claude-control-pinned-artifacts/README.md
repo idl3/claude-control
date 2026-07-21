@@ -1,7 +1,7 @@
-# cockpit-pinned-artifacts — tracker index
+# claude-control-pinned-artifacts — tracker index
 
 Plan: `~/.claude/plans/cockpit-pinned-artifacts.md` (pass 2, tier feature, autonomous: true, confidence 97)
-Design: [`docs/design/cockpit-pinned-artifacts.md`](../../design/cockpit-pinned-artifacts.md)
+Design: [`docs/design/claude-control-pinned-artifacts.md`](../../design/claude-control-pinned-artifacts.md)
 Umbrella branch: `feat/cockpit-pinned-artifacts-integration` (phase PRs target it; umbrella PR is the single review surface into main)
 
 > ⚠️ Repo flow: PR-first. Local main is disposable (deploy hard-resets to origin/main). All work happens in phase worktrees off the umbrella branch. These tracker files are intentionally untracked in the main checkout (they survive `git reset --hard`); the committed copies ride the umbrella branch.

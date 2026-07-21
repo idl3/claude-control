@@ -136,7 +136,7 @@ describe('PtyClient — attach handshake', () => {
     expect(states).toEqual(['connecting', 'connected']);
   });
 
-  it('offers [WS_PROTOCOL, token] the same way CockpitSocket does', () => {
+  it('offers [WS_PROTOCOL, token] the same way ClaudeControlSocket does', () => {
     fakeToken = 'secret-xyz';
     const c = new PtyClient('main:0');
     c.connect();

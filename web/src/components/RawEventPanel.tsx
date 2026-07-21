@@ -27,7 +27,7 @@ function detailText(detail: unknown): string {
 // One event paired with its stable identity key (see keyOf below). The key —
 // not the array index — is the selection anchor: raw events have no unique
 // id, and the events array both gets filtered (search) AND front-evicted
-// (useCockpit caps at RAW_EVENT_CAP and slices from the front), so an
+// (useClaudeControl caps at RAW_EVENT_CAP and slices from the front), so an
 // index-based selection silently drifts to an unrelated event over time. A
 // content-derived key survives both; it only "misses" if the exact
 // (ts, source, kind, summary) tuple repeats, which is an acceptable tradeoff

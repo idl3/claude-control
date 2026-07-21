@@ -41,7 +41,7 @@ import { isOversizeCapture, decodeCaptureDataUrl, writeCaptureAtomic, sweepCaptu
 import { getVersionInfo, currentVersion } from './lib/version.js';
 import * as push from './lib/push.js';
 import { createPushTrigger } from './lib/push-trigger.js';
-import { readConfig, writeConfig } from './lib/config.js';
+import { readConfig, writeConfig, getDataDir } from './lib/config.js';
 import { loadOlamConfig, assertAuthWithRemoteOrgs } from './lib/olam-config.js';
 import { RemoteSessionSource } from './lib/olam-sessions.js';
 import { OlamTranscriptSource } from './lib/olam-transcript.js';
@@ -86,10 +86,9 @@ const PUBLIC_DIR = fs.existsSync(path.join(DIST_DIR, 'index.html'))
   ? DIST_DIR
   : path.join(__dirname, 'public');
 
-// Env lookup: prefer CLAUDE_CONTROL_<X>, fall back to the legacy COCKPIT_<X>
-// (kept so existing launchers keep working after the claude-control rename).
-const env = (name) =>
-  process.env[`CLAUDE_CONTROL_${name}`] ?? process.env[`COCKPIT_${name}`];
+// Env lookup: CLAUDE_CONTROL_<X> only. The pre-rename legacy aliases were
+// removed (hard break).
+const env = (name) => process.env[`CLAUDE_CONTROL_${name}`];
 
 // Truthy when the env var is set to anything other than empty / 0 / false / no / off.
 const envFlag = (name) => {
@@ -105,7 +104,7 @@ const envFlag = (name) => {
 // /tmp wipes, without relying on a launcher to inject the env var.
 function readPersistedToken() {
   try {
-    const t = fs.readFileSync(path.join(os.homedir(), '.claude-control', 'token'), 'utf8').trim();
+    const t = fs.readFileSync(path.join(getDataDir(), 'token'), 'utf8').trim();
     return t || null;
   } catch {
     return null;
@@ -121,7 +120,7 @@ const CONFIG = {
     homeDir: os.homedir(),
     primaryRoot: env('PROJECTS') || path.join(os.homedir(), '.claude', 'projects'),
     singleRoot: envFlag('SINGLE_ROOT'),   // CLAUDE_CONTROL_SINGLE_ROOT=1 opt-out
-    dataDir: env('DATA') || path.join(os.homedir(), '.claude-control'),
+    dataDir: getDataDir(),
   }),
   codexSessionsRoot:
     env('CODEX_SESSIONS') || path.join(os.homedir(), '.codex', 'sessions'),
@@ -3708,7 +3707,7 @@ async function main() {
       // (WS). Print it so the operator can paste it into the login prompt.
       console.log(`   (access token: ${CONFIG.token} — enter it at the login prompt)`);
     } else {
-      console.log('   (no COCKPIT_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
+      console.log('   (no CLAUDE_CONTROL_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
     }
     // A local MLX model retains roughly 2 GB. Keep startup lean by loading it
     // lazily on first use unless the operator explicitly opts into prewarming.

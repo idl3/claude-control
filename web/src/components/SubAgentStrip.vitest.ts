@@ -2,7 +2,7 @@
 /**
  * SubAgentStrip status-pill wiring + batch-visibility regression tests.
  *
- * `cockpit.subagents` (App.tsx / useCockpit.ts) accumulates every sub-agent
+ * `cockpit.subagents` (App.tsx / useClaudeControl.ts) accumulates every sub-agent
  * dispatched all session long — entries are never deleted, only their
  * `status` flips 'running' -> 'done'. Naively rendering "everything with
  * status !== undefined" would resurrect long-finished agents from earlier
@@ -123,7 +123,7 @@ describe('SubAgentStrip', () => {
     expect(container.querySelector('.subagent-strip')).toBeNull();
 
     // A new, unrelated agent starts running; `subagents` (accumulated by
-    // useCockpit) still carries the old, long-done entry alongside it.
+    // useClaudeControl) still carries the old, long-done entry alongside it.
     rerender(
       createElement(SubAgentStrip, {
         subagents: [makeAgent('old', 'done'), makeAgent('new', 'running')],

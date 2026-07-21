@@ -79,7 +79,7 @@ test('_handler with an unparseable URL responds with 4xx/5xx JSON, does not thro
 
 test('GET /api/does-not-exist returns 404 application/json, not 200 text/html', () => {
   // The server has no token configured in test mode (CONFIG.token is null/empty
-  // when COCKPIT_TOKEN / CLAUDE_CONTROL_TOKEN env vars are unset). In that case
+  // when CLAUDE_CONTROL_TOKEN is unset). In that case
   // checkToken returns true for any request, so the route falls through to the
   // unknown-/api/* guard and returns 404 JSON.
   //

@@ -1,5 +1,5 @@
 import type { ConnState } from '../lib/ws';
-import type { ResourceState } from '../hooks/useCockpit';
+import type { ResourceState } from '../hooks/useClaudeControl';
 import type { PushController } from '../hooks/usePushNotifications';
 import { shellDragStart } from '../lib/nativeShell';
 import { NotifyBell } from './NotifyBell';

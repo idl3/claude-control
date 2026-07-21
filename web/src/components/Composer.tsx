@@ -104,7 +104,7 @@ const AC_MAX = 4;
 interface ComposerProps {
   disabled: boolean;
   /** True while the selected session's transcript is still loading from the
-   *  server (see Thread's `loading` prop / useCockpit's `messagesLoaded`).
+   *  server (see Thread's `loading` prop / useClaudeControl's `messagesLoaded`).
    *  Purely a copy hint — `disabled` already carries the send-blocking gate;
    *  this only swaps the placeholder to something more specific than "Select
    *  a session…" while a session IS selected but not yet ready. */
@@ -1822,7 +1822,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── Drag-and-drop attachments ───────────────────────────────────────────────
   // Files dropped on the composer card go through the SAME runtime path as the
-  // 📎 button (composer.addAttachment → createCockpitAttachmentAdapter). Only
+  // 📎 button (composer.addAttachment → createClaudeControlAttachmentAdapter). Only
   // active in normal mode — terminal (keystroke relay) and voice (recording)
   // must not react. Files outside ATTACH_ACCEPT are rejected with a toast; the
   // adapter handles the upload + success toast for accepted ones.

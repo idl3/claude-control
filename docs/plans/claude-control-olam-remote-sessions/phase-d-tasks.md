@@ -1,5 +1,5 @@
 ---
-feature: cockpit-olam-remote-sessions
+feature: claude-control-olam-remote-sessions
 phase: d
 tier: epic
 autonomous: true
@@ -15,7 +15,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 # Phase D — Terminal + replay tab
 
 > **Scope**: Server-side terminal-token minting; frontend open-in-new-tab links for live terminal + replay; expired-token re-mint UX. Then grain/pleri org rollout (config entries only).
-> **Design**: docs/design/cockpit-olam-remote-sessions.md
+> **Design**: docs/design/claude-control-olam-remote-sessions.md
 > **Branch**: feat/cockpit-olam-remote-sessions-phase-d
 
 ## Status
@@ -49,7 +49,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Regression surfaces**: isolated
 > **Integration-test**: npm test
 
-- [x] Mint endpoint on cockpit server (GET /api/olam/terminal-token; org client call)
+- [x] Mint endpoint on claude-control server (GET /api/olam/terminal-token; org client call)
 - [x] Frontend links + TTL clamp (client clamps 5–60m; buttons window.open the returned uiUrl/replayUiUrl)
 - [x] no-secret guard: only uiUrl/replayUiUrl/expiresAt surfaced — wsUrl/uploadUrl (non-browser) dropped; runner bearer never leaves the server
 <!-- e2e: terminal-token 2 tests (browser-safe URL projection + TTL clamp + 401 re-walk); runner leg live-verified in A0 -->
@@ -57,7 +57,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 ### D2 — Expired-token re-mint UX + multi-org rollout
 
 > **Goal**: An expired terminal token gets a one-click "mint new" path, and grain + pleri go live as config entries with health probes green.
-> **Files**: web/src/components/**, ~/.cockpit/olam.json (operator), docs/olam-contract.md
+> **Files**: web/src/components/**, ~/.claude-control/olam.json (operator), docs/olam-contract.md
 > **Acceptance**: Expired-token state renders re-mint affordance; adding grain/pleri org blocks to config lights up their fleet rows with zero code change; per-org contract notes appended to docs/olam-contract.md.
 > **Verification**: npm test && node scripts/olam-contract-check.mjs --org grain --org pleri
 > **Depends on**: D1

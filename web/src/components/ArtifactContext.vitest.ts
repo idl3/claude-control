@@ -5,7 +5,7 @@
 // (open/setActive/close — pin/unpin were removed in CP3-C, see
 // ArtifactContext.tsx's pinned-field doc comment; pinning goes through
 // open({pinned:true}), unpinning through close()) via renderHook + act,
-// mirroring useCockpit.vitest.ts's pattern — no reducer internals are
+// mirroring useClaudeControl.vitest.ts's pattern — no reducer internals are
 // imported directly, so these tests exercise exactly what real callers
 // (ToolPart, CodeHeader, the C3 pin affordance) can do.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

@@ -59,13 +59,13 @@
   <div class="card">
     <div class="mark">Claude&nbsp;Control</div>
     <h1 id="title">Connecting…</h1>
-    <p class="sub" id="sub">Opening your cockpit over Tailscale.</p>
+    <p class="sub" id="sub">Opening Claude Control over Tailscale.</p>
 
     <form id="setup" autocomplete="off">
       <input id="url" type="url" inputmode="url" placeholder="https://your-host.ts.net/"
              value="https://" spellcheck="false">
       <button type="submit">Save &amp; open</button>
-      <span class="hint">Your cockpit's tailnet URL. HTTPS (via <code>tailscale serve</code>) is recommended so the mic works. The URL is only saved after it answers.</span>
+      <span class="hint">Your Claude Control tailnet URL. HTTPS (via <code>tailscale serve</code>) is recommended so the mic works. The URL is only saved after it answers.</span>
     </form>
 
     <div class="dots"><i></i><i></i><i></i></div>
@@ -74,7 +74,7 @@
 
 <script>
   // ── Disposable adoption spike (Phase A) ──────────────────────────────────────
-  // Wraps the ALREADY-SHIPPED cockpit SPA in a native WKWebView. Zero backend
+  // Wraps the ALREADY-SHIPPED claude-control SPA in a native WKWebView. Zero backend
   // change: it navigates to your *.ts.net origin, which server.js isAllowedOrigin
   // already permits. First run asks for the URL; later runs go straight in. The
   // "native opens" counter is the disposable adoption signal — compare it
@@ -98,7 +98,7 @@
 
   // no-cors fetch resolves (opaque) if anything answers at that origin and
   // rejects on DNS failure / connection refused / timeout — exactly the
-  // "is this a cockpit-shaped URL" signal we need without CORS cooperation.
+  // "is this a claude-control-shaped URL" signal we need without CORS cooperation.
   function probe(url, ms = 5000) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), ms);
@@ -107,7 +107,7 @@
   }
 
   function showForm(prefill, error) {
-    $("title").textContent = error ? "Can't reach that cockpit" : "Point me at your cockpit";
+    $("title").textContent = error ? "Can't reach Claude Control" : "Point me at Claude Control";
     const sub = $("sub");
     sub.textContent = error || "One-time setup.";
     sub.classList.toggle("err", Boolean(error));
@@ -123,7 +123,7 @@
     $("setup").classList.remove("show");
     $("title").textContent = "Connecting…";
     const sub = $("sub");
-    sub.textContent = "Opening your cockpit over Tailscale — press Esc to change the URL.";
+    sub.textContent = "Opening Claude Control over Tailscale — press Esc to change the URL.";
     sub.classList.remove("err");
     probe(url).then(() => {
       if (cancelled) return;

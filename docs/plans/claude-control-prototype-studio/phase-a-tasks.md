@@ -1,5 +1,5 @@
 ---
-feature: cockpit-prototype-studio
+feature: claude-control-prototype-studio
 phase: a
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 # Phase A — Chrome, suppression, dedupe (no AppFrameLayer files)
 
 > **Scope**: Open rename + fullscreen affordance + StudioModal shell + hotkey suppression seam + styles dedupe. AppFrameLayer.tsx and ArtifactPanel.tsx hosting logic are OFF-LIMITS (other work owns/queues them).
-> **Design**: docs/design/cockpit-prototype-studio.md
+> **Design**: docs/design/claude-control-prototype-studio.md
 > **Branch**: feat/cockpit-prototype-studio-phase-a
 
 ## Status
@@ -55,7 +55,7 @@ Sequencing note: if scroll-sync PR still unmerged when Phase A completes, chain 
 > **Reversibility**: clean-revert
 
 ### A3 — Hotkey suppression seam (capture-phase interceptor)
-> **Goal**: one window keydown interceptor (capture phase, registered early in App mount) suppresses cockpit hotkey combos while a shared suppression ref is ON; NONE of the 20 existing keydown listeners are edited.
+> **Goal**: one window keydown interceptor (capture phase, registered early in App mount) suppresses claude-control hotkey combos while a shared suppression ref is ON; NONE of the 20 existing keydown listeners are edited.
 > **Files**: web/src/lib/hotkeySuppression.ts (new), web/src/App.tsx (one registration + provider), web/src/lib/hotkeySuppression.vitest.ts (new)
 > **Acceptance**: with suppression ON, a synthetic Cmd+K reaches no existing listener (mounted test w/ spy listener registered after); OFF restores; Escape is never suppressed (carve-out); cleanup on unmount restores globals.
 > **Verification**: cd web && npx vitest run && npx tsc -b --pretty false

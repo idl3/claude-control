@@ -15,12 +15,12 @@ import {
   type SessionLiveness,
 } from './lib/olamMode';
 import { sessionDisplayLabel } from './lib/olamLabel';
-import { useCockpit } from './hooks/useCockpit';
+import { useClaudeControl } from './hooks/useClaudeControl';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
-import { attachmentPath, createCockpitAttachmentAdapter } from './lib/attachments';
+import { attachmentPath, createClaudeControlAttachmentAdapter } from './lib/attachments';
 import { renameSession, getConfig, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { RailTabs, computeRailTabs, resolveTabAction } from './components/RailTabs';
@@ -210,10 +210,10 @@ function appendMessageText(message: AppendMessage): string {
 }
 
 // The authenticated app. Mounted ONLY after TokenGate confirms access, so the
-// WebSocket (opened by useCockpit on mount) never connects with a bad/absent
+// WebSocket (opened by useClaudeControl on mount) never connects with a bad/absent
 // token before the gate has cleared.
 function AppInner() {
-  const cockpit = useCockpit();
+  const cockpit = useClaudeControl();
   const push = usePushNotifications();
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastSeq = useRef(0);
@@ -360,7 +360,7 @@ function AppInner() {
   // path on each attachment (see lib/attachments). Memoized so the runtime
   // sees a stable adapter identity.
   const attachmentAdapter = useMemo(
-    () => createCockpitAttachmentAdapter(showToast),
+    () => createClaudeControlAttachmentAdapter(showToast),
     [showToast],
   );
 

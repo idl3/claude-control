@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useModalTransition } from '../lib/anim';
 import { listProcesses, killProcess } from '../lib/api';
-import type { ResourcePoint } from '../hooks/useCockpit';
+import type { ResourcePoint } from '../hooks/useClaudeControl';
 import type { ProcessInfo, PowerStatus } from '../lib/types';
 import { BatteryIcon, XIcon } from './icons';
 
 interface ProcessPanelProps {
   power: PowerStatus | null;
-  /** Rolling ~10min CPU%/Mem% samples (from useCockpit). */
+  /** Rolling ~10min CPU%/Mem% samples (from useClaudeControl). */
   history: ResourcePoint[];
   onClose: () => void;
   onToast: (text: string, kind?: 'ok' | 'error' | '') => void;

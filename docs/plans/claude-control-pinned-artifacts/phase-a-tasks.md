@@ -1,5 +1,5 @@
 ---
-feature: cockpit-pinned-artifacts
+feature: claude-control-pinned-artifacts
 phase: a
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 # Phase A — Iframe/render stability foundation
 
 > **Scope**: transcript re-renders stop remounting embedded iframes; app state survives churn.
-> **Design**: docs/design/cockpit-pinned-artifacts.md
+> **Design**: docs/design/claude-control-pinned-artifacts.md
 > **Branch**: feat/cockpit-pinned-artifacts-phase-a
 
 ## Status
@@ -89,7 +89,7 @@ CP3-A: 3 HIGH fixed in 123a668 (clip+stack, hidden-evict, rAF gate); MEDIUM dup-
   out of scope here per the brief's explicit "do NOT re-key" constraint — url-keyed single-
   instance slots stay the Phase A/B design; tracked forward into Phase C's multi-placeholder
   arbitration work (AppFrameLayer.tsx:48 carries a standing comment to that effect).
-  LOW: docs/design/cockpit-pinned-artifacts.md Seam section — one line appended documenting that
+  LOW: docs/design/claude-control-pinned-artifacts.md Seam section — one line appended documenting that
   render-cap unmount / hidden-ancestor-grace eviction DOES cold-reload on return (the never-
   reload guarantee covers in-view churn, tab switches, Phase C pin moves — not explicit exits).
 -->
@@ -111,9 +111,9 @@ CP3-A: 3 HIGH fixed in 123a668 (clip+stack, hidden-evict, rAF gate); MEDIUM dup-
 
 ### A2 — Churn-survival spike: does identity stabilization stop iframe remounts? (decides OQ3)
 > **Goal**: produce a written verdict — stable refs + memo suffice, or row DOM moves force the hoist layer.
-> **Files**: web/scratch/prototype-cockpit-uiproof/** (harness), web/src/lib/* (probe helper if needed)
+> **Files**: web/scratch/prototype-claude-control-uiproof/** (harness), web/src/lib/* (probe helper if needed)
 > **Acceptance**: harness drives 20 appended messages + working-row toggle + hiddenCount window shift over a stateful embedded app; verdict recorded in tracker CP0 log + plan Assumptions log with iframe reload-count evidence (0 = stabilize path; >0 = hoist path).
-> **Verification**: node ~/.claude/skills/prototype-component/scripts/run.mjs web/scratch/prototype-cockpit-uiproof --spec <churn-spec>.json
+> **Verification**: node ~/.claude/skills/prototype-component/scripts/run.mjs web/scratch/prototype-claude-control-uiproof --spec <churn-spec>.json
 > **Depends on**: A1
 > **Reversibility**: clean-revert
 > **E2E test**: n/a (harness IS the test)

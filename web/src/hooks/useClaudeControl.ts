@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitSocket, type ConnState } from '../lib/ws';
+import { ClaudeControlSocket, type ConnState } from '../lib/ws';
 import { mergeMessages } from '../lib/messages';
 import type {
   AnswerSelection,
@@ -35,7 +35,7 @@ function pruneRecord<T>(record: Record<string, T>, liveIds: Set<string>): Record
   return Object.fromEntries(keys.filter((id) => liveIds.has(id)).map((id) => [id, record[id]]));
 }
 
-export interface CockpitStore {
+export interface ClaudeControlStore {
   sessions: Session[];
   selectedId: string | null;
   messages: Msg[];
@@ -141,9 +141,9 @@ export interface CockpitStore {
  * Single source of truth: owns the WebSocket and exposes derived React state.
  * Per-session message buffers are cached so re-selecting a session is instant.
  */
-export function useCockpit(): CockpitStore {
-  const socketRef = useRef<CockpitSocket | null>(null);
-  if (!socketRef.current) socketRef.current = new CockpitSocket();
+export function useClaudeControl(): ClaudeControlStore {
+  const socketRef = useRef<ClaudeControlSocket | null>(null);
+  if (!socketRef.current) socketRef.current = new ClaudeControlSocket();
   const socket = socketRef.current;
 
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -180,7 +180,7 @@ export function useCockpit(): CockpitStore {
   const [promptById, setPromptById] = useState<Record<string, PanePrompt | null>>({});
   // Pane-scrape picker signal: open:true means a TUI picker is on screen right now.
   const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
-  // Per-org health, rides every 'sessions' frame — see the CockpitStore field doc.
+  // Per-org health, rides every 'sessions' frame — see the ClaudeControlStore field doc.
   const [orgHealth, setOrgHealth] = useState<Record<string, OrgHealth>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
@@ -523,7 +523,7 @@ export function useCockpit(): CockpitStore {
     [socket],
   );
 
-  // See the CockpitStore.messagesLoaded doc comment above for the full
+  // See the ClaudeControlStore.messagesLoaded doc comment above for the full
   // local-vs-remote rationale. Remote detection mirrors the rest of the hook
   // (`session.kind === 'remote'`, e.g. olamMode.ts / App.tsx), with the
   // `olam:` id prefix as a defensive fallback for the brief window before the

@@ -1,5 +1,5 @@
 ---
-feature: cockpit-olam-remote-sessions
+feature: claude-control-olam-remote-sessions
 phase: b
 tier: epic
 autonomous: true
@@ -17,7 +17,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 # Phase B — Conversation streaming (TranscriptSource)
 
 > **Scope**: Chunks-backed transcript source for the selected remote session (Electric shape long-poll, offset resumption), mapped to `TranscriptTailer`'s append-event contract; degraded logTail/feed fallback with visible banner. No steering.
-> **Design**: docs/design/cockpit-olam-remote-sessions.md
+> **Design**: docs/design/claude-control-olam-remote-sessions.md
 > **Branch**: feat/cockpit-olam-remote-sessions-phase-b
 
 ## Status
@@ -30,7 +30,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 <!-- CP0 log
 - 2026-07-02 commit-plan: emitted from plan pass 3. Go/no-go per org on first authenticated shape read (decision 6/plan Phase B).
 - 2026-07-02 CP3 audit (adversarial, epic 3-lens): 1 CRITICAL confirmed + fixed — degraded feed cursor used monotonic Math.max, so a runner feed reset (restart/truncate) couldn't rewind → silent skip of new entries. Fix: detect reset (serverCursor or feed.length < ours) → rewind to 0 (replay window; duplicate-over-skip) + added runner-reset regression test. Other 6 findings all Land-as-is (teardown/unsubscribe leaks bounded by single-operator + 30min heartbeat; T1 verified no secrets in olam-degraded/append frames; degraded path reuses org auth, no bypass). 16/16 transcript, full suite green.
-- 2026-07-02 B3+B4 landed: OlamTranscriptSource (shape full-mode w/ runner-feed degraded fallback, banner event, tailer-compatible getMessages/getPending/trim surface) + server.js remote branch in ensureSubscription (one live source per selected session, append→WS, olam-degraded→banner) + useCockpit degraded state + App banner. node 703 (0 fail, 1 skip), lifecycle 4/4. cumulative: files~6, loc~900 (budget 1.8x of B's 500 — B absorbed B1/B2 combine + degraded + full UI wiring; within epic budget). Phase B: 0 todo / 4 done.
+- 2026-07-02 B3+B4 landed: OlamTranscriptSource (shape full-mode w/ runner-feed degraded fallback, banner event, tailer-compatible getMessages/getPending/trim surface) + server.js remote branch in ensureSubscription (one live source per selected session, append→WS, olam-degraded→banner) + useClaudeControl degraded state + App banner. node 703 (0 fail, 1 skip), lifecycle 4/4. cumulative: files~6, loc~900 (budget 1.8x of B's 500 — B absorbed B1/B2 combine + degraded + full UI wiring; within epic budget). Phase B: 0 todo / 4 done.
 - 2026-07-02 execute CP0 passed against 3a802b2 (umbrella tip w/ merged Phase A). Phase B GO full-mode (A1 live-verified shape auth cleared). B1+B2 landed as one module lib/olam-transcript.js (ShapeSubscriber + chunksToMessages). Caught+fixed a live-poll hot-loop (starved node:test reporter) — added livePollDelayMs bound. cumulative: files=2, loc=~430 (budget 0.86x of B's 500)
 -->
 

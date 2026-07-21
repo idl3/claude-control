@@ -1,5 +1,5 @@
 ---
-feature: cockpit-pinned-artifacts
+feature: claude-control-pinned-artifacts
 phase: c
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 # Phase C — Panel view + pinning
 
 > **Scope**: `'app'` artifact kind; pin-to-panel from transcript embeds; always-mounted, mount-ordered app iframes; LRU pin-exemption.
-> **Design**: docs/design/cockpit-pinned-artifacts.md
+> **Design**: docs/design/claude-control-pinned-artifacts.md
 > **Branch**: feat/cockpit-pinned-artifacts-phase-c
 
 ## Status
@@ -60,7 +60,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 - Playwright wasn't a project dependency (no E2E infra existed yet in this repo) — added via `npm install --no-save playwright@1.59.1` in the (symlinked, gitignored) `web/node_modules`. Deliberately `--no-save`: this is capture tooling for the harness, not a shipped dependency, so `package.json`/lockfile are untouched.
 - Deferred seam-regression re-run (flagged across C2 and C3, still outstanding going into C4) executed as part of this task's VERIFY pass: `web/scratch/churn-spike/` — Phase A's hoist-survival regression guard — had gone stale and now crashed on mount (`AppFrameLayer` calls `useArtifactPanel()` since C2, but sat outside both `Panel` variants' own nested `ArtifactPanelProvider`s). Fixed by hoisting one shared provider around both panels + `AppFrameLayer` (per-panel context isolation doesn't matter for this harness's actual assertions — hoist/fetch-count survival, not pin state). Separately, its `capture.json` used `locator.screenshot()` on the counters region, which waits for two visually-stable consecutive frames — a wait that can never resolve while `AppFrameLayer`'s rAF tracking loop keeps repositioning the hoisted iframe every frame (expected, continuous, by-design behavior of the live clip-tracking system, not a bug). Switched those states to `fullPage` screenshots, which carry no such wait. Re-run confirms the fix from Phase A still holds after C1–C3: `stable iframe loads: 1`, `unstable iframe loads: 1`, `live hoist count: 2` after the full 24-step churn run; hide/re-show the stable pane past the eviction grace period costs exactly one extra load (2) and hoist count returns to 2 — matching FIX 2's documented contract exactly, no leak.
 - Verification: full suite 595/595 green (unchanged from C3 — C4 touched no `src/` files), `npx tsc -b --pretty false` clean (the new harness `.tsx`/`.mts` files under `web/scratch/` don't affect the build graph, same as the pre-existing scratch dirs), `npm run build` green (same pre-existing >500kB chunk-size warning, unrelated).
-- Deviations: (1) the tracker's file list for C4 named only `web/src/styles.css, capture harness spec` — no styles.css changes were needed (C1-C3's chrome/CSS already matched the cockpit aesthetic; C4 found nothing to adjust visually). (2) the churn-spike harness fix (2 files) was not in C4's anticipated scope but was required to actually execute the phase's own explicitly-deferred VERIFY-pass regression check — a mechanical unblock (missing provider wrap + a screenshot-mechanics swap), not a design change, so folded into this commit rather than opening a new task. Neither HALT condition triggered at any point across the full phase.
+- Deviations: (1) the tracker's file list for C4 named only `web/src/styles.css, capture harness spec` — no styles.css changes were needed (C1-C3's chrome/CSS already matched the claude-control aesthetic; C4 found nothing to adjust visually). (2) the churn-spike harness fix (2 files) was not in C4's anticipated scope but was required to actually execute the phase's own explicitly-deferred VERIFY-pass regression check — a mechanical unblock (missing provider wrap + a screenshot-mechanics swap), not a design change, so folded into this commit rather than opening a new task. Neither HALT condition triggered at any point across the full phase.
 
 <!-- CP0 log: CP3-C: verdict (b); 2 HIGH + 1 MEDIUM fixed in a93a19f —
      panel-context hosts are now exempt from AppFrameLayer's zero-rect
@@ -148,7 +148,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 > **Reversibility**: clean-revert
 
 ### C4 — Visual pass + mobile behavior
-> **Goal**: panel app view matches cockpit aesthetic; mobile follows existing ArtifactPanel responsive rules; captures embedded for review.
+> **Goal**: panel app view matches claude-control aesthetic; mobile follows existing ArtifactPanel responsive rules; captures embedded for review.
 > **Files**: web/src/styles.css, capture harness spec
 > **Acceptance**: captures show pinned tabs (desktop + narrow viewport), reload strip, and tab-switch state survival; no layout shift.
 > **Verification**: prototype-harness run + npm run build

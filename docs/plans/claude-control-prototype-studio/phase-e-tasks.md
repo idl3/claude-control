@@ -1,5 +1,5 @@
 ---
-feature: cockpit-prototype-studio
+feature: claude-control-prototype-studio
 phase: e
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 # Phase E — Inspector, console stub, E2E + docs
 
 > **Scope**: read-only DOM inspection, console coming-soon slot, full-journey evidence, artifact-contract docs. Last phase — umbrella goes ready-for-review after this.
-> **Design**: docs/design/cockpit-prototype-studio.md
+> **Design**: docs/design/claude-control-prototype-studio.md
 > **Branch**: feat/cockpit-prototype-studio-phase-e
 
 ## Status
@@ -42,7 +42,7 @@ umbrella-branch: feat/cockpit-prototype-studio-integration
 - **Corrected assumption, found by reading `StudioModal.tsx` directly**: `DEVICE_MODES` gating via `useMinWidth(preset.width + STUDIO_BODY_CHROME_WIDTH(50))` applies to **every** device-mode button, including the smallest preset (Mobile, own threshold 440px) — not just the larger ones. An earlier harness draft asserted "Mobile stays enabled at 390px" and failed; corrected to assert all three disabled at a real 390px viewport, matching verified source behavior. The same gate also meant a naive 1280px desktop-pass viewport was too narrow to select Studio's *own* "Desktop 1280" button (needs >=1330px) — bumped the desktop pass to 1400px so all three device-mode screenshots actually get taken.
 - **Two findings folded into the design doc's new degrade-rules table** (not treated as bugs to fix this phase — out of E3's scope, which is evidence + docs): (1) a full iframe reload (crash recovery) discards all previously-applied `cc-props-set` overrides — the artifact remounts via a genuinely new `<iframe>` DOM element with only its own manifest defaults, and Studio's Props panel doesn't auto-resend the last-typed value to the fresh iframe (verified live: `desktop-05-recovered.png` shows the label reverted to default while the input still showed the pre-crash edit); (2) Studio's crashed-strip renders no reload button (`isStudioHost` gate in `AppFrameLayer.tsx`), a pre-existing gap this phase doesn't fix.
 - Non-blocking clarification: the harness's hermetic server briefly showed live-host tmux window state in its sidebar during development (SessionRegistry reconciles tmux panes host-wide, alongside file-based project transcripts which ARE correctly isolated via `CLAUDE_CONTROL_PROJECTS`) — inherent to `lib/sessions.js`, orthogonal to the Studio journey under test (which only ever touches the isolated media root), and absent on the final clean run ("no tmux panes"). Not a hermeticity bug in the harness's own env-var construction.
-- Contract docs: new "Artifact contract" section in `docs/design/cockpit-prototype-studio.md` — manifest schema v1 (fields + per-field degrade), full bidirectional message catalog (all 8 types, both directions, correlation/no-correlation reasoning), validation rules (source-identity-not-origin, exact-shape, dual-sided outline-budget enforcement, capture-size ceilings client+server), and a degrade-rules table covering manifest-absence, oversize/throwing outline walks, capture failure/timeout/oversize, crash+no-reload-button, reload-discards-overrides, and the device-mode chrome-inset gating above.
+- Contract docs: new "Artifact contract" section in `docs/design/claude-control-prototype-studio.md` — manifest schema v1 (fields + per-field degrade), full bidirectional message catalog (all 8 types, both directions, correlation/no-correlation reasoning), validation rules (source-identity-not-origin, exact-shape, dual-sided outline-budget enforcement, capture-size ceilings client+server), and a degrade-rules table covering manifest-absence, oversize/throwing outline walks, capture failure/timeout/oversize, crash+no-reload-button, reload-discards-overrides, and the device-mode chrome-inset gating above.
 - Verification: harness run green (`{"ok": true}`, 12/12 evidence artifacts) + full suites below.
 
 ### CP3-E — done — sha `d9ea5cf`
@@ -81,7 +81,7 @@ CP3 audit follow-up on top of E1-E3, priority-ordered:
 
 ### E3 — Full-journey E2E + contract docs
 > **Goal**: harness captures of the complete studio journey (desktop + 390px): open → device switch → props edit → invalid prop → crash+reload → screenshot → annotate → save → inspector; docs/design contract section documents manifest schema v1 + bridge protocol + degrade rules.
-> **Files**: web/scratch harness, docs/design/cockpit-prototype-studio.md, README updates
+> **Files**: web/scratch harness, docs/design/claude-control-prototype-studio.md, README updates
 > **Acceptance**: PNGs/video read + confirmed; docs let a third party build a conforming artifact.
 > **Verification**: harness run + full suites (web + server) green
 > **Depends on**: E1

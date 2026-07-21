@@ -1,5 +1,5 @@
 ---
-feature: cockpit-olam-remote-sessions
+feature: claude-control-olam-remote-sessions
 phase: c
 tier: epic
 autonomous: true
@@ -17,7 +17,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 # Phase C — Steering (Transport)
 
 > **Scope**: `transport: 'olam'` branch in `handleClientMessage`: cloud-dispatch mirror for chat/Linear sessions, composer modes (steer/approve/read-only), lifecycle + dispatch error classes surfaced in-thread. Session-state detection from Phase A/B data.
-> **Design**: docs/design/cockpit-olam-remote-sessions.md
+> **Design**: docs/design/claude-control-olam-remote-sessions.md
 > **Branch**: feat/cockpit-olam-remote-sessions-phase-c
 
 ## Status
@@ -51,7 +51,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Verification**: node --test test/transport-routing.test.js
 > **Depends on**: none (umbrella contains A+B)
 > **Reversibility**: clean-revert
-> **Regression surfaces**: handleClientMessage routing (every input path in cockpit)
+> **Regression surfaces**: handleClientMessage routing (every input path in claude-control)
 > **Integration-test**: npm test
 
 - [x] lib/olam-transport.js (dispatch body builder + send)
@@ -123,4 +123,4 @@ cd ~/Projects/claude-cockpit && git revert "$PHASE_C_MERGE_SHA"   # A+B remain (
 
 - [ ] All 4 tasks done + verifications green
 - [ ] T1/T4/T6 coverage demonstrated
-- [ ] M3 gate: one real Linear session steered E2E from cockpit (lifecycle visible)
+- [ ] M3 gate: one real Linear session steered E2E from claude-control (lifecycle visible)

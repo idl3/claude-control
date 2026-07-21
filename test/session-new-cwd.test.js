@@ -20,7 +20,7 @@
  *   - CLAUDE_CONTROL_DATA points at a throwaway dir with a controlled
  *     config.json (launchCommand = the node binary, so the agent-binary
  *     pre-check passes and we reach the cwd check).
- *   - COCKPIT_TMUX points at a non-existent binary, so the createCwd path
+ *   - CLAUDE_CONTROL_TMUX points at a non-existent binary, so the createCwd path
  *     cannot touch the operator's real tmux server — it mkdir's, then fails at
  *     the tmux seam (which is what we want: the mkdir side effect is observable
  *     and the response is deterministically not cwd_missing).
@@ -77,7 +77,7 @@ async function startServer(port, dataDir) {
         CLAUDE_CONTROL_PROJECTS: dataDir,
         // Point tmux resolution at a non-existent binary so no real tmux server
         // is ever contacted (the createCwd path fails AFTER mkdir).
-        COCKPIT_TMUX: path.join(dataDir, 'no-such-tmux'),
+        CLAUDE_CONTROL_TMUX: path.join(dataDir, 'no-such-tmux'),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -145,7 +145,7 @@ test('session/new: missing cwd + createCwd:true → mkdir then proceed (not cwd_
     agent: 'claude', cwd: toCreate, name: 'x', createCwd: true,
   });
   // The directory must have been created (mkdir -p) regardless of whether the
-  // downstream tmux launch succeeds (it cannot here — COCKPIT_TMUX is bogus).
+  // downstream tmux launch succeeds (it cannot here — CLAUDE_CONTROL_TMUX is bogus).
   assert.ok(fs.existsSync(toCreate), 'createCwd:true must mkdir -p the directory');
   const json = await res.json().catch(() => ({}));
   assert.notEqual(json.code, 'cwd_missing', 'createCwd path must not reject as cwd_missing');

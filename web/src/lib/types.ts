@@ -351,7 +351,7 @@ export type ServerMessage =
   | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }
   // Remote (olam) session only: the Electric chunks shape's initial snapshot
   // has drained to its live cursor — the transcript is no longer ambiguous
-  // between "still loading" and "genuinely empty". See useCockpit's
+  // between "still loading" and "genuinely empty". See useClaudeControl's
   // remote-only messagesLoaded gate.
   | { type: 'olam-transcript-ready'; id: string }
   | { type: 'pending'; id: string; pending: Pending | null }
@@ -384,7 +384,7 @@ export type ServerMessage =
   // `path` is media-root-relative ("apps/<name>.html" or
   // "apps/<name>/<version>.html"); `mtime` is the file's mtimeMs. Consumed by
   // AppFrameLayer via the 'cockpit:media-app-changed' CustomEvent (see
-  // useCockpit.ts) to hot-reload track-latest panel app tabs.
+  // useClaudeControl.ts) to hot-reload track-latest panel app tabs.
   | { type: 'media-app-changed'; path: string; mtime: number };
 
 // Client -> server WebSocket frames.

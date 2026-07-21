@@ -97,7 +97,7 @@ describe('RawEventPanel — drill-in detail tier', () => {
 
   // Regression coverage for the selectedIdx → selectedKey fix: selection must
   // be anchored to a stable identity, not an array position, because the
-  // events array both (a) gets front-evicted (useCockpit caps at
+  // events array both (a) gets front-evicted (useClaudeControl caps at
   // RAW_EVENT_CAP and slices from the front, shifting every later index down)
   // and (b) can be swapped wholesale on a session switch. An index-based
   // selection silently re-points at an unrelated event in both cases; a

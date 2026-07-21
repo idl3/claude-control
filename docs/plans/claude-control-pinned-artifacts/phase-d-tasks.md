@@ -1,5 +1,5 @@
 ---
-feature: cockpit-pinned-artifacts
+feature: claude-control-pinned-artifacts
 phase: d
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 # Phase D — Live reload + versions
 
 > **Scope**: rebuilds hot-reload tracking-latest tabs ≤2s; filesystem versioning + version picker; producer skill emits versions.
-> **Design**: docs/design/cockpit-pinned-artifacts.md
+> **Design**: docs/design/claude-control-pinned-artifacts.md
 > **Branch**: feat/cockpit-pinned-artifacts-phase-d
 
 ## Status
@@ -32,7 +32,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 - Deviations: none. Neither HALT condition triggered.
 
 ### D2 — done (sha 1ec0cd1)
-- Landed the frame-consuming half in `AppFrameLayer.tsx` (+94/-… lines) rather than `EmbeddedApp.tsx`/`useCockpit.ts` alone as the tracker's file list predicted — `AppFrameLayer` was the existing seam that already owns the live iframe hoisting/mount lifecycle, so track-latest re-fetch-on-frame logic joined it there instead of duplicating mount-tracking state in a second file. `EmbeddedApp.tsx`/`useCockpit.ts`/`web/src/lib/types.ts` still each got the smaller plumbing changes the tracker anticipated (frame prop threading, `trackLatest` typing). `web/src/lib/mediaUrl.ts` gained +24 lines of shared URL-parsing helpers reused by D3/D4.
+- Landed the frame-consuming half in `AppFrameLayer.tsx` (+94/-… lines) rather than `EmbeddedApp.tsx`/`useClaudeControl.ts` alone as the tracker's file list predicted — `AppFrameLayer` was the existing seam that already owns the live iframe hoisting/mount lifecycle, so track-latest re-fetch-on-frame logic joined it there instead of duplicating mount-tracking state in a second file. `EmbeddedApp.tsx`/`useClaudeControl.ts`/`web/src/lib/types.ts` still each got the smaller plumbing changes the tracker anticipated (frame prop threading, `trackLatest` typing). `web/src/lib/mediaUrl.ts` gained +24 lines of shared URL-parsing helpers reused by D3/D4.
 - mtime-compare guard prevents a redundant reload when a frame arrives for an app whose srcdoc is already current (covers both same-mtime replays and out-of-order frame delivery).
 - Deviation (logged loud, self-caught): the new tests were added to the **existing** `AppFrameLayer.vitest.ts` (+160 lines) rather than a new file, since `AppFrameLayer.vitest.ts` already owned this component's test surface — creating a second test file for the same component would have split coverage for no benefit.
 - Positive deviation (discovered in D4, logged here for the record): this task built `EmbeddedApp.tsx`'s `trackLatest` prop fully ahead of schedule, which is why D4 below needed zero further changes to that file.
@@ -89,7 +89,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 
 ### D2 — Client: tracking-latest tabs re-fetch on frame
 > **Goal**: pinned tabs in track-latest mode re-fetch srcdoc when a frame for their app arrives; mtime compare prevents redundant/racing reloads.
-> **Files**: web/src/components/EmbeddedApp.tsx, web/src/hooks/useCockpit.ts (frame plumb), web/src/lib/appVersion.vitest.ts
+> **Files**: web/src/components/EmbeddedApp.tsx, web/src/hooks/useClaudeControl.ts (frame plumb), web/src/lib/appVersion.vitest.ts
 > **Acceptance**: rebuild on disk → tab reflects new build ≤2s (success signal 2, harness-proven); pinned-to-version tabs do NOT reload.
 > **Verification**: cd web && npx vitest run && npx tsc -b --pretty false
 > **Depends on**: D1
@@ -106,7 +106,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 ### D4 — Version picker UI: pin-version vs track-latest per tab
 > **Goal**: app tab header exposes version dropdown (from D3 endpoint); switching versions re-fetches; mode persists per tab (localStorage).
 > **Files**: web/src/components/ArtifactPanel.tsx, web/src/components/EmbeddedApp.tsx, web/src/styles.css
-> **Acceptance**: pin v1 → rebuild latest → v1 tab untouched, latest tab reloads; picker matches cockpit aesthetic.
+> **Acceptance**: pin v1 → rebuild latest → v1 tab untouched, latest tab reloads; picker matches claude-control aesthetic.
 > **Verification**: cd web && npx vitest run && npm run build
 > **Depends on**: D2, D3
 > **Reversibility**: clean-revert

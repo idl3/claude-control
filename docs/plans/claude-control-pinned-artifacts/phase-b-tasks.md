@@ -1,5 +1,5 @@
 ---
-feature: cockpit-pinned-artifacts
+feature: claude-control-pinned-artifacts
 phase: b
 tier: feature
 autonomous: true
@@ -11,7 +11,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 # Phase B — Reload affordance + crash beacon
 
 > **Scope**: crashed or stale apps recover in place; optional beacon surfaces crashes; EmbeddedApp extracted.
-> **Design**: docs/design/cockpit-pinned-artifacts.md
+> **Design**: docs/design/claude-control-pinned-artifacts.md
 > **Branch**: feat/cockpit-pinned-artifacts-phase-b
 
 ## Status
@@ -100,7 +100,7 @@ umbrella-branch: feat/cockpit-pinned-artifacts-integration
 
 ### B3 — Counter artifact adopts the beacon (demo + contract doc)
 > **Goal**: apps/counter.html rebuilt with beacon emit in its error boundary; artifact contract documented.
-> **Files**: web/scratch/counter-app/counter.tsx, web/scratch/counter-app/build.mjs, docs/design/cockpit-pinned-artifacts.md (contract section), ~/.claude-control/media/apps/ artifact
+> **Files**: web/scratch/counter-app/counter.tsx, web/scratch/counter-app/build.mjs, docs/design/claude-control-pinned-artifacts.md (contract section), ~/.claude-control/media/apps/ artifact
 > **Acceptance**: crash-it button → host strip appears → reload recovers; contract section documents beacon as OPTIONAL.
 > **Verification**: cd web && npx vitest run; capture via prototype harness
 > **Depends on**: B2
