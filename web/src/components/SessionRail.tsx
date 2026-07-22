@@ -162,14 +162,95 @@ export function formatUsageWindow(windowMin?: number | null): string {
 }
 
 /**
+ * True when `name` looks like a crash-restore tmux session (the ad-hoc
+ * "restored" session that some restore tooling creates, holding windows
+ * named `r-<session-id>`) rather than a session the operator actually named.
+ * lib/sessions.js's transcript-matching heuristic can re-attach a genuinely
+ * different pane in that session to the SAME transcript file as an
+ * already-live pane elsewhere — two distinct tmux panes, one underlying
+ * Claude conversation. Used only as the dedup tie-break below: a
+ * "restored"-named row never wins over a normally-named row that shares its
+ * identity key. Exported for direct unit testing.
+ */
+export function isRestoredSessionName(name: string | undefined | null): boolean {
+  const n = (name ?? '').trim().toLowerCase();
+  return n === 'restored' || n.startsWith('restored:') || n.startsWith('restored-') || n.startsWith('restored ');
+}
+
+/**
+ * Stable identity key for a session row, used to collapse rows that reach the
+ * SAME underlying session via multiple tmux paths — a tmux session GROUP
+ * (several session names sharing one window set, e.g. `session_grouped`
+ * mirrors) or a crash-restore pane matched by the server's transcript
+ * heuristic to an already-live session's transcript. Priority: transcriptPath
+ * (canonical claude session identity — survives pane/window/session-name
+ * churn and is what both a grouped mirror AND a heuristic-matched restore
+ * pane converge on) > sessionId (the claude session UUID recorded inside that
+ * transcript) > tmux windowId (`@N`, stable across renumber but genuinely
+ * distinct per pane — last resort for rows with no transcript, e.g. plain
+ * terminals). Returns null when a row carries none of the three (nothing to
+ * dedupe against; the row passes through unchanged). Exported for direct
+ * unit testing.
+ */
+export function sessionIdentityKey(s: Session): string | null {
+  if (s.transcriptPath) return `tp:${s.transcriptPath}`;
+  if (s.sessionId) return `sid:${s.sessionId}`;
+  if (s.windowId) return `wid:${s.windowId}`;
+  return null;
+}
+
+/**
+ * Collapse rows that represent the SAME underlying session reachable through
+ * more than one tmux path (see sessionIdentityKey) down to exactly one row
+ * each, so the rail never shows a session twice — once under its live tmux
+ * group and again under a stale "restored" mirror. Runs BEFORE groupByTmux.
+ *
+ * When two rows collide on identity: a "restored"-named row (see
+ * isRestoredSessionName) never wins over a normally-named one. Otherwise
+ * (e.g. several grouped-session names mirroring the same live window, none
+ * of them "restored") the first-encountered row wins — any of them is an
+ * equally valid representative of the same live session, so ordering is a
+ * deterministic tie-break, not a correctness choice. Rows with no derivable
+ * identity (no transcript, no sessionId, no windowId) always pass through
+ * unchanged since they have nothing to collide on. Exported for direct unit
+ * testing.
+ */
+export function dedupeSessionsByIdentity(sessions: Session[]): Session[] {
+  const bestByKey = new Map<string, Session>();
+  const passthrough: Session[] = [];
+  for (const s of sessions) {
+    const key = sessionIdentityKey(s);
+    if (!key) {
+      passthrough.push(s);
+      continue;
+    }
+    const existing = bestByKey.get(key);
+    if (!existing) {
+      bestByKey.set(key, s);
+      continue;
+    }
+    if (isRestoredSessionName(existing.sessionName) && !isRestoredSessionName(s.sessionName)) {
+      bestByKey.set(key, s); // replace a restored-mirror dup with the live row
+    }
+    // else: keep `existing` — either it's already the non-restored winner,
+    // or both sides tie on restored-ness and the first-seen row wins.
+  }
+  return [...bestByKey.values(), ...passthrough];
+}
+
+/**
  * Deterministic tmux structure: SESSION → WINDOW → PANE, in natural tmux order
  * (session name, then window index, then pane index). Each pane is one row,
  * tagged Claude (transcript) or terminal (live shell) — mirroring exactly what
- * tmux shows, with no title/time guessing.
+ * tmux shows, with no title/time guessing. Sessions reachable via more than
+ * one tmux path (a grouped tmux session, or a crash-restore mirror matched to
+ * the same transcript — see dedupeSessionsByIdentity) are collapsed to one
+ * row first, so each real session renders exactly once. Exported for direct
+ * unit testing.
  */
-function groupByTmux(sessions: Session[]): SessionGroup[] {
+export function groupByTmux(sessions: Session[]): SessionGroup[] {
   const bySession = new Map<string, Map<number, Session[]>>();
-  for (const s of sessions) {
+  for (const s of dedupeSessionsByIdentity(sessions)) {
     const sn = s.sessionName ?? '?';
     const wi = s.windowIndex ?? 0;
     if (!bySession.has(sn)) bySession.set(sn, new Map());
