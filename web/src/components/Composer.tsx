@@ -251,8 +251,8 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
 
 /**
  * assistant-ui composer wired to the cockpit:
- * - Plain Enter inserts a newline; ⌘/Ctrl+Enter optimises (default send),
- *   ⌘/Ctrl+Shift+Enter bypasses the optimiser and sends the raw text.
+ * - Plain Enter inserts a newline; ⌘/Ctrl+Enter sends the raw text (default
+ *   send), ⌘/Ctrl+Shift+Enter runs the prompt optimiser instead.
  * - The reply send + "sent →" toast happen in App's onNew adapter (where the
  *   WS reply is dispatched); this just renders the UI.
  * - Attachments use assistant-ui's native attachment system: the 📎 button is
@@ -370,7 +370,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [openTerminal, closeTerminal, terminal],
   );
 
-  // Pulse the primary send button while a prompt is being optimised (in flight).
+  // Pulse the optimise (star) button while a prompt is being optimised (in flight).
   const sendBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = sendBtnRef.current;
@@ -1614,7 +1614,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }, [composer, composerServices, disabled, optimizing, compacting, resuming, key, patchEnhance]);
 
-  // ⌘/Ctrl+Enter (optimise) and ⌘/Ctrl+Shift+Enter (send raw) from ANYWHERE —
+  // ⌘/Ctrl+Enter (send raw) and ⌘/Ctrl+Shift+Enter (optimise) from ANYWHERE —
   // window-level + capture phase so it fires even when focus is outside the
   // textarea. Mirrors the ⌘S pattern. Does nothing in terminal mode (the
   // textarea's onKeyDown already handles the shell-Enter path).
@@ -1635,10 +1635,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
       e.preventDefault();
       if (e.shiftKey) {
+        void runEnhance();
+      } else {
         composer.send();
         refocusComposer();
-      } else {
-        void runEnhance();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -2144,16 +2144,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   return;
                 }
               }
-              // Enter inserts a newline. ⌘/Ctrl+Enter = optimise (default);
-              // ⌘/Ctrl+Shift+Enter = bypass and send the raw composer text.
+              // Enter inserts a newline. ⌘/Ctrl+Enter = send the raw composer
+              // text (default); ⌘/Ctrl+Shift+Enter = run the prompt optimiser.
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 if (disabled || optimizing) return;
                 if (e.shiftKey) {
+                  void runEnhance();
+                } else {
                   composer.send();
                   refocusComposer();
-                } else {
-                  void runEnhance();
                 }
               }
               // ⌘/Ctrl+O also triggers the optimiser (legacy alias).
@@ -2201,9 +2201,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <div className="composer-hint" aria-hidden="true">
               <span className="composer-hint-lead">Reply…</span>
               <span className="composer-hint-keys">
-                <Kbd>⌘/Ctrl+↵</Kbd> optimise
+                <Kbd>⌘/Ctrl+↵</Kbd> send
                 <span className="composer-hint-dot">·</span>
-                <Kbd>⌘/Ctrl+⇧+↵</Kbd> send raw
+                <Kbd>⌘/Ctrl+⇧+↵</Kbd> optimise
                 <span className="composer-hint-dot">·</span>
                 <Kbd>↵</Kbd> newline
               </span>
@@ -2316,7 +2316,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             </button>
           ) : null}
           <span className="composer-toolbar-spacer" />
-          {/* Stop sits to the LEFT of both send buttons (bypass ↑ + optimise ✦).
+          {/* Stop sits to the LEFT of both send buttons (raw send ↑ + optimise ✦).
               Rendered only while generating: the send cluster is right-aligned
               (the spacer above is flex-grow), so Stop grows leftward into the
               spacer when it appears — ↑/✦ never shift, and there's no reserved
@@ -2333,7 +2333,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <StopIcon size={14} />
             </button>
           ) : null}
-          {/* Voice input mic — sits just LEFT of the Raw Send (bypass) button. */}
+          {/* Voice input mic — sits just LEFT of the Raw Send (primary) button. */}
           {!terminal && !voice ? (
             <ComposerMicButton
               ariaLabel="Voice input"
@@ -2343,12 +2343,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onClick={openVoice}
             />
           ) : null}
-          {/* Secondary: bypass — send the raw composer text without optimising. */}
+          {/* Primary: send the raw composer text without optimising. Leading
+              (leftmost) of the two send-cluster buttons and accent-styled —
+              this is now the default action (⌘/Ctrl+↵). */}
           {!terminal && !voice ? (
             <ComposerRawSendButton
-              ariaLabel="Send without optimising"
-              title="Send raw — skip the optimiser (⌘/Ctrl+⇧+↵)"
+              ariaLabel="Send"
+              title="Send (⌘/Ctrl+↵)"
               disabled={disabled || optimizing || empty || compacting || resuming}
+              dataHotkey={empty ? undefined : '⌘↵'}
               onClick={() => {
                 composer.send();
                 refocusComposer();
@@ -2368,16 +2371,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <ArrowUpIcon />
             </button>
           ) : voice ? null : (
-            // The optimise / improve-prompt button. Always visible (only
+            // Secondary: the optimise / improve-prompt button. De-emphasized
+            // (trailing, `.composer-enhance` style) — the raw Send button to
+            // its left is the default action now. Always visible (only
             // disabled when the composer is empty) so the action never
-            // disappears; Stop (rendered above, only while generating) sits to
-            // its left — no reserved-slot gap.
+            // disappears; Stop (rendered above, only while generating) sits
+            // to the LEFT of the whole cluster — no reserved-slot gap.
             <ComposerSendButton
               ref={sendBtnRef}
-              ariaLabel="Optimise and send"
-              title="Optimise & send (⌘/Ctrl+↵)"
+              ariaLabel="Optimize prompt"
+              title="Optimize prompt (⌘/Ctrl+⇧+↵)"
               disabled={disabled || optimizing || empty || compacting || resuming}
-              dataHotkey={empty ? undefined : '⌘↵'}
+              dataHotkey={empty ? undefined : '⌘⇧↵'}
               busy={optimizing}
               onClick={() => void runEnhance()}
             />
