@@ -103,9 +103,12 @@ function sourceWith({ listSessions, probeState = { status: 'green', reason: null
 
 test('tick pushes normalised rows into the registry with id olam:<org>:<sessionId>', async () => {
   const { src, reg } = sourceWith({
-    listSessions: async () => [
-      { org: 'atlas', sessionId: 's9', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's9', pool: null, phase: null },
-    ],
+    listSessions: async () => ({
+      rows: [
+        { org: 'atlas', sessionId: 's9', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's9', pool: null, phase: null },
+      ],
+      nextCursor: null,
+    }),
   });
   await src.tick();
   const remote = reg.getSessions().find((s) => s.kind === 'remote');
@@ -120,7 +123,7 @@ test('org fetch failure degrades to stale last-known rows (greyed, not dropped)'
   const { src, reg } = sourceWith({
     listSessions: async () => {
       if (fail) throw new Error('HTTP 502');
-      return [{ org: 'atlas', sessionId: 's9', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's9', pool: null, phase: null }];
+      return { rows: [{ org: 'atlas', sessionId: 's9', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's9', pool: null, phase: null }], nextCursor: null };
     },
   });
   await src.tick();
@@ -144,13 +147,13 @@ test('red org health keeps rows visible as stale and skips the list fetch', asyn
 });
 
 test('health() exposes per-org probe state for the API/frontend', async () => {
-  const { src } = sourceWith({ listSessions: async () => [] });
+  const { src } = sourceWith({ listSessions: async () => ({ rows: [], nextCursor: null }) });
   await src.tick();
   assert.equal(src.health().atlas.status, 'green');
 });
 
 test('health() defaults capped to false when the client never truncated a page', async () => {
-  const { src } = sourceWith({ listSessions: async () => [] });
+  const { src } = sourceWith({ listSessions: async () => ({ rows: [], nextCursor: null }) });
   await src.tick();
   assert.equal(src.health().atlas.capped, false);
 });
@@ -166,7 +169,10 @@ test('health() surfaces capped:true when the client hit its page-size limit (hon
       // Mirrors the real OlamOrgClient contract: it sets `.capped` itself as
       // a side effect of the fetch, RemoteSessionSource just reads it back.
       this.capped = true;
-      return [{ org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null }];
+      return {
+        rows: [{ org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null }],
+        nextCursor: null,
+      };
     },
     enrich: async (rows) => rows,
     cfg: { spaBase: 'https://s.test' },
@@ -211,9 +217,12 @@ test('tick() makes zero sessionLiveness calls, even across repeated ticks (R5 gu
   };
   const reg = makeRegistry();
   const client = {
-    listSessions: async () => [
-      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: 'linear', phase: 'running' },
-    ],
+    listSessions: async () => ({
+      rows: [
+        { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: 'linear', phase: 'running' },
+      ],
+      nextCursor: null,
+    }),
     enrich: async (rows) => rows,
     sessionLiveness: async () => { livenessCalls += 1; return { state: 'live' }; },
     cfg: { spaBase: 'https://s.test' },
@@ -235,9 +244,12 @@ test('tick() makes zero sessionLiveness calls, even across repeated ticks (R5 gu
 // on a canonical terminal status, never on active halted/done).
 test('tick keeps a halted session active (not archived)', async () => {
   const { src, reg } = sourceWith({
-    listSessions: async () => [
-      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: true, linearRef: 's1', pool: null, phase: null },
-    ],
+    listSessions: async () => ({
+      rows: [
+        { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: true, linearRef: 's1', pool: null, phase: null },
+      ],
+      nextCursor: null,
+    }),
   });
   await src.tick();
   const remote = reg.getSessions().find((s) => s.kind === 'remote');
@@ -246,9 +258,12 @@ test('tick keeps a halted session active (not archived)', async () => {
 
 test('tick derives archived:true from a canonical terminal planStatus (e.g. merged)', async () => {
   const { src, reg } = sourceWith({
-    listSessions: async () => [
-      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null, planStatus: 'merged' },
-    ],
+    listSessions: async () => ({
+      rows: [
+        { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: false, halted: false, linearRef: 's1', pool: null, phase: null, planStatus: 'merged' },
+      ],
+      nextCursor: null,
+    }),
   });
   await src.tick();
   const remote = reg.getSessions().find((s) => s.kind === 'remote');
@@ -257,9 +272,12 @@ test('tick derives archived:true from a canonical terminal planStatus (e.g. merg
 
 test('tick derives archived:false for an active session', async () => {
   const { src, reg } = sourceWith({
-    listSessions: async () => [
-      { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: null, phase: 'running', planStatus: 'approved' },
-    ],
+    listSessions: async () => ({
+      rows: [
+        { org: 'atlas', sessionId: 's1', summary: 'x', lastActivity: null, inFlight: true, halted: false, linearRef: 's1', pool: null, phase: 'running', planStatus: 'approved' },
+      ],
+      nextCursor: null,
+    }),
   });
   await src.tick();
   const remote = reg.getSessions().find((s) => s.kind === 'remote');

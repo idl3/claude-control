@@ -93,6 +93,17 @@ interface SessionRailProps {
    * a row-derived health can't do that (there's no row to read it off of).
    */
   orgHealth?: Record<string, OrgHealth>;
+  /**
+   * True when the active cloud tab's org has a fetchable next page beyond
+   * what's already rendered — mounts the IntersectionObserver sentinel at the
+   * end of the remote list. Scoped to `cloudOrg`; ignored on the local tab.
+   */
+  remoteHasMore?: boolean;
+  /** True while a page fetch for the active cloud org is in flight — renders
+   *  a "loading more…" status row instead of the sentinel triggering again. */
+  remoteLoadingMore?: boolean;
+  /** Rail sentinel callback: fetch the next page for the given org slug. */
+  onLoadMoreRemote?: (org: string) => void;
 }
 
 /**
@@ -934,6 +945,9 @@ export function SessionRail({
   onRequestMove,
   cloudOrg = null,
   orgHealth = {},
+  remoteHasMore = false,
+  remoteLoadingMore = false,
+  onLoadMoreRemote,
 }: SessionRailProps) {
   // Operator-configured meta-slot token order + rotation interval (Settings →
   // Rail tokens, see lib/railTokenPrefs.ts). SessionRail is the only
@@ -1062,6 +1076,29 @@ export function SessionRail({
       },
     ];
   }, [sessions, cloudOrg, orgHealth]);
+
+  // Infinite-scroll sentinel for the active cloud tab. The rail is NOT
+  // virtualized — .rail-scroll wraps this component's plain .map() list
+  // directly (App.tsx), so a real IntersectionObserver against that ancestor
+  // works without any virtualization-aware plumbing. `root` is resolved from
+  // the sentinel element itself (`.closest('.rail-scroll')`) rather than a
+  // passed-down ref, so this component stays agnostic of how its parent lays
+  // out the scroll container.
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!cloudOrg || !remoteHasMore || !onLoadMoreRemote) return;
+    const el = loadMoreSentinelRef.current;
+    if (!el) return;
+    const root = el.closest('.rail-scroll') as HTMLElement | null;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) onLoadMoreRemote(cloudOrg);
+      },
+      { root, rootMargin: '200px 0px', threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [cloudOrg, remoteHasMore, onLoadMoreRemote]);
 
   // remoteGroups always has >=1 entry once cloudOrg is set (see the useMemo
   // above — it synthesizes an empty group from orgHealth when there are zero
@@ -1200,6 +1237,14 @@ export function SessionRail({
       {remoteGroups.map((g) => (
         <RemoteOrgSection key={`remote:${g.org}`} g={g} selectedId={selectedId} onSelect={onSelect} />
       ))}
+      {cloudOrg && remoteHasMore ? (
+        <div ref={loadMoreSentinelRef} className="rail-loadmore-sentinel" aria-hidden="true" />
+      ) : null}
+      {cloudOrg && remoteLoadingMore ? (
+        <div className="rail-loadmore" role="status" aria-live="polite">
+          loading more…
+        </div>
+      ) : null}
     </div>
   );
 }

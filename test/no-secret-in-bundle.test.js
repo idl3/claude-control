@@ -78,11 +78,14 @@ test('remote WS rows carry only the allow-listed keys (no token-shaped fields)',
     registry,
     {
       clientFactory: () => ({
-        listSessions: async () => [{
-          org: 'atlas', sessionId: 's1', worldId: 'w1', summary: 'x',
-          lastActivity: null, inFlight: false, halted: false,
-          linearRef: 's1', pool: null, phase: null,
-        }],
+        listSessions: async () => ({
+          rows: [{
+            org: 'atlas', sessionId: 's1', worldId: 'w1', summary: 'x',
+            lastActivity: null, inFlight: false, halted: false,
+            linearRef: 's1', pool: null, phase: null,
+          }],
+          nextCursor: null,
+        }),
         enrich: async (rows) => rows,
       }),
       probeFactory: () => ({ probe: async () => ({ status: 'green', reason: null }), state: {} }),

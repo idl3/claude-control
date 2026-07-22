@@ -2729,6 +2729,9 @@ function AppInner() {
                 }}
                 cloudOrg={railTab === 'local' ? null : railTab}
                 orgHealth={cockpit.orgHealth}
+                remoteHasMore={railTab !== 'local' ? !!cockpit.orgHasMore[railTab] : false}
+                remoteLoadingMore={railTab !== 'local' ? !!cockpit.orgLoadingMore[railTab] : false}
+                onLoadMoreRemote={cockpit.loadMoreOlam}
               />
             </div>
             {/* Tab row (docs/plans/cloud-local-tabs): Local + one per configured

@@ -5,7 +5,7 @@
 import { getToken, clearToken } from './auth';
 import type { PerfDeviceInfo, PerfSample } from './perfDiagnostics';
 import type { SessionLiveness } from './olamMode';
-import type { OrgHealth } from './types';
+import type { OrgHealth, Session } from './types';
 
 // --- 401 handling -----------------------------------------------------------
 // When any authenticated request comes back 401, the stored token is stale or
@@ -782,4 +782,33 @@ export async function olamSessionLiveness(id: string): Promise<SessionLiveness> 
   } catch {
     return { state: 'unknown' };
   }
+}
+
+/** One page of a remote org's scrolled tail (pages 2..N) — see olamPaging.ts
+ *  for the client-side accumulation model. `nextCursor: null` means this was
+ *  the last page. */
+export interface OlamPage {
+  sessions: Session[];
+  nextCursor: string | null;
+}
+
+/**
+ * Fetch the next page of a remote org's session list: GET
+ * `/api/olam/sessions?org=<slug>&cursor=<opaque>`. The 10s WS poller keeps
+ * owning page 1 (the live head) — this is ONLY for pages 2..N, driven by the
+ * rail's IntersectionObserver sentinel (see olamPaging.ts / useClaudeControl's
+ * loadMoreOlam). Malformed response bodies degrade to an empty page rather
+ * than throwing, so a bad payload just stops pagination instead of crashing
+ * the rail.
+ */
+export async function fetchOlamPage(org: string, cursor: string): Promise<OlamPage> {
+  const p = new URLSearchParams({ org });
+  if (cursor) p.set('cursor', cursor);
+  const res = await authFetch(`/api/olam/sessions?${p.toString()}`);
+  if (!res.ok) throw new Error(`olam page HTTP ${res.status}`);
+  const body = await res.json();
+  return {
+    sessions: Array.isArray(body?.sessions) ? body.sessions : [],
+    nextCursor: typeof body?.nextCursor === 'string' ? body.nextCursor : null,
+  };
 }

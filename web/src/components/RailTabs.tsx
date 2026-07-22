@@ -19,9 +19,11 @@ export interface RailTab {
   /**
    * True when this org's last fetched page hit the backend's page-size
    * ceiling (lib/olam-client.js LIST_SESSIONS_LIMIT, threaded through
-   * RemoteSessionSource.health()) — the org may have MORE sessions than
-   * `count` reflects. Renders as an honest "N+" instead of a possibly-wrong
-   * exact count. Always false/absent for the 'local' and 'unconfigured' tabs.
+   * RemoteSessionSource.health()) OR when cursor-following infinite scroll
+   * still has a fetchable next page (`orgHealth[org].hasMore`) — either way
+   * the org may have MORE sessions than `count` reflects. Renders as an
+   * honest "N+" instead of a possibly-wrong exact count. Always
+   * false/absent for the 'local' and 'unconfigured' tabs.
    */
   capped?: boolean;
 }
@@ -72,7 +74,7 @@ export function computeRailTabs(
     label: resolveOrgLabel(org, customNames),
     count: sessions.filter((s) => s.kind === 'remote' && s.org === org).length,
     kind: 'org',
-    capped: !!orgHealth[org]?.capped,
+    capped: !!orgHealth[org]?.capped || !!orgHealth[org]?.hasMore,
   }));
   return [localTab, ...orgTabs];
 }

@@ -10,6 +10,10 @@ export interface OrgHealth {
   status: 'green' | 'amber' | 'red' | 'unknown';
   reason: string | null;
   capped?: boolean;
+  /** More pages exist past the live head (server has a fetchable next page). */
+  hasMore?: boolean;
+  /** Opaque token to pass to `GET /api/olam/sessions?cursor=` for the next page. */
+  nextCursor?: string | null;
 }
 
 export interface Session {

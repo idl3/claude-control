@@ -339,6 +339,35 @@ describe('ConfigModal — Olam cloud section (Fix 3 setup guide)', () => {
     expect(screen.getByText(/hit the fetch page limit/)).toBeTruthy();
   });
 
+  // Cursor-following infinite scroll: an org with a fetchable next page
+  // (hasMore, no legacy capped flag) gets its own hint, distinct from the
+  // capped notice above.
+  it('an org with hasMore (no capped) surfaces the "loads as you scroll" hint, not the capped notice', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'atlas', spaBase: 'https://atlas.olam.example' }],
+      olamHealth: { atlas: { status: 'green', reason: null, capped: false, hasMore: true } },
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText(/load as you scroll/)).toBeTruthy();
+    expect(document.querySelector('.config-olam-org-capped')).toBeNull();
+  });
+
+  it('an org with both capped and hasMore shows only the capped notice, not a duplicate hint', async () => {
+    mockApi({
+      ...FIXTURE_CONFIG,
+      olamOrgs: [{ org: 'atlas', spaBase: 'https://atlas.olam.example' }],
+      olamHealth: { atlas: { status: 'green', reason: null, capped: true, hasMore: true } },
+    });
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Olam cloud/ }));
+
+    expect(screen.getByText(/hit the fetch page limit/)).toBeTruthy();
+    expect(document.querySelector('.config-olam-org-hasmore')).toBeNull();
+  });
+
   it('an org missing from olamHealth entirely still renders (unknown status), never crashes', async () => {
     mockApi({
       ...FIXTURE_CONFIG,
