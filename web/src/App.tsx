@@ -164,7 +164,8 @@ function saveDrafts(drafts: Record<string, string>): void {
 }
 
 // Per-session sub-agent mode: true | false | agent-name-string.
-// Defaults to true for any session without a stored value.
+// Defaults to false (off) for any session without a stored value; the operator
+// opts a session in via ⌘/Ctrl+D or the checkbox, and that choice persists.
 const SUBAGENT_KEY = 'cc_subagent';
 function loadSubAgentModes(): Record<string, SubAgentMode> {
   try {
@@ -2096,7 +2097,7 @@ function AppInner() {
   const activeSubAgentMode: SubAgentMode =
     cockpit.selectedId != null
       ? (subAgentModes[cockpit.selectedId] ?? false)
-      : true;
+      : false;
   const onActiveSubAgentModeChange = useCallback(
     (mode: SubAgentMode) => {
       if (cockpit.selectedId) setSubAgentMode(cockpit.selectedId, mode);
