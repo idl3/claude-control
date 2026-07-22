@@ -839,10 +839,17 @@ describe('NewSessionDraft cwd_missing confirm-then-retry', () => {
   it('raises the create-folder modal on cwd_missing, then retries with createCwd:true on confirm', async () => {
     const onCreated = vi.fn();
     // First attempt (no createCwd) → cwd_missing 400; retry (createCwd:true) → ok.
+    // The retry returns a PANE-shaped target (session:window.pane) — the exact
+    // id the server's session registry keys by. onCreated (→ App.tsx select())
+    // must navigate/subscribe to THIS verbatim, not a draft-derived guess: the
+    // detach bug was the server returning a target that didn't match its own
+    // registry id, so this test pins the client contract "navigate to whatever
+    // the server returned, unchanged".
+    const RETRY_TARGET = 'claude-control:7.2';
     const { createCalls } = stubApi({
       createResponse: (body) =>
         body.createCwd === true
-          ? new Response(JSON.stringify({ ok: true, target: 'claude-control:1', name: 'made', agent: 'claude', transport: 'tmux' }), {
+          ? new Response(JSON.stringify({ ok: true, target: RETRY_TARGET, name: 'made', agent: 'claude', transport: 'tmux' }), {
               status: 200,
               headers: { 'content-type': 'application/json' },
             })
@@ -876,6 +883,10 @@ describe('NewSessionDraft cwd_missing confirm-then-retry', () => {
     await waitFor(() => expect(createCalls.length).toBe(2));
     expect(createCalls[1].createCwd).toBe(true);
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    // The createCwd retry's onCreated payload must carry the SERVER-returned
+    // target verbatim — the id App.tsx select()s + subscribes to. A mismatch
+    // here is the detach: the client would attach to the wrong/nonexistent id.
+    expect(onCreated.mock.calls[0][0].target).toBe(RETRY_TARGET);
   });
 
   it('dismissing the create-folder modal keeps the draft open and fires no retry', async () => {
