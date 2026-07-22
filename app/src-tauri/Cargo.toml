@@ -1,6 +1,6 @@
 [package]
 name = "claude-control-spike"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native shell for the Claude Control SPA (desktop spike, Phase-B features)"
 edition = "2021"
 
