@@ -2045,6 +2045,15 @@ function AppInner() {
     },
     [cockpit.sendAnswer, cockpit.clearCapture, markAnswered, cockpit.selectedId, cockpit.messages.length],
   );
+  // Dismiss a stale `pending` question (e.g. the session errored/hit a usage
+  // limit and can no longer be answered) — sends nothing, only hides the
+  // dialog locally. Guarded on cockpit.pending so a stray click with no live
+  // question is a no-op.
+  const onThreadDismiss = useCallback(() => {
+    if (cockpit.selectedId && cockpit.pending) {
+      cockpit.dismissPending(cockpit.selectedId, cockpit.pending.toolUseId);
+    }
+  }, [cockpit.selectedId, cockpit.pending, cockpit.dismissPending]);
   const onThreadKey = useCallback(
     (key: string) => {
       cockpit.sendPromptKey(key);
@@ -3132,6 +3141,7 @@ function AppInner() {
                     onKey={onThreadKey}
                     onSelect={onThreadSelect}
                     onReply={onInlineReply}
+                    onDismiss={onThreadDismiss}
                     onToast={showToast}
                   />
                   </ErrorBoundary>
