@@ -160,19 +160,27 @@ describe('Composer keybindings — ⌘/Ctrl+Enter sends raw, ⌘/Ctrl+Shift+Ente
     fireEvent.change(textarea(), { target: { value: 'ship the fix' } });
     fireEvent.keyDown(textarea(), { key: 'Enter', metaKey: true, shiftKey: true });
 
-    // NOT toHaveBeenCalledTimes(1): Composer.tsx wires the ⌘/Ctrl+⇧+↵ chord in
-    // TWO independent listeners (a window-level capture-phase one plus the
-    // textarea's own onKeyDown), and neither stops propagation or checks
-    // e.target — so a single real keypress invokes runEnhance() from both,
-    // calling optimizePrompt() twice. That's a pre-existing double-invoke
-    // (present under the old mapping too — see [100x-specialist] intel
-    // below), not something this chord/button-mapping swap owns fixing. This
-    // test only asserts DIRECTION (optimise fires, send doesn't), which is
-    // what "prove ⌘+⇧+↵ triggers optimize" requires.
+    // EXACTLY once: the ⌘/Ctrl+⇧+↵ chord was previously wired in TWO listeners
+    // (a window-level capture-phase one + the textarea's own onKeyDown), both
+    // firing runEnhance() for one keypress → optimizePrompt() called twice.
+    // Fixed: the window handler now early-returns when the event target is the
+    // composer input (`.composer-input`), since the input's own onKeyDown
+    // already covers the focused case. This asserts the double-invoke is gone.
     await vi.waitFor(() => {
       expect(optimizePrompt).toHaveBeenCalled();
     });
+    expect(optimizePrompt).toHaveBeenCalledTimes(1);
     expect(optimizePrompt).toHaveBeenCalledWith('ship the fix');
     expect(onNew).not.toHaveBeenCalled();
+  });
+
+  it('the raw Send button is the FAR-RIGHT (trailing) button; Optimize sits to its left', () => {
+    render(createElement(Harness, { disabled: false }));
+    const send = document.querySelector('button.composer-send[aria-label="Send"]');
+    const optimize = document.querySelector('button.composer-enhance[aria-label="Optimize prompt"]');
+    expect(send).toBeTruthy();
+    expect(optimize).toBeTruthy();
+    // DOM order == visual left-to-right order: Optimize precedes Send.
+    expect(optimize!.compareDocumentPosition(send!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
