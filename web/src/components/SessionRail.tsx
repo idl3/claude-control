@@ -7,7 +7,7 @@ import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
-import { setStandaloneDragImage } from '../lib/dragGhost';
+import { createPointerGhost, type PointerGhost } from '../lib/dragGhost';
 import { defaultOrgLabel } from './RailTabs';
 import {
   loadRailTokens,
@@ -759,6 +759,328 @@ function WorkflowRailGlyph({ s }: { s: Session }) {
   );
 }
 
+/**
+ * ── Pointer-event drag-and-drop (replaces HTML5 DnD) ─────────────────────
+ *
+ * The rail's "move window to another session" drag used to ride the HTML5
+ * drag-and-drop API (`draggable` + dragstart/dragover/drop). That API is a
+ * dead end for this app: the SPA also runs inside the Tauri desktop shell's
+ * WKWebView, where wry's native drag layer interferes with in-page HTML5 DnD
+ * on macOS regardless of its dragDropEnabled flag (verified on stamped
+ * builds both ways), and the planned native file-drop shell mode disables
+ * in-page HTML5 DnD outright. Pointer events are engine-independent (and
+ * bring touch along for free), so the whole gesture is reimplemented here:
+ * pointerdown arms a candidate, pointermove past a threshold starts the
+ * drag (pointer capture + a body-level ghost, see lib/dragGhost.ts),
+ * document.elementFromPoint probes the hovered group header, and pointerup
+ * fires the same onRequestMove(srcId, destSessionName) the old onDrop did —
+ * still confirm-gated by MoveWindowModal in App.tsx, never a move-on-drop.
+ */
+
+/** Mouse/pen: the pointer must travel this far (px, euclidean) from
+ *  pointerdown before the gesture reads as a drag. Below it, it's a CLICK —
+ *  the row's onClick select must keep working exactly as before, and real
+ *  clicks always jitter a pixel or two, so 0 would break selection while
+ *  anything much larger makes short drags feel dead. 6px matches the slop
+ *  most DnD libraries ship. */
+const DRAG_ARM_DISTANCE_PX = 6;
+/** Touch: hold this long WITHOUT moving before the drag arms. Touch has no
+ *  hover and the same finger gesture must keep scrolling the rail, so
+ *  distance alone can't disambiguate — a hold-to-drag (the long-press
+ *  convention iOS/Android reorder UIs use) lets a plain swipe scroll
+ *  normally and a deliberate press-and-hold pick the row up. */
+const TOUCH_HOLD_MS = 300;
+/** Touch: movement beyond this during the hold means "scrolling, not
+ *  dragging" — cancel the arming and let the native pan proceed. Looser than
+ *  the mouse threshold because fingers wobble more than cursors. */
+const TOUCH_SLOP_PX = 10;
+/** Auto-scroll: dragging within this many px of the rail scroller's
+ *  top/bottom edge scrolls the list, ramping up to the max step per frame
+ *  the deeper into the zone the pointer sits. */
+const AUTOSCROLL_EDGE_PX = 24;
+const AUTOSCROLL_MAX_STEP_PX = 12;
+
+/** Nearest scrollable ancestor of a rail row — the `.rail-scroll` wrapper in
+ *  the real app (App.tsx; same ancestor the load-more sentinel resolves), or
+ *  the first overflow-y:auto/scroll ancestor when rendered standalone. */
+function findScrollParent(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    if (node.classList.contains('rail-scroll')) return node;
+    const oy = getComputedStyle(node).overflowY;
+    if (oy === 'auto' || oy === 'scroll') return node;
+  }
+  return null;
+}
+
+/** Map client coordinates to the tmux session name of the group header under
+ *  them, or null when the pointer isn't over a local group header. Headers
+ *  carry data-session-name exactly for this probe; remote org headers don't,
+ *  so they can never read as drop targets. The drag ghost is
+ *  pointer-events:none, so elementFromPoint sees through it. */
+function dropTargetAt(x: number, y: number): string | null {
+  const head = document.elementFromPoint?.(x, y)?.closest?.('.session-group-head');
+  return head?.getAttribute('data-session-name') ?? null;
+}
+
+interface RowDragState {
+  el: HTMLElement;
+  pointerId: number;
+  /** Where the pointer went DOWN — the arm thresholds measure from here, and
+   *  the ghost's grab offset anchors here so the row doesn't jump on arm. */
+  startX: number;
+  startY: number;
+  /** Latest pointer position — the auto-scroll rAF loop reads it between
+   *  pointermove events (a stationary pointer at the edge must keep
+   *  scrolling, and each scroll must re-probe the hovered header). */
+  lastX: number;
+  lastY: number;
+  isTouch: boolean;
+  /** False while still a click/scroll candidate; true once dragging. */
+  armed: boolean;
+  ghost: PointerGhost | null;
+  holdTimer: ReturnType<typeof setTimeout> | null;
+  raf: number | null;
+  hover: string | null;
+  prevBodyUserSelect: string;
+  docKeydown: ((e: KeyboardEvent) => void) | null;
+  docTouchMove: ((e: TouchEvent) => void) | null;
+}
+
+/**
+ * Per-row pointer-drag state machine. All gesture state lives in refs —
+ * pointermove fires far too often to round-trip through setState, and the
+ * only render-visible outputs (draggingId / dragOverSession) already live in
+ * SessionRail and arrive via the callbacks.
+ */
+function useRowPointerDrag({
+  id,
+  onDragStart,
+  onDragHover,
+  onDrop,
+  onDragEnd,
+}: {
+  id: string;
+  onDragStart?: (id: string) => void;
+  onDragHover?: (sessionName: string | null) => void;
+  onDrop?: (srcId: string, destSessionName: string) => void;
+  onDragEnd?: () => void;
+}) {
+  const st = useRef<RowDragState | null>(null);
+  /** Set when a drag (completed OR cancelled) tears down: the browser still
+   *  synthesizes a click from the pointerdown/up pair, and that click must
+   *  NOT select the row. Consumed by onClick; also reset by the next
+   *  pointerdown so a swallowed-click flag can never leak into a later
+   *  genuine click (e.g. after a pointercancel that produced no click). */
+  const suppressClickRef = useRef(false);
+  // Latest callbacks in a ref so teardown paths (Escape listener, rAF loop,
+  // unmount cleanup) never call a stale closure.
+  const cbs = useRef({ onDragStart, onDragHover, onDrop, onDragEnd });
+  cbs.current = { onDragStart, onDragHover, onDrop, onDragEnd };
+
+  /** Undo everything the gesture set up. When the drag was armed, also clears
+   *  the rail's drag state (onDragEnd) and flags the trailing click for
+   *  suppression. Never fires a move — pointerup does that itself, AFTER
+   *  calling this. */
+  const teardown = () => {
+    const s = st.current;
+    if (!s) return;
+    if (s.holdTimer != null) clearTimeout(s.holdTimer);
+    if (s.raf != null) cancelAnimationFrame(s.raf);
+    if (s.armed) {
+      s.ghost?.destroy();
+      if (s.docKeydown) document.removeEventListener('keydown', s.docKeydown, true);
+      if (s.docTouchMove) document.removeEventListener('touchmove', s.docTouchMove);
+      document.body.style.userSelect = s.prevBodyUserSelect;
+      try {
+        s.el.releasePointerCapture(s.pointerId);
+      } catch {
+        /* capture already gone (pointerup released it) or jsdom */
+      }
+      suppressClickRef.current = true;
+      cbs.current.onDragEnd?.();
+    }
+    st.current = null;
+  };
+
+  /** Re-probe the drop target and report changes up (drives the header's
+   *  data-drag-over ring via SessionRail's dragOverSession state). */
+  const updateHover = (x: number, y: number) => {
+    const s = st.current;
+    if (!s) return;
+    const name = dropTargetAt(x, y);
+    if (name !== s.hover) {
+      s.hover = name;
+      cbs.current.onDragHover?.(name);
+    }
+  };
+
+  /** Scroll the rail while the (possibly stationary) pointer sits in the
+   *  edge zone. A rAF loop rather than pointermove-driven: holding still
+   *  near the edge fires no more moves, but must keep scrolling. */
+  const startAutoScroll = () => {
+    const s = st.current;
+    if (!s) return;
+    const scroller = findScrollParent(s.el);
+    if (!scroller) return;
+    const step = () => {
+      const cur = st.current;
+      if (!cur || !cur.armed) return;
+      const rect = scroller.getBoundingClientRect();
+      let delta = 0;
+      if (cur.lastX >= rect.left && cur.lastX <= rect.right) {
+        const topDepth = AUTOSCROLL_EDGE_PX - (cur.lastY - rect.top);
+        const bottomDepth = AUTOSCROLL_EDGE_PX - (rect.bottom - cur.lastY);
+        // Depth past the edge keeps ramping the speed (clamped), so
+        // overshooting the rail edge scrolls fast, grazing it scrolls slow.
+        if (topDepth > 0) delta = -Math.min(AUTOSCROLL_MAX_STEP_PX, Math.ceil(topDepth / 2));
+        else if (bottomDepth > 0) delta = Math.min(AUTOSCROLL_MAX_STEP_PX, Math.ceil(bottomDepth / 2));
+      }
+      if (delta !== 0) {
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + delta;
+        // The list moved under a stationary pointer — the hovered header may
+        // have changed without any pointermove, so re-probe.
+        if (scroller.scrollTop !== before) updateHover(cur.lastX, cur.lastY);
+      }
+      cur.raf = requestAnimationFrame(step);
+    };
+    s.raf = requestAnimationFrame(step);
+  };
+
+  /** Threshold crossed (mouse) or hold elapsed (touch): the gesture is now a
+   *  drag. Capture the pointer so every subsequent event lands on this row
+   *  even outside its bounds, spawn the ghost, and flip the rail state. */
+  const arm = () => {
+    const s = st.current;
+    if (!s || s.armed) return;
+    s.armed = true;
+    try {
+      s.el.setPointerCapture(s.pointerId);
+    } catch {
+      /* jsdom, or the pointer died between down and arm — drag still works
+         for as long as events keep bubbling through the row */
+    }
+    s.ghost = createPointerGhost(s.el, s.startX, s.startY);
+    s.ghost.move(s.lastX, s.lastY);
+    // A mouse drag across text would otherwise paint selections everywhere.
+    s.prevBodyUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+    // Escape cancels the drag cleanly (no move). Document-level + capture:
+    // the row doesn't hold keyboard focus mid-drag.
+    const docKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        teardown();
+      }
+    };
+    document.addEventListener('keydown', docKeydown, true);
+    s.docKeydown = docKeydown;
+    if (s.isTouch) {
+      // Once armed, the finger owns the gesture: preventDefault every
+      // touchmove (passive:false) or the browser reclaims it as a scroll pan
+      // and fires pointercancel, killing the drag mid-flight. Registered
+      // only while a drag is live, so normal rail scrolling is untouched.
+      const docTouchMove = (e: TouchEvent) => e.preventDefault();
+      document.addEventListener('touchmove', docTouchMove, { passive: false });
+      s.docTouchMove = docTouchMove;
+    }
+    cbs.current.onDragStart?.(id);
+    startAutoScroll();
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    // Primary button / first touch only, one gesture at a time (a second
+    // finger landing mid-drag must not restart the machine). Deliberately no
+    // capture and no preventDefault yet — before the threshold this is still
+    // a plain click (or a touch scroll), and both must behave untouched.
+    if (st.current || e.button !== 0) return;
+    suppressClickRef.current = false; // new gesture — any stale flag is void
+    const el = e.currentTarget as HTMLElement;
+    st.current = {
+      el,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      isTouch: e.pointerType === 'touch',
+      armed: false,
+      ghost: null,
+      holdTimer: null,
+      raf: null,
+      hover: null,
+      prevBodyUserSelect: '',
+      docKeydown: null,
+      docTouchMove: null,
+    };
+    if (st.current.isTouch) {
+      st.current.holdTimer = setTimeout(() => {
+        const s = st.current;
+        if (s && !s.armed) {
+          s.holdTimer = null;
+          arm();
+        }
+      }, TOUCH_HOLD_MS);
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    const s = st.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    s.lastX = e.clientX;
+    s.lastY = e.clientY;
+    if (!s.armed) {
+      const dist = Math.hypot(e.clientX - s.startX, e.clientY - s.startY);
+      if (s.isTouch) {
+        // Moved before the hold elapsed → the finger is scrolling the rail,
+        // not picking the row up. Stand down and let the native pan run.
+        if (dist > TOUCH_SLOP_PX) teardown();
+      } else if (dist > DRAG_ARM_DISTANCE_PX) {
+        arm();
+      }
+      if (!st.current?.armed) return;
+    }
+    st.current!.ghost?.move(e.clientX, e.clientY);
+    updateHover(e.clientX, e.clientY);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    const s = st.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    if (!s.armed) {
+      // Never armed — a plain click (mouse) or tap/short-hold (touch): clear
+      // the candidate and let the browser's click event select the row.
+      teardown();
+      return;
+    }
+    const dest = dropTargetAt(e.clientX, e.clientY);
+    teardown();
+    if (dest) cbs.current.onDrop?.(id, dest);
+  };
+
+  const onPointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    const s = st.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    teardown(); // never a move on cancel
+  };
+
+  // The dragged row can unmount mid-drag (the poll refresh re-keys the
+  // list): without this, the ghost and document listeners would orphan and
+  // the rail's draggingId would stick. All state lives in refs, so the
+  // first-render teardown closure stays valid for the component's lifetime.
+  useEffect(() => teardown, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return {
+    dragHandlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
+    /** True (and self-clearing) when the incoming click trails a drag. */
+    consumeClickSuppression: () => {
+      const v = suppressClickRef.current;
+      suppressClickRef.current = false;
+      return v;
+    },
+  };
+}
+
 function PaneRow({
   s,
   selected,
@@ -771,6 +1093,8 @@ function PaneRow({
   railTokens,
   dragging,
   onDragStart,
+  onDragHover,
+  onDrop,
   onDragEnd,
 }: {
   s: Session;
@@ -795,12 +1119,26 @@ function PaneRow({
   railTokens: RailToken[];
   /** True while THIS row is the one being dragged (move-window DnD). */
   dragging?: boolean;
-  /** Drag started on this row — reports the dragged session's id up to
+  /** Pointer drag armed on this row (threshold/hold crossed, see
+   *  useRowPointerDrag) — reports the dragged session's id up to
    *  SessionRail, which tracks the single in-flight draggingId. */
   onDragStart?: (id: string) => void;
+  /** The drag is hovering a group header (its data-session-name), or nothing
+   *  (null) — drives the header's data-drag-over ring via SessionRail. */
+  onDragHover?: (sessionName: string | null) => void;
+  /** Pointer released over a group header — SessionRail applies the
+   *  same-group guard and forwards to onRequestMove (confirm-gated). */
+  onDrop?: (srcId: string, destSessionName: string) => void;
   /** Drag ended (drop or cancel) — clears the rail's drag state. */
   onDragEnd?: () => void;
 }) {
+  const { dragHandlers, consumeClickSuppression } = useRowPointerDrag({
+    id: s.id,
+    onDragStart,
+    onDragHover,
+    onDrop,
+    onDragEnd,
+  });
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
   const label = isTerminal
@@ -913,28 +1251,22 @@ function PaneRow({
       data-kind={s.kind ?? 'claude'}
       data-pending={s.pending ? 'true' : undefined}
       data-dragging={dragging ? 'true' : undefined}
-      draggable
-      onClick={() => onSelect(s.id)}
+      onClick={() => {
+        // A completed/cancelled drag still synthesizes a trailing click from
+        // its pointerdown/up pair — that click must not ALSO select the row.
+        if (consumeClickSuppression()) return;
+        onSelect(s.id);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onSelect(s.id);
         }
       }}
-      onDragStart={(e) => {
-        // "move window to another session" DnD — the group header's onDrop
-        // reads this back via getData; effectAllowed communicates intent to
-        // the OS drag cursor (confirmed via MoveWindowModal, not on drop).
-        e.dataTransfer.setData('text/cockpit-session', s.id);
-        e.dataTransfer.effectAllowed = 'move';
-        // Explicit standalone ghost: WebKit snapshots the rail's whole
-        // backdrop-filter layer for the default drag image (neighbor labels
-        // ghosting into the drag preview in the desktop shell) — see
-        // lib/dragGhost.ts.
-        setStandaloneDragImage(e.nativeEvent, e.currentTarget as HTMLElement);
-        onDragStart?.(s.id);
-      }}
-      onDragEnd={() => onDragEnd?.()}
+      // "move window to another session" drag — pointer events, NOT HTML5
+      // DnD (which the desktop shell's WKWebView breaks; see the
+      // useRowPointerDrag block comment above).
+      {...dragHandlers}
     >
       <div className="session-top">
         {/* One icon per row: Claude vs terminal. Active tmux pane = full
@@ -1064,16 +1396,27 @@ export function SessionRail({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const renameSubmittingRef = useRef(false);
 
-  // "Move window to another session" drag-and-drop: draggingId is the pane
-  // currently being dragged (drives PaneRow's data-dragging affordance);
-  // dragOverSession is the tmux session name the drag is hovering (drives the
-  // target group header's data-drag-over ring). Both clear on drop AND on a
-  // cancelled drag (dragend fires either way) — see PaneRow's onDragEnd.
+  // "Move window to another session" drag-and-drop (pointer events — see
+  // useRowPointerDrag): draggingId is the pane currently being dragged
+  // (drives PaneRow's data-dragging affordance); dragOverSession is the tmux
+  // session name the drag is hovering (drives the target group header's
+  // data-drag-over ring). Both clear on drop AND on a cancelled drag
+  // (Escape / pointercancel / mid-drag unmount) — every teardown path in
+  // useRowPointerDrag fires onDragEnd.
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverSession, setDragOverSession] = useState<string | null>(null);
   const clearDrag = () => {
     setDraggingId(null);
     setDragOverSession(null);
+  };
+  // Pointer released over a group header. Guard: dropping onto the dragged
+  // pane's OWN group is a no-op (never offered as a destination — see
+  // MoveWindowModal too). Same guard, same shape, as the old HTML5 onDrop.
+  const handleRowDrop = (srcId: string, destSessionName: string) => {
+    const src = sessions.find((s) => s.id === srcId);
+    if (src && src.sessionName !== destSessionName) {
+      onRequestMove?.(srcId, destSessionName);
+    }
   };
 
   useEffect(() => {
@@ -1206,26 +1549,11 @@ export function SessionRail({
               className="session-group-head"
               data-renaming={isRenamingThis ? 'true' : undefined}
               data-drag-over={dragOverSession === g.sessionName ? 'true' : undefined}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (dragOverSession !== g.sessionName) setDragOverSession(g.sessionName);
-              }}
-              onDragLeave={() =>
-                setDragOverSession((cur) => (cur === g.sessionName ? null : cur))
-              }
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOverSession(null);
-                const srcId = e.dataTransfer.getData('text/cockpit-session');
-                if (!srcId) return;
-                const src = sessions.find((s) => s.id === srcId);
-                // Guard: dropping onto the dragged pane's OWN group is a no-op
-                // (never offered as a destination — see MoveWindowModal too).
-                if (src && src.sessionName !== g.sessionName) {
-                  onRequestMove?.(srcId, g.sessionName);
-                }
-              }}
+              // Drop-target identity for the pointer drag's elementFromPoint
+              // probe (useRowPointerDrag → dropTargetAt): the header carries
+              // its own tmux session name so a hit maps straight back to the
+              // destination without any DOM-order bookkeeping.
+              data-session-name={g.sessionName}
             >
               <button
                 type="button"
@@ -1306,6 +1634,8 @@ export function SessionRail({
                           railTokens={railTokens}
                           dragging={s.id === draggingId}
                           onDragStart={setDraggingId}
+                          onDragHover={setDragOverSession}
+                          onDrop={handleRowDrop}
                           onDragEnd={clearDrag}
                         />
                       ))}
