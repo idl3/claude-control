@@ -72,6 +72,9 @@ interface ThreadProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  /** Dismiss the current inline question WITHOUT answering it — forwarded to
+   *  the Composer/AskInline stale-question escape hatch. */
+  onDismiss?: () => void;
   /** Toast sink — forwarded to the Composer for drag-and-drop attachment feedback. */
   onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
   /**
@@ -196,6 +199,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   onKey,
   onSelect,
   onReply,
+  onDismiss,
   onToast,
   emptyState = null,
 }: ThreadProps, ref) {
@@ -345,6 +349,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
         onKey={onKey}
         onSelect={onSelect}
         onReply={onReply}
+        onDismiss={onDismiss}
         onToast={onToast}
       />
     </ThreadPrimitive.Root>

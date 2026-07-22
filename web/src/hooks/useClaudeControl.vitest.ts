@@ -166,3 +166,75 @@ describe('useClaudeControl — messagesLoaded (remote vs. local gating)', () => 
     expect(result.current.messagesLoaded).toBe(true);
   });
 });
+
+// ── dismissPending: stale-question escape hatch ────────────────────────────
+//
+// Root cause under test: a session that stalls on an API error (429/401/
+// overload) keeps re-reporting the SAME `pending` on every snapshot/pending
+// WS frame, so a local clear alone doesn't stick — the very next frame
+// re-sets pendingById[id] to the identical object. dismissPending records
+// (sessionId -> dismissed toolUseId) instead, and the derived `pending`
+// memo suppresses a pendingById entry whose toolUseId matches. A genuinely
+// NEW question (different toolUseId) must NOT be suppressed.
+describe('useClaudeControl — dismissPending (stale-question escape hatch)', () => {
+  it('suppresses the dismissed question and survives a repeated snapshot re-send', async () => {
+    const id = 'sess-dismiss-1';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const pending = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    expect(result.current.pending).toEqual(pending);
+
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.pending).toBeNull();
+
+    // The server has no idea it was dismissed — it keeps re-reporting the
+    // SAME pending on the next snapshot/pending frame. Must stay suppressed.
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    expect(result.current.pending).toBeNull();
+
+    await act(async () => {
+      ws.message({ type: 'messages', id, messages: [], pending });
+    });
+    expect(result.current.pending).toBeNull();
+  });
+
+  it('does NOT suppress a new question with a different toolUseId', async () => {
+    const id = 'sess-dismiss-2';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const first = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending: first });
+    });
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.pending).toBeNull();
+
+    const second = { toolUseId: 'tu-2', questions: [{ question: 'Continue?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending: second });
+    });
+    expect(result.current.pending).toEqual(second);
+  });
+
+  it('clears the session rail pending badge immediately on dismiss', async () => {
+    const id = 'sess-dismiss-3';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const pending = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(true);
+
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+  });
+});

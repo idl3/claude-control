@@ -30,6 +30,17 @@ export interface AskInlineProps {
   onSelect: (labels: string[]) => void;
   /** Called to send a normal freeform reply (for "type something" options). */
   onReply: (text: string) => void;
+  /**
+   * Dismiss the current question WITHOUT answering it — sends nothing over the
+   * wire, purely hides a stale dialog (e.g. the session errored/hit a usage
+   * limit and the question can no longer be answered). Must never be wired to
+   * onAnswer/onReply.
+   */
+  onDismiss: () => void;
+  /** True when the selected session hit an API error and stalled (rate limit /
+   *  overload / 5xx) — the question can no longer be delivered. Shows an
+   *  inline note and makes the Dismiss control prominent. */
+  errored?: boolean;
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
@@ -747,8 +758,11 @@ function PromptBody({ prompt, planMarkdown, agentName, bodyRef, onKey, onSelect,
 /**
  * Always-mounted inline prompt shell — display:none when idle, revealed by the
  * Composer morph on `askActive`. Renders either a structured AskUserQuestion
- * (kind='ask') or a PanePrompt (kind='prompt'). Non-dismissible: no Esc, no ✕.
- * Cleared only when the server nulls pending/prompt.
+ * (kind='ask') or a PanePrompt (kind='prompt'). Normally cleared only when the
+ * server nulls pending/prompt; the header's Dismiss control (×) is the escape
+ * hatch for a STALE question the server keeps re-reporting (e.g. the session
+ * errored and can no longer deliver an answer) — it hides the dialog locally
+ * without sending anything.
  */
 /** Short header shown on the minimized yellow bar. */
 export function promptHeader(p: ActivePrompt | null): string {
@@ -769,6 +783,8 @@ export function AskInline({
   onKey,
   onSelect,
   onReply,
+  onDismiss,
+  errored = false,
 }: AskInlineProps) {
   // Minimize: collapse the whole question to a single yellow bar so the
   // transcript is fully visible while you process the context. Reset whenever a
@@ -815,6 +831,16 @@ export function AskInline({
           <div className="ask-min-header">
             <button
               type="button"
+              className="ask-dismiss-btn"
+              data-prominent={errored ? 'true' : undefined}
+              aria-label="Dismiss question"
+              title="Dismiss (does not answer)"
+              onClick={onDismiss}
+            >
+              ×
+            </button>
+            <button
+              type="button"
               className="ask-min-btn"
               aria-label="Minimise question"
               title="Minimise"
@@ -823,6 +849,16 @@ export function AskInline({
               <span aria-hidden="true" />
             </button>
           </div>
+          {errored ? (
+            <div className="ask-errored-note" role="alert">
+              <span>
+                This session hit a usage limit — the answer can&rsquo;t be delivered. You can dismiss this question.
+              </span>
+              <button type="button" className="ask-errored-dismiss" onClick={onDismiss}>
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           {activePrompt.kind === 'ask' ? (
             <AskBody
               key={activePrompt.pending.toolUseId}

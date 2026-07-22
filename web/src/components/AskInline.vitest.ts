@@ -1,11 +1,16 @@
+// @vitest-environment jsdom
 /**
- * Unit tests for AskInline pure logic.
- * These replicate the component's internal functions without a DOM,
- * providing clear regression coverage for all prompt-type behaviours.
+ * Unit tests for AskInline pure logic, plus DOM-level Dismiss/errored-note
+ * coverage for the stale-question escape hatch (component-level tests need
+ * jsdom; the pure-logic describes above don't care and stay unaffected).
  */
-import { describe, it, expect } from 'vitest';
-import { questionHasPreview, isFreeTextOption, promptHeader } from './AskInline';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
+import { AskInline, questionHasPreview, isFreeTextOption, promptHeader } from './AskInline';
 import type { PendingQuestion, Pending, PanePrompt } from '../lib/types';
+
+afterEach(cleanup);
 
 describe('promptHeader (minimized bar label)', () => {
   it('prefers the structured question header, falls back to the question text', () => {
@@ -337,5 +342,73 @@ describe('activePrompt derivation', () => {
   it('returns null when both pending and prompt are null', () => {
     const activePrompt = null;
     expect(activePrompt).toBeNull();
+  });
+});
+
+// ── Dismiss control + errored note (DOM) ───────────────────────────────────
+//
+// Root cause under test: a stale AskUserQuestion dialog (the session hit a
+// usage-limit/API error and stalled) had no way to be dismissed — Dismiss
+// must fire onDismiss and NEVER onAnswer/onReply (dismissal sends nothing),
+// and the errored note must only render when `errored` is true.
+
+function renderAsk(overrides: {
+  errored?: boolean;
+  onAnswer?: (toolUseId: string, selections: unknown[]) => void;
+  onReply?: (text: string) => void;
+  onDismiss?: () => void;
+} = {}) {
+  const pending: Pending = {
+    toolUseId: 'tu-errored-1',
+    questions: [{ question: 'Proceed with the migration?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+  };
+  const onAnswer = overrides.onAnswer ?? vi.fn();
+  const onReply = overrides.onReply ?? vi.fn();
+  const onDismiss = overrides.onDismiss ?? vi.fn();
+  const bodyRef = { current: null };
+  render(
+    createElement(AskInline, {
+      activePrompt: { kind: 'ask', pending },
+      bodyRef,
+      onAnswer,
+      onKey: () => {},
+      onSelect: () => {},
+      onReply,
+      onDismiss,
+      errored: overrides.errored ?? false,
+    }),
+  );
+  return { onAnswer, onReply, onDismiss };
+}
+
+describe('AskInline Dismiss control', () => {
+  it('clicking Dismiss fires onDismiss and does NOT fire onAnswer or onReply', () => {
+    const { onAnswer, onReply, onDismiss } = renderAsk();
+    fireEvent.click(screen.getByRole('button', { name: /dismiss question/i }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(onReply).not.toHaveBeenCalled();
+  });
+
+  it('the Dismiss control is present even when the session is not errored', () => {
+    renderAsk({ errored: false });
+    expect(screen.getByRole('button', { name: /dismiss question/i })).toBeTruthy();
+    expect(screen.queryByText(/hit a usage limit/i)).toBeNull();
+  });
+
+  it('shows the errored note (and a second Dismiss action) when errored is true', () => {
+    const { onDismiss } = renderAsk({ errored: true });
+    expect(screen.getByText(/hit a usage limit/i)).toBeTruthy();
+    expect(screen.getByText(/can.t be delivered/i)).toBeTruthy();
+    // The prominent errored-note Dismiss button also just dismisses — never answers.
+    fireEvent.click(screen.getByRole('button', { name: /^dismiss$/i }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not block the normal answer flow — selecting an option still calls onAnswer', () => {
+    const { onAnswer } = renderAsk();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    expect(onAnswer).toHaveBeenCalledWith('tu-errored-1', [['Yes']]);
   });
 });

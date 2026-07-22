@@ -145,6 +145,9 @@ interface ComposerProps {
   onKey?: (key: string) => void;
   onSelect?: (labels: string[]) => void;
   onReply?: (text: string) => void;
+  /** Dismiss the current inline question WITHOUT answering it (stale-question
+   *  escape hatch — see AskInline's onDismiss doc). */
+  onDismiss?: () => void;
   /** Toast sink for drag-and-drop attachment feedback (rejected / failed files). */
   onToast?: (text: string, kind?: 'ok' | 'error' | '') => void;
   services?: Partial<ComposerServices>;
@@ -284,6 +287,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   onKey,
   onSelect,
   onReply,
+  onDismiss,
   onToast,
   services,
 }: ComposerProps, ref) {
@@ -1976,6 +1980,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onKey={onKey ?? (() => {})}
           onSelect={onSelect ?? (() => {})}
           onReply={onReply ?? (() => {})}
+          onDismiss={onDismiss ?? (() => {})}
+          errored={errored}
         />
         {/* Compaction strip: Claude is compacting context — sends are blocked
             (the TUI ignores input) and this shows it's progressing, not hung. */}

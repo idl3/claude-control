@@ -135,6 +135,15 @@ export interface ClaudeControlStore {
   sendPromptKey: (key: string) => boolean;
   sendPromptSelect: (id: string, labels: string[]) => boolean;
   sendAnswer: (toolUseId: string, selections: AnswerSelection[]) => boolean;
+  /**
+   * Dismiss a stale `pending` question WITHOUT answering it — e.g. the session
+   * hit a usage-limit/API error and the question can no longer be answered, so
+   * the server keeps reporting the same `pending` forever. Records the
+   * dismissed question's `toolUseId` for `id` so the derived `pending` (below)
+   * suppresses it; a genuinely NEW question (different `toolUseId`) is not
+   * suppressed. Sends nothing over the wire — purely a client-side hide.
+   */
+  dismissPending: (id: string, toolUseId: string) => void;
   requestSubagent: (agentId: string) => boolean;
   /** Load a workflow agent's full transcript (B3 Agent View overlay). */
   requestWorkflowAgent: (runId: string, agentId: string) => boolean;
@@ -184,6 +193,11 @@ export function useClaudeControl(): ClaudeControlStore {
   const [pendingById, setPendingById] = useState<Record<string, Pending | null>>(
     {},
   );
+  // sessionId -> the toolUseId of a `pending` question the user explicitly
+  // dismissed (stale-question escape hatch). Survives snapshot/pending WS
+  // frames re-setting pendingById[id] — see the `pending` memo below, which
+  // suppresses a pendingById entry whose toolUseId matches this map.
+  const [dismissedById, setDismissedById] = useState<Record<string, string>>({});
   // sessionId -> (agentId -> SubAgent). Sub-agents stream independently of the
   // main transcript; keyed by agentId so updates upsert in place.
   const [subagentsById, setSubagentsById] = useState<
@@ -261,6 +275,7 @@ export function useClaudeControl(): ClaudeControlStore {
           setDegradedById((prev) => pruneRecord(prev, retainedIds));
           setReadyById((prev) => pruneRecord(prev, retainedIds));
           setPendingById((prev) => pruneRecord(prev, retainedIds));
+          setDismissedById((prev) => pruneRecord(prev, retainedIds));
           setSubagentsById((prev) => pruneRecord(prev, retainedIds));
           setRawEventsById((prev) => pruneRecord(prev, retainedIds));
           setPromptById((prev) => pruneRecord(prev, retainedIds));
@@ -516,6 +531,12 @@ export function useClaudeControl(): ClaudeControlStore {
     [socket],
   );
 
+  const dismissPending = useCallback((id: string, toolUseId: string) => {
+    setDismissedById((prev) => ({ ...prev, [id]: toolUseId }));
+    // Keep the rail badge in sync immediately (same as the 'pending' WS case).
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pending: false } : s)));
+  }, []);
+
   const requestSubagent = useCallback(
     (agentId: string): boolean => {
       const id = selectedRef.current;
@@ -631,10 +652,17 @@ export function useClaudeControl(): ClaudeControlStore {
     () => (selectedId ? messagesById[selectedId] ?? [] : []),
     [selectedId, messagesById],
   );
-  const pending = useMemo(
-    () => (selectedId ? pendingById[selectedId] ?? null : null),
-    [selectedId, pendingById],
-  );
+  const pending = useMemo(() => {
+    if (!selectedId) return null;
+    const p = pendingById[selectedId] ?? null;
+    // Suppress a question the user explicitly dismissed as stale (e.g. the
+    // session errored and can no longer be answered) — a snapshot/pending WS
+    // frame re-sets pendingById[id] to the SAME object every time, so a local
+    // clear alone wouldn't stick; comparing toolUseId lets a genuinely new
+    // question (different id) through undismissed.
+    if (p && dismissedById[selectedId] === p.toolUseId) return null;
+    return p;
+  }, [selectedId, pendingById, dismissedById]);
   const prompt = useMemo(
     () => (selectedId ? promptById[selectedId] ?? null : null),
     [selectedId, promptById],
@@ -713,6 +741,7 @@ export function useClaudeControl(): ClaudeControlStore {
     sendPromptKey,
     sendPromptSelect,
     sendAnswer,
+    dismissPending,
     requestSubagent,
     requestWorkflowAgent,
     requestCapture,
