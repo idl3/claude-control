@@ -121,6 +121,25 @@ describe('computeRailTabs — capped badge (Fix 2b)', () => {
     const tabs = computeRailTabs([], ['atlas']);
     expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(false);
   });
+
+  // Cursor-following infinite scroll: hasMore (a fetchable next page) folds
+  // into the same "N+" badge as the legacy capped signal — the operator
+  // sees an honest lower-bound count either way.
+  it('an org tab is capped when orgHealth reports hasMore:true, even with capped:false', () => {
+    const orgHealth: Record<string, OrgHealth> = {
+      atlas: { status: 'green', reason: null, capped: false, hasMore: true },
+    };
+    const tabs = computeRailTabs([], ['atlas'], {}, orgHealth);
+    expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(true);
+  });
+
+  it('an org tab is NOT capped when both capped and hasMore are false/absent', () => {
+    const orgHealth: Record<string, OrgHealth> = {
+      atlas: { status: 'green', reason: null, capped: false, hasMore: false },
+    };
+    const tabs = computeRailTabs([], ['atlas'], {}, orgHealth);
+    expect(tabs.find((t) => t.id === 'atlas')!.capped).toBe(false);
+  });
 });
 
 describe('RailTabs — capped badge renders as "N+" (Fix 2b)', () => {

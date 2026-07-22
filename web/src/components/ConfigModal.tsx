@@ -769,6 +769,11 @@ function OlamSection({
                         Session count may be a lower bound — this org hit the fetch page limit.
                       </div>
                     ) : null}
+                    {!health.capped && health.hasMore ? (
+                      <div className="config-hint config-olam-org-hasmore">
+                        More sessions load as you scroll this org's list.
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}

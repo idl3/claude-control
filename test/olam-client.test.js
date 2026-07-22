@@ -69,7 +69,7 @@ test('listSessions normalises rows on the ADR-062 identity', async () => {
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const rows = await c.listSessions();
+  const { rows } = await c.listSessions();
   assert.equal(rows.length, 1);
   const r = rows[0];
   assert.equal(r.org, 'atlas');
@@ -106,7 +106,7 @@ test('readOnly: a session owned via CF Access SUB (not email) is steerable, org-
     ] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const rows = await c.listSessions();
+  const { rows } = await c.listSessions();
   const bySub = rows.find((r) => r.sessionId === 'own-by-sub');
   const byEmail = rows.find((r) => r.sessionId === 'own-by-email');
   const mate = rows.find((r) => r.sessionId === 'org-mate');
@@ -180,7 +180,7 @@ test('expired CF Access self-heals after re-login: HTML wall → re-mint → JSO
     ['/api/plan-chat/v1/sessions', () => (hits++ === 0 ? html(200) : json(200, { sessions: [LIST_ROW] }))],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const rows = await c.listSessions();
+  const { rows } = await c.listSessions();
   assert.equal(rows.length, 1); // recovered without a restart
   assert.equal(hits, 2); // HTML wall, then JSON on retry
   // The retried request carried the FRESH re-minted JWT.
@@ -291,7 +291,7 @@ test('normalised rows and thrown errors never carry token material', async () =>
     ['token-probe', () => json(401, {})],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const rows = await c.listSessions();
+  const { rows } = await c.listSessions();
   assert.ok(!JSON.stringify(rows).includes('jwt-1'));
   const err = await c.runnerToken().catch((e) => e);
   assert.ok(!String(err.message).includes('SUPER-SECRET'));
@@ -319,7 +319,7 @@ test('readOnly is set for an org-mate session, false for the operator own', asyn
     return json(200, {});
   };
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const out = await c.listSessions();
+  const { rows: out } = await c.listSessions();
   const by = Object.fromEntries(out.map((r) => [r.sessionId, r]));
   assert.equal(by.mine.readOnly, false);
   assert.equal(by.theirs.readOnly, true);   // org-mate's session → view-only
@@ -352,7 +352,7 @@ test('listSessions captures canonical status fields onto the row when present', 
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const [r] = await c.listSessions();
+  const { rows: [r] } = await c.listSessions();
   assert.equal(r.planStatus, 'merged');
   assert.equal(r.status, 'closed');
   assert.equal(r.linearState, 'Done');
@@ -366,7 +366,7 @@ test('listSessions omits canonical status fields entirely when absent from the r
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const [r] = await c.listSessions();
+  const { rows: [r] } = await c.listSessions();
   for (const key of ['status', 'state', 'closed', 'closedAt', 'cancelled', 'canceled', 'archived', 'archivedAt', 'prState', 'merged', 'mergedAt', 'linearState', 'linearStatus']) {
     assert.ok(!(key in r), `unexpected invented field: ${key}`);
   }
@@ -387,7 +387,7 @@ test('listSessions passes through last_model/last_ctx_pct as model/ctxPct', asyn
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const [r] = await c.listSessions();
+  const { rows: [r] } = await c.listSessions();
   assert.equal(r.model, 'claude-opus-4-8');
   assert.equal(r.ctxPct, 42);
 });
@@ -405,7 +405,7 @@ test('listSessions leaves model/ctxPct undefined when last_model/last_ctx_pct ar
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [row] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const [r] = await c.listSessions();
+  const { rows: [r] } = await c.listSessions();
   assert.equal(r.model, undefined);
   assert.equal(r.ctxPct, undefined);
 });
@@ -417,7 +417,7 @@ test('listSessions leaves model/ctxPct undefined when the row omits last_model/l
     ['/api/plan-chat/v1/sessions', () => json(200, { sessions: [LIST_ROW] })],
   ]);
   const c = new OlamOrgClient(ORG, { fetchImpl, execFileImpl });
-  const [r] = await c.listSessions();
+  const { rows: [r] } = await c.listSessions();
   assert.equal(r.model, undefined);
   assert.equal(r.ctxPct, undefined);
 });
