@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClaudeControlSocket, type ConnState } from '../lib/ws';
 import { mergeMessages } from '../lib/messages';
+import { mergeById, seedFromHead, canLoadMore, applyPage, EMPTY_PAGING, type OrgPaging } from '../lib/olamPaging';
+import { fetchOlamPage } from '../lib/api';
 import type {
   AnswerSelection,
   Msg,
@@ -62,6 +64,21 @@ export interface ClaudeControlStore {
    * expired" even when zero rows for that org have ever arrived.
    */
   orgHealth: Record<string, OrgHealth>;
+  /**
+   * True when a remote (olam) org has a fetchable next page beyond the
+   * scrolled tail already merged into `sessions` — drives the rail's
+   * IntersectionObserver sentinel for the active cloud tab (SessionRail's
+   * `remoteHasMore` prop). Derived from per-org paging state; see
+   * lib/olamPaging.ts.
+   */
+  orgHasMore: Record<string, boolean>;
+  /** True while a page fetch for that org is in flight (SessionRail's
+   *  `remoteLoadingMore` prop — renders a "loading more…" affordance). */
+  orgLoadingMore: Record<string, boolean>;
+  /** Fetch the next page of a remote org's session list (rail sentinel
+   *  callback). Guarded against duplicate concurrent fetches per org; no-op
+   *  when the org has no fetchable cursor or is already loading. */
+  loadMoreOlam: (org: string) => void;
   /**
    * On-demand workflow-agent transcripts, keyed `${runId}::${agentId}`. Loaded
    * via requestWorkflowAgent when the Agent View opens "full transcript"; fed to
@@ -182,6 +199,8 @@ export function useClaudeControl(): ClaudeControlStore {
   const [pickerOpenById, setPickerOpenById] = useState<Record<string, boolean>>({});
   // Per-org health, rides every 'sessions' frame — see the ClaudeControlStore field doc.
   const [orgHealth, setOrgHealth] = useState<Record<string, OrgHealth>>({});
+  // Per-org scrolled-tail paging state (pages 2..N) — see lib/olamPaging.ts.
+  const [olamPaging, setOlamPaging] = useState<Record<string, OrgPaging>>({});
 
   // selectedId in a ref so the message handler (registered once) reads fresh.
   const selectedRef = useRef<string | null>(null);
@@ -191,6 +210,15 @@ export function useClaudeControl(): ClaudeControlStore {
   const sessionsRef = useRef<Session[]>([]);
   const sessionSeenRef = useRef<Record<string, number>>({});
   sessionsRef.current = sessions;
+  // olamPaging in a ref so loadMoreOlam (a stable useCallback) reads fresh
+  // state without depending on olamPaging (which would re-create the
+  // callback, and thus the sentinel's IntersectionObserver, on every page).
+  const olamPagingRef = useRef(olamPaging);
+  olamPagingRef.current = olamPaging;
+  // Per-org in-flight guard so a fast double-fire of the sentinel (or a
+  // slow response overlapping a new one) can't issue two concurrent fetches
+  // for the same org.
+  const inFlightOrgs = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const offState = socket.onState(setConn);
@@ -218,6 +246,13 @@ export function useClaudeControl(): ClaudeControlStore {
           const liveIds = new Set((msg.sessions ?? []).map((s) => s.id));
           for (const id of liveIds) sessionSeenRef.current[id] = now;
           const retainedIds = new Set(liveIds);
+          // An opened deep-tail row (a scrolled-in remote session past the
+          // live head — see olamPaging/mergedSessions below) never appears in
+          // `liveIds` (the WS head snapshot doesn't know about it), so
+          // without this it would fall out of the grace window and have its
+          // cached messages/pending/etc. pruned out from under the operator
+          // while it's still selected.
+          if (selectedRef.current) retainedIds.add(selectedRef.current);
           for (const [id, lastSeen] of Object.entries(sessionSeenRef.current)) {
             if (now - lastSeen <= SESSION_CACHE_GRACE_MS) retainedIds.add(id);
             else delete sessionSeenRef.current[id];
@@ -364,6 +399,60 @@ export function useClaudeControl(): ClaudeControlStore {
 
   // Close the socket only when the whole app unmounts.
   useEffect(() => () => socket.close(), [socket]);
+
+  // Seed/refresh each org's paging cursor from the live head's orgHealth.
+  // seedFromHead is a no-op once an org's tail has started accumulating (the
+  // client cursor becomes authoritative) — see lib/olamPaging.ts.
+  useEffect(() => {
+    setOlamPaging((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [org, h] of Object.entries(orgHealth)) {
+        const seeded = seedFromHead(prev[org], h);
+        if (seeded !== prev[org]) {
+          next[org] = seeded;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [orgHealth]);
+
+  // Fetch the next page for a remote org (rail sentinel callback). Guarded by
+  // inFlightOrgs so a fast double-fire of the IntersectionObserver (or a slow
+  // response overlapping a fresh trigger) can't issue two concurrent fetches
+  // for the same org. Deliberately dependency-free (reads olamPagingRef) so
+  // the callback identity is stable across renders/pages.
+  const loadMoreOlam = useCallback(async (org: string) => {
+    if (inFlightOrgs.current.has(org)) return;
+    const cur = olamPagingRef.current[org];
+    if (!canLoadMore(cur)) return;
+    inFlightOrgs.current.add(org);
+    setOlamPaging((p) => ({ ...p, [org]: { ...(p[org] ?? EMPTY_PAGING), loading: true } }));
+    try {
+      const page = await fetchOlamPage(org, cur!.cursor!);
+      setOlamPaging((p) => (p[org] ? { ...p, [org]: applyPage(p[org], page) } : p));
+    } catch {
+      setOlamPaging((p) => (p[org] ? { ...p, [org]: { ...p[org], loading: false } } : p));
+    } finally {
+      inFlightOrgs.current.delete(org);
+    }
+  }, []);
+
+  // Merge the live WS-pushed head (`sessions`) with each org's scrolled tail
+  // (pages 2..N accumulated in olamPaging) — dedup by id, head wins on overlap.
+  const mergedSessions = useMemo(() => {
+    const tail = Object.values(olamPaging).flatMap((p) => p.tail);
+    return tail.length === 0 ? sessions : mergeById(sessions, tail);
+  }, [sessions, olamPaging]);
+  const orgHasMore = useMemo(
+    () => Object.fromEntries(Object.entries(olamPaging).map(([o, p]) => [o, p.hasMore && p.cursor != null])),
+    [olamPaging],
+  );
+  const orgLoadingMore = useMemo(
+    () => Object.fromEntries(Object.entries(olamPaging).map(([o, p]) => [o, p.loading])),
+    [olamPaging],
+  );
 
   const select = useCallback(
     (id: string) => {
@@ -594,7 +683,7 @@ export function useClaudeControl(): ClaudeControlStore {
   }, [sessions]);
 
   return {
-    sessions,
+    sessions: mergedSessions,
     selectedId,
     messages,
     messagesLoaded,
@@ -606,6 +695,9 @@ export function useClaudeControl(): ClaudeControlStore {
     workflowsById,
     workflowAgentById,
     orgHealth,
+    orgHasMore,
+    orgLoadingMore,
+    loadMoreOlam,
     conn,
     resources,
     resourceHistory,

@@ -376,6 +376,22 @@ const _handler = (req, res) => {
       .catch((err) => endJson(res, 502, { error: String(err?.message ?? err) }));
     return;
   }
+  // Cursor-following pagination for the olam remote-session list (backend
+  // half of the SPA's scroll-paging). GET /api/olam/sessions?org=<slug>&cursor=<opaque>
+  // returns { sessions, nextCursor } — sessions are FULLY WRAPPED (same shape
+  // the 10s tick pushes). RemoteSessionSource.loadMore() does not mutate the
+  // tick's lastRows; the SPA owns the scrolled tail.
+  if (u.pathname === '/api/olam/sessions') {
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    const org = u.searchParams.get('org') ?? '';
+    const cursor = u.searchParams.get('cursor') || undefined;
+    if (!olamSource?.clientForOrg(org)) return endJson(res, 404, { error: `unknown org ${org}` });
+    olamSource
+      .loadMore(org, cursor)
+      .then(({ sessions, nextCursor }) => endJson(res, 200, { sessions, nextCursor: nextCursor ?? null }))
+      .catch((err) => endJson(res, 502, { error: String(err?.message ?? err) }));
+    return;
+  }
   // Phase A (cloud-session-chat, task A4) — on-demand liveness for a remote
   // (olam) session, fetched ONLY on select (this route) + pre-send (the WS
   // 'reply' handler's getSessionLiveness call) — never on the 10s tick (R5).

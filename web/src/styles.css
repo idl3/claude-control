@@ -10948,6 +10948,15 @@ select.config-input {
 .remote-archived-toggle:hover { color: var(--text-dim, #aaa); }
 .remote-archived-chevron { display: inline-block; width: 10px; }
 
+/* --- olam cursor-following infinite scroll — rail sentinel + status --- */
+.rail-loadmore-sentinel { height: 1px; }
+.rail-loadmore {
+  padding: 8px 10px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--muted, #888);
+}
+
 /* --- olam degraded (log-tail-only) streaming banner --- */
 .olam-degraded-banner {
   padding: 8px;
