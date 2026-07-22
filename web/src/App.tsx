@@ -92,7 +92,7 @@ import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
 import { loadCosmosPref } from './lib/cosmosPrefs';
 import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
-import { isNativeShell, notifySessionNative } from './lib/nativeShell';
+import { isNativeShell, notifySessionNative, openExternal } from './lib/nativeShell';
 import { loadPerfDiagnosticsEnabled, recordPerfEvent, savePerfDiagnosticsEnabled } from './lib/perfDiagnostics';
 
 
@@ -905,24 +905,28 @@ function AppInner() {
   // tab natively (delegated click handler bails for those).
 
   // Delegated capture-phase click handler: intercepts http(s) link clicks that
-  // originate inside transcript markdown (.aui-md) and opens them in a new
-  // browser tab (markdown anchors have no target="_blank" of their own). Falls
-  // through for modifier-key clicks (Cmd/Ctrl/Shift) and middle-mouse so power
-  // users still get native tab behavior.
+  // originate inside transcript markdown (.aui-md) and opens them externally
+  // (markdown anchors have no target="_blank" of their own). In the desktop
+  // shell it ALSO intercepts every http(s) `target="_blank"` anchor anywhere
+  // in the document — WKWebView has no UI-delegate, so those anchors (PR
+  // links, iframe-embed "Open in new tab" fallbacks, docs links, …) are
+  // otherwise silent no-ops; openExternal routes them to the native browser
+  // window. Outside the shell it falls through for modifier-key clicks
+  // (Cmd/Ctrl/Shift) and middle-mouse so power users still get native tab
+  // behavior; in-shell there is no native tab, so modifier clicks route too.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      // Ignore non-primary clicks and modifier-key clicks (open in new tab).
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.button !== 0) return;
+      if (!isNativeShell && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
       const a = target.closest('a');
       if (!a) return;
       const href = a.getAttribute('href') ?? '';
-      // Only intercept http(s) links inside transcript markdown.
       if (!/^https?:\/\//i.test(href)) return;
-      if (!a.closest('.aui-md')) return;
+      if (!a.closest('.aui-md') && !(isNativeShell && a.target === '_blank')) return;
       e.preventDefault();
-      window.open(href, '_blank', 'noopener,noreferrer');
+      openExternal(href);
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
