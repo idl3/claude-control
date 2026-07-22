@@ -199,6 +199,45 @@ async fn open_url_window(app: tauri::AppHandle, url: String) -> Result<(), Strin
     Ok(())
 }
 
+/// Paths from actual native drops, the ONLY thing read_dropped_file will
+/// serve. The command is reachable from the remote SPA origin, so without
+/// this gate it would be an arbitrary-file-read oracle for any page the
+/// webview ever loads.
+struct DroppedPaths(std::sync::Mutex<std::collections::HashSet<String>>);
+
+const MAX_ATTACH_BYTES: u64 = 25 * 1024 * 1024;
+
+/// Materialize a natively-dropped file for the SPA (wry owns the OS drag
+/// session in-shell — DOM drops never fire; see the DragDrop forwarding in
+/// setup). One-shot per drop: the path is consumed from the allowlist.
+#[tauri::command]
+fn read_dropped_file(
+    path: String,
+    dropped: tauri::State<'_, DroppedPaths>,
+) -> Result<serde_json::Value, String> {
+    if !dropped.0.lock().unwrap().remove(&path) {
+        return Err("not a recently dropped path".into());
+    }
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_ATTACH_BYTES {
+        return Err(format!(
+            "file is {}MB — attach cap is {}MB",
+            meta.len() / (1024 * 1024),
+            MAX_ATTACH_BYTES / (1024 * 1024)
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    use base64::Engine as _;
+    Ok(serde_json::json!({
+        "name": name,
+        "b64": base64::engine::general_purpose::STANDARD.encode(bytes),
+    }))
+}
+
 #[tauri::command]
 fn notify_session(session_id: String, title: String, body: String) {
     #[cfg(target_os = "macos")]
@@ -228,16 +267,71 @@ fn main() {
             }
         }))
         .manage(supervisor)
+        .manage(DroppedPaths(std::sync::Mutex::new(
+            std::collections::HashSet::new(),
+        )))
         .invoke_handler(tauri::generate_handler![
             notify_session,
             open_url_window,
             start_local_server,
-            local_server_status
+            local_server_status,
+            read_dropped_file
         ])
-        .setup(|_app| {
+        .setup(|app| {
+            use tauri::Manager;
             #[cfg(target_os = "macos")]
             if notifications::is_bundled() {
-                notifications::init(_app.handle().clone());
+                notifications::init(app.handle().clone());
+            }
+            // Native drag-drop → DOM bridge. With dragDropEnabled (wry's
+            // reliable mode) the OS drag session never reaches WKWebView's
+            // HTML5 events — forward wry's enter/over/drop/leave into the page
+            // as 'cc:native-drag' CustomEvents (CSS-px coordinates) and record
+            // dropped paths for read_dropped_file. The SPA hit-tests its own
+            // drop zones (web/src/lib/nativeShell.ts onNativeDrag).
+            if let Some(w) = app.get_webview_window("main") {
+                let fwd = w.clone();
+                let handle = app.handle().clone();
+                w.on_window_event(move |event| {
+                    let tauri::WindowEvent::DragDrop(dd) = event else {
+                        return;
+                    };
+                    let scale = fwd.scale_factor().unwrap_or(1.0);
+                    let (kind, position, paths): (
+                        &str,
+                        Option<tauri::PhysicalPosition<f64>>,
+                        Vec<String>,
+                    ) = match dd {
+                        tauri::DragDropEvent::Enter { paths, position } => (
+                            "enter",
+                            Some(*position),
+                            paths.iter().map(|p| p.display().to_string()).collect(),
+                        ),
+                        tauri::DragDropEvent::Over { position } => ("over", Some(*position), vec![]),
+                        tauri::DragDropEvent::Drop { paths, position } => (
+                            "drop",
+                            Some(*position),
+                            paths.iter().map(|p| p.display().to_string()).collect(),
+                        ),
+                        tauri::DragDropEvent::Leave => ("leave", None, vec![]),
+                        _ => return, // non-exhaustive upstream enum
+                    };
+                    if kind == "drop" {
+                        let state = handle.state::<DroppedPaths>();
+                        let mut set = state.0.lock().unwrap();
+                        for p in &paths {
+                            set.insert(p.clone());
+                        }
+                    }
+                    let (x, y) = position
+                        .map(|p| (p.x / scale, p.y / scale))
+                        .unwrap_or((0.0, 0.0));
+                    let payload =
+                        serde_json::json!({ "kind": kind, "x": x, "y": y, "paths": paths });
+                    let _ = fwd.eval(format!(
+                        "window.dispatchEvent(new CustomEvent('cc:native-drag',{{detail:{payload}}}))"
+                    ));
+                });
             }
             Ok(())
         })
