@@ -251,6 +251,10 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       // tail) covers the fit-case early-return below, so a pane that grows back
       // to fitting drops the bottom-align flag.
       delete el.dataset.paneOverflow;
+      // Split-pane fix: cleared up front for the same reason as paneOverflow
+      // above — see the tail comment for what these flag and why.
+      delete el.dataset.paneUnderflowX;
+      delete el.dataset.paneUnderflowY;
       // Glyph raster size scales ~linearly with fontSize, so one pass usually
       // lands within a pixel or two — a few more tighten it up. Capped so a
       // box that's still mid-layout (0-sized, or xterm's own resize hasn't
@@ -301,6 +305,36 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
       // cleared and keeps the deliberate top-align (no dead band under header).
       if (screen.getBoundingClientRect().height > el.clientHeight + 1) {
         el.dataset.paneOverflow = 'y';
+      }
+      // Split-pane fix: a pane mirrored from a split tmux window is, by
+      // definition, smaller (fewer cols and/or rows) than an unsplit window
+      // — so it converges to a screen block noticeably shorter and/or
+      // narrower than this full-screen container. The default top/left
+      // align (styles.css) leaves that shortfall as dead black space below
+      // and/or to the right, which reads as "small terminal stranded in a
+      // corner" — the operator complaint this fixes — even though the font
+      // itself is legible (often *larger* than an unsplit pane's, since
+      // fewer rows converge to a bigger fontSize). Center each axis that has
+      // real slack, independently and only when it's unambiguously safe to:
+      //  - X: whenever the rendered width already fits with no horizontal
+      //    scroll needed. Centering an OVERFLOWING row is unsafe — with
+      //    `overflow-x: auto` still set, flexbox centers the overflow
+      //    symmetrically and the scrollbar can't reach the clipped start —
+      //    so this only fires once there's nothing left to scroll to.
+      //  - Y: only once the convergence loop above is capped at
+      //    MAX_PANE_FONT_PX with real slack left over. Gating on the cap
+      //    (not just "screen shorter than container") matters: quantized
+      //    cell heights (comment above) routinely leave a few px of
+      //    letterbox on an ordinary unsplit pane too, and that's exactly the
+      //    "dead band above" the top-align default (comment above) was
+      //    written to avoid — only a pane that hit the ceiling and STILL has
+      //    room is a genuinely short pane, not quantization noise.
+      const finalRect = screen.getBoundingClientRect();
+      if (finalRect.width <= el.clientWidth) {
+        el.dataset.paneUnderflowX = 'true';
+      }
+      if (term.options.fontSize === MAX_PANE_FONT_PX && finalRect.height < el.clientHeight - 8) {
+        el.dataset.paneUnderflowY = 'true';
       }
     };
 
