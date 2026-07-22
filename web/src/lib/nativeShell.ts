@@ -41,6 +41,34 @@ export function shellDragStart(e: {
   });
 }
 
+/**
+ * Open an external http(s) URL. Outside the shell this is a plain
+ * `window.open` new tab. In-shell, `window.open`/`target="_blank"` are silent
+ * no-ops (WKWebView has no UI-delegate), so we relay to the Rust side's
+ * `open_url_window` command instead — a reusable native child window labeled
+ * "browser" that loads the URL as a top-level browsing context (immune to
+ * X-Frame-Options / CSP frame-ancestors, unlike any iframe) and carries zero
+ * IPC (its label is in no capability's `windows` list). Fire-and-forget; if
+ * the invoke rejects (older shell build without the command) we fall back to
+ * `window.open` rather than dropping the click on the floor.
+ */
+export function openExternal(url: string): void {
+  const fallback = () => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+  if (!isNativeShell) {
+    fallback();
+    return;
+  }
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  const invoked = tauri?.core?.invoke?.('open_url_window', { url });
+  if (invoked) {
+    void invoked.catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
 /** Fire-and-forget native notification (no-op outside the shell). */
 export function notifySessionNative(
   sessionId: string,

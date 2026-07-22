@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import { PtyClient, type PtyConnState } from '../lib/pty-client';
 import { setTerminalPanelFocused, getTerminalPanelFocused } from './terminalFocus';
 import { copyText, isCopyShortcut } from '../lib/terminalClipboard';
+import { openExternal } from '../lib/nativeShell';
 
 export interface XtermHostProps {
   /** Session id == tmux target (e.g. `name:0`); a fresh mount per id re-attaches. */
@@ -161,12 +162,12 @@ export function XtermHost({ sessionId, className, onEscapeElsewhere, onExit, aut
     // hood) is a core Terminal API that does its own buffer-coordinate hit
     // testing independent of the active renderer — xterm's `.xterm-viewport`
     // element (not the canvas) captures the pointer events for hover/click, so
-    // this works unmodified whether the WebGL or DOM renderer is active. Opens
-    // in a new tab; `noopener,noreferrer` matches the security posture of every
-    // other external-link open in this app.
+    // this works unmodified whether the WebGL or DOM renderer is active.
+    // openExternal = new tab in a browser, the native "browser" child window
+    // in the desktop shell (where window.open is a WKWebView no-op).
     term.loadAddon(
       new WebLinksAddon((_event, uri) => {
-        window.open(uri, '_blank', 'noopener,noreferrer');
+        openExternal(uri);
       }),
     );
 
