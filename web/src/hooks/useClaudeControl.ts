@@ -37,6 +37,37 @@ function pruneRecord<T>(record: Record<string, T>, liveIds: Set<string>): Record
   return Object.fromEntries(keys.filter((id) => liveIds.has(id)).map((id) => [id, record[id]]));
 }
 
+/**
+ * True when session `id`'s pending flag should be treated as user-dismissed
+ * right now — i.e. the server is still reporting the SAME toolUseId the user
+ * already dismissed, not a genuinely new question.
+ *
+ * ROOT CAUSE this guards against: a stalled session (rate limit / API error)
+ * keeps re-broadcasting the identical `pending` on every tailer poll cycle —
+ * both via `{type:'pending'}` pushes AND the periodic `{type:'sessions'}`
+ * snapshot. The derived `pending` memo (below) already reconciles the ask
+ * CARD against `dismissedById` by toolUseId, but the raw `sessions[i].pending`
+ * boolean that drives the rail badge was being overwritten straight from
+ * each re-send with no such check — so the badge silently un-dismissed
+ * itself on the very next frame. This predicate is the single place both
+ * `case 'pending'` and `case 'sessions'` consult before writing `pending`
+ * onto a session row, so the rail badge and the ask card agree.
+ *
+ * `pendingById[id]` is the last-known STRUCTURED pending (has a real
+ * toolUseId) — comparing against it lets a genuinely new question (different
+ * toolUseId) through undismissed, exactly like the `pending` memo.
+ */
+function isRailPendingDismissed(
+  id: string,
+  dismissedById: Record<string, string>,
+  pendingById: Record<string, Pending | null>,
+): boolean {
+  const dismissedToolUseId = dismissedById[id];
+  if (!dismissedToolUseId) return false;
+  const known = pendingById[id];
+  return !!known && known.toolUseId === dismissedToolUseId;
+}
+
 export interface ClaudeControlStore {
   sessions: Session[];
   selectedId: string | null;
@@ -224,6 +255,13 @@ export function useClaudeControl(): ClaudeControlStore {
   const sessionsRef = useRef<Session[]>([]);
   const sessionSeenRef = useRef<Record<string, number>>({});
   sessionsRef.current = sessions;
+  // dismissedById/pendingById in refs so the message handler (registered
+  // once, see the `[socket]`-only effect below) reads a FRESH value when
+  // reconciling the rail badge — see isRailPendingDismissed.
+  const dismissedByIdRef = useRef<Record<string, string>>({});
+  const pendingByIdRef = useRef<Record<string, Pending | null>>({});
+  dismissedByIdRef.current = dismissedById;
+  pendingByIdRef.current = pendingById;
   // olamPaging in a ref so loadMoreOlam (a stable useCallback) reads fresh
   // state without depending on olamPaging (which would re-create the
   // callback, and thus the sentinel's IntersectionObserver, on every page).
@@ -244,13 +282,23 @@ export function useClaudeControl(): ClaudeControlStore {
           // generation, which would drop the meta row and make the card's height
           // flicker ("wonky"). Sticky values keep the row stable; they update as
           // soon as a refresh carries a real value again.
+          //
+          // Also reconcile `pending` against a dismissed stale question (see
+          // isRailPendingDismissed) — the periodic snapshot has no idea a
+          // question was locally dismissed and would otherwise silently
+          // re-light the rail's ASK badge for the same toolUseId on the very
+          // next broadcast.
           setSessions((prev) => {
             const byId = new Map(prev.map((s) => [s.id, s]));
             return (msg.sessions ?? []).map((s) => {
               const old = byId.get(s.id);
-              if (!old) return s;
+              const pending = isRailPendingDismissed(s.id, dismissedByIdRef.current, pendingByIdRef.current)
+                ? false
+                : s.pending;
+              if (!old) return { ...s, pending };
               return {
                 ...s,
+                pending,
                 model: s.model ?? old.model,
                 ctxPct: s.ctxPct ?? old.ctxPct,
               };
@@ -309,15 +357,22 @@ export function useClaudeControl(): ClaudeControlStore {
         case 'olam-transcript-ready':
           setReadyById((prev) => (prev[msg.id] ? prev : { ...prev, [msg.id]: true }));
           break;
-        case 'pending':
+        case 'pending': {
           setPendingById((prev) => ({ ...prev, [msg.id]: msg.pending }));
-          // Keep the rail badge in sync without waiting for the next snapshot.
+          // Keep the rail badge in sync without waiting for the next
+          // snapshot — but reconcile against a dismissed stale question
+          // first: a stalled session re-broadcasts the SAME toolUseId on
+          // every poll cycle, and a bare `!!msg.pending` would re-light the
+          // badge for a question the user already dismissed as stale.
+          const dismissedToolUseId = dismissedByIdRef.current[msg.id];
+          const isDismissed = !!msg.pending && msg.pending.toolUseId === dismissedToolUseId;
           setSessions((prev) =>
             prev.map((s) =>
-              s.id === msg.id ? { ...s, pending: !!msg.pending } : s,
+              s.id === msg.id ? { ...s, pending: isDismissed ? false : !!msg.pending } : s,
             ),
           );
           break;
+        }
         case 'resources': {
           const snap = msg.snapshot ?? null;
           setResources({ snapshot: snap, warning: msg.warning ?? null });

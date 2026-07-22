@@ -237,4 +237,81 @@ describe('useClaudeControl — dismissPending (stale-question escape hatch)', ()
     act(() => result.current.dismissPending(id, 'tu-1'));
     expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
   });
+
+  // ROOT CAUSE (residual, post-#370): the rail badge clear above is a
+  // ONE-SHOT local patch of `sessions`. Both `case 'pending'` and
+  // `case 'sessions'` in the WS reducer independently overwrite
+  // `sessions[i].pending` straight from the server payload with NO check
+  // against `dismissedById` — unlike the `pending` memo (used by the ask
+  // card), which already reconciles against `dismissedById`. A stalled
+  // session's tailer keeps re-broadcasting the identical stale question on
+  // every poll cycle (this is the exact mechanism #370's own description
+  // names: "keeps re-reporting the same pending on every snapshot/pending WS
+  // frame"), so the very next repeated frame flips the rail badge back to
+  // `true` — the operator-visible "stuck yellow ASK badge that never
+  // clears," even though the in-thread card correctly stays dismissed.
+  it('rail badge stays cleared across a REPEATED `pending` re-send for the dismissed toolUseId', async () => {
+    const id = 'sess-dismiss-4';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const pending = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+
+    // Server has no idea it was dismissed — the tailer re-broadcasts the
+    // SAME toolUseId on the next poll cycle (the stalled/rate-limited case).
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+  });
+
+  it('rail badge stays cleared across a REPEATED `sessions` snapshot for the dismissed toolUseId', async () => {
+    const id = 'sess-dismiss-5';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const pending = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending });
+    });
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+
+    // The periodic session-list broadcast (registry `change` event) still
+    // reports the same session as `pending: true` — the registry's
+    // transcript-derived pending flag never clears without a real answer.
+    await act(async () => {
+      ws.message({ type: 'sessions', sessions: [{ ...localSession(id), pending: true }] });
+    });
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+  });
+
+  it('rail badge DOES re-show for a genuinely NEW question (different toolUseId) after a dismissal', async () => {
+    const id = 'sess-dismiss-6';
+    const { result, ws } = await mountConnected([localSession(id)]);
+    act(() => result.current.select(id));
+
+    const first = { toolUseId: 'tu-1', questions: [{ question: 'Proceed?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending: first });
+    });
+    act(() => result.current.dismissPending(id, 'tu-1'));
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(false);
+
+    const second = { toolUseId: 'tu-2', questions: [{ question: 'Continue?', options: [] }] };
+    await act(async () => {
+      ws.message({ type: 'pending', id, pending: second });
+    });
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(true);
+
+    await act(async () => {
+      ws.message({ type: 'sessions', sessions: [{ ...localSession(id), pending: true }] });
+    });
+    expect(result.current.sessions.find((s) => s.id === id)?.pending).toBe(true);
+  });
 });

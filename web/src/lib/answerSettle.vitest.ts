@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS } from './answerSettle';
+import {
+  shouldShowPrompt,
+  shouldShowSynthesizedAsk,
+  resolveDismissToolUseId,
+  SETTLE_CAP_MS,
+  FLAG_PENDING_TOOL_USE_ID,
+} from './answerSettle';
 
 // Fixed reference time used across tests.
 const T0 = 1_000_000;
@@ -191,5 +197,33 @@ describe('shouldShowSynthesizedAsk', () => {
       settleDeadline: 0,
       now: T0,
     })).toBe(true);
+  });
+});
+
+// ROOT CAUSE under test: onThreadDismiss previously only checked structured
+// `cockpit.pending`, which is always null for the synthesized FLAG fallback
+// (tailer-less session) — Dismiss was a hard no-op on that path, leaving the
+// dialog permanently stuck even though the Dismiss control was visible and
+// clickable. resolveDismissToolUseId centralizes the priority order so both
+// ask shapes resolve to a dismissable toolUseId.
+describe('resolveDismissToolUseId', () => {
+  it('prefers the structured pending toolUseId when present', () => {
+    const pending = { toolUseId: 'tu-1' };
+    const activePrompt = { kind: 'ask', pending: { toolUseId: 'tu-1' } };
+    expect(resolveDismissToolUseId(pending, activePrompt)).toBe('tu-1');
+  });
+
+  it('falls back to the synthesized FLAG ask when there is no structured pending', () => {
+    const activePrompt = { kind: 'ask', pending: { toolUseId: FLAG_PENDING_TOOL_USE_ID } };
+    expect(resolveDismissToolUseId(null, activePrompt)).toBe(FLAG_PENDING_TOOL_USE_ID);
+  });
+
+  it('returns null for a stray click with no live question', () => {
+    expect(resolveDismissToolUseId(null, null)).toBeNull();
+  });
+
+  it('returns null when the active prompt is a scrape `prompt`, not an `ask`', () => {
+    const activePrompt = { kind: 'prompt' };
+    expect(resolveDismissToolUseId(null, activePrompt)).toBeNull();
   });
 });
