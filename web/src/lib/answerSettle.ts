@@ -141,3 +141,30 @@ export function shouldShowSynthesizedAsk({
   if (!pickerOpen) return true;
   return false;
 }
+
+/**
+ * Resolve which toolUseId (if any) a Dismiss click should hand to
+ * `dismissPending`, mirroring the exact priority order `activePrompt`
+ * itself resolves the live ask through:
+ *
+ *  1. structured `cockpit.pending` (tailer-derived, real toolUseId) — the
+ *     common case (rate-limited/errored session with a real AskUserQuestion).
+ *  2. the synthesized FLAG fallback (tailer-less session — no structured
+ *     Pending, only the session's boolean `pending` flag; see App.tsx's
+ *     `activePrompt` memo). Previously Dismiss was a hard no-op here: the
+ *     caller only checked `cockpit.pending`, which is always null on this
+ *     path, so the click did nothing and the dialog stayed stuck.
+ *
+ * Returns null when there is nothing live to dismiss (stray-click guard —
+ * matches the previous inline `cockpit.pending &&` guard for case 1).
+ */
+export function resolveDismissToolUseId(
+  pending: { toolUseId: string } | null,
+  activePrompt: { kind: string; pending?: { toolUseId: string } } | null,
+): string | null {
+  if (pending) return pending.toolUseId;
+  if (activePrompt?.kind === 'ask' && activePrompt.pending?.toolUseId === FLAG_PENDING_TOOL_USE_ID) {
+    return FLAG_PENDING_TOOL_USE_ID;
+  }
+  return null;
+}
