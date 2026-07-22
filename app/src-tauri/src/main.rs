@@ -160,6 +160,45 @@ async fn local_server_status(
         .map_err(|e| e.to_string())
 }
 
+/// Validate a URL relayed from the SPA for the native browser window. The SPA
+/// forwards arbitrary hrefs (transcript markdown, xterm links, context menus),
+/// so scheme validation is load-bearing: only top-level web content —
+/// `javascript:`, `file:`, custom app schemes, etc. are rejected.
+fn parse_external_http_url(raw: &str) -> Result<tauri::Url, String> {
+    let parsed = tauri::Url::parse(raw).map_err(|e| format!("invalid url: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        other => Err(format!("refusing non-http(s) scheme: {other}")),
+    }
+}
+
+/// Reusable native "browser" child window. Loads arbitrary http(s) URLs as a
+/// top-level browsing context — unlike any in-page iframe it is not subject to
+/// X-Frame-Options / CSP frame-ancestors, and unlike `window.open` it needs no
+/// WKWebView UI-delegate. Reuses a single window labeled "browser": navigate +
+/// focus if it exists, else build it. SECURITY: the "browser" label is
+/// deliberately absent from every capability's `windows` list
+/// (capabilities/*.json), so the external content it hosts gets zero IPC by
+/// construction. Standard macOS chrome on purpose: the Overlay/hiddenTitle
+/// styling in tauri.macos.conf.json applies only to the config-defined "main"
+/// window, never to runtime-built ones.
+#[tauri::command]
+async fn open_url_window(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri::Manager;
+    let parsed = parse_external_http_url(&url)?;
+    if let Some(existing) = app.get_webview_window("browser") {
+        existing.navigate(parsed).map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "browser", tauri::WebviewUrl::External(parsed))
+        .title("Claude Control — Browser")
+        .inner_size(1100.0, 850.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn notify_session(session_id: String, title: String, body: String) {
     #[cfg(target_os = "macos")]
@@ -191,6 +230,7 @@ fn main() {
         .manage(supervisor)
         .invoke_handler(tauri::generate_handler![
             notify_session,
+            open_url_window,
             start_local_server,
             local_server_status
         ])
@@ -210,4 +250,42 @@ fn main() {
                 exit_supervisor.shutdown();
             }
         });
+}
+
+#[cfg(test)]
+mod open_url_tests {
+    use super::parse_external_http_url;
+
+    #[test]
+    fn accepts_http_and_https() {
+        assert_eq!(
+            parse_external_http_url("https://example.com/a?b=c#d")
+                .unwrap()
+                .as_str(),
+            "https://example.com/a?b=c#d"
+        );
+        assert!(parse_external_http_url("http://127.0.0.1:4317/").is_ok());
+    }
+
+    #[test]
+    fn rejects_non_http_schemes() {
+        // The SPA relays arbitrary hrefs — every non-web scheme must bounce.
+        for url in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "tauri://localhost",
+            "data:text/html,hi",
+        ] {
+            let err = parse_external_http_url(url).unwrap_err();
+            assert!(err.contains("refusing non-http(s) scheme"), "{url}: {err}");
+        }
+    }
+
+    #[test]
+    fn rejects_unparseable_urls() {
+        for url in ["", "not a url", "https://", "//missing-scheme.example"] {
+            assert!(parse_external_http_url(url).is_err(), "{url}");
+        }
+    }
 }
