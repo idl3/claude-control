@@ -85,7 +85,7 @@ import {
   removePendingSend,
   toMs,
 } from './lib/pendingSend';
-import { shouldShowPrompt, shouldShowSynthesizedAsk, SETTLE_CAP_MS, FLAG_PENDING_TOOL_USE_ID } from './lib/answerSettle';
+import { shouldShowPrompt, shouldShowSynthesizedAsk, resolveDismissToolUseId, SETTLE_CAP_MS, FLAG_PENDING_TOOL_USE_ID } from './lib/answerSettle';
 import { applySubAgentPrefix, type SubAgentMode } from './lib/subAgent';
 import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
@@ -2051,13 +2051,15 @@ function AppInner() {
   );
   // Dismiss a stale `pending` question (e.g. the session errored/hit a usage
   // limit and can no longer be answered) — sends nothing, only hides the
-  // dialog locally. Guarded on cockpit.pending so a stray click with no live
-  // question is a no-op.
+  // dialog locally. See resolveDismissToolUseId for which of the two ask
+  // shapes (structured `cockpit.pending` vs. the synthesized FLAG fallback)
+  // is being dismissed; returns null (no-op) for a stray click with no live
+  // question.
   const onThreadDismiss = useCallback(() => {
-    if (cockpit.selectedId && cockpit.pending) {
-      cockpit.dismissPending(cockpit.selectedId, cockpit.pending.toolUseId);
-    }
-  }, [cockpit.selectedId, cockpit.pending, cockpit.dismissPending]);
+    if (!cockpit.selectedId) return;
+    const toolUseId = resolveDismissToolUseId(cockpit.pending, activePrompt);
+    if (toolUseId) cockpit.dismissPending(cockpit.selectedId, toolUseId);
+  }, [cockpit.selectedId, cockpit.pending, cockpit.dismissPending, activePrompt]);
   const onThreadKey = useCallback(
     (key: string) => {
       cockpit.sendPromptKey(key);
