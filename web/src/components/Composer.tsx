@@ -41,6 +41,7 @@ import { ComposerAttachButton, ComposerMicButton, ComposerRawSendButton, Compose
 import { AskInline, type ActivePrompt } from './AskInline';
 import { composerHighlightSegments } from '../lib/composerHighlight';
 import { acceptsFile } from '../lib/attachments';
+import { isNativeShell, onNativeDrag, readDroppedFile } from '../lib/nativeShell';
 
 // Module-level per-session cache so the skill list (live, session-discovered
 // via GET /api/skills?id=<sessionId> → lib/skills.js) is fetched once per
@@ -1890,6 +1891,57 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       setDragActive(false);
     }
   }, [dragEnabled]);
+
+  // Desktop shell: OS file drags never reach the DOM handlers above — wry's
+  // native layer owns the drag session in-shell (verified on stamped builds:
+  // HTML5 dragenter/drop stay silent under BOTH dragDropEnabled states on
+  // macOS). The shell forwards native enter/over/drop/leave as
+  // 'cc:native-drag' CustomEvents with CSS-px coordinates + file paths; we
+  // hit-test the composer card and drive the SAME overlay state and
+  // addAttachment path the browser drop uses, so behavior stays identical
+  // from the operator's side.
+  useEffect(() => {
+    if (!isNativeShell) return undefined;
+    return onNativeDrag((d) => {
+      const card = composerCardRef.current;
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      const inside =
+        d.x >= r.left && d.x <= r.right && d.y >= r.top && d.y <= r.bottom;
+      if (d.kind === 'leave') {
+        dragDepthRef.current = 0;
+        setDragActive(false);
+        return;
+      }
+      if (d.kind === 'enter' || d.kind === 'over') {
+        dragDepthRef.current = 0; // native stream has no nested enter/leave pairs
+        setDragActive(dragEnabled && inside);
+        return;
+      }
+      // drop
+      dragDepthRef.current = 0;
+      setDragActive(false);
+      if (!dragEnabled || !inside) return;
+      for (const p of d.paths) {
+        void readDroppedFile(p).then((file) => {
+          if (!file) {
+            onToast?.(`Attach failed: couldn't read ${p}`, 'error');
+            return undefined;
+          }
+          if (!acceptsFile(file)) {
+            onToast?.(`Can't attach ${file.name} — unsupported file type`, 'error');
+            return undefined;
+          }
+          return composer.addAttachment(file).catch((err) => {
+            onToast?.(
+              `Attach failed: ${err instanceof Error ? err.message : String(err)}`,
+              'error',
+            );
+          });
+        });
+      }
+    });
+  }, [dragEnabled, composer, onToast]);
 
   return (
     <ComposerPrimitive.Root className="composer" data-ask-active={askActive ? 'true' : undefined}>
