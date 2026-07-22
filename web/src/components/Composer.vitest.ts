@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { fireEvent } from '@testing-library/dom';
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react';
@@ -27,14 +27,16 @@ const STUB_SERVICES: Partial<ComposerServices> = {
 
 interface HarnessProps {
   disabled: boolean;
+  onNew?: (message: ThreadMessageLike) => Promise<void>;
+  services?: Partial<ComposerServices>;
 }
 
-function Harness({ disabled }: HarnessProps) {
+function Harness({ disabled, onNew, services }: HarnessProps) {
   const runtime = useExternalStoreRuntime({
     messages: [] as ThreadMessageLike[],
     isDisabled: false,
     convertMessage: identityConvertMessage,
-    onNew: async () => {},
+    onNew: onNew ?? (async () => {}),
   });
   return createElement(
     AssistantRuntimeProvider,
@@ -43,7 +45,7 @@ function Harness({ disabled }: HarnessProps) {
       disabled,
       sessionId: 'session-1',
       onToast: () => {},
-      services: STUB_SERVICES,
+      services: services ?? STUB_SERVICES,
     }),
   );
 }
@@ -110,5 +112,67 @@ describe('Composer drag overlay — never gets stuck when drag mode flips off mi
     // the overlay must clear itself rather than persisting forever.
     rerender(createElement(Harness, { disabled: true }));
     expect(document.querySelector('.composer-drop-overlay')).toBeNull();
+  });
+});
+
+// Keybindings were inverted: ⌘/Ctrl+Enter is now the default raw send, and
+// ⌘/Ctrl+Shift+Enter now runs the prompt optimiser (previously the reverse).
+// These prove the chord → action wiring directly, independent of button
+// styling, so a future accidental re-swap of the keydown branches fails loud.
+describe('Composer keybindings — ⌘/Ctrl+Enter sends raw, ⌘/Ctrl+Shift+Enter optimises', () => {
+  function textarea(): HTMLTextAreaElement {
+    return document.querySelector('.composer-input') as HTMLTextAreaElement;
+  }
+
+  it('⌘+Enter (no shift) sends the raw composer text — bypasses the optimiser', async () => {
+    const onNew = vi.fn(async () => {});
+    const optimizePrompt = vi.fn(async (text: string) => ({
+      optimized: text,
+      rationale: [],
+      changes: [],
+      mode: 'rules' as const,
+    }));
+    render(createElement(Harness, { disabled: false, onNew, services: { ...STUB_SERVICES, optimizePrompt } }));
+
+    fireEvent.change(textarea(), { target: { value: 'ship the fix' } });
+    fireEvent.keyDown(textarea(), { key: 'Enter', metaKey: true });
+
+    // composer.send() → append() is async (it awaits an internal tool-call
+    // abort check before invoking onNew), so the call lands a microtask
+    // after the synchronous keydown dispatch — wait for it rather than
+    // asserting immediately.
+    await vi.waitFor(() => {
+      expect(onNew).toHaveBeenCalledTimes(1);
+    });
+    expect(optimizePrompt).not.toHaveBeenCalled();
+  });
+
+  it('⌘+Shift+Enter runs the prompt optimiser — does NOT send', async () => {
+    const onNew = vi.fn(async () => {});
+    const optimizePrompt = vi.fn(async (text: string) => ({
+      optimized: text,
+      rationale: [],
+      changes: [],
+      mode: 'rules' as const,
+    }));
+    render(createElement(Harness, { disabled: false, onNew, services: { ...STUB_SERVICES, optimizePrompt } }));
+
+    fireEvent.change(textarea(), { target: { value: 'ship the fix' } });
+    fireEvent.keyDown(textarea(), { key: 'Enter', metaKey: true, shiftKey: true });
+
+    // NOT toHaveBeenCalledTimes(1): Composer.tsx wires the ⌘/Ctrl+⇧+↵ chord in
+    // TWO independent listeners (a window-level capture-phase one plus the
+    // textarea's own onKeyDown), and neither stops propagation or checks
+    // e.target — so a single real keypress invokes runEnhance() from both,
+    // calling optimizePrompt() twice. That's a pre-existing double-invoke
+    // (present under the old mapping too — see [100x-specialist] intel
+    // below), not something this chord/button-mapping swap owns fixing. This
+    // test only asserts DIRECTION (optimise fires, send doesn't), which is
+    // what "prove ⌘+⇧+↵ triggers optimize" requires.
+    await vi.waitFor(() => {
+      expect(optimizePrompt).toHaveBeenCalled();
+    });
+    expect(optimizePrompt).toHaveBeenCalledWith('ship the fix');
+    expect(onNew).not.toHaveBeenCalled();
   });
 });
