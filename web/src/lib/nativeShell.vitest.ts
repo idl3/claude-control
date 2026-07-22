@@ -125,3 +125,61 @@ describe('nativeShell', () => {
     expect(startDragging).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('native file-drop bridge', () => {
+  it('onNativeDrag outside the shell: inert unsubscriber, no listener', async () => {
+    const mod = await import('./nativeShell');
+    const handler = vi.fn();
+    const off = mod.onNativeDrag(handler);
+    window.dispatchEvent(
+      new CustomEvent('cc:native-drag', {
+        detail: { kind: 'enter', x: 1, y: 1, paths: [] },
+      }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(() => off()).not.toThrow();
+  });
+
+  it('onNativeDrag in-shell: routes event detail; unsubscribe stops delivery', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'ClaudeControlShell/0.1.1' });
+    const mod = await import('./nativeShell');
+    const handler = vi.fn();
+    const off = mod.onNativeDrag(handler);
+    const detail = { kind: 'drop', x: 10, y: 20, paths: ['/tmp/a.png'] };
+    window.dispatchEvent(new CustomEvent('cc:native-drag', { detail }));
+    expect(handler).toHaveBeenCalledWith(detail);
+    off();
+    window.dispatchEvent(new CustomEvent('cc:native-drag', { detail }));
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('readDroppedFile: decodes the b64 payload into a typed File', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'ClaudeControlShell/0.1.1' });
+    const invoke = vi
+      .fn()
+      .mockResolvedValue({ name: 'shot.png', b64: btoa('abc') });
+    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {
+      core: { invoke },
+    };
+    const mod = await import('./nativeShell');
+    const file = await mod.readDroppedFile('/tmp/shot.png');
+    expect(invoke).toHaveBeenCalledWith('read_dropped_file', {
+      path: '/tmp/shot.png',
+    });
+    expect(file?.name).toBe('shot.png');
+    expect(file?.type).toBe('image/png');
+    expect(file?.size).toBe(3);
+  });
+
+  it('readDroppedFile: null without the Tauri global and on invoke rejection', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'ClaudeControlShell/0.1.1' });
+    const mod = await import('./nativeShell');
+    expect(await mod.readDroppedFile('/tmp/x')).toBeNull();
+    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {
+      core: { invoke: vi.fn().mockRejectedValue(new Error('not a dropped path')) },
+    };
+    vi.resetModules();
+    const mod2 = await import('./nativeShell');
+    expect(await mod2.readDroppedFile('/tmp/x')).toBeNull();
+  });
+});

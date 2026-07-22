@@ -83,3 +83,74 @@ export function notifySessionNative(
     },
   );
 }
+
+// ── Native file-drop bridge ─────────────────────────────────────────────────
+// In-shell, OS file drags never reach the DOM: wry's native layer owns the
+// drag session (dragDropEnabled: true — its reliable mode; the false path is
+// broken on macOS regardless, verified on stamped builds). The Rust side
+// forwards wry's enter/over/drop/leave as 'cc:native-drag' CustomEvents with
+// CSS-pixel coordinates + dropped file paths; consumers hit-test their own
+// rects and reuse their existing attach pipelines via readDroppedFile.
+
+export interface NativeDragDetail {
+  kind: 'enter' | 'over' | 'drop' | 'leave';
+  x: number;
+  y: number;
+  paths: string[];
+}
+
+/** Subscribe to shell-forwarded native drag events. No-op unsubscriber
+ *  outside the shell. */
+export function onNativeDrag(
+  handler: (d: NativeDragDetail) => void,
+): () => void {
+  if (!isNativeShell) return () => {};
+  const listener = (e: Event) => {
+    const d = (e as CustomEvent).detail as NativeDragDetail | undefined;
+    if (d && typeof d.kind === 'string') handler(d);
+  };
+  window.addEventListener('cc:native-drag', listener);
+  return () => window.removeEventListener('cc:native-drag', listener);
+}
+
+// acceptsFile matches extensions too, but a real MIME keeps image previews +
+// server-side typing working for the common cases.
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  heic: 'image/heic',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  json: 'application/json',
+};
+
+/**
+ * Materialize a shell-dropped file path into a web File via the shell's
+ * read_dropped_file command (which only serves paths from an actual recent
+ * native drop — it is not a general file-read hole). Null on any failure.
+ */
+export async function readDroppedFile(path: string): Promise<File | null> {
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  const invoke = tauri?.core?.invoke;
+  if (!invoke) return null;
+  try {
+    const res = (await invoke('read_dropped_file', { path })) as {
+      name: string;
+      b64: string;
+    };
+    const bin = atob(res.b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    const ext = res.name.split('.').pop()?.toLowerCase() ?? '';
+    return new File([bytes], res.name, {
+      type: EXT_MIME[ext] ?? 'application/octet-stream',
+    });
+  } catch {
+    return null;
+  }
+}
