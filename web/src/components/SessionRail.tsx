@@ -7,6 +7,7 @@ import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession } from '../lib/api';
+import { setStandaloneDragImage } from '../lib/dragGhost';
 import { defaultOrgLabel } from './RailTabs';
 import {
   loadRailTokens,
@@ -834,6 +835,11 @@ function PaneRow({
         // the OS drag cursor (confirmed via MoveWindowModal, not on drop).
         e.dataTransfer.setData('text/cockpit-session', s.id);
         e.dataTransfer.effectAllowed = 'move';
+        // Explicit standalone ghost: WebKit snapshots the rail's whole
+        // backdrop-filter layer for the default drag image (neighbor labels
+        // ghosting into the drag preview in the desktop shell) — see
+        // lib/dragGhost.ts.
+        setStandaloneDragImage(e.nativeEvent, e.currentTarget as HTMLElement);
         onDragStart?.(s.id);
       }}
       onDragEnd={() => onDragEnd?.()}
