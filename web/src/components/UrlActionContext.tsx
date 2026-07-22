@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { copyText } from '../lib/terminalClipboard';
 import { computeMenuPosition, framingFallbackState, type RectLike } from '../lib/linkify';
+import { openExternal } from '../lib/nativeShell';
 import { XIcon } from './icons';
 
 /**
@@ -152,7 +153,9 @@ function UrlActionMenu({
   }, [onClose]);
 
   const handleNewTab = () => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Browser: a plain new tab. Desktop shell: the native "browser" child
+    // window (window.open is a silent WKWebView no-op there).
+    openExternal(url);
     onClose();
   };
 
