@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
-import { setStandaloneDragImage } from './dragGhost';
+import { describe, it, expect } from 'vitest';
+import { createPointerGhost } from './dragGhost';
 
 function makeRow(): HTMLElement {
   const rail = document.createElement('div');
@@ -13,43 +13,47 @@ function makeRow(): HTMLElement {
   return row;
 }
 
-describe('setStandaloneDragImage', () => {
-  it('points setDragImage at a body-level clone outside the rail layer', () => {
+describe('createPointerGhost', () => {
+  it('appends a body-level clone outside the rail layer', () => {
     const row = makeRow();
-    const setDragImage = vi.fn();
-    setStandaloneDragImage(
-      { clientX: 10, clientY: 5, dataTransfer: { setDragImage } },
-      row,
-    );
-    expect(setDragImage).toHaveBeenCalledTimes(1);
-    const ghost = setDragImage.mock.calls[0][0] as HTMLElement;
+    const g = createPointerGhost(row, 10, 5);
+    const ghost = document.body.lastElementChild as HTMLElement;
     expect(ghost).not.toBe(row);
-    // Standalone: parked under <body>, NOT inside the backdrop-filter rail.
+    // Standalone: parked under <body>, NOT inside the backdrop-filter rail —
+    // WebKit would composite an in-rail clone against the whole glass layer.
     expect(ghost.parentElement).toBe(document.body);
     expect(ghost.closest('.rail')).toBeNull();
-    expect(ghost.style.position).toBe('fixed');
     expect(ghost.textContent).toBe('my session');
+    expect(ghost.style.position).toBe('fixed');
+    // Must never intercept hit-testing (elementFromPoint drop probe) nor the
+    // pointer events driving the drag.
+    expect(ghost.style.pointerEvents).toBe('none');
+    expect(ghost.getAttribute('aria-hidden')).toBe('true');
+    g.destroy();
   });
 
-  it('removes the ghost on the next animation frame', async () => {
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-      cb(0);
-      return 0;
-    });
+  it('move() repositions via transform translate3d honoring the grab offset', () => {
+    // jsdom rects are all zeros, so a grab at (10, 5) IS the offset: the
+    // initial placement lands the row's origin at (0, 0) and every move()
+    // keeps that grab point under the cursor.
     const row = makeRow();
-    const before = document.body.querySelectorAll('.session-item').length;
-    setStandaloneDragImage(
-      { clientX: 0, clientY: 0, dataTransfer: { setDragImage: vi.fn() } },
-      row,
-    );
-    expect(document.body.querySelectorAll('.session-item').length).toBe(before);
-    vi.unstubAllGlobals();
+    const g = createPointerGhost(row, 10, 5);
+    const ghost = document.body.lastElementChild as HTMLElement;
+    expect(ghost.style.transform).toBe('translate3d(0px, 0px, 0)');
+    g.move(110, 55);
+    expect(ghost.style.transform).toBe('translate3d(100px, 50px, 0)');
+    // Compositor-only motion: top/left stay parked at 0, never animated.
+    expect(ghost.style.top).toBe('0px');
+    expect(ghost.style.left).toBe('0px');
+    g.destroy();
   });
 
-  it('no-ops without dataTransfer/setDragImage (jsdom-native drags)', () => {
+  it('destroy() removes the ghost and is safe to call twice', () => {
     const row = makeRow();
-    expect(() =>
-      setStandaloneDragImage({ clientX: 0, clientY: 0, dataTransfer: null }, row),
-    ).not.toThrow();
+    const g = createPointerGhost(row, 0, 0);
+    const withGhost = document.body.querySelectorAll('.session-item').length;
+    g.destroy();
+    expect(document.body.querySelectorAll('.session-item').length).toBe(withGhost - 1);
+    expect(() => g.destroy()).not.toThrow();
   });
 });
