@@ -75,7 +75,7 @@
     </form>
 
     <div class="dots"><i></i><i></i><i></i></div>
-    <div class="counter">native opens: <b id="n">0</b></div>
+    <div class="counter"><span id="ver"></span>native opens: <b id="n">0</b></div>
   </div>
 
 <script>
@@ -180,6 +180,13 @@
   });
 
   $("n").textContent = localStorage.getItem(KEY_OPENS) || 0;
+
+  // Build stamp — answers "which binary am I actually running?" (two 0.1.0
+  // DMGs circulated with different behavior; never again). Shown on the
+  // splash + always available via the app's About panel.
+  window.__TAURI__?.app?.getVersion?.().then((v) => {
+    $("ver").textContent = "v" + v + " · ";
+  }).catch(() => {});
 
   $("setup").addEventListener("submit", (e) => {
     e.preventDefault();
