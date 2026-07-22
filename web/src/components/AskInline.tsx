@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AskQuestionForm, isFreeTextOption, useHeightFlip } from '@idl3/agent-ui-kit';
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -7,8 +7,13 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { AssistantMessage, UserMessage } from './Messages';
-import type { AnswerSelection, Pending, PendingQuestion, PendingOption, PanePrompt } from '../lib/types';
+import type { AnswerSelection, Pending, PanePrompt } from '../lib/types';
 import { FLAG_PENDING_TOOL_USE_ID } from '../lib/answerSettle';
+
+// The structured-ask renderer now lives in @idl3/agent-ui-kit; re-export its
+// helpers so existing imports (tests, AskModal suite) keep working.
+export { questionHasPreview } from '@idl3/agent-ui-kit';
+export { isFreeTextOption };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -34,82 +39,11 @@ export interface AskInlineProps {
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
 
-type Selections = Set<string>[];
-
-function initSelections(pending: Pending): Selections {
-  return pending.questions.map(() => new Set<string>());
-}
-
-/** True when any option in the question carries a preview string. */
-export function questionHasPreview(q: PendingQuestion): boolean {
-  return q.options.some((o) => typeof o.preview === 'string' && o.preview.length > 0);
-}
-
-/** True when the label indicates a "type something" / free-text option. */
-export function isFreeTextOption(label: string): boolean {
-  return /type something|chat about this/i.test(label);
-}
-
 /** Grow a textarea to fit its content (capped by the CSS max-height → scrolls). */
 function autoGrow(el: HTMLTextAreaElement | null): void {
   if (!el) return;
   el.style.height = 'auto';
   el.style.height = `${el.scrollHeight}px`;
-}
-
-/**
- * Claude's TUI always appends these two rows to an AskUserQuestion picker, but
- * they are NOT in the structured tool input — so the structured render must add
- * them to match what the TUI shows. Both route to the free-text flow. Labels
- * mirror the TUI text so the answer navigation matches the live picker row.
- */
-const SYNTHETIC_FREETEXT: PendingOption[] = [
-  { label: 'Type something' },
-  { label: 'Chat about this' },
-];
-
-/** Real options + the TUI's always-appended free-text rows (parity with the TUI,
- *  which appends these to EVERY AskUserQuestion picker regardless of content). */
-function withFreeText(q: PendingQuestion): PendingOption[] {
-  return [...q.options, ...SYNTHETIC_FREETEXT];
-}
-
-/**
- * Animate the ask body's height across a content swap (options ↔ free-text). The
- * card is auto-height and follows the body. A ResizeObserver can't do this — by
- * the time it fires the DOM already snapped — so we capture the height in the
- * click handler BEFORE setState, then FLIP from it after the re-render.
- * Returns `capture()` to call synchronously before the state change.
- */
-function useHeightFlip(bodyRef: React.RefObject<HTMLElement | null>, dep: unknown) {
-  const beforeRef = useRef<number | null>(null);
-  const capture = () => {
-    beforeRef.current = bodyRef.current?.offsetHeight ?? null;
-  };
-  useLayoutEffect(() => {
-    const from = beforeRef.current;
-    beforeRef.current = null;
-    const body = bodyRef.current;
-    if (from == null || !body || prefersReducedMotion()) return;
-    body.style.height = 'auto';
-    const to = body.offsetHeight;
-    if (Math.abs(to - from) < 2) {
-      body.style.height = '';
-      return;
-    }
-    body.style.height = `${from}px`;
-    void body.offsetHeight; // reflow so the tween starts from `from`
-    gsap.to(body, {
-      height: to,
-      duration: 0.2,
-      ease: ANIM.enterEase,
-      onComplete: () => {
-        body.style.height = '';
-      },
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dep]);
-  return capture;
 }
 
 // ── PlanReview (shared renderer, matches PromptModal's) ───────────────────────
@@ -146,310 +80,6 @@ function PlanReview({ markdown }: { markdown: string }) {
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
-  );
-}
-
-// ── AskBody: renders the structured AskUserQuestion (kind='ask') ───────────────
-
-interface AskBodyProps {
-  pending: Pending;
-  bodyRef: React.RefObject<HTMLDivElement | null>;
-  onAnswer: (toolUseId: string, selections: AnswerSelection[]) => void;
-  onReply: (text: string) => void;
-}
-
-function AskBody({ pending, bodyRef, onAnswer, onReply }: AskBodyProps) {
-  const [selections, setSelections] = useState<Selections>(() => initSelections(pending));
-  const [focusedIdx, setFocusedIdx] = useState<number[]>(() =>
-    pending.questions.map(() => 0),
-  );
-  // If a free-text option is selected, switch to textarea mode.
-  const [freeTextQIdx, setFreeTextQIdx] = useState<number | null>(null);
-  const [freeTextOptLabel, setFreeTextOptLabel] = useState<string>('');
-  const [freeTextValue, setFreeTextValue] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const flipHeight = useHeightFlip(bodyRef, freeTextQIdx);
-
-  useEffect(() => {
-    setSelections(initSelections(pending));
-    setFocusedIdx(pending.questions.map(() => 0));
-    setFreeTextQIdx(null);
-    setFreeTextOptLabel('');
-    setFreeTextValue('');
-    setSubmitting(false);
-  }, [pending]);
-
-  // When entering free-text mode, focus the textarea and size it to any content.
-  useEffect(() => {
-    if (freeTextQIdx !== null) {
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        autoGrow(textareaRef.current);
-      });
-    }
-  }, [freeTextQIdx]);
-
-  const ready = useMemo(
-    () => selections.length > 0 && selections.every((s) => s.size > 0),
-    [selections],
-  );
-
-  const toggle = (qIdx: number, label: string, multi: boolean) => {
-    if (submitting) return;
-    // Free-text option: enter textarea mode instead of toggling.
-    if (isFreeTextOption(label)) {
-      flipHeight(); // capture height BEFORE the swap so the FLIP can animate it
-      setFreeTextQIdx(qIdx);
-      setFreeTextOptLabel(label);
-      return;
-    }
-    setSelections((prev) => {
-      const next = prev.map((s) => new Set(s));
-      const set = next[qIdx];
-      if (multi) {
-        if (set.has(label)) set.delete(label);
-        else set.add(label);
-      } else {
-        next[qIdx] = new Set([label]);
-      }
-      return next;
-    });
-  };
-
-  const moveFocus = (qIdx: number, delta: number, optCount: number) => {
-    setFocusedIdx((prev) => {
-      const next = [...prev];
-      next[qIdx] = Math.max(0, Math.min(optCount - 1, (prev[qIdx] ?? 0) + delta));
-      return next;
-    });
-  };
-
-  const submit = () => {
-    if (!ready || submitting) return;
-    setSubmitting(true);
-    onAnswer(pending.toolUseId, selections.map((s) => [...s]));
-  };
-
-  const submitFreeText = () => {
-    const text = freeTextValue.trim();
-    if (!text || submitting || freeTextQIdx === null) return;
-    setSubmitting(true);
-    // Synthesized (tailer-less) ask: the server has no real pending to navigate for
-    // the sentinel toolUseId, so route the typed text through the plain reply path
-    // (the historical fallback). The structured directive path below would fail
-    // server-side ("no pending question") for this id.
-    if (pending.toolUseId === FLAG_PENDING_TOOL_USE_ID) {
-      onReply(text);
-      return;
-    }
-    // Real ask: send a DISTINCT free-text/chat directive for THIS question so the
-    // server types the literal text into the picker's "Type something" /
-    // "Chat about this" row. Other questions keep their normal option-label arrays.
-    //
-    // The OLD path sent the free-text OPTION LABEL as a fake selection AND fired a
-    // separate onReply(text); that reply (viaAnswer=true, so not refused) pasted the
-    // text + Enter into a picker still in navigation mode — selecting the highlighted
-    // option 0 and dropping the typed text. We must NOT call onReply here.
-    const kind: 'text' | 'chat' = /chat about this/i.test(freeTextOptLabel) ? 'chat' : 'text';
-    const sels: AnswerSelection[] = selections.map((s) => [...s]);
-    sels[freeTextQIdx] = { kind, text };
-    onAnswer(pending.toolUseId, sels);
-  };
-
-  // Free-text mode: keep the question context (header) for consistency; the
-  // chosen option becomes a header above a focused borderless textarea.
-  if (freeTextQIdx !== null) {
-    const fq = pending.questions[freeTextQIdx];
-    const goBack = () => {
-      flipHeight(); // animate the height back as the options return
-      setFreeTextQIdx(null);
-      setFreeTextOptLabel('');
-      setFreeTextValue('');
-    };
-    return (
-      <div className="question ask-freetext-view">
-        {fq?.header ? <div className="q-header">{fq.header}</div> : null}
-        {fq?.question ? <div className="q-text">{fq.question}</div> : null}
-        {/* The chosen option, now a header rather than a button. */}
-        <div className="ask-freetext-chosen">{freeTextOptLabel}</div>
-        <textarea
-          ref={textareaRef}
-          className="ask-inline-textarea"
-          rows={3}
-          value={freeTextValue}
-          disabled={submitting}
-          onChange={(e) => {
-            setFreeTextValue(e.target.value);
-            autoGrow(e.target);
-          }}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-              e.preventDefault();
-              submitFreeText();
-            }
-          }}
-          placeholder="Type your reply…"
-        />
-        <div className="ask-inline-foot ask-inline-freetext-actions">
-          <button type="button" className="btn-secondary" disabled={submitting} onClick={goBack}>
-            Back
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!freeTextValue.trim() || submitting}
-            onClick={submitFreeText}
-          >
-            {submitting ? (
-              <span className="working-spinner" aria-label="sending" />
-            ) : (
-              'Send'
-            )}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {pending.questions.map((q, qIdx) => {
-        const hasSplit = questionHasPreview(q);
-        const dispOpts = withFreeText(q); // real options + TUI free-text rows
-        const focused = focusedIdx[qIdx] ?? 0;
-        const focusedOpt = dispOpts[focused];
-        const qSels = selections[qIdx];
-
-        return (
-          <div className="question" key={qIdx}>
-            {q.header ? <div className="q-header">{q.header}</div> : null}
-            <div className="q-text">{q.question}</div>
-            {q.multiSelect ? <div className="q-hint">select one or more</div> : null}
-
-            {hasSplit ? (
-              <div className="ask-split">
-                <div
-                  className="ask-split-list"
-                  role="listbox"
-                  aria-multiselectable={!!q.multiSelect}
-                  aria-label={q.question}
-                >
-                  {dispOpts.map((opt, oIdx) => {
-                    const selected = qSels?.has(opt.label);
-                    const isFocused = oIdx === focused;
-                    return (
-                      <div
-                        key={opt.label}
-                        className="ask-split-row"
-                        data-focused={isFocused ? 'true' : 'false'}
-                        data-selected={selected ? 'true' : 'false'}
-                        role="option"
-                        aria-selected={selected}
-                        tabIndex={isFocused ? 0 : -1}
-                        onMouseEnter={() =>
-                          setFocusedIdx((prev) => {
-                            const next = [...prev];
-                            next[qIdx] = oIdx;
-                            return next;
-                          })
-                        }
-                        onClick={() => {
-                          setFocusedIdx((prev) => {
-                            const next = [...prev];
-                            next[qIdx] = oIdx;
-                            return next;
-                          });
-                          toggle(qIdx, opt.label, !!q.multiSelect);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'ArrowDown') {
-                            e.preventDefault();
-                            moveFocus(qIdx, 1, dispOpts.length);
-                          } else if (e.key === 'ArrowUp') {
-                            e.preventDefault();
-                            moveFocus(qIdx, -1, dispOpts.length);
-                          } else if (e.key === ' ' || e.key === 'Enter') {
-                            e.preventDefault();
-                            toggle(qIdx, opt.label, !!q.multiSelect);
-                          }
-                        }}
-                      >
-                        <span className="ask-split-indicator">
-                          {q.multiSelect ? (
-                            <span className="ask-check" aria-hidden="true">
-                              {selected ? '▣' : '▢'}
-                            </span>
-                          ) : (
-                            <span className="ask-radio" aria-hidden="true">
-                              {selected ? '◉' : '○'}
-                            </span>
-                          )}
-                        </span>
-                        <span className="ask-split-text">
-                          <span className="option-label">{opt.label}</span>
-                          {opt.description ? (
-                            <span className="option-desc">{opt.description}</span>
-                          ) : null}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="ask-preview" aria-live="polite" aria-label="Option preview">
-                  {focusedOpt?.preview ? (
-                    <>
-                      <div className="ask-preview-label">{focusedOpt.label}</div>
-                      <pre className="ask-preview-content">{focusedOpt.preview}</pre>
-                    </>
-                  ) : (
-                    <div className="ask-preview-empty">no preview</div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="q-options">
-                {dispOpts.map((opt) => {
-                  const on = qSels?.has(opt.label);
-                  const isFree = isFreeTextOption(opt.label);
-                  return (
-                    <button
-                      type="button"
-                      key={opt.label}
-                      className="option-btn"
-                      data-on={on ? 'true' : 'false'}
-                      aria-pressed={isFree ? undefined : on}
-                      disabled={submitting}
-                      onClick={() => toggle(qIdx, opt.label, !!q.multiSelect)}
-                    >
-                      <span className="option-label">{opt.label}</span>
-                      {opt.description ? (
-                        <span className="option-desc">{opt.description}</span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <div className="ask-inline-foot">
-        <button
-          type="button"
-          className="btn-primary"
-          disabled={!ready || submitting}
-          onClick={submit}
-        >
-          {submitting ? (
-            <span className="working-spinner" aria-label="sending" />
-          ) : (
-            'Send Answer'
-          )}
-        </button>
-      </div>
-    </>
   );
 }
 
@@ -802,7 +432,11 @@ export function AskInline({
           <span className="ask-min-action">Maximise</span>
         </button>
       ) : activePrompt ? (
-        <div className="ask-inline-full">
+        /* agent-ui-kit scope: PromptBody reuses the kit's base classes
+           (.question, .option-btn, free-text view), so the host opts this
+           subtree into the kit stylesheet; cockpit overrides still win by
+           cascade order. */
+        <div className="ask-inline-full agent-ui-kit">
           {/* Sticky, zero-height header: `.ask-inline-body` (the bodyRef div)
               is the actual overflow-y:auto scroller, so pinning the button
               needs `position: sticky` on something INSIDE it, not `fixed` —
@@ -824,12 +458,17 @@ export function AskInline({
             </button>
           </div>
           {activePrompt.kind === 'ask' ? (
-            <AskBody
+            <AskQuestionForm
               key={activePrompt.pending.toolUseId}
-              pending={activePrompt.pending}
-              bodyRef={bodyRef}
-              onAnswer={onAnswer}
-              onReply={onReply}
+              questions={activePrompt.pending.questions}
+              onSubmit={(answers) => onAnswer(activePrompt.pending.toolUseId, answers)}
+              // Synthesized (tailer-less) ask: the server has no real pending to
+              // navigate for the sentinel toolUseId, so free-text routes through
+              // the plain reply path instead of a structured directive.
+              onFreeTextReply={
+                activePrompt.pending.toolUseId === FLAG_PENDING_TOOL_USE_ID ? onReply : undefined
+              }
+              flipContainerRef={bodyRef}
             />
           ) : (
             <PromptBody

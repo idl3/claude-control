@@ -38,9 +38,10 @@
     "cleanup:stale-dev": "node scripts/cleanup-stale-dev.mjs",
     "cleanup:stale-dev:apply": "node scripts/cleanup-stale-dev.mjs --apply",
     "install-hook": "node scripts/install-pane-hook.mjs",
-    "build:web": "cd web && npm install && npm run build",
+    "build:web": "npm run build:kit && cd web && npm install && npm run build",
     "build": "npm run build:web",
-    "prepack": "npm run build && find web/dist -name '*.map' -type f -delete"
+    "prepack": "npm run build && find web/dist -name '*.map' -type f -delete",
+    "build:kit": "cd packages/agent-ui-kit && npm install && npm run build"
   },
   "engines": {
     "node": ">=20"

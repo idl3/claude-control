@@ -5073,66 +5073,36 @@ body.is-external-display .composer {
   align-self: stretch;
   align-items: stretch;
 }
-.question {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* ── AskUserQuestion renderer (structured ask) ─────────────────────────────
+   The base renderer styles (.question, .q-*, .option-btn, .ask-split*,
+   .ask-preview*, free-text view, kit-scoped buttons/spinner) moved to
+   @idl3/agent-ui-kit/styles.css (packages/agent-ui-kit), imported in main.tsx
+   BEFORE this sheet so the overrides below win by cascade order. This block
+   maps cockpit's tokens onto the kit's --auk-* contract. */
+.agent-ui-kit {
+  --auk-bg: var(--bg);
+  --auk-surface: var(--bg-2);
+  --auk-surface-hover: var(--bg-hover);
+  --auk-option-bg: var(--glass-panel);
+  --auk-option-bg-hover: oklch(22% 0.016 260 / 0.72);
+  --auk-option-bg-on: oklch(20% 0.02 260 / 0.75);
+  --auk-line: var(--line);
+  --auk-text: var(--text);
+  --auk-text-dim: var(--text-dim);
+  --auk-text-faint: var(--text-faint);
+  --auk-accent: var(--accent);
+  --auk-accent-contrast: oklch(18% 0.02 260);
+  --auk-accent-2: var(--accent-2);
+  --auk-blur: var(--glass-blur);
+  --auk-ease: var(--ease);
+  --auk-font-md: calc(14px * var(--ui-scale));
+  --auk-font-body: var(--txt-transcript);
+  --auk-font-meta: var(--txt-meta);
+  --auk-font-mono-size: calc(12px * var(--ui-scale));
+  --auk-font-input: var(--txt-composer);
 }
-.q-header {
-  font-size: var(--txt-meta);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent-2);
-}
-.q-text {
-  font-size: calc(14px * var(--ui-scale));
-  font-weight: 600;
-}
-.q-hint {
-  font-size: var(--txt-meta);
-  color: var(--text-faint);
-}
-.q-options {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin-top: 2px;
-}
-.option-btn {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-  padding: 8px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--glass-panel);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  transition:
-    border-color var(--ease) 0.15s,
-    background var(--ease) 0.15s;
-}
-.option-btn:hover {
-  background: oklch(22% 0.016 260 / 0.72);
-}
-.option-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.option-btn[data-on='true'] {
-  border-color: var(--accent);
-  background: oklch(20% 0.02 260 / 0.75);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-/* Submission feedback: chosen option highlights + shows a spinner; the rest dim. */
-.option-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+/* Submission feedback on TUI pane prompts (PromptBody, host-only): chosen
+   option highlights + shows a spinner; the rest dim. */
 .option-btn[data-sending='true'] {
   opacity: 1;
   border-color: var(--accent);
@@ -5150,165 +5120,6 @@ body.is-external-display .composer {
 .prompt-status {
   font-size: var(--txt-meta);
   color: var(--accent);
-}
-.option-label {
-  font-size: var(--txt-transcript);
-  font-weight: 600;
-}
-.option-desc {
-  font-size: var(--txt-meta);
-  color: var(--text-dim);
-}
-/* ── AskModal: side-by-side split layout (questions with previews) ── */
-
-/* Container: option list left, preview pane right. Stacks on narrow screens. */
-.ask-split {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-}
-@media (min-width: 760px) {
-  .ask-split {
-    flex-direction: row;
-    align-items: stretch;
-    gap: 8px;
-    min-height: 0;
-  }
-}
-
-/* Left column: the selectable option rows. */
-.ask-split-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-@media (min-width: 760px) {
-  .ask-split-list {
-    width: 200px;
-    max-width: 40%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-}
-
-/* A single row in the option list. */
-.ask-split-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--bg-2);
-  cursor: pointer;
-  user-select: none;
-  transition:
-    border-color 120ms var(--ease),
-    background 120ms var(--ease);
-}
-.ask-split-row:focus {
-  outline: none;
-}
-.ask-split-row:focus-visible,
-.ask-split-row[data-focused='true']:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.ask-split-row[data-focused='true'] {
-  border-color: var(--accent-2);
-  background: var(--bg-hover);
-}
-.ask-split-row[data-selected='true'] {
-  border-color: var(--accent);
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.ask-split-row[data-selected='true'][data-focused='true'] {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-/* Selection indicator (radio/checkbox glyph). */
-.ask-split-indicator {
-  flex: 0 0 auto;
-  font-size: calc(14px * var(--ui-scale));
-  line-height: 1.3;
-  color: var(--text-dim);
-}
-.ask-split-row[data-selected='true'] .ask-split-indicator {
-  color: var(--accent);
-}
-.ask-check,
-.ask-radio {
-  display: block;
-  font-style: normal;
-}
-
-/* Text column inside each row (label + description). */
-.ask-split-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* Right column: the preview pane. */
-.ask-preview {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-}
-@media (min-width: 760px) {
-  .ask-preview {
-    max-height: 320px;
-  }
-}
-
-.ask-preview-label {
-  padding: 8px 8px 0;
-  font-size: var(--txt-meta);
-  font-weight: 700;
-  color: var(--accent-2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  flex: 0 0 auto;
-}
-
-.ask-preview-content {
-  margin: 0;
-  padding: 8px;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: calc(12px * var(--ui-scale));
-  line-height: 1.5;
-  color: var(--text);
-  white-space: pre;
-  overflow: auto;
-  overscroll-behavior: contain;
-  flex: 1 1 auto;
-  tab-size: 4;
-}
-
-.ask-preview-empty {
-  padding: 18px 8px;
-  color: var(--text-faint);
-  font-size: var(--txt-meta);
-  font-style: italic;
-  align-self: center;
-}
-
-/* Reduced motion: skip transition on row state changes. */
-@media (prefers-reduced-motion: reduce) {
-  .ask-split-row {
-    transition: none;
-  }
 }
 
 .capture-output {
@@ -9644,68 +9455,6 @@ select.config-input {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-top: 1px solid var(--line);
-}
-/* Free-text textarea inside the inline body. */
-.ask-inline-freetext {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-/* The chosen option, restyled from a button into a header above the textarea. */
-.ask-freetext-chosen {
-  font-size: calc(13px * var(--ui-scale));
-  font-weight: 600;
-  color: var(--text);
-  padding: 2px 0;
-}
-/* Free-text view: the textarea + chosen header fade/slide in (the height resize
-   itself is the GSAP FLIP on .ask-inline-body). The options that were here fade
-   away as this replaces them. */
-.ask-freetext-view .ask-freetext-chosen,
-.ask-freetext-view .ask-inline-textarea {
-  animation: ask-freetext-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.ask-freetext-view .ask-inline-textarea { animation-delay: 0.04s; }
-@keyframes ask-freetext-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ask-freetext-view .ask-freetext-chosen,
-  .ask-freetext-view .ask-inline-textarea { animation: none; }
-}
-.ask-inline-textarea {
-  width: 100%;
-  min-height: 48px;
-  max-height: 40dvh;
-  resize: none;
-  /* Borderless + transparent — it's already inside the composer card, so a
-     bordered box would read as a chat-box-in-a-chat-box. Match .composer-input. */
-  padding: 2px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--txt-composer);
-  box-sizing: border-box;
-}
-.ask-inline-textarea:focus {
-  outline: none;
-}
-.ask-inline-freetext-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-/* Back + Send: IDENTICAL boxes — fixed width/height override so the filled
-   primary and outlined secondary are pixel-for-pixel the same size. */
-.ask-inline-freetext-actions > button {
-  flex: 0 0 auto;
-  width: 88px;
-  height: 34px;
-  min-width: 0;
-  padding: 0;
-  justify-content: center;
 }
 
 /* Inline body: flex column inside .composer-card, fills the input area.

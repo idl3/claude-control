@@ -13,3 +13,4 @@ outputs/
 .envrc
 scratch/
 web/scratch/
+packages/agent-ui-kit/dist/
