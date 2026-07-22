@@ -66,12 +66,14 @@ export function ComposerMicButton({
   );
 }
 
-/** Secondary send — skip the optimiser, send the raw composer text as-is. */
+/** Primary send — dispatches the raw composer text as-is, no optimiser.
+ *  Uses the primary (`.composer-send`) accent style: this is now the
+ *  default/leading action in the toolbar cluster. */
 export function ComposerRawSendButton({ onClick, disabled, title, ariaLabel, dataHotkey }: ComposerActionButtonProps) {
   return (
     <button
       type="button"
-      className="composer-enhance composer-bypass"
+      className="composer-send"
       aria-label={ariaLabel}
       title={title}
       disabled={disabled}
@@ -92,16 +94,17 @@ interface ComposerSendButtonProps extends ComposerActionButtonProps {
   type?: 'button' | 'submit';
 }
 
-/** Primary send — forwards its ref: the live composer pulses it (scale
- *  tween) while a prompt optimisation is in flight (see Composer.tsx's
- *  sendBtnRef effect). */
+/** Secondary: optimise the prompt (via the OptimizeReview flow) — forwards
+ *  its ref: the live composer pulses it (scale tween) while the optimisation
+ *  request is in flight (see Composer.tsx's sendBtnRef effect). De-emphasized
+ *  (`.composer-enhance`) since Raw Send is now the primary action. */
 export const ComposerSendButton = forwardRef<HTMLButtonElement, ComposerSendButtonProps>(
   function ComposerSendButton({ onClick, disabled, title, ariaLabel, dataHotkey, busy, type }, ref) {
     return (
       <button
         ref={ref}
         type={type ?? 'button'}
-        className="composer-send"
+        className="composer-enhance"
         aria-label={ariaLabel}
         title={title}
         disabled={disabled}
