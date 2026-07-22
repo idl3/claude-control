@@ -11309,6 +11309,20 @@ select.config-input {
 .agent-term-canvas .term-canvas[data-pane-overflow='y'] {
   align-items: flex-end;
 }
+/* Split-pane fix: a pane mirrored from a split tmux window converges smaller
+   (fewer cols and/or rows) than an unsplit window, so it can under-fill this
+   full-screen container instead of over-filling it (the opposite of Bug 1
+   above). applyPaneScale (XtermHost.tsx) sets these flags — independently
+   per axis, and only once it's unambiguously safe (see its comment) — so the
+   pane reads as a deliberately-sized, centered terminal instead of a small
+   block stranded top-left with a dead black void below/beside it. Left
+   un-set (the fit/overflow cases) this default stays flex-start, unchanged. */
+.agent-term-canvas .term-canvas[data-pane-underflow-x='true'] {
+  justify-content: center;
+}
+.agent-term-canvas .term-canvas[data-pane-underflow-y='true'] {
+  align-items: center;
+}
 /* ============================================================================
    Graphite Inspector — Prototype Studio (dark inspector, Linear/Raycast bar).
    Chrome (head + toolbar) collapses to ≤2 dense rows; the stage is the hero;
