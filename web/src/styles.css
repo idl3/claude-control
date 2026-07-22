@@ -9530,10 +9530,10 @@ select.config-input {
 .ask-inline-full {
   position: relative;
 }
-/* Keep the first question's header clear of the [_] button in the corner. */
+/* Keep the first question's header clear of the [_]/× buttons in the corner. */
 .ask-inline-full .question:first-child .q-header,
 .ask-inline-full .question:first-child .q-text {
-  padding-right: 30px;
+  padding-right: 56px;
 }
 /* Sticky wrapper: pins .ask-min-btn to the top of .ask-inline-body (the
    actual overflow-y:auto scroller) while the question content scrolls
@@ -9576,6 +9576,77 @@ select.config-input {
   height: 2px;
   border-radius: 1px;
   background: currentColor;
+}
+/* Dismiss (×): unobtrusive by default — same footprint/position pattern as
+   .ask-min-btn, sitting to its left. Escape hatch for a STALE question the
+   server keeps re-reporting (e.g. errored session); sends nothing, only
+   hides the dialog locally (dismissedById in useClaudeControl). Turns
+   prominent (danger-styled) when the session is errored. */
+.ask-dismiss-btn {
+  position: absolute;
+  top: 2px;
+  right: 32px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ask-dismiss-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.ask-dismiss-btn[data-prominent='true'] {
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--red-bg);
+}
+.ask-dismiss-btn[data-prominent='true']:hover {
+  background: color-mix(in oklch, var(--red-bg) 70%, var(--red));
+}
+/* Errored note: the session hit a usage limit and can no longer deliver an
+   answer — prompts the user toward Dismiss. Mirrors .composer-errored's
+   danger palette (--red/--red-bg tokens) for visual consistency. */
+.ask-errored-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* top: clears the sticky .ask-min-header corner buttons (26px tall, pinned
+     at top:2px) — the note is the first flow child of .ask-inline-body, so
+     without this it renders directly underneath/behind them at scrollTop 0. */
+  margin: 34px 0 10px;
+  padding: 8px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  background: var(--red-bg);
+  color: var(--text);
+  font-size: calc(12.5px * var(--ui-scale));
+  font-weight: 600;
+}
+.ask-errored-note span {
+  flex: 1 1 auto;
+}
+.ask-errored-dismiss {
+  flex: 0 0 auto;
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: none;
+  background: var(--red);
+  color: oklch(20% 0.02 25);
+  font-weight: 700;
+  font-size: calc(12.5px * var(--ui-scale));
+  cursor: pointer;
+}
+.ask-errored-dismiss:hover {
+  background: color-mix(in oklch, var(--red) 85%, white);
 }
 /* Minimized state: a single amber bar — question header + Maximise. */
 .ask-min-bar {
