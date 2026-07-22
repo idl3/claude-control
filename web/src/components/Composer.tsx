@@ -113,7 +113,7 @@ interface ComposerProps {
   /** Active session id — used to scope the enhance/review state so an
    *  improvement from one session can't leak into another on switch. */
   sessionId?: string | null;
-  /** Per-session sub-agent mode. Defaults to true when not provided. */
+  /** Per-session sub-agent mode. Defaults to false (off) when not provided. */
   subAgentMode?: SubAgentMode;
   /** Called when the sub-agent checkbox changes. */
   onSubAgentModeChange?: (mode: SubAgentMode) => void;
@@ -273,7 +273,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   disabled,
   loading = false,
   sessionId,
-  subAgentMode = true,
+  subAgentMode = false,
   onSubAgentModeChange,
   onTerminalModeChange,
   working = false,
@@ -1634,6 +1634,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         voiceStopRef.current?.();
         return;
       }
+      // The composer input's own onKeyDown already handles ⌘/Ctrl+Enter (send)
+      // and ⌘/Ctrl+Shift+Enter (optimise) when it's focused. This window
+      // handler is only the OUT-OF-FOCUS fallback — skip when the input is the
+      // target, else the optimiser (runEnhance) double-fires for one keypress.
+      if (e.target instanceof HTMLElement && e.target.closest('.composer-input')) return;
       e.preventDefault();
       if (e.shiftKey) {
         void runEnhance();
@@ -2395,19 +2400,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onClick={openVoice}
             />
           ) : null}
-          {/* Primary: send the raw composer text without optimising. Leading
-              (leftmost) of the two send-cluster buttons and accent-styled —
-              this is now the default action (⌘/Ctrl+↵). */}
+          {/* Secondary: the optimise / improve-prompt button. De-emphasized
+              (`.composer-enhance` style) and to the LEFT of the raw Send button
+              — raw Send is the primary far-right action now. Always visible
+              (only disabled when the composer is empty) so the action never
+              disappears; Stop (rendered above, only while generating) sits to
+              the LEFT of the whole cluster — no reserved-slot gap. */}
           {!terminal && !voice ? (
-            <ComposerRawSendButton
-              ariaLabel="Send"
-              title="Send (⌘/Ctrl+↵)"
+            <ComposerSendButton
+              ref={sendBtnRef}
+              ariaLabel="Optimize prompt"
+              title="Optimize prompt (⌘/Ctrl+⇧+↵)"
               disabled={disabled || optimizing || empty || compacting || resuming}
-              dataHotkey={empty ? undefined : '⌘↵'}
-              onClick={() => {
-                composer.send();
-                refocusComposer();
-              }}
+              dataHotkey={empty ? undefined : '⌘⇧↵'}
+              busy={optimizing}
+              onClick={() => void runEnhance()}
             />
           ) : null}
           {terminal && !voice ? (
@@ -2422,23 +2429,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             >
               <ArrowUpIcon />
             </button>
-          ) : voice ? null : (
-            // Secondary: the optimise / improve-prompt button. De-emphasized
-            // (trailing, `.composer-enhance` style) — the raw Send button to
-            // its left is the default action now. Always visible (only
-            // disabled when the composer is empty) so the action never
-            // disappears; Stop (rendered above, only while generating) sits
-            // to the LEFT of the whole cluster — no reserved-slot gap.
-            <ComposerSendButton
-              ref={sendBtnRef}
-              ariaLabel="Optimize prompt"
-              title="Optimize prompt (⌘/Ctrl+⇧+↵)"
+          ) : null}
+          {/* Primary: send the raw composer text without optimising. The
+              far-RIGHT (trailing) button of the send cluster and accent-styled —
+              the default action (⌘/Ctrl+↵). */}
+          {!terminal && !voice ? (
+            <ComposerRawSendButton
+              ariaLabel="Send"
+              title="Send (⌘/Ctrl+↵)"
               disabled={disabled || optimizing || empty || compacting || resuming}
-              dataHotkey={empty ? undefined : '⌘⇧↵'}
-              busy={optimizing}
-              onClick={() => void runEnhance()}
+              dataHotkey={empty ? undefined : '⌘↵'}
+              onClick={() => {
+                composer.send();
+                refocusComposer();
+              }}
             />
-          )}
+          ) : null}
         </div>
       </div>
       {review ? (

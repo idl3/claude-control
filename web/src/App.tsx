@@ -164,7 +164,8 @@ function saveDrafts(drafts: Record<string, string>): void {
 }
 
 // Per-session sub-agent mode: true | false | agent-name-string.
-// Defaults to true for any session without a stored value.
+// Defaults to false (off) for any session without a stored value; the operator
+// opts a session in via ⌘/Ctrl+D or the checkbox, and that choice persists.
 const SUBAGENT_KEY = 'cc_subagent';
 function loadSubAgentModes(): Record<string, SubAgentMode> {
   try {
@@ -463,7 +464,7 @@ function AppInner() {
         document.querySelector<HTMLElement>('.ask-min-bar')?.click();
         return;
       }
-      const mode = sid != null ? (subAgentModesRef.current[sid] ?? true) : false;
+      const mode = sid != null ? (subAgentModesRef.current[sid] ?? false) : false;
       const inTerminal = composerTerminalRef.current;
       const prefixedTyped =
         !inTerminal && typed ? applySubAgentPrefix(typed, mode) : typed;
@@ -814,7 +815,7 @@ function AppInner() {
     adapters: runtimeAdapters,
   });
 
-  // Per-session sub-agent mode. Defaults to true for unseen sessions.
+  // Per-session sub-agent mode. Defaults to false (off) for unseen sessions.
   const subAgentModesRef = useRef<Record<string, SubAgentMode>>(loadSubAgentModes());
   const [subAgentModes, setSubAgentModes] = useState<Record<string, SubAgentMode>>(
     () => loadSubAgentModes(),
@@ -2092,11 +2093,11 @@ function AppInner() {
     [viewingAgentId, cockpit.subagents],
   );
 
-  // Active session's sub-agent mode (default true for unseen sessions).
+  // Active session's sub-agent mode (default false (off) for unseen sessions).
   const activeSubAgentMode: SubAgentMode =
     cockpit.selectedId != null
-      ? (subAgentModes[cockpit.selectedId] ?? true)
-      : true;
+      ? (subAgentModes[cockpit.selectedId] ?? false)
+      : false;
   const onActiveSubAgentModeChange = useCallback(
     (mode: SubAgentMode) => {
       if (cockpit.selectedId) setSubAgentMode(cockpit.selectedId, mode);
