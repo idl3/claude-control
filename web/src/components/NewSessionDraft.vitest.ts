@@ -177,6 +177,8 @@ function stubApi({
   uploadPath,
   transcribeText,
   uploadGate,
+  skills,
+  agents,
 }: {
   claudeAvailable?: boolean;
   codexAvailable?: boolean;
@@ -190,6 +192,10 @@ function stubApi({
   /** When set, /api/upload awaits this before responding — lets a test hold an
    *  upload "in flight" to assert submit() stays gated on it. */
   uploadGate?: Promise<void>;
+  /** Rows /api/skills returns — drives the inline `/skill` autocomplete. */
+  skills?: { name: string; description: string; source: 'user' | 'project' | 'plugin' }[];
+  /** Rows /api/agents returns — drives the inline `@agent` autocomplete. */
+  agents?: { name: string; description: string; source: 'user' | 'project' | 'plugin' }[];
 } = {}) {
   const createCalls: Record<string, unknown>[] = [];
   const uploadCalls: string[] = [];
@@ -250,6 +256,21 @@ function stubApi({
     }
     if (url.endsWith('/api/config')) {
       return new Response(JSON.stringify({ defaultCwd: '/workspace', projectDirs: projectDirs ?? [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    // New-session composer parity: the inline `/skill` + `@agent` autocomplete.
+    // No session id is passed (a new session has none), so these resolve
+    // user-level skills/agents — exactly the graceful-degrade path.
+    if (url.startsWith('/api/skills')) {
+      return new Response(JSON.stringify({ skills: skills ?? [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.startsWith('/api/agents')) {
+      return new Response(JSON.stringify({ agents: agents ?? [] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -1492,5 +1513,89 @@ describe('NewSessionDraft voice dictation waveform', () => {
     // Panel closes back to the normal composer body once dictation commits.
     expect(document.querySelector('.new-session-draft .voice-wave-inline')).toBeNull();
     expect(screen.getByRole('button', { name: 'Voice input' })).toBeTruthy();
+  });
+});
+
+// ── Composer parity: reserved-token overlay (/goal + ultrathink) + inline
+//    /skill · @agent autocomplete — the interactions that previously existed
+//    only in the live-session Composer.tsx and were missing here. The token
+//    DETECTION is unit-tested in lib/composerHighlight.vitest.ts and
+//    lib/slashToken.vitest.ts; these assert the NewSessionDraft WIRING renders
+//    the same classes/menu Composer does.
+describe('NewSessionDraft composer parity (overlay + slash/at autocomplete)', () => {
+  function draft() {
+    return render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+  }
+  async function promptBox(): Promise<HTMLTextAreaElement> {
+    return (await screen.findByLabelText('Initial prompt')) as HTMLTextAreaElement;
+  }
+
+  it('renders the ultrathink rainbow span in the overlay when the word is typed', async () => {
+    stubApi();
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: 'please ultrathink this problem' } });
+    await waitFor(() =>
+      expect(document.querySelector('.composer-ultrathink')?.textContent).toBe('ultrathink'),
+    );
+  });
+
+  it('renders the /goal pill in the overlay for a leading /goal invocation', async () => {
+    stubApi();
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: '/goal ship the parity fix' } });
+    await waitFor(() => expect(document.querySelector('.composer-goal-pill')).toBeTruthy());
+    // Plain prose with no reserved token renders no pills (overlay stays inert).
+    fireEvent.change(ta, { target: { value: 'just a normal message' } });
+    await waitFor(() => {
+      expect(document.querySelector('.composer-goal-pill')).toBeNull();
+      expect(document.querySelector('.composer-ultrathink')).toBeNull();
+    });
+  });
+
+  it('opens the /skill autocomplete listbox with matching skills as you type', async () => {
+    stubApi({
+      skills: [
+        { name: 'commit', description: 'craft a commit', source: 'user' },
+        { name: 'review', description: 'review a diff', source: 'user' },
+      ],
+    });
+    draft();
+    const ta = await promptBox();
+    // Type a `/co` trigger token at the caret.
+    fireEvent.change(ta, { target: { value: '/co', selectionStart: 3 } });
+    fireEvent.keyUp(ta, { key: 'o' });
+    const menu = await screen.findByRole('listbox', { name: 'Skill suggestions' });
+    expect(within(menu).getByText('commit')).toBeTruthy();
+    // 'review' does not match the `co` query.
+    expect(within(menu).queryByText('review')).toBeNull();
+  });
+
+  it('opens the @agent autocomplete for an @ trigger', async () => {
+    stubApi({
+      agents: [{ name: 'reviewer', description: 'code reviewer', source: 'user' }],
+    });
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: '@rev', selectionStart: 4 } });
+    fireEvent.keyUp(ta, { key: 'v' });
+    const menu = await screen.findByRole('listbox', { name: 'Skill suggestions' });
+    expect(within(menu).getByText('reviewer')).toBeTruthy();
+  });
+
+  it('degrades gracefully when the skills endpoint is empty — no menu, no crash', async () => {
+    stubApi({ skills: [] });
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: '/co', selectionStart: 3 } });
+    fireEvent.keyUp(ta, { key: 'o' });
+    // Give any pending fetch a tick; the listbox must never appear with 0 items.
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Skill suggestions' })).toBeNull());
   });
 });
