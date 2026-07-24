@@ -41,16 +41,28 @@ export function shellDragStart(e: {
   });
 }
 
+// Link-open failures in-shell were SILENT (invoke rejects → window.open
+// fallback → WKWebView no-op → nothing happens, nothing logged). Ship every
+// shell link-open failure to the server's client-error sink so "links are
+// dead" is diagnosable from ~/.claude-control/logs/client-errors.jsonl
+// instead of a screen-share.
+function reportShellOpenFailure(stage: string, url: string, err: unknown): void {
+  void import('./reportError').then(({ reportClientError }) => {
+    reportClientError({
+      source: 'nativeShell.openExternal',
+      message: `${stage} failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  });
+}
+
 /**
  * Open an external http(s) URL. Outside the shell this is a plain
- * `window.open` new tab. In-shell, `window.open`/`target="_blank"` are silent
- * no-ops (WKWebView has no UI-delegate), so we relay to the Rust side's
- * `open_url_window` command instead — a reusable native child window labeled
- * "browser" that loads the URL as a top-level browsing context (immune to
- * X-Frame-Options / CSP frame-ancestors, unlike any iframe) and carries zero
- * IPC (its label is in no capability's `windows` list). Fire-and-forget; if
- * the invoke rejects (older shell build without the command) we fall back to
- * `window.open` rather than dropping the click on the floor.
+ * `window.open` new tab. In-shell it opens the operator's REAL system
+ * browser via the shell's `open_system_browser` command (macOS `open`) —
+ * `window.open`/`target="_blank"` are silent no-ops there (WKWebView has no
+ * UI-delegate). Fallback chain for older shell builds: `open_url_window`
+ * (the native in-app browser window), then `window.open`, reporting each
+ * in-shell failure to the client-error sink.
  */
 export function openExternal(url: string): void {
   const fallback = () => {
@@ -61,12 +73,43 @@ export function openExternal(url: string): void {
     return;
   }
   const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  const invoked = tauri?.core?.invoke?.('open_url_window', { url });
-  if (invoked) {
-    void invoked.catch(fallback);
-  } else {
+  const invoke = tauri?.core?.invoke;
+  if (!invoke) {
+    reportShellOpenFailure('no __TAURI__ global', url, 'init script missing');
     fallback();
+    return;
   }
+  void invoke('open_system_browser', { url }).catch((err) => {
+    reportShellOpenFailure('open_system_browser', url, err);
+    return invoke('open_url_window', { url }).catch((err2: unknown) => {
+      reportShellOpenFailure('open_url_window', url, err2);
+      fallback();
+    });
+  });
+}
+
+/**
+ * Open a URL in the shell's native in-app "browser" child window — a
+ * top-level browsing context immune to X-Frame-Options / CSP
+ * frame-ancestors, unlike any iframe (the reason the transcript's inline
+ * URL preview uses this in-shell instead of its iframe overlay). Outside
+ * the shell (or on invoke failure) falls back to openExternal's chain.
+ */
+export function openInAppWindow(url: string): void {
+  if (!isNativeShell) {
+    openExternal(url);
+    return;
+  }
+  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+  const invoked = tauri?.core?.invoke?.('open_url_window', { url });
+  if (!invoked) {
+    reportShellOpenFailure('no __TAURI__ global (in-app window)', url, 'init script missing');
+    return;
+  }
+  void invoked.catch((err) => {
+    reportShellOpenFailure('open_url_window (inline)', url, err);
+    openExternal(url);
+  });
 }
 
 /** Fire-and-forget native notification (no-op outside the shell). */

@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
+// Hermetic: openExternal failure paths ship reports via reportError — keep
+// tests off the network.
+vi.mock('./reportError', () => ({ reportClientError: vi.fn() }));
+
 // isNativeShell is computed at import time from the UA, so each case resets
 // modules and re-imports.
 afterEach(() => {
@@ -58,7 +62,7 @@ describe('nativeShell', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('openExternal in-shell: invokes open_url_window with { url }, not window.open', async () => {
+  it('openExternal in-shell: system browser first, no window.open', async () => {
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (Macintosh) ClaudeControlShell/0.1.0',
     });
@@ -70,29 +74,50 @@ describe('nativeShell', () => {
     };
     const mod = await import('./nativeShell');
     mod.openExternal('https://github.com/idl3/claude-control');
-    expect(invoke).toHaveBeenCalledWith('open_url_window', {
+    expect(invoke).toHaveBeenCalledWith('open_system_browser', {
       url: 'https://github.com/idl3/claude-control',
     });
-    // Give the (resolved) invoke promise a tick — the fallback must NOT fire.
+    // Give the (resolved) invoke promise a tick — no fallback must fire.
     await new Promise((r) => setTimeout(r, 0));
+    expect(invoke).toHaveBeenCalledTimes(1);
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('openExternal in-shell: invoke rejection falls back to window.open', async () => {
+  it('openExternal in-shell: falls back system browser → app window → window.open', async () => {
     vi.stubGlobal('navigator', {
       userAgent: 'ClaudeControlShell/0.1.0',
     });
     const open = vi.fn();
     vi.stubGlobal('open', open);
-    // Older shell build without the open_url_window command.
+    // Older shell build: neither command exists.
     const invoke = vi.fn().mockRejectedValue(new Error('unknown command'));
     (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {
       core: { invoke },
     };
     const mod = await import('./nativeShell');
     mod.openExternal('https://example.com');
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(invoke).toHaveBeenNthCalledWith(1, 'open_system_browser', { url: 'https://example.com' });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'open_url_window', { url: 'https://example.com' });
     expect(open).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
+  });
+
+  it('openInAppWindow in-shell: open_url_window direct; browser: openExternal path', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    const mod = await import('./nativeShell');
+    // Outside the shell → openExternal chain → plain window.open.
+    mod.openInAppWindow('https://example.com/doc');
+    expect(open).toHaveBeenCalledWith('https://example.com/doc', '_blank', 'noopener,noreferrer');
+    vi.resetModules();
+    vi.stubGlobal('navigator', { userAgent: 'ClaudeControlShell/0.1.0' });
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {
+      core: { invoke },
+    };
+    const mod2 = await import('./nativeShell');
+    mod2.openInAppWindow('https://example.com/doc');
+    expect(invoke).toHaveBeenCalledWith('open_url_window', { url: 'https://example.com/doc' });
   });
 
   it('openExternal in-shell without the Tauri global: window.open fallback, no throw', async () => {
