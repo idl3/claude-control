@@ -2332,7 +2332,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             />
           ) : null}
           {/* Sub-agent toggle: when active, outgoing prompts are prefixed
-              with "Using a sub-agent." Sits in the LEFT toolbar cluster,
+              with an imperative "Dispatch this to a sub-agent…" directive
+              (see lib/subAgent.ts) so the parent actually delegates rather than
+              answering it itself. Sits in the LEFT toolbar cluster,
               beside attach/mic/terminal — deliberately far from the Send
               button on the right so toggling it can't misclick-fire a send.
               Only shown in non-terminal, non-voice mode. */}
