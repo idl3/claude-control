@@ -12,7 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { copyText } from '../lib/terminalClipboard';
 import { computeMenuPosition, framingFallbackState, type RectLike } from '../lib/linkify';
-import { openExternal } from '../lib/nativeShell';
+import { isNativeShell, openExternal, openInAppWindow } from '../lib/nativeShell';
 import { XIcon } from './icons';
 
 /**
@@ -65,6 +65,17 @@ export function UrlActionProvider({ children }: { children?: ReactNode }) {
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const showInline = useCallback((url: string) => {
+    // Desktop shell: the iframe overlay below is a dead end — most sites send
+    // X-Frame-Options/CSP frame-ancestors and refuse to be framed, so "Open
+    // inline" showed the refused-to-frame fallback for the URLs people
+    // actually click (GitHub, docs, dashboards). The shell's native "browser"
+    // child window is a TOP-LEVEL browsing context those headers don't apply
+    // to — open there instead. Browsers keep the iframe overlay (framing
+    // fallback and all): no native window exists to offer.
+    if (isNativeShell) {
+      openInAppWindow(url);
+      return;
+    }
     setInline({ url });
   }, []);
 
