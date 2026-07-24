@@ -1,8 +1,27 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createSession, fetchSpawnAgents, fetchTmuxSessions, getConfig, getModels, uploadFile } from '../lib/api';
-import type { ClaudeModelInfo, CreateSessionResult, SpawnAgentInfo, TmuxSessionSummary } from '../lib/api';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  createSession,
+  fetchSpawnAgents,
+  fetchTmuxSessions,
+  getConfig,
+  getModels,
+  listAgents,
+  listSkills,
+  uploadFile,
+} from '../lib/api';
+import type {
+  AgentEntry,
+  ClaudeModelInfo,
+  CreateSessionResult,
+  SkillEntry,
+  SpawnAgentInfo,
+  TmuxSessionSummary,
+} from '../lib/api';
 import { ATTACH_ACCEPT } from '../lib/attachments';
 import gsap, { ANIM, prefersReducedMotion } from '../lib/anim';
+import { composerHighlightSegments } from '../lib/composerHighlight';
+import { triggerTokenAt, type TriggerToken } from '../lib/slashToken';
 import {
   defaultAgentForFilter,
   defaultName,
@@ -65,6 +84,10 @@ const DEFAULT_MODEL_OPTION: ClaudeModelInfo = { id: 'default', label: 'Default' 
 
 /** Sentinel value for the tmux-session dropdown's "New tmux session…" option. */
 const NEW_TMUX_SESSION = '__new__';
+
+/** Max rows shown in the inline `/skill` + `@agent` autocomplete — mirrors
+ *  Composer.tsx's AC_MAX exactly (same UX, same cap). */
+const AC_MAX = 4;
 
 /**
  * New-chat draft screen, shown in the main content area in place of the
@@ -197,6 +220,94 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
+
+  // ── Inline skill + agent autocomplete ────────────────────────────────────
+  // Mirrors Composer.tsx's "Inline skill + agent autocomplete" block (same
+  // triggerTokenAt/selectSkill/AC_MAX contract, same keyboard UX), adapted to
+  // a plain controlled textarea with no live assistant-ui runtime: `prompt`
+  // (React state) stands in for composer.getState().text, and `promptRef`
+  // stands in for the `document.querySelector('.composer-input')` escape
+  // hatch Composer.tsx uses. Unlike Composer.tsx, there is no sessionId to
+  // scope the fetch or key a module-level cache by — listSkills()/listAgents()
+  // are called with no id, which the server already treats as "no project
+  // scope" (see server.js's /api/skills + /api/agents handlers), so this
+  // still resolves user-level (non-project) skills/agents rather than
+  // erroring or leaving the menu permanently empty for a not-yet-created
+  // session.
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
+  const [agents, setAgents] = useState<AgentEntry[]>([]);
+  const [caret, setCaret] = useState(0); // textarea selectionStart
+  const [acIndex, setAcIndex] = useState(0); // highlighted suggestion
+  const [acDismissed, setAcDismissed] = useState(false); // Esc / just-selected
+
+  // Fetch once on mount — no session id to re-key on, so (unlike Composer.tsx)
+  // there's nothing to re-fetch later. A failure degrades to an empty list
+  // (menu still opens on '/', just has nothing to show) rather than throwing.
+  useEffect(() => {
+    listSkills()
+      .then((s) => setSkills(s))
+      .catch(() => setSkills([]));
+    listAgents()
+      .then((a) => setAgents(a))
+      .catch(() => setAgents([]));
+  }, []);
+
+  // Active trigger token at the current caret — drives autocomplete
+  // suggestions. Detects both `/skill` (trigger='/') and `@agent` (trigger='@').
+  const activeToken = useMemo<TriggerToken | null>(() => triggerTokenAt(prompt, caret), [prompt, caret]);
+  const acQuery = activeToken ? activeToken.query : null;
+
+  // Reset highlight + un-dismiss whenever the query changes (new keystroke).
+  useEffect(() => {
+    setAcIndex(0);
+    setAcDismissed(false);
+  }, [acQuery]);
+
+  const acItems = useMemo(() => {
+    if (acQuery == null || acDismissed) return [];
+    const q = acQuery.toLowerCase();
+    // '@' trigger → search agents; '/' trigger → search skills.
+    const source: (SkillEntry | AgentEntry)[] = activeToken?.trigger === '@' ? agents : skills;
+    return source
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        // Prefix matches first, then alphabetical.
+        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return ap !== bp ? ap - bp : a.name.localeCompare(b.name);
+      })
+      .slice(0, AC_MAX);
+  }, [acQuery, acDismissed, activeToken?.trigger, skills, agents]);
+  const acOpen = acItems.length > 0;
+
+  const selectSkill = useCallback(
+    (name: string) => {
+      const token = activeToken;
+      // Use the trigger char that opened this autocomplete ('@' for agents, '/' for skills).
+      const replacement = (token?.trigger === '@' ? '@' : '/') + name + ' ';
+      if (token) {
+        // Splice: replace only the trigger-token at the caret, preserve surrounding text.
+        setPrompt((current) => current.slice(0, token.start) + replacement + current.slice(token.end));
+        // Restore caret to right after the inserted replacement.
+        const newCaret = token.start + replacement.length;
+        requestAnimationFrame(() => {
+          const ta = promptRef.current;
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(newCaret, newCaret);
+            setCaret(newCaret);
+          }
+        });
+      } else {
+        setPrompt(replacement);
+        requestAnimationFrame(() => {
+          promptRef.current?.focus();
+        });
+      }
+      setAcDismissed(true);
+    },
+    [activeToken],
+  );
 
   // Fetch agent availability + config once on mount, and focus the composer
   // so the user can start typing the prompt immediately.
@@ -514,6 +625,54 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     { value: NEW_TMUX_SESSION, label: 'New tmux session…' },
   ];
 
+  // ── Reserved-token highlight overlay (`/goal` pill + ultrathink rainbow) ──
+  // Same read-only mirror-div-over-transparent-textarea pattern as
+  // Composer.tsx's "Inline pill overlay", scoped down to just the reserved
+  // tokens (no committed `/skill`/`@agent` mention-pill rendering — see the
+  // PR body for why that's an explicit, separately-flagged follow-up rather
+  // than done here). composerHighlightSegments is the exact shared detector
+  // Composer.tsx uses, so `/goal ...` and `ultrathink` render identically in
+  // both composers.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const { overlayNodes, hasPills } = useMemo(() => {
+    const nodes: ReactNode[] = [];
+    let pills = false;
+    let key = 0;
+    for (const seg of composerHighlightSegments(prompt)) {
+      if (seg.kind === 'goal') {
+        pills = true;
+        nodes.push(
+          <span key={key++} className="composer-goal-pill" aria-hidden="true">
+            {seg.text}
+          </span>,
+        );
+      } else if (seg.kind === 'ultrathink') {
+        pills = true;
+        nodes.push(
+          <span key={key++} className="composer-ultrathink" aria-hidden="true">
+            {seg.text}
+          </span>,
+        );
+      } else {
+        nodes.push(seg.text);
+      }
+    }
+    return { overlayNodes: nodes, hasPills: pills };
+  }, [prompt]);
+
+  // Sync overlay scroll to the textarea scroll after every text change (same
+  // as Composer.tsx) — keeps the pill layer aligned when the textarea
+  // scrolls vertically. Uses promptRef directly rather than a
+  // document.querySelector('.composer-input') escape hatch, since this
+  // composer's textarea is already ref-able.
+  useLayoutEffect(() => {
+    const ta = promptRef.current;
+    const overlay = overlayRef.current;
+    if (!ta || !overlay) return;
+    overlay.scrollTop = ta.scrollTop;
+    overlay.scrollLeft = ta.scrollLeft;
+  }, [prompt]);
+
   // Mirrors VoiceInline's statusLabel switch in Composer.tsx, for parity.
   const voiceStatusLabel =
     voice.status === 'error'
@@ -586,6 +745,41 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
       </div>
 
       <div className="composer" ref={composerWrapRef}>
+        {/* Inline skill/agent autocomplete — same markup + classes as
+            Composer.tsx's own `.skill-ac` listbox, floated above the
+            composer card via the shared `.composer` position:relative
+            ancestor, so it looks identical to the live composer's menu. */}
+        {acOpen ? (
+          <div className="skill-ac" role="listbox" aria-label="Skill suggestions">
+            {acItems.map((s, i) => (
+              <button
+                type="button"
+                key={s.name}
+                role="option"
+                aria-selected={i === acIndex}
+                data-on={i === acIndex ? 'true' : undefined}
+                className="skill-ac-item"
+                // Use onMouseDown (not onClick) so the textarea doesn't blur first.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectSkill(s.name);
+                }}
+                onMouseEnter={() => setAcIndex(i)}
+              >
+                <span className="tool-head">
+                  <span className="tool-arrow" aria-hidden="true">▸</span>
+                  <span className="tool-name skill-card-name">{s.name}</span>
+                  {s.description ? (
+                    <>
+                      <span className="tool-sep">—</span>
+                      <span className="tool-input skill-card-desc">{s.description}</span>
+                    </>
+                  ) : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <form
           className="composer-card"
           aria-label="Create session"
@@ -864,15 +1058,67 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
             </div>
           ) : (
             <>
-              <div className="composer-input-wrap">
+              <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}>
                 <textarea
                   ref={promptRef}
                   className="composer-input"
                   value={prompt}
                   disabled={creating}
                   placeholder="Message to start the session with (optional)…"
-                  onChange={(e) => setPrompt(e.target.value)}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    // Keep caret in sync on every commit, not just keyup/click/select
+                    // below — covers IME/mobile input that can update the value
+                    // without a distinct keyup (same gap Composer.tsx's runtime
+                    // subscribe-based sync closes for its own textarea).
+                    setCaret(e.target.selectionStart ?? e.target.value.length);
+                  }}
+                  onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+                  onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+                  onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+                  onScroll={(e) => {
+                    const o = overlayRef.current;
+                    if (o) {
+                      o.scrollTop = e.currentTarget.scrollTop;
+                      o.scrollLeft = e.currentTarget.scrollLeft;
+                    }
+                  }}
                   onKeyDown={(e) => {
+                    // Skill/agent autocomplete nav takes precedence while the
+                    // dropdown is open — same keyboard contract as Composer.tsx.
+                    if (acOpen) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setAcIndex((i) => (i + 1) % acItems.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setAcIndex((i) => (i - 1 + acItems.length) % acItems.length);
+                        return;
+                      }
+                      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        selectSkill(acItems[acIndex].name);
+                        return;
+                      }
+                      if (e.key === 'Tab') {
+                        e.preventDefault();
+                        selectSkill(acItems[acIndex].name);
+                        return;
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        // Stop this Escape from also bubbling up to the draft
+                        // root's onKeyDown (onCancel, below) — dismissing the
+                        // autocomplete menu must not also close the whole
+                        // draft. Composer.tsx has no such ancestor Escape
+                        // handler, so it never needs this stopPropagation.
+                        e.stopPropagation();
+                        setAcDismissed(true);
+                        return;
+                      }
+                    }
                     // ⌘/Ctrl+Enter submits, same convention as the real composer's
                     // send shortcut. Plain Enter inserts a newline (textarea default).
                     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -882,6 +1128,20 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                   }}
                   aria-label="Initial prompt"
                 />
+                {/* READ-ONLY reserved-token overlay — see the overlayNodes/hasPills
+                    memo above. Absolutely positioned over the textarea;
+                    pointer-events:none so it never interferes with input.
+                    Visible only once hasPills flips the textarea transparent
+                    (.composer-input-wrap[data-has-pills] in styles.css). */}
+                <div className="composer-overlay" aria-hidden="true" ref={overlayRef}>
+                  {overlayNodes}
+                  {/* A lone trailing "\n" collapses to zero extra height in a
+                      white-space:pre-wrap block unless something follows it —
+                      this zero-width space keeps the overlay's height matched
+                      to the textarea's, which does render the trailing blank
+                      line. */}
+                  {prompt.endsWith('\n') ? '\u200B' : null}
+                </div>
               </div>
 
               {/* Attachment chips — SAME position as the live composer's own
