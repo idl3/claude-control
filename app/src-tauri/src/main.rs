@@ -182,10 +182,37 @@ fn parse_external_http_url(raw: &str) -> Result<tauri::Url, String> {
 /// construction. Standard macOS chrome on purpose: the Overlay/hiddenTitle
 /// styling in tauri.macos.conf.json applies only to the config-defined "main"
 /// window, never to runtime-built ones.
+/// Open a URL in the operator's REAL default browser (macOS `open`). The
+/// shell's default for regular link clicks — the in-app "browser" window
+/// (open_url_window below) stays for the transcript's INLINE preview, where
+/// staying inside the app is the point.
+#[tauri::command]
+async fn open_system_browser(url: String) -> Result<(), String> {
+    let parsed = parse_external_http_url(&url)?;
+    eprintln!("[shell] open_system_browser: {parsed}");
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg(parsed.as_str())
+            .status()
+            .map_err(|e| e.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("/usr/bin/open exited {status}"))
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("system-browser open not implemented for this platform".into())
+    }
+}
+
 #[tauri::command]
 async fn open_url_window(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri::Manager;
     let parsed = parse_external_http_url(&url)?;
+    eprintln!("[shell] open_url_window: {parsed}");
     if let Some(existing) = app.get_webview_window("browser") {
         existing.navigate(parsed).map_err(|e| e.to_string())?;
         existing.set_focus().map_err(|e| e.to_string())?;
@@ -273,6 +300,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             notify_session,
             open_url_window,
+            open_system_browser,
             start_local_server,
             local_server_status,
             read_dropped_file
