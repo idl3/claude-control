@@ -18,6 +18,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             web/package-lock.json
+            packages/agent-ui-kit/package-lock.json
 
       # Backend (Node built-in test runner). The suite is hermetic — no tmux,
       # ffmpeg, or whisper are required (create-session + transcribe tests stub
@@ -29,6 +30,21 @@ jobs:
         run: npm ci
 
       - name: Backend tests
+        run: npm test
+
+      # Kit (@idl3/agent-ui-kit): build + its own suite gate every PR — not just
+      # the tag-triggered publish workflow. web's file: dep needs the kit's
+      # dist/ built before web's build resolves the package exports.
+      - name: Install kit deps
+        working-directory: packages/agent-ui-kit
+        run: npm ci
+
+      - name: Kit build
+        working-directory: packages/agent-ui-kit
+        run: npm run build
+
+      - name: Kit tests
+        working-directory: packages/agent-ui-kit
         run: npm test
 
       # Web (Vite build + Vitest).

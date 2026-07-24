@@ -6,6 +6,9 @@ import { isNativeShell } from './lib/nativeShell';
 import { computeScreenH } from './lib/screenHeight';
 import { loadRingRotation, applyRingRotation } from './lib/ringRotationPref';
 import 'slot-text/style.css';
+// Kit CSS loads BEFORE styles.css so cockpit's equal-specificity overrides
+// (e.g. .ask-inline-body .option-btn) win by cascade order.
+import '@idl3/agent-ui-kit/styles.css';
 import './styles.css';
 import './highlight-theme.css';
 
