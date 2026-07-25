@@ -124,7 +124,7 @@ describe('railTokenPrefs — load/save', () => {
 
 describe('railTokenPrefs — poolTokens', () => {
   it('returns tokens not on the bar, in RAIL_TOKENS order', () => {
-    expect(poolTokens(['ctx', 'model'])).toEqual(['effort', 'usage']);
+    expect(poolTokens(['ctx', 'model'])).toEqual(['effort', 'usage', 'mem']);
   });
 
   it('returns everything when the bar is empty', () => {
