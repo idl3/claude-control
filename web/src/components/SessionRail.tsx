@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SlotText } from 'slot-text/react';
 import type { OrgHealth, Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
@@ -6,7 +6,7 @@ import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
-import { renameTmuxSession } from '../lib/api';
+import { renameTmuxSession, terminateSession } from '../lib/api';
 import { createPointerGhost, type PointerGhost } from '../lib/dragGhost';
 import { defaultOrgLabel } from './RailTabs';
 import {
@@ -565,7 +565,7 @@ export function useMetaCyclePhase(periodMs = META_CYCLE_PERIOD_MS): number {
 
 /** One field the row's right-hand meta slot can show, in cycle order. */
 interface MetaField {
-  key: 'model' | 'effort' | 'ctx' | 'usage' | 'cwd';
+  key: 'model' | 'effort' | 'ctx' | 'usage' | 'cwd' | 'mem';
   text: string;
   className: string;
 }
@@ -710,6 +710,10 @@ function paneMetaFields(
   if (effort) fields.push({ key: 'effort', text: effort, className: effortClass(effort, isCodex) });
   if (s.ctxPct != null) {
     fields.push({ key: 'ctx', text: `ctx:${Math.round(s.ctxPct)}%`, className: 'meta-ctx' });
+  }
+  if (s.memMB != null) {
+    const mem = s.memMB >= 1024 ? `${(s.memMB / 1024).toFixed(1)}G` : `${s.memMB}M`;
+    fields.push({ key: 'mem', text: mem, className: 'meta-mem' });
   }
   if (isCodex && s.usagePct != null) {
     fields.push({
@@ -1096,6 +1100,7 @@ function PaneRow({
   onDragHover,
   onDrop,
   onDragEnd,
+  onTerminate,
 }: {
   s: Session;
   selected: boolean;
@@ -1131,6 +1136,8 @@ function PaneRow({
   onDrop?: (srcId: string, destSessionName: string) => void;
   /** Drag ended (drop or cancel) — clears the rail's drag state. */
   onDragEnd?: () => void;
+  /** Terminate this session (confirm → kill tmux window + unregister pane). */
+  onTerminate?: (id: string) => void;
 }) {
   const { dragHandlers, consumeClickSuppression } = useRowPointerDrag({
     id: s.id,
@@ -1338,6 +1345,23 @@ function PaneRow({
             that used to sit above each window's panes is gone — this is
             the one place that name shows now). */}
         {rightSlot}
+        {onTerminate ? (
+          <button
+            type="button"
+            className="session-terminate"
+            aria-label={`Terminate ${label}`}
+            title="Terminate — kill this tmux window"
+            // pointerdown/click both stopPropagation so terminating never also
+            // selects the row or arms the move-window drag.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTerminate(s.id);
+            }}
+          >
+            ×
+          </button>
+        ) : null}
       </div>
     </li>
   );
@@ -1380,6 +1404,21 @@ export function SessionRail({
     window.addEventListener('cockpit:railtokenprefs', onPrefs);
     return () => window.removeEventListener('cockpit:railtokenprefs', onPrefs);
   }, []);
+
+  // Terminate a session from the rail: confirm, kill its tmux window +
+  // unregister the pane record (server side), toast the outcome. The row drops
+  // on the next registry refresh (≤4 s); no optimistic state to unwind.
+  const handleTerminate = useCallback(
+    (id: string) => {
+      const s = sessions.find((x) => x.id === id);
+      const label = s?.name || s?.tmuxName || id;
+      if (!window.confirm(`Terminate "${label}"? This kills its tmux window.`)) return;
+      terminateSession(id)
+        .then(() => onToast?.(`Terminated ${label}`, 'ok'))
+        .catch((err) => onToast?.(`Terminate failed: ${err instanceof Error ? err.message : 'error'}`, 'error'));
+    },
+    [sessions, onToast],
+  );
 
   // Shared cycle phase for every row's right-hand meta slot — see
   // useMetaCyclePhase / paneMetaFields. Driven by the operator-configured
@@ -1637,6 +1676,7 @@ export function SessionRail({
                           onDragHover={setDragOverSession}
                           onDrop={handleRowDrop}
                           onDragEnd={clearDrag}
+                          onTerminate={handleTerminate}
                         />
                       ))}
                     </ul>

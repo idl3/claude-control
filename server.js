@@ -31,7 +31,7 @@ import { Collab } from './lib/collab.js';
 import { recordClientError } from './lib/client-errors.js';
 import { recordClientPerf, summarizeClientPerf } from './lib/client-perf.js';
 import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
-import { writePaneRegistryRecord } from './lib/pane-registry.js';
+import { writePaneRegistryRecord, deletePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
 import { buildAnswerProgram, parsePicker, planStep, planTextStep, isTextDirective, confirmSubmit } from './lib/answer.js';
 import { sweepUploads, resolveUploadPath } from './lib/uploads.js';
@@ -698,6 +698,11 @@ const _handler = (req, res) => {
     if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     return handleSessionRename(req, res);
+  }
+  if (u.pathname === '/api/session/terminate') {
+    if (req.method !== 'POST') return endJson(res, 405, { error: 'method not allowed' });
+    if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
+    return handleSessionTerminate(req, res);
   }
   // POST /api/tmux/rename-session — rename the tmux SESSION itself (the
   // sidebar's deduped session-group header), distinct from the per-window
@@ -1733,6 +1738,48 @@ async function handleSessionRename(req, res) {
     //     name follows /rename verbatim as a single argument to the command.
     await tmux.sendText(session.target, `/rename ${name}`);
     return endJson(res, 200, { ok: true });
+  } catch (err) {
+    return endJson(res, 500, { error: String(err?.message || err) });
+  }
+}
+
+// POST /api/session/terminate — safely close out a session: kill its tmux
+// window AND unregister its pane→transcript record so a reused %N can't later
+// re-bind a stale transcript. Idempotent (already-gone window/record is still a
+// 200). Token-gated + localhost, same as the rest of the control surface.
+async function handleSessionTerminate(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return endJson(res, 400, { error: String(err?.message || err) });
+  }
+  const id = typeof body?.id === 'string' ? body.id : '';
+  const session = sessionById(id);
+  if (!session) return endJson(res, 404, { error: 'unknown session' });
+  if (!tmux.isValidTarget(session.target)) {
+    return endJson(res, 400, { error: 'invalid tmux target' });
+  }
+  try {
+    const { killed } = await tmux.killWindow(session.target);
+    // Unregister the pane binding regardless of kill outcome — the pane is going
+    // away, so its record must not linger to mis-bind a future reused %N.
+    if (session.paneId) await deletePaneRegistryRecord(session.paneId);
+    // Also drop a manual pin for this pane, if any, so it can't resurrect a dead
+    // binding. pinKey mirrors handleSetPin's key (windowId.paneIndex).
+    const pk = pinKey(session.windowId, session.paneIndex);
+    if (pins[pk]) {
+      pins = { ...pins };
+      delete pins[pk];
+      try {
+        savePins(CONFIG.pinsFile, pins);
+        registry.setPins(pins);
+      } catch {
+        /* best-effort — the pane is gone either way */
+      }
+    }
+    await registry.refresh().catch(() => {});
+    return endJson(res, 200, { ok: true, killed });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
   }

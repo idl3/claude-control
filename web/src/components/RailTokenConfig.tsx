@@ -18,6 +18,7 @@ const TOKEN_LABEL: Record<RailToken, string> = {
   effort: 'effort',
   ctx: 'ctx',
   usage: 'usage',
+  mem: 'mem',
 };
 
 // Illustrative chip per token — reuses the real rail's meta classes so the
@@ -30,6 +31,7 @@ const TOKEN_SAMPLE_CLASS: Record<RailToken, string> = {
   effort: 'meta-effort meta-effort-amber',
   ctx: 'meta-ctx',
   usage: 'meta-usage',
+  mem: 'meta-mem',
 };
 
 const PLACEHOLDER = '__placeholder__' as const;
@@ -100,6 +102,7 @@ function randomPreviewFields(isCodex: boolean): PreviewField[] {
     { key: 'model', text: formatModel(model), className: modelBadgeClass(model) },
     { key: 'effort', text: effort, className: effortClass(effort, isCodex) },
     { key: 'ctx', text: `ctx:${randInt(0, 100)}%`, className: 'meta-ctx' },
+    { key: 'mem', text: `${randInt(200, 1800)}M`, className: 'meta-mem' },
   ];
   if (isCodex) {
     fields.push({ key: 'usage', text: `${pick(USAGE_WINDOWS)}:${randInt(0, 100)}%`, className: 'meta-usage' });

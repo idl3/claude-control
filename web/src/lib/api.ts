@@ -632,6 +632,23 @@ export async function renameSession(id: string, name: string): Promise<void> {
 }
 
 /**
+ * Terminate a session: POST /api/session/terminate kills its tmux window AND
+ * unregisters its pane→transcript record (so a reused %N can't re-bind a stale
+ * transcript). Idempotent server-side. Throws on a non-OK response.
+ */
+export async function terminateSession(id: string): Promise<void> {
+  const res = await authFetch('/api/session/terminate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: true; error?: string };
+  if (!res.ok || !json.ok) {
+    throw new Error(json.error || `HTTP ${res.status}`);
+  }
+}
+
+/**
  * Rename a tmux SESSION (not a window) — e.g. the sidebar's deduped
  * tmux-session group header. POST /api/tmux/rename-session. Distinct from
  * `renameSession` above, which renames a single window/pane's display name.

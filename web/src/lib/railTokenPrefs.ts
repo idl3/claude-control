@@ -10,14 +10,14 @@
  *  is arbitrary (it's just the source of truth for "known tokens" + the
  *  pool's default display order) — the operator-chosen rail order lives in
  *  `RailToken[]` arrays, not this constant. */
-export const RAIL_TOKENS = ['model', 'effort', 'ctx', 'usage'] as const;
+export const RAIL_TOKENS = ['model', 'effort', 'ctx', 'usage', 'mem'] as const;
 export type RailToken = (typeof RAIL_TOKENS)[number];
 
 const STORAGE_KEY = 'cc:rail-tokens';
 
 /** Current (pre-configurator) behavior: every token, in the order
  *  paneMetaFields has always built them in. */
-export const DEFAULT_RAIL_TOKENS: RailToken[] = ['model', 'effort', 'ctx', 'usage'];
+export const DEFAULT_RAIL_TOKENS: RailToken[] = ['model', 'effort', 'ctx', 'usage', 'mem'];
 
 /** Default rotation interval for the rail's shared meta-slot cycle (see
  *  SessionRail's useMetaCyclePhase) — matches the pre-configurator hardcoded
