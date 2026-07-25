@@ -30,6 +30,8 @@ export interface Session {
   windowId?: string;
   active?: boolean;
   cwd?: string;
+  /** RSS (MB) of this pane's whole process subtree; null/absent when unknown. */
+  memMB?: number | null;
   transcriptPath?: string;
   pinned?: boolean;
   lastActivity?: number;

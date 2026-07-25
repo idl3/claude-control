@@ -1278,6 +1278,49 @@ body.is-external-display .rail {
   color: var(--text-dim);
   margin-left: auto; /* right-align ctx within the meta row */
 }
+.meta-mem {
+  /* Per-session RSS chip — same shape as ctx, subtle so it doesn't shout. */
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+}
+/* Terminate (×) — hidden until the row is hovered/focused/selected so it never
+   clutters the rail, then a restrained danger tone on its own hover. */
+.session-terminate {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 150ms) ease, background var(--dur-fast, 150ms) ease, color var(--dur-fast, 150ms) ease;
+}
+.session-item:hover .session-terminate,
+.session-item:focus-within .session-terminate,
+.session-item[data-selected='true'] .session-terminate {
+  opacity: 0.6;
+}
+.session-terminate:hover,
+.session-terminate:focus-visible {
+  opacity: 1;
+  background: color-mix(in oklch, var(--danger, oklch(62% 0.2 25)) 18%, transparent);
+  color: var(--danger, oklch(62% 0.2 25));
+}
+@media (hover: none) {
+  /* Touch: no hover to reveal it, so keep it faintly visible always. */
+  .session-terminate { opacity: 0.4; }
+}
 .meta-usage {
   /* Codex rate-limit chip — distinct muted tone (not ctx: colour) */
   font-variant-numeric: tabular-nums;
