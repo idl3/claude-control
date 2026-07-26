@@ -39,13 +39,21 @@ test('isoStamp strips milliseconds and colons, keeping the trailing Z', () => {
 
 // ── listVersions ──────────────────────────────────────────────────────────
 
-// Fixture root is created at MODULE EVAL time, not in before(): the route
-// section below must set CLAUDE_CONTROL_MEDIA before importing server.js,
-// and hook-vs-module-eval ordering differs across Node versions (Node >=25
-// runs module-scope before() eagerly; Node 20 runs it at test start — which
-// left the env var as the string "undefined" in CI).
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
-{
+// Fixture root + the server import both happen inside before(), not as
+// top-level module code: a raw top-level `await import(...)` in an ESM test
+// file races node:test's own hook scheduling — tests registered after the
+// await can start running (and the file-scope after() can fire) before the
+// rest of the module finishes evaluating, depending on the Node version and
+// how many tests were already queued at the point of suspension. Keeping all
+// of setup (including the dynamic import, since it must happen after
+// CLAUDE_CONTROL_MEDIA is set) inside a single before() hook makes ordering
+// node:test's problem, not this file's: before() is guaranteed to finish
+// before any test() body runs, full stop.
+let root;
+let _handler;
+
+before(async () => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
   const appDir = path.join(root, 'apps', 'widget');
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(appDir, '2026-07-01T10-00-00Z.html'), '<html>v1</html>');
@@ -68,22 +76,16 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-root-'));
   // An app dir that exists but has no recognizable version files and no
   // latest pointer yet.
   fs.mkdirSync(path.join(root, 'apps', 'empty'));
-}
 
-// The server import happens BEFORE any test() registration: under Node 20,
-// a top-level `await` suspends module eval and the runner starts executing
-// already-registered tests — then fires the file-scope after() hook (deleting
-// the fixture root) before eval resumes to register the route tests. Import
-// order, not hook order, is what makes this file version-proof.
-// ── route level (_handler) ───────────────────────────────────────────────
-// Configure env BEFORE importing server.js: token-gated, hermetic media root
-// so the route reads real fixture data instead of the operator's actual
-// ~/.claude-control/media.
-
-process.env.CLAUDE_CONTROL_TOKEN = 'test-token-media-apps';
-process.env.CLAUDE_CONTROL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-data-'));
-process.env.CLAUDE_CONTROL_MEDIA = root;
-const { _handler } = await import('../server.js');
+  // ── route level (_handler) ────────────────────────────────────────────
+  // Configure env BEFORE importing server.js: token-gated, hermetic media
+  // root so the route reads real fixture data instead of the operator's
+  // actual ~/.claude-control/media.
+  process.env.CLAUDE_CONTROL_TOKEN = 'test-token-media-apps';
+  process.env.CLAUDE_CONTROL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'media-apps-data-'));
+  process.env.CLAUDE_CONTROL_MEDIA = root;
+  ({ _handler } = await import('../server.js'));
+});
 
 after(() => {
   fs.rmSync(root, { recursive: true, force: true });
