@@ -1,0 +1,89 @@
+name: Publish agent-ui-kit
+
+# Publishes @idl3/agent-ui-kit to GitHub Packages. Deliberate versioning:
+# fires only on an explicit `agent-ui-kit-v*` tag (or a manual dry-run via
+# workflow_dispatch) — never on merge — so consumers that pin versions
+# upgrade on their own schedule.
+on:
+  push:
+    tags:
+      - 'agent-ui-kit-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build, test, and pack-smoke without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/agent-ui-kit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/agent-ui-kit/package-lock.json
+          registry-url: https://npm.pkg.github.com
+          scope: '@idl3'
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # Tag must match package.json — refuse to publish a mislabeled version.
+      - name: Version guard
+        if: github.event_name == 'push'
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#agent-ui-kit-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME ($TAG_VERSION) != package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
+      # Consume-path smoke on the EXACT artifact: pack the tarball, install it
+      # into a bare project, import it under node ESM, render with
+      # react-dom/server, and check the stylesheet export resolves. Catches
+      # exports/files/types packaging regressions on every release, not just
+      # v0.1.0 (in-repo build+test can't see these).
+      - name: Pack smoke
+        run: |
+          npm pack --pack-destination /tmp
+          TARBALL=$(ls /tmp/idl3-agent-ui-kit-*.tgz)
+          mkdir -p /tmp/pack-smoke && cd /tmp/pack-smoke
+          npm init -y >/dev/null
+          npm install --no-fund --no-audit "$TARBALL" react@19 react-dom@19
+          node --input-type=module -e "
+            import React from 'react';
+            import { renderToString } from 'react-dom/server';
+            import { AskQuestionForm } from '@idl3/agent-ui-kit';
+            import { createRequire } from 'module';
+            const html = renderToString(React.createElement(AskQuestionForm, {
+              questions: [{ question: 'Q?', options: [{ label: 'A' }] }],
+              onSubmit: () => {},
+            }));
+            if (!html.includes('option-btn')) throw new Error('render smoke failed');
+            createRequire(import.meta.url).resolve('@idl3/agent-ui-kit/styles.css');
+            console.log('pack smoke OK');
+          "
+
+      - name: Publish
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
