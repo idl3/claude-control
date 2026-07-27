@@ -108,3 +108,32 @@ test('extractTailRecord: assistant message with no usage block leaves contextUse
     await fs.rm(tmpPath, { force: true });
   }
 });
+
+// Regression: a native-1M model (fable) must resolve to the 1M window from its
+// MODEL, not from how full the session happens to be. The window used to be
+// sniffed only from a "(1M context)" label — which never appears when the model
+// surfaces as a raw id — so it fell through to the `usedTokens > 200_000`
+// heuristic. Observed live on four claude-fable-5 sessions: 191,794 tokens read
+// as 4% remaining (200k window) while 254,271 / 258,994 / 749,729 read as
+// 75/74/25% (1M window). Same model, two windows, and the meter JUMPED UP as a
+// session crossed 200k instead of continuing down.
+test('fable resolves the 1M window from the model id, below and above 200k', () => {
+  // Below 200k is the case the heuristic could never rescue.
+  assert.equal(computeCtxPctFromUsage(191_794, 'claude-fable-5'), 81);
+  assert.equal(computeCtxPctFromUsage(191_794, 'Fable 5'), 81); // pretty label too
+  // Above 200k stays correct (was already right, but for the wrong reason).
+  assert.equal(computeCtxPctFromUsage(258_994, 'claude-fable-5'), 74);
+  assert.equal(computeCtxPctFromUsage(749_729, 'Fable 5'), 25);
+});
+
+test('fable ctx% decreases monotonically across the old 200k cliff', () => {
+  const at190 = computeCtxPctFromUsage(190_000, 'claude-fable-5');
+  const at210 = computeCtxPctFromUsage(210_000, 'claude-fable-5');
+  assert.ok(at210 < at190, `expected ${at210} < ${at190} — the meter must not jump up`);
+});
+
+test('non-fable models keep the 200k default (no accidental widening)', () => {
+  assert.equal(computeCtxPctFromUsage(100_000, 'Opus 4.8'), 50);
+  assert.equal(computeCtxPctFromUsage(100_000, 'claude-opus-5'), 50);
+});
+
