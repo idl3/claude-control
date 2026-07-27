@@ -8,6 +8,13 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  resolve: {
+    // @idl3/agent-ui-kit is a file: symlink into packages/agent-ui-kit, whose
+    // own node_modules carries a react copy (devDep for its tests). Node
+    // resolution walks the symlink's REAL path, so without dedupe the bundle
+    // (and vitest) can load two reacts → hooks crash.
+    dedupe: ['react', 'react-dom'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
