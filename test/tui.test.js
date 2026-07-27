@@ -131,6 +131,15 @@ test('parseTuiStatus STILL flags thinking when working line is in the visible bo
 test('prettyModel shortens transcript model ids', () => {
   assert.equal(prettyModel('claude-opus-4-8'), 'Opus 4.8');
   assert.equal(prettyModel('claude-sonnet-4-6'), 'Sonnet 4.6');
+  // Claude 5 family: undotted versions + `fable`. These previously fell through
+  // and returned the RAW id, which also cost them their context window
+  // (sessions.js resolves the window from this label).
+  assert.equal(prettyModel('claude-fable-5'), 'Fable 5');
+  assert.equal(prettyModel('claude-opus-5'), 'Opus 5');
+  assert.equal(prettyModel('claude-sonnet-5'), 'Sonnet 5');
+  assert.equal(prettyModel('claude-haiku-4-5-20251001'), 'Haiku 4.5');
+  // Unfamiliar shapes still fall back to the raw id.
+  assert.equal(prettyModel('weird-thing'), 'weird-thing');
   assert.equal(prettyModel(null), null);
   assert.equal(prettyModel('weird-id'), 'weird-id');
 });
