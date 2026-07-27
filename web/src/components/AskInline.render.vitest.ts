@@ -17,6 +17,10 @@ afterEach(cleanup);
 function mount(activePrompt: ActivePrompt, handlers: Partial<{
   onAnswer: (toolUseId: string, selections: unknown) => void;
   onReply: (text: string) => void;
+  // Required by AskInlineProps since the stuck-ASK-card fix (#375): dismissing
+  // an ask must reconcile the rail badge, so the prop is not optional.
+  // Overridable here so a test can assert the dismiss path.
+  onDismiss: () => void;
 }> = {}) {
   const bodyRef = createRef<HTMLDivElement>();
   return render(
@@ -27,6 +31,7 @@ function mount(activePrompt: ActivePrompt, handlers: Partial<{
       onKey: () => {},
       onSelect: () => {},
       onReply: handlers.onReply ?? (() => {}),
+      onDismiss: handlers.onDismiss ?? (() => {}),
     }),
   );
 }
