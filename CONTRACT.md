@@ -84,10 +84,16 @@ Parsing rules (verified against real transcripts):
   of `{type:'text',text}` → flatten to text; `is_error`→isError).
 - `ts` = record.timestamp; `uuid` = record.uuid.
 - **Pending detection:** an AskUserQuestion is a `tool_use` block with
-  `name === 'AskUserQuestion'`, `input.questions`. It is *pending* until a
-  `tool_result` with `forId === that id` appears anywhere later in the stream.
-  Maintain a map of open question ids while tailing; `getPending()` returns the most
-  recent still-open one (or null). Emit `'pending'` when it changes.
+  `name === 'AskUserQuestion'`, `input.questions`. A question is *pending* only
+  while it is the transcript's **final turn** — i.e. the agent asked and is still
+  waiting. Any subsequent `user` record ends the wait, whether the human SELECTED
+  an option (recorded as a `tool_result`) OR TYPED a free-text reply (which Claude
+  Code records with **no** `tool_result` for the question). So: while tailing, add
+  an open question on its `tool_use`, and **clear all open questions on any
+  `user`-role message** (do NOT rely on matching a `tool_result` by `forId` — a
+  typed-over question never gets one and would otherwise stay "open" forever).
+  `getPending()` returns the most recent still-open one (or null). Emit `'pending'`
+  when it changes.
 - Bounded tail load: stat size; read the last `min(size, 1MB)` bytes; discard the
   first partial line; parse the rest; keep the last `maxBuffer` messages. Set the read
   offset to the file size. Then watch (`fs.watch` on the file, debounced) and on change
