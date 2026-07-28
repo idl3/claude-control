@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTuiStatus, prettyModel } from '../lib/tui.js';
+import { parseTuiStatus, prettyModel, resolveModelLabel } from '../lib/tui.js';
 
 test('parseTuiStatus extracts ctx% and model from a real status line', () => {
   const line = '    /claude-cockpit Opus 4.8 (1M context) ctx:35%         Remote Control active';
@@ -171,4 +171,52 @@ test('parseTuiStatus does NOT flag errored while the agent is still working', ()
 test('parseTuiStatus: ordinary prose mentioning errors does not trip errored', () => {
   const r = parseTuiStatus('Here is how to handle an error gracefully in your code.');
   assert.equal(r.errored, false);
+});
+
+// Regression: a narrow/wrapped tmux pane clips the status line mid-token. A
+// real 81-column capture ("Opus 4.…") produces a half-parsed model, because
+// MODEL_RE's [\d.]+ swallows the trailing dot but stops before the "…" that
+// follows it. This is the raw mechanism that produced "Opus 4." in the rail —
+// resolveModelLabel() (below) is what turns this parse result into a correct
+// display label; parseTuiStatus itself is unchanged and still extracts the
+// clipped text verbatim.
+test('parseTuiStatus documents the clipped-pane mechanism: a wrapped status line yields a bare-dot model', () => {
+  const line = '    /pleri-org/olam-wt/claudex-plan on  fix/billed-key-429-passthrough Opus 4.…';
+  const r = parseTuiStatus(line);
+  assert.equal(r.model, 'Opus 4.');
+});
+
+test('resolveModelLabel prefers the fallback when the TUI label ends in a bare trailing dot (clip lands mid minor-version)', () => {
+  assert.equal(resolveModelLabel('Opus 4.', 'Opus 4.8'), 'Opus 4.8');
+});
+
+test('resolveModelLabel prefers the fallback when the TUI label is a strict prefix of it (clip lands before the dot)', () => {
+  assert.equal(resolveModelLabel('Opus 4', 'Opus 4.8'), 'Opus 4.8');
+});
+
+test('resolveModelLabel falls back to null when the TUI label is truncated and no fallback is available', () => {
+  assert.equal(resolveModelLabel('Opus 4.', null), null);
+});
+
+test('resolveModelLabel still prefers the TUI label when it carries extra decoration the fallback lacks (no precedence regression)', () => {
+  assert.equal(resolveModelLabel('Opus 4.8 (1M context)', 'Opus 4.8'), 'Opus 4.8 (1M context)');
+});
+
+test('resolveModelLabel returns the fallback outright when there is no TUI label', () => {
+  assert.equal(resolveModelLabel(null, 'Opus 4.8'), 'Opus 4.8');
+});
+
+test('resolveModelLabel returns null when neither source is available', () => {
+  assert.equal(resolveModelLabel(null, null), null);
+});
+
+test('resolveModelLabel does NOT treat an exact match as truncated (whole-number family label)', () => {
+  assert.equal(resolveModelLabel('Opus 5', 'Opus 5'), 'Opus 5');
+});
+
+test('resolveModelLabel does NOT treat a genuinely different (non-prefix) label as truncated', () => {
+  // "Sonnet 4.6" is not a prefix of "Opus 4.8" (nor vice versa) — a stale/
+  // mismatched cached label from a model switch is a different bug, out of
+  // scope here; this only guards the SAME-family clip case.
+  assert.equal(resolveModelLabel('Sonnet 4.6', 'Opus 4.8'), 'Sonnet 4.6');
 });
