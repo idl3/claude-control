@@ -56,6 +56,42 @@ test('detectTranscriptPending: resolved AskUserQuestion is NOT pending', () => {
   assert.equal(res.pendingQuestion, null);
 });
 
+// Build a user record carrying a free-text reply — what Claude Code writes when
+// the human answers an AskUserQuestion by TYPING instead of selecting an option
+// (there is NO tool_result for the question in this case).
+function userTextRecord(text) {
+  return JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'text', text }] },
+  });
+}
+
+test('detectTranscriptPending: AskUserQuestion answered by a TYPED reply (no tool_result) is NOT pending', () => {
+  // Regression (stale-question bug): the human typed a new instruction instead
+  // of selecting, so the tool_use never received a tool_result. The question
+  // must NOT read as pending forever — the following user turn ends the wait.
+  const lines = [
+    askRecord('toolu_typed', 'The plan is finalized. What next?'),
+    userTextRecord('actually, let us switch to the cockpit bug'),
+  ];
+  const res = detectTranscriptPending(lines);
+  assert.equal(res.transcriptPending, false);
+  assert.equal(res.pendingToolUseId, null);
+  assert.equal(res.pendingQuestion, null);
+});
+
+test('detectTranscriptPending: question superseded by later conversation is NOT pending', () => {
+  // Human replied, then the agent kept working (more turns). The earlier
+  // question is answered/moved past, not pending.
+  const lines = [
+    askRecord('toolu_old', 'Old question?'),
+    userTextRecord('go with option A'),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }),
+  ];
+  const res = detectTranscriptPending(lines);
+  assert.equal(res.transcriptPending, false);
+});
+
 test('detectTranscriptPending: only the unresolved question of several is pending', () => {
   const lines = [
     askRecord('toolu_1', 'First?'),
