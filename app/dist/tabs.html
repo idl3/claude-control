@@ -21,18 +21,17 @@
     display: flex; align-items: center; gap: 6px; max-width: 180px; min-width: 64px;
     height: 28px; padding: 0 8px; border-radius: 6px; cursor: default;
     background: rgba(255,255,255,0.05); border: 1px solid transparent;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden;
   }
   .tab:hover { background: rgba(255,255,255,0.1); }
   .tab.active { background: rgba(60, 100, 200, 0.25); border-color: rgba(90, 130, 220, 0.5); }
-  .tab span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .tab span { flex: 1 1 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .tab .close {
     flex: 0 0 auto; width: 14px; height: 14px; border-radius: 3px; border: 0;
     background: transparent; color: #8b93a3; font-size: 13px; line-height: 14px;
     padding: 0; cursor: default; display: flex; align-items: center; justify-content: center;
   }
   .tab .close:hover { background: rgba(255,100,100,0.25); color: #fff; }
-  .tab.new-tab { min-width: 48px; justify-content: center; color: #9fb4e0; }
   .toolbar {
     flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
     padding: 0 10px 0 6px; height: 100%;
@@ -45,42 +44,41 @@
   }
   .btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
   .btn.add { padding: 0 7px; font-weight: 600; }
-  .new-url {
-    position: absolute; top: 38px; right: 8px;
+  .url-bar {
+    position: absolute; top: 0; left: 82px; right: 120px; bottom: 0;
     display: none; align-items: center; gap: 6px;
-    padding: 6px; border-radius: 8px;
+    padding: 0 6px;
     background: rgba(16, 21, 31, 0.98);
-    border: 1px solid rgba(90, 130, 220, 0.4);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   }
-  .new-url.show { display: flex; }
-  .new-url input {
-    width: 280px; height: 26px; padding: 0 8px; border-radius: 5px;
+  .url-bar.show { display: flex; }
+  .url-bar input {
+    flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 8px; border-radius: 5px;
     border: 1px solid #2b3550; background: #0c1018; color: #e7e9ee;
     font: 400 13px/1.2 -apple-system, system-ui, sans-serif; outline: none;
   }
-  .new-url input:focus { border-color: #4f6bb0; }
+  .url-bar input:focus { border-color: #4f6bb0; }
   [data-tauri-drag-region] { -webkit-app-region: drag; app-region: drag; }
 </style>
 </head>
 <body>
 <div class="drag" data-tauri-drag-region></div>
 <div class="tabs" id="tabs"></div>
+<div class="url-bar" id="url-bar">
+  <input id="url-input" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false">
+  <button class="btn" id="go">Go</button>
+  <button class="btn" id="cancel">Cancel</button>
+</div>
 <div class="toolbar">
   <button class="btn add" id="new-tab" title="New tab">+</button>
   <button class="btn" id="reload" title="Reload app">↻</button>
   <button class="btn" id="processes" title="Processes">⚙</button>
   <button class="btn" id="settings" title="Settings">⋯</button>
 </div>
-<div class="new-url" id="new-url-box">
-  <input id="new-url" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false">
-  <button class="btn" id="go">Go</button>
-</div>
 <script>
   const $ = (sel) => document.querySelector(sel);
   const tabsEl = $('#tabs');
-  const newUrlBox = $('#new-url-box');
-  const newUrlInput = $('#new-url');
+  const urlBar = $('#url-bar');
+  const urlInput = $('#url-input');
 
   function invoke(cmd, args) {
     const tauri = window.__TAURI__;
@@ -124,34 +122,38 @@
   };
 
   function openNewTab() {
-    const url = newUrlInput.value.trim();
+    const url = urlInput.value.trim();
     if (!url) return;
     invoke('open_browser_tab', { url }).catch(console.error);
-    newUrlInput.value = '';
-    newUrlBox.classList.remove('show');
+    urlInput.value = '';
+    urlBar.classList.remove('show');
+  }
+
+  function showUrlBar() {
+    urlBar.classList.add('show');
+    urlInput.focus();
+  }
+
+  function hideUrlBar() {
+    urlBar.classList.remove('show');
+    urlInput.value = '';
   }
 
   $('#new-tab').addEventListener('click', () => {
-    newUrlBox.classList.toggle('show');
-    if (newUrlBox.classList.contains('show')) newUrlInput.focus();
+    if (urlBar.classList.contains('show')) hideUrlBar();
+    else showUrlBar();
   });
   $('#go').addEventListener('click', openNewTab);
-  newUrlInput.addEventListener('keydown', (e) => {
+  $('#cancel').addEventListener('click', hideUrlBar);
+  urlInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') openNewTab();
-    if (e.key === 'Escape') {
-      newUrlBox.classList.remove('show');
-      newUrlInput.value = '';
-    }
-  });
-  newUrlInput.addEventListener('blur', () => {
-    setTimeout(() => { if (document.activeElement !== newUrlInput) newUrlBox.classList.remove('show'); }, 200);
+    if (e.key === 'Escape') hideUrlBar();
   });
 
   $('#reload').addEventListener('click', () => invoke('shell_action', { action: 'reload' }).catch(console.error));
   $('#settings').addEventListener('click', () => invoke('shell_action', { action: 'settings' }).catch(console.error));
   $('#processes').addEventListener('click', () => invoke('shell_action', { action: 'processes' }).catch(console.error));
 
-  // Safety: Tauri global may already be present; if not, poll briefly.
   if (!window.__TAURI__) {
     let n = 0;
     const iv = setInterval(() => {
