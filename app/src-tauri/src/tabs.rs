@@ -228,17 +228,12 @@ impl TabManager {
     }
 }
 
-#[derive(serde::Deserialize)]
-pub struct OpenTabRequest {
-    url: String,
-}
-
 #[tauri::command]
 pub async fn open_browser_tab(
-    req: OpenTabRequest,
+    url: String,
     tabs: tauri::State<'_, Arc<Mutex<TabManager>>>,
 ) -> Result<String, String> {
-    tabs.lock().unwrap().open_tab(req.url)
+    tabs.lock().unwrap().open_tab(url)
 }
 
 #[tauri::command]
