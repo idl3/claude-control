@@ -6,8 +6,9 @@ use tauri::{
 };
 
 const TAB_BAR_HEIGHT: f64 = 38.0;
-const DEFAULT_SPLIT: f64 = 0.55;
 const TAB_BAR_LABEL: &str = "tab-bar";
+const CHATS_ID: &str = "chats";
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) ClaudeControlShell/0.1.0";
 
 #[derive(Clone, serde::Serialize)]
 struct TabView {
@@ -24,46 +25,22 @@ struct Tab {
 pub struct TabManager {
     window: Window,
     main: Webview,
-    tab_bar: Option<Webview>,
+    tab_bar: Webview,
     tabs: Vec<Tab>,
-    active_id: Option<String>,
-    split: f64,
+    active_id: String,
     next_id: usize,
 }
 
 impl TabManager {
-    pub fn new(window: Window, main: Webview) -> Self {
+    pub fn new(window: Window, tab_bar: Webview, main: Webview) -> Self {
         Self {
             window,
             main,
-            tab_bar: None,
+            tab_bar,
             tabs: Vec::new(),
-            active_id: None,
-            split: DEFAULT_SPLIT,
+            active_id: CHATS_ID.to_string(),
             next_id: 1,
         }
-    }
-
-    fn ensure_tab_bar(&mut self) -> Result<&Webview, String> {
-        if self.tab_bar.is_none() {
-            let size = self
-                .window
-                .inner_size()
-                .map_err(|e| e.to_string())?
-                .to_logical(self.window.scale_factor().unwrap_or(1.0));
-            let builder = WebviewBuilder::new(TAB_BAR_LABEL, WebviewUrl::App("tabs.html".into()));
-            let webview = self
-                .window
-                .add_child(
-                    builder,
-                    LogicalPosition::new(0.0, 0.0),
-                    LogicalSize::new(size.width, TAB_BAR_HEIGHT),
-                )
-                .map_err(|e| e.to_string())?;
-            let _ = webview.set_auto_resize(false);
-            self.tab_bar = Some(webview);
-        }
-        Ok(self.tab_bar.as_ref().unwrap())
     }
 
     fn window_logical_size(&self) -> Result<LogicalSize<f64>, String> {
@@ -72,55 +49,50 @@ impl TabManager {
         Ok(size.to_logical(sf))
     }
 
+    fn content_rect(&self, size: LogicalSize<f64>) -> Rect {
+        Rect {
+            position: Position::Logical(LogicalPosition::new(0.0, TAB_BAR_HEIGHT)),
+            size: Size::Logical(LogicalSize::new(
+                size.width,
+                (size.height - TAB_BAR_HEIGHT).max(0.0_f64),
+            )),
+        }
+    }
+
     fn layout(&mut self) -> Result<(), String> {
         let size = self.window_logical_size()?;
-        let tab_bar = self.ensure_tab_bar()?;
-        tab_bar
+
+        self.tab_bar
             .set_bounds(Rect {
                 position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
                 size: Size::Logical(LogicalSize::new(size.width, TAB_BAR_HEIGHT)),
             })
             .map_err(|e| e.to_string())?;
 
-        if self.tabs.is_empty() {
-            self.hide_all_browser_panes();
-            self.main
-                .set_bounds(Rect {
-                    position: Position::Logical(LogicalPosition::new(0.0, TAB_BAR_HEIGHT)),
-                    size: Size::Logical(LogicalSize::new(
-                        size.width,
-                        (size.height - TAB_BAR_HEIGHT).max(0.0),
-                    )),
-                })
-                .map_err(|e| e.to_string())?;
-            let _ = self.main.show();
-        } else {
-            let browser_height = ((size.height - TAB_BAR_HEIGHT) * self.split).max(120.0);
-            let spa_top = TAB_BAR_HEIGHT + browser_height;
-            let spa_height = (size.height - spa_top).max(0.0);
+        let content = self.content_rect(size);
 
+        if self.active_id == CHATS_ID {
+            let _ = self.hide_all_browser_panes();
+            self.main.set_bounds(content).map_err(|e| e.to_string())?;
+            let _ = self.main.show();
+        } else if self.tabs.iter().any(|t| t.view.id == self.active_id) {
+            let _ = self.main.hide();
             for tab in &self.tabs {
-                if Some(&tab.view.id) == self.active_id.as_ref() {
-                    tab.webview
-                        .set_bounds(Rect {
-                            position: Position::Logical(LogicalPosition::new(0.0, TAB_BAR_HEIGHT)),
-                            size: Size::Logical(LogicalSize::new(size.width, browser_height)),
-                        })
-                        .map_err(|e| e.to_string())?;
+                if tab.view.id == self.active_id {
+                    tab.webview.set_bounds(content).map_err(|e| e.to_string())?;
                     let _ = tab.webview.show();
                 } else {
                     let _ = tab.webview.hide();
                 }
             }
-
-            self.main
-                .set_bounds(Rect {
-                    position: Position::Logical(LogicalPosition::new(0.0, spa_top)),
-                    size: Size::Logical(LogicalSize::new(size.width, spa_height)),
-                })
-                .map_err(|e| e.to_string())?;
+        } else {
+            // Unknown active tab -> fall back to Chats.
+            self.active_id = CHATS_ID.to_string();
+            let _ = self.hide_all_browser_panes();
+            self.main.set_bounds(content).map_err(|e| e.to_string())?;
             let _ = self.main.show();
         }
+
         self.sync_tab_bar();
         Ok(())
     }
@@ -132,15 +104,20 @@ impl TabManager {
     }
 
     fn sync_tab_bar(&self) {
-        let Some(tab_bar) = self.tab_bar.as_ref() else {
-            return;
-        };
-        let list: Vec<&TabView> = self.tabs.iter().map(|t| &t.view).collect();
-        let payload = match serde_json::to_string(&(&list, self.active_id.as_deref())) {
+        let mut list = Vec::with_capacity(self.tabs.len() + 1);
+        list.push(TabView {
+            id: CHATS_ID.to_string(),
+            url: String::new(),
+            title: "Chats".to_string(),
+        });
+        list.extend(self.tabs.iter().map(|t| t.view.clone()));
+        let payload = match serde_json::to_string(&(&list, &self.active_id)) {
             Ok(s) => s,
             Err(_) => return,
         };
-        let _ = tab_bar.eval(format!("if(window.updateTabs)window.updateTabs({payload})"));
+        let _ = self
+            .tab_bar
+            .eval(format!("if(window.updateTabs)window.updateTabs({payload})"));
     }
 
     fn tab_title(url: &str) -> String {
@@ -161,17 +138,19 @@ impl TabManager {
         }
         let id = format!("tab-{}", self.next_id);
         self.next_id += 1;
+
         let size = self.window_logical_size()?;
-        let browser_height = ((size.height - TAB_BAR_HEIGHT) * self.split).max(120.0);
+        let content = self.content_rect(size);
+        let (position, size) = match (content.position, content.size) {
+            (Position::Logical(p), Size::Logical(s)) => (p, s),
+            _ => return Err("unexpected bounds type".into()),
+        };
+
         let label = format!("browser-{id}");
         let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed));
         let webview = self
             .window
-            .add_child(
-                builder,
-                LogicalPosition::new(0.0, TAB_BAR_HEIGHT),
-                LogicalSize::new(size.width, browser_height),
-            )
+            .add_child(builder, position, size)
             .map_err(|e| e.to_string())?;
         let _ = webview.set_auto_resize(false);
 
@@ -183,22 +162,21 @@ impl TabManager {
             },
             webview,
         });
-        self.active_id = Some(id.clone());
+        self.active_id = id.clone();
         self.layout()?;
         Ok(id)
     }
 
     pub fn close_tab(&mut self, id: &str) -> Result<(), String> {
+        if id == CHATS_ID {
+            return Err("the Chats tab cannot be closed".into());
+        }
         let pos = self.tabs.iter().position(|t| t.view.id == id);
         if let Some(pos) = pos {
             let tab = self.tabs.remove(pos);
             let _ = tab.webview.close();
-            if self.active_id.as_deref() == Some(id) {
-                self.active_id = self
-                    .tabs
-                    .get(pos.saturating_sub(1))
-                    .or_else(|| self.tabs.first())
-                    .map(|t| t.view.id.clone());
+            if self.active_id == id {
+                self.active_id = CHATS_ID.to_string();
             }
             self.layout()?;
         }
@@ -206,8 +184,13 @@ impl TabManager {
     }
 
     pub fn activate_tab(&mut self, id: &str) -> Result<(), String> {
+        if id == CHATS_ID {
+            self.active_id = CHATS_ID.to_string();
+            self.layout()?;
+            return Ok(());
+        }
         if self.tabs.iter().any(|t| t.view.id == id) {
-            self.active_id = Some(id.to_string());
+            self.active_id = id.to_string();
             self.layout()?;
         }
         Ok(())
@@ -226,6 +209,39 @@ impl TabManager {
     pub fn handle_resize(&mut self) -> Result<(), String> {
         self.layout()
     }
+}
+
+fn create_tab_bar(window: &Window) -> Result<Webview, String> {
+    let sf = window.scale_factor().unwrap_or(1.0);
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    let logical: LogicalSize<f64> = size.to_logical(sf);
+    let builder = WebviewBuilder::new(TAB_BAR_LABEL, WebviewUrl::App("tabs.html".into()));
+    let webview = window
+        .add_child(
+            builder,
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(logical.width, TAB_BAR_HEIGHT),
+        )
+        .map_err(|e| e.to_string())?;
+    let _ = webview.set_auto_resize(false);
+    Ok(webview)
+}
+
+fn create_main(window: &Window) -> Result<Webview, String> {
+    let sf = window.scale_factor().unwrap_or(1.0);
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    let logical: LogicalSize<f64> = size.to_logical(sf);
+    let builder = WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
+        .user_agent(USER_AGENT);
+    let webview = window
+        .add_child(
+            builder,
+            LogicalPosition::new(0.0, TAB_BAR_HEIGHT),
+            LogicalSize::new(logical.width, (logical.height - TAB_BAR_HEIGHT).max(0.0_f64)),
+        )
+        .map_err(|e| e.to_string())?;
+    let _ = webview.set_auto_resize(false);
+    Ok(webview)
 }
 
 #[tauri::command]
@@ -262,12 +278,15 @@ pub async fn shell_action(
 
 pub fn init(app: &AppHandle) -> Result<Arc<Mutex<TabManager>>, String> {
     let window = app.get_window("main").ok_or("main window not found")?;
-    let main = window
-        .webviews()
-        .into_iter()
-        .next()
-        .ok_or("main webview not found")?;
-    let _ = main.set_auto_resize(false);
-    let manager = Arc::new(Mutex::new(TabManager::new(window, main)));
+    // Close the default webview created from tauri.conf.json so we can control
+    // child webview order. On Linux/GTK the pack order determines stacking, and
+    // the tab bar must be created before the content webviews to appear on top.
+    for w in window.webviews() {
+        let _ = w.close();
+    }
+    let tab_bar = create_tab_bar(&window)?;
+    let main = create_main(&window)?;
+    let manager = Arc::new(Mutex::new(TabManager::new(window, tab_bar, main)));
+    let _ = manager.lock().unwrap().handle_resize();
     Ok(manager)
 }
