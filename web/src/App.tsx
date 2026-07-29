@@ -21,6 +21,7 @@ import { usePullToRefresh, PTR_THRESHOLD } from './hooks/usePullToRefresh';
 import { convertMessages, transcriptHasToolUse } from './lib/convert';
 import { buildThreadMessages, initialSendSeq } from './lib/thread-messages';
 import { attachmentPath, createClaudeControlAttachmentAdapter } from './lib/attachments';
+import { isAllowedHref } from './lib/linkify';
 import { renameSession, getConfig, olamTerminalToken, olamSessionLiveness, type CreateSessionResult } from './lib/api';
 import { SessionRail, claudeWorking, type SessionFilter } from './components/SessionRail';
 import { RailTabs, computeRailTabs, resolveTabAction } from './components/RailTabs';
@@ -1876,8 +1877,16 @@ function AppInner() {
     try {
       const { uiUrl } = await olamTerminalToken(id);
       if (remoteTermSessionRef.current !== id) return; // selection moved on while awaiting
-      if (uiUrl) setRemoteTermUrl(uiUrl);
-      else showToast('No terminal URL available for this session', 'error');
+      // The terminal URL is trusted to come from the runner, but validate the
+      // scheme so a compromised/malformed response cannot mount a javascript:
+      // iframe in the cockpit origin.
+      if (typeof uiUrl === 'string' && /^https?:\/\//i.test(uiUrl)) {
+        setRemoteTermUrl(uiUrl);
+      } else if (uiUrl) {
+        showToast('Terminal URL rejected: unsafe scheme', 'error');
+      } else {
+        showToast('No terminal URL available for this session', 'error');
+      }
     } catch (err) {
       showToast(`Terminal token failed: ${(err as Error).message}`, 'error');
     } finally {
@@ -3058,7 +3067,7 @@ function AppInner() {
                 {resumeIssue?.sessionId === cockpit.selectedId ? (
                   <div className="olam-resume-banner" role="alert">
                     ⚠ {resumeIssue.message}
-                    {resumeIssue.prUrl ? (
+                    {resumeIssue.prUrl && isAllowedHref(resumeIssue.prUrl) ? (
                       <a href={resumeIssue.prUrl} target="_blank" rel="noopener noreferrer">
                         open PR ↗
                       </a>
@@ -3093,6 +3102,7 @@ function AppInner() {
                           src={remoteTermUrl}
                           className="olam-terminal-frame"
                           title="Remote sandbox terminal"
+                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
                         />
                         <a
                           className="olam-terminal-newtab"

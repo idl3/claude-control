@@ -231,6 +231,11 @@ json_escape() {
 bootstrap_data() {
   mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$CONFIG_DIR/media" "$CONFIG_DIR/panes"
   chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+  chmod 700 "$LOG_DIR" 2>/dev/null || true
+  # Pre-create nohup logs with 0600 so a bearer token printed during startup is
+  # not written to a world-readable file.
+  touch "$LOG_DIR/out.log" "$LOG_DIR/err.log" 2>/dev/null || true
+  chmod 600 "$LOG_DIR/out.log" "$LOG_DIR/err.log" 2>/dev/null || true
 
   if [ "$GEN_TOKEN" = "1" ]; then
     if [ -s "$TOKEN_FILE" ]; then
@@ -412,7 +417,11 @@ echo ""
 ok "done."
 echo "  data dir:  $CONFIG_DIR"
 if [ "$GEN_TOKEN" = "1" ] && [ -s "$TOKEN_FILE" ]; then
-  echo "  token:     $(cat "$TOKEN_FILE")   (enter at the login prompt, or append ?token=… once)"
+  # The token itself lives in $TOKEN_FILE (mode 0600). Print only a short hint
+  # so the install log does not leak the bearer into a world-readable file.
+  token_hint="$(openssl dgst -sha256 -binary "$TOKEN_FILE" 2>/dev/null | xxd -p - 2>/dev/null | head -c 16)"
+  [ -z "$token_hint" ] && token_hint="$(node -e "process.stdout.write(crypto.createHash('sha256').update(require('fs').readFileSync('$TOKEN_FILE')).digest('hex').slice(0,16))" 2>/dev/null)"
+  echo "  token:     SHA-256 $token_hint…  (enter at the login prompt; stored in $TOKEN_FILE)"
 else
   echo "  auth:      TOKENLESS (relies on 127.0.0.1 bind + tailnet ACL)"
 fi
