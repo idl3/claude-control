@@ -638,10 +638,7 @@ html[data-native-shell='true'] .hud-brand {
   display: none;
 }
 html[data-native-shell='true'] .hud {
-  padding-left: 86px;
-  overscroll-behavior: contain;
-  flex: 0 0 auto;
-  box-sizing: content-box;
+  display: none;
 }
 .hud[data-warn='true'] {
   background: var(--amber-bg);
