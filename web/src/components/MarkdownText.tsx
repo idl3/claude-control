@@ -16,7 +16,7 @@ import { MarkdownDiv } from './DeliveryCard';
 import { UltrathinkText } from './ReservedTokens';
 import { useArtifactPanel, codeArtifactId } from './ArtifactContext';
 import { UrlLink } from './UrlLink';
-import { linkifyChildren, hljsHtmlToNodes } from '../lib/linkify';
+import { linkifyChildren, hljsHtmlToNodes, isAllowedHref } from '../lib/linkify';
 
 /**
  * GitHub-flavored markdown for assistant/system text parts.
@@ -142,16 +142,23 @@ const TableWrap = ({ node: _node, ...props }: { node?: unknown } & React.HTMLAtt
 
 // Prose links: remark-gfm autolinks bare URLs into real `<a>` nodes, and
 // `[text](url)` markdown links land here too. Anything with an http(s) href
-// routes through the shared UrlLink popover (see UrlLink.tsx); anything else
-// (mailto:, relative paths, etc.) renders as a plain, unhandled anchor.
-const ProseLink = ({ href, children }: { href?: string; children?: React.ReactNode }) =>
-  typeof href === 'string' && /^https?:\/\//i.test(href) ? (
-    <UrlLink url={href} variant="prose">
-      {children}
-    </UrlLink>
-  ) : (
-    <a href={href}>{children}</a>
-  );
+// routes through the shared UrlLink popover (see UrlLink.tsx); mailto:/tel:
+// and relative paths render as a plain anchor. javascript:/data:/vbscript:
+// and other schemes are rendered as plain text so a prompt-injected markdown
+// link cannot execute in the cockpit origin and steal the localStorage bearer.
+const ProseLink = ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+  if (typeof href === 'string' && /^https?:\/\//i.test(href)) {
+    return (
+      <UrlLink url={href} variant="prose">
+        {children}
+      </UrlLink>
+    );
+  }
+  if (isAllowedHref(href)) {
+    return <a href={href}>{children}</a>;
+  }
+  return <span className="aui-md-link-invalid">{children}</span>;
+};
 
 // Inline `code` (single-backtick spans). This is ALSO the `Code` slot handed
 // to CodeHighlighter above for fenced blocks — there, `children` always

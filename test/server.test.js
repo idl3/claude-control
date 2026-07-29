@@ -51,7 +51,7 @@ function getFreePort() {
  * Spawn the server as a child process and wait until it logs its startup line
  * (or reject after a timeout). Returns { child, port, uploadsDir }.
  */
-async function startServer(port, uploadsDir) {
+async function startServer(port, uploadsDir, presentDir) {
   const pinsFile = path.join(os.tmpdir(), `cc-test-pins-${port}.json`);
   fs.writeFileSync(pinsFile, '{}');
 
@@ -62,6 +62,7 @@ async function startServer(port, uploadsDir) {
         CLAUDE_CONTROL_PORT: String(port),
         CLAUDE_CONTROL_TOKEN: TEST_TOKEN,
         CLAUDE_CONTROL_UPLOADS: uploadsDir,
+        CLAUDE_CONTROL_PRESENT: presentDir,
         CLAUDE_CONTROL_PINS: pinsFile,
         // Point at a known-empty directory so tmux errors don't crash startup.
         CLAUDE_CONTROL_PROJECTS: os.tmpdir(),
@@ -75,12 +76,12 @@ async function startServer(port, uploadsDir) {
       settled = true;
       clearTimeout(timer);
       if (isErr) reject(val);
-      else resolve({ child, port, uploadsDir });
+      else resolve({ child, port, uploadsDir, presentDir });
     };
 
     // Wait for the "claude-control → http://" startup line.
     child.stdout.on('data', (chunk) => {
-      if (chunk.toString().includes('claude-control →')) settle({ child, port, uploadsDir });
+      if (chunk.toString().includes('claude-control →')) settle({ child, port, uploadsDir, presentDir });
     });
     child.stderr.on('data', () => {/* swallow */});
     child.on('error', (err) => settle(err, true));
@@ -106,17 +107,20 @@ function req(port, pathname, options = {}) {
 
 let port;
 let uploadsDir;
-let serverCtx; // { child, port, uploadsDir }
+let presentDir;
+let serverCtx; // { child, port, uploadsDir, presentDir }
 
 before(async () => {
   port = await getFreePort();
   uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-uploads-test-'));
-  serverCtx = await startServer(port, uploadsDir);
+  presentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-present-test-'));
+  serverCtx = await startServer(port, uploadsDir, presentDir);
 });
 
 after(() => {
   try { serverCtx?.child?.kill('SIGTERM'); } catch { /* already gone */ }
   try { fs.rmSync(uploadsDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try { fs.rmSync(presentDir, { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
 // ===========================================================================
@@ -489,4 +493,42 @@ test('R8: server survives a full disconnect (0 clients) and a new client still g
   // pause/resume round-trip — the strongest possible "did not crash" proof.
   const followUp = await req(port, '/api/agents', { headers: AUTH_HEADER });
   assert.equal(followUp.status, 200, 'server must still be alive and responsive after a pause/resume cycle');
+});
+
+// ===========================================================================
+// 4. GET /present — no auth, but path-confined to presentDir + HTML sandboxed
+// ===========================================================================
+
+test('/present serves a plain file from presentDir', async () => {
+  const file = path.join(presentDir, 'demo.txt');
+  fs.writeFileSync(file, 'hello present');
+  const res = await req(port, '/present/demo.txt');
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), 'hello present');
+});
+
+test('/present adds sandbox CSP to HTML files', async () => {
+  const file = path.join(presentDir, 'demo.html');
+  fs.writeFileSync(file, '<html><script>alert(1)</script></html>');
+  const res = await req(port, '/present/demo.html');
+  assert.equal(res.status, 200);
+  const csp = res.headers.get('content-security-policy');
+  assert.ok(csp?.includes('sandbox'), 'HTML present files must be sandboxed');
+});
+
+test('/present rejects path traversal', async () => {
+  // Use encoded dots so the URL parser does not normalize them before the
+  // server decodes and resolves the path itself.
+  const res = await req(port, '/present/%2e%2e%2fauth.test.js');
+  assert.equal(res.status, 403);
+});
+
+test('/present rejects symlink escape to uploadsDir', async () => {
+  const outside = path.join(os.tmpdir(), `cc-present-outside-${Date.now()}.txt`);
+  fs.writeFileSync(outside, 'leak');
+  const link = path.join(presentDir, 'escape.txt');
+  fs.symlinkSync(outside, link);
+  const res = await req(port, '/present/escape.txt');
+  assert.equal(res.status, 403);
+  fs.unlinkSync(outside);
 });

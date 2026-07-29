@@ -13,6 +13,10 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 PORT="${CLAUDE_CONTROL_PORT:-4317}"
 
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
+# Pre-create launchd log files with restrictive permissions so the bearer token
+# never lands in a world-readable log even if the server briefly logs it.
+touch "$LOG_DIR/out.log" "$LOG_DIR/err.log" 2>/dev/null || true
+chmod 600 "$LOG_DIR"/*.log 2>/dev/null || true
 
 # Token (OPTIONAL): if ~/.claude-control/token exists, gate the UI on it;
 # otherwise run tokenless — open to anything that can reach the port (the
@@ -108,8 +112,11 @@ echo "  logs:  $LOG_DIR/{out,err}.log"
 echo "  url:   $BASE"
 if [ -n "$TOKEN" ]; then
   # Don't put the token in the URL (it leaks via history/logs); the web app
-  # prompts for it and stores it in localStorage.
-  echo "  auth:  token — enter it at the login prompt: $TOKEN"
+  # prompts for it and stores it in localStorage. Print only a SHA-256 hint
+  # so the launchd stdout log (default 0644) does not leak the bearer.
+  token_hint="$(printf '%s' "$TOKEN" | openssl dgst -sha256 -binary 2>/dev/null | xxd -p - 2>/dev/null | head -c 16)"
+  [ -z "$token_hint" ] && token_hint="$(printf '%s' "$TOKEN" | node -e 'process.stdout.write(crypto.createHash("sha256").update(require("fs").readFileSync(0)).digest("hex").slice(0,16))' 2>/dev/null)"
+  echo "  auth:  token — enter it at the login prompt (SHA-256 hint: ${token_hint}…)"
 else
   echo "  auth:  TOKENLESS (tailnet-only)"
 fi

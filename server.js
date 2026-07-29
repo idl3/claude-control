@@ -6,6 +6,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -316,10 +317,11 @@ function isAllowedOrigin(origin) {
   try {
     const host = new URL(origin).hostname;
     if (host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1') return true;
-    // Tailscale MagicDNS hostnames (tailnet-private) when reached via `tailscale
-    // serve`. The tailnet ACL already restricts who can connect; the token gate
-    // is the second factor since this UI can type into live sessions.
-    if (host.endsWith('.ts.net')) return true;
+    // Tailscale MagicDNS hostnames are only acceptable when a bearer token is
+    // configured. In tokenless mode the server is intentionally localhost-only;
+    // exposing a tokenless control plane to a tailnet would let any tailnet
+    // host drive sessions after a single DNS/phishing hop.
+    if (host.endsWith('.ts.net')) return !!CONFIG.token;
     return false;
   } catch {
     return false;
@@ -2106,18 +2108,41 @@ function staticCacheControl(rel, { viteDist = PUBLIC_DIR === DIST_DIR } = {}) {
   return 'no-store, must-revalidate';
 }
 
-function servePresent(pathname, res) {
+// /present/* files are agent-writable. Keep them inside the presentDir and,
+// for HTML, sandbox the browsing context so a demo page cannot read the
+// cockpit's localStorage bearer or make same-origin WebSocket requests.
+const PRESENT_CSP = "sandbox allow-scripts";
+
+function resolvePresentPath(pathname) {
   let rel;
   try {
     rel = decodeURIComponent(pathname.replace(/^\/present\/?/, ''));
   } catch {
-    res.writeHead(400); return res.end('bad request');
+    return null;
   }
+  if (rel.includes('\0')) return null;
+  if (path.isAbsolute(rel)) return null;
   if (!rel || rel.endsWith('/')) rel = path.join(rel, 'index.html');
+
   const root = path.resolve(CONFIG.presentDir);
   const full = path.resolve(root, rel);
-  if (full !== root && !full.startsWith(root + path.sep)) {
-    res.writeHead(403); return res.end('forbidden');
+  // Lexical guard first, then realpath to defeat symlink escapes.
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  try {
+    const realRoot = fs.realpathSync(root);
+    const realFull = fs.realpathSync(full);
+    if (realFull !== realRoot && !realFull.startsWith(realRoot + path.sep)) return null;
+    return realFull;
+  } catch {
+    return null;
+  }
+}
+
+function servePresent(pathname, res) {
+  const full = resolvePresentPath(pathname);
+  if (!full) {
+    res.writeHead(403);
+    return res.end('forbidden');
   }
   fs.readFile(full, (err, data) => {
     if (err) {
@@ -2125,11 +2150,15 @@ function servePresent(pathname, res) {
       return res.end('not found');
     }
     const ext = path.extname(full).toLowerCase();
-    res.writeHead(200, {
+    const headers = {
       'content-type': MIME[ext] || 'application/octet-stream',
       'cache-control': 'no-store, must-revalidate',
       'x-content-type-options': 'nosniff',
-    });
+    };
+    // HTML demos run in a sandboxed unique origin so they cannot access
+    // cockpit localStorage or make authenticated same-origin WS calls.
+    if (ext === '.html') headers['content-security-policy'] = PRESENT_CSP;
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
@@ -3789,10 +3818,11 @@ async function main() {
     // eslint-disable-next-line no-console
     console.log(`claude-control → ${_scheme}://${CONFIG.host}:${CONFIG.port}/`);
     if (CONFIG.token) {
-      // The token is no longer carried in the URL — the web app prompts for it
-      // on load and sends it as an Authorization header (HTTP) / subprotocol
-      // (WS). Print it so the operator can paste it into the login prompt.
-      console.log(`   (access token: ${CONFIG.token} — enter it at the login prompt)`);
+      // The token is stored in ~/.claude-control/token (mode 0600). Print only
+      // its SHA-256 prefix so the operator can confirm which token is active
+      // without leaking the bearer into launchd logs that may be world-readable.
+      const tokenHint = crypto.createHash('sha256').update(CONFIG.token).digest('hex').slice(0, 16);
+      console.log(`   (access token active — SHA-256 hint: ${tokenHint}… enter it at the login prompt)`);
     } else {
       console.log('   (no CLAUDE_CONTROL_TOKEN set — relying on 127.0.0.1 bind. This UI can type into your sessions.)');
     }
