@@ -15,7 +15,9 @@ mod notifications {
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, Bool, ProtocolObject};
     use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
-    use objc2_foundation::{ns_string, NSDictionary, NSError, NSObject, NSObjectProtocol, NSString};
+    use objc2_foundation::{
+        ns_string, NSDictionary, NSError, NSObject, NSObjectProtocol, NSString,
+    };
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
         UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
@@ -66,9 +68,8 @@ mod notifications {
                             // encodeURIComponent to mirror App.tsx's own hash writes
                             // (session ids can contain '%', e.g. tmux pane ids).
                             if let Ok(json) = serde_json::to_string(&sid) {
-                                let _ = w.eval(format!(
-                                    "location.hash = encodeURIComponent({json})"
-                                ));
+                                let _ =
+                                    w.eval(format!("location.hash = encodeURIComponent({json})"));
                             }
                         }
                     });
@@ -92,8 +93,7 @@ mod notifications {
         let opts = UNAuthorizationOptions::Alert
             | UNAuthorizationOptions::Sound
             | UNAuthorizationOptions::Badge;
-        let auth_block =
-            block2::StackBlock::new(|_granted: Bool, _err: *mut NSError| {}).copy();
+        let auth_block = block2::StackBlock::new(|_granted: Bool, _err: *mut NSError| {}).copy();
         center.requestAuthorizationWithOptions_completionHandler(opts, &auth_block);
 
         let delegate = Delegate::new(app);
@@ -124,18 +124,21 @@ mod notifications {
                     .map(|d| d.as_millis())
                     .unwrap_or(0)
             ));
-            let request =
-                UNNotificationRequest::requestWithIdentifier_content_trigger(&ident, &content, None);
+            let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+                &ident, &content, None,
+            );
             center.addNotificationRequest_withCompletionHandler(&request, None);
         }
     }
 }
 
 mod server_supervisor;
+mod tabs;
 
 use std::sync::Arc;
 
 use server_supervisor::Supervisor;
+use tabs::{activate_browser_tab, close_browser_tab, open_browser_tab, shell_action, TabManager};
 
 /// Tri-mode Phase 1 (docs/plans/tri-mode-shell/DESIGN.md §6): adopt a healthy
 /// local server, or spawn+supervise one from the git checkout. Async +
@@ -213,17 +216,9 @@ async fn open_url_window(app: tauri::AppHandle, url: String) -> Result<(), Strin
     use tauri::Manager;
     let parsed = parse_external_http_url(&url)?;
     eprintln!("[shell] open_url_window: {parsed}");
-    if let Some(existing) = app.get_webview_window("browser") {
-        existing.navigate(parsed).map_err(|e| e.to_string())?;
-        existing.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-    tauri::WebviewWindowBuilder::new(&app, "browser", tauri::WebviewUrl::External(parsed))
-        .title("Claude Control — Browser")
-        .inner_size(1100.0, 850.0)
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    let tabs = app.state::<Arc<std::sync::Mutex<TabManager>>>();
+    let result = tabs.lock().unwrap().open_tab(parsed.to_string());
+    result.map(|_| ())
 }
 
 /// Paths from actual native drops, the ONLY thing read_dropped_file will
@@ -272,7 +267,9 @@ fn notify_session(session_id: String, title: String, body: String) {
         if notifications::is_bundled() {
             notifications::notify(&session_id, &title, &body);
         } else {
-            eprintln!("[shell] notify_session (dev, unbundled — skipped): {session_id}: {title}: {body}");
+            eprintln!(
+                "[shell] notify_session (dev, unbundled — skipped): {session_id}: {title}: {body}"
+            );
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -301,6 +298,10 @@ fn main() {
             notify_session,
             open_url_window,
             open_system_browser,
+            open_browser_tab,
+            close_browser_tab,
+            activate_browser_tab,
+            shell_action,
             start_local_server,
             local_server_status,
             read_dropped_file
@@ -317,10 +318,19 @@ fn main() {
             // as 'cc:native-drag' CustomEvents (CSS-px coordinates) and record
             // dropped paths for read_dropped_file. The SPA hit-tests its own
             // drop zones (web/src/lib/nativeShell.ts onNativeDrag).
+            let tab_mgr = tabs::init(app.handle())?;
+            let tabs_for_event = Arc::clone(&tab_mgr);
+
             if let Some(w) = app.get_webview_window("main") {
                 let fwd = w.clone();
                 let handle = app.handle().clone();
                 w.on_window_event(move |event| {
+                    match event {
+                        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                            let _ = tabs_for_event.lock().unwrap().handle_resize();
+                        }
+                        _ => {}
+                    }
                     let tauri::WindowEvent::DragDrop(dd) = event else {
                         return;
                     };
@@ -361,6 +371,10 @@ fn main() {
                     ));
                 });
             }
+
+            app.manage(tab_mgr.clone());
+            let _ = tab_mgr.lock().unwrap().handle_resize();
+
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -1,0 +1,24 @@
+[[permission]]
+identifier = "allow-open-url"
+description = "Open http(s) URLs in the operator's system browser or in a native in-app browser tab"
+commands.allow = ["open_system_browser", "open_url_window", "open_browser_tab"]
+
+[[permission]]
+identifier = "allow-browser-tabs"
+description = "Manage the native browser tabs shown in the shell tab bar"
+commands.allow = ["close_browser_tab", "activate_browser_tab", "shell_action"]
+
+[[permission]]
+identifier = "allow-notify-session"
+description = "Show native notifications tied to a session"
+commands.allow = ["notify_session"]
+
+[[permission]]
+identifier = "allow-read-dropped-file"
+description = "Read file paths from a native drag-and-drop event"
+commands.allow = ["read_dropped_file"]
+
+[[permission]]
+identifier = "allow-server-control"
+description = "Start or query the supervised local server from the splash page"
+commands.allow = ["start_local_server", "local_server_status"]

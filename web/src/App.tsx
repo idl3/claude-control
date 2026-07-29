@@ -962,6 +962,21 @@ function AppInner() {
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  // Native tab-bar toolbar (shell-only): relay reload/settings/processes
+  // actions from the top webview into the SPA.
+  useEffect(() => {
+    const reload = () => window.location.reload();
+    window.addEventListener('cc:reload-app', reload);
+    const openSettings = () => setConfigOpen(true);
+    window.addEventListener('cc:open-settings', openSettings);
+    const openProcesses = () => setProcessOpen(true);
+    window.addEventListener('cc:open-processes', openProcesses);
+    return () => {
+      window.removeEventListener('cc:reload-app', reload);
+      window.removeEventListener('cc:open-settings', openSettings);
+      window.removeEventListener('cc:open-processes', openProcesses);
+    };
+  }, []);
   // Cmd+J: full-screen raw mirror of the selected session's LIVE agent tmux
   // pane (AgentTerminalOverlay) — separate surface from the composer's `>_`
   // cc-shell scratch terminal (openTerminal/toggleTerminal above).
