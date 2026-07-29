@@ -1,5 +1,8 @@
 use std::sync::{Arc, Mutex};
 
+#[cfg(target_os = "linux")]
+use gtk::prelude::*;
+
 use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url, Webview,
     WebviewBuilder, WebviewUrl, Window,
@@ -9,6 +12,55 @@ const TAB_BAR_HEIGHT: f64 = 38.0;
 const TAB_BAR_LABEL: &str = "tab-bar";
 const CHATS_ID: &str = "chats";
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) ClaudeControlShell/0.1.0";
+
+#[cfg(target_os = "linux")]
+fn ensure_gtk_fixed_parent<W: IsA<gtk::Widget>>(widget: &W) -> Option<gtk::Fixed> {
+    if let Some(parent) = widget.parent() {
+        if let Some(fixed) = parent.downcast_ref::<gtk::Fixed>() {
+            return Some(fixed.clone());
+        }
+        if let Some(vbox) = parent.downcast_ref::<gtk::Box>() {
+            let fixed: gtk::Fixed = vbox
+                .children()
+                .iter()
+                .find_map(|c| c.downcast_ref::<gtk::Fixed>().cloned())
+                .unwrap_or_else(|| {
+                    let f = gtk::Fixed::new();
+                    vbox.pack_start(&f, true, true, 0);
+                    f.show_all();
+                    f
+                });
+            vbox.remove(widget);
+            fixed.put(widget, 0, 0);
+            widget.show();
+            return Some(fixed);
+        }
+    }
+    None
+}
+
+fn set_webview_bounds(webview: &Webview, window: &Window, bounds: Rect) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        webview.set_bounds(bounds).map_err(|e| e.to_string())?;
+        let sf = window.scale_factor().unwrap_or(1.0);
+        webview
+            .with_webview(move |webview| {
+                let gtk_wv = webview.inner();
+                if let Some(fixed) = ensure_gtk_fixed_parent(&gtk_wv) {
+                    let pos = bounds.position.to_logical::<i32>(sf);
+                    let size = bounds.size.to_logical::<i32>(sf);
+                    fixed.move_(&gtk_wv, pos.x, pos.y);
+                    gtk_wv.set_size_request(size.width, size.height);
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        webview.set_bounds(bounds).map_err(|e| e.to_string())
+    }
+}
 
 #[derive(Clone, serde::Serialize)]
 struct TabView {
@@ -61,25 +113,23 @@ impl TabManager {
 
     fn layout(&mut self) -> Result<(), String> {
         let size = self.window_logical_size()?;
-
-        self.tab_bar
-            .set_bounds(Rect {
-                position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
-                size: Size::Logical(LogicalSize::new(size.width, TAB_BAR_HEIGHT)),
-            })
-            .map_err(|e| e.to_string())?;
+        let tab_bar_bounds = Rect {
+            position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
+            size: Size::Logical(LogicalSize::new(size.width, TAB_BAR_HEIGHT)),
+        };
+        set_webview_bounds(&self.tab_bar, &self.window, tab_bar_bounds)?;
 
         let content = self.content_rect(size);
 
         if self.active_id == CHATS_ID {
             let _ = self.hide_all_browser_panes();
-            self.main.set_bounds(content).map_err(|e| e.to_string())?;
+            set_webview_bounds(&self.main, &self.window, content)?;
             let _ = self.main.show();
         } else if self.tabs.iter().any(|t| t.view.id == self.active_id) {
             let _ = self.main.hide();
             for tab in &self.tabs {
                 if tab.view.id == self.active_id {
-                    tab.webview.set_bounds(content).map_err(|e| e.to_string())?;
+                    set_webview_bounds(&tab.webview, &self.window, content)?;
                     let _ = tab.webview.show();
                 } else {
                     let _ = tab.webview.hide();
@@ -89,7 +139,7 @@ impl TabManager {
             // Unknown active tab -> fall back to Chats.
             self.active_id = CHATS_ID.to_string();
             let _ = self.hide_all_browser_panes();
-            self.main.set_bounds(content).map_err(|e| e.to_string())?;
+            set_webview_bounds(&self.main, &self.window, content)?;
             let _ = self.main.show();
         }
 
