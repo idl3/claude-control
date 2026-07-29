@@ -29,6 +29,31 @@ import { createElement, Fragment, type ReactNode } from 'react';
  */
 export const URL_RE = /https?:\/\/[^\s<>"'`]+/;
 
+// Href allow-list used for every <a href> produced from user/agent content.
+// javascript: / data: / vbscript: are disallowed because they execute in the
+// cockpit origin and can steal the localStorage bearer. http(s)/mailto/tel
+// and relative paths are safe for navigation.
+const ALLOWED_HREF_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
+/** Returns true for relative URLs and a small allow-list of safe schemes. */
+export function isAllowedHref(href: string | undefined | null): boolean {
+  if (typeof href !== 'string') return false;
+  const trimmed = href.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed, 'http://localhost');
+    // A relative URL has no host/port and just inherits the base; absolute
+    // URLs keep their real protocol.
+    if (url.host === 'localhost' && !/^[-+.a-z0-9]+:/i.test(trimmed)) {
+      return true;
+    }
+    return ALLOWED_HREF_PROTOCOLS.has(url.protocol.toLowerCase());
+  } catch {
+    // Malformed URL — safest to reject as an href.
+    return false;
+  }
+}
+
 // Trailing characters that are far more likely to be prose punctuation
 // following the URL than part of the URL itself.
 const TRAILING_PUNCT_CHARS = new Set(['.', ',', ';', ':', '!', '?', ')', ']', '}', "'", '"']);
