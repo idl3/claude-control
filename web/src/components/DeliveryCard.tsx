@@ -6,6 +6,7 @@ import {
   safeParseDeliveryPayload,
   type DeliveryPayload,
 } from '../lib/delivery';
+import { isAllowedHref } from '../lib/linkify';
 
 // react-markdown `div` component override: delivery nodes are planted by
 // remarkDelivery as a plain `div` tagged via data-delivery/data-payload (see
@@ -35,7 +36,10 @@ export function MarkdownDiv(props: MdDivProps) {
 
 function DeliveryCard({ payload }: { payload: DeliveryPayload }) {
   const badge = outcomeBadge(payload.outcome);
-  const parsedPr = payload.prUrl ? parsePrUrl(payload.prUrl) : null;
+  // Never render a javascript:/data:/vbscript: href, even if the payload came
+  // out of the assistant transcript as a string.
+  const safePrUrl = payload.prUrl && isAllowedHref(payload.prUrl) ? payload.prUrl : null;
+  const parsedPr = safePrUrl ? parsePrUrl(safePrUrl) : null;
   const extra = extraDeliveryFields(payload);
 
   return (
@@ -44,15 +48,17 @@ function DeliveryCard({ payload }: { payload: DeliveryPayload }) {
         <span className={`delivery-badge delivery-badge-${badge.tone}`}>{badge.label}</span>
         {payload.branch ? <code className="delivery-branch">{payload.branch}</code> : null}
       </div>
-      {payload.prUrl ? (
+      {safePrUrl ? (
         <a
           className="delivery-pr-link"
-          href={payload.prUrl}
+          href={safePrUrl}
           target="_blank"
           rel="noopener noreferrer"
         >
-          {parsedPr ? formatPrLabel(parsedPr) : payload.prUrl}
+          {parsedPr ? formatPrLabel(parsedPr) : safePrUrl}
         </a>
+      ) : payload.prUrl ? (
+        <code className="delivery-pr-link-fallback">{payload.prUrl}</code>
       ) : null}
       {extra.length > 0 ? (
         <dl className="delivery-extra">

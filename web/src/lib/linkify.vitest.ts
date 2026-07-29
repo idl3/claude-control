@@ -10,6 +10,7 @@ import {
   hljsHtmlToNodes,
   framingFallbackState,
   computeMenuPosition,
+  isAllowedHref,
 } from './linkify';
 
 // A stable, string-serializable stand-in for the real `UrlLink` — lets
@@ -285,5 +286,38 @@ describe('computeMenuPosition', () => {
     const anchor = { top: 100, left: -50, width: 50, height: 20 };
     const pos = computeMenuPosition(anchor, menu, viewport);
     expect(pos.left).toBe(8);
+  });
+});
+
+describe('isAllowedHref', () => {
+  it('allows http and https URLs', () => {
+    expect(isAllowedHref('http://example.com')).toBe(true);
+    expect(isAllowedHref('https://example.com')).toBe(true);
+  });
+
+  it('allows mailto and tel schemes', () => {
+    expect(isAllowedHref('mailto:test@example.com')).toBe(true);
+    expect(isAllowedHref('tel:+123456789')).toBe(true);
+  });
+
+  it('allows relative paths', () => {
+    expect(isAllowedHref('/foo')).toBe(true);
+    expect(isAllowedHref('foo/bar')).toBe(true);
+  });
+
+  it('rejects javascript, data and vbscript schemes', () => {
+    expect(isAllowedHref('javascript:alert(1)')).toBe(false);
+    expect(isAllowedHref('data:text/html,<script>alert(1)</script>')).toBe(false);
+    expect(isAllowedHref('vbscript:msgbox(1)')).toBe(false);
+  });
+
+  it('rejects missing or empty hrefs', () => {
+    expect(isAllowedHref('')).toBe(false);
+    expect(isAllowedHref(null as any)).toBe(false);
+    expect(isAllowedHref(undefined as any)).toBe(false);
+  });
+
+  it('is case-insensitive for allowed schemes', () => {
+    expect(isAllowedHref('HTTPS://example.com')).toBe(true);
   });
 });
