@@ -111,13 +111,17 @@ impl TabManager {
             title: "Chats".to_string(),
         });
         list.extend(self.tabs.iter().map(|t| t.view.clone()));
-        let payload = match serde_json::to_string(&(&list, &self.active_id)) {
+        let tabs_json = match serde_json::to_string(&list) {
             Ok(s) => s,
             Err(_) => return,
         };
-        let _ = self
-            .tab_bar
-            .eval(format!("if(window.updateTabs)window.updateTabs({payload})"));
+        let active_json = match serde_json::to_string(&self.active_id) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let _ = self.tab_bar.eval(format!(
+            "if(window.updateTabs)window.updateTabs({tabs_json},{active_json})"
+        ));
     }
 
     fn tab_title(url: &str) -> String {
