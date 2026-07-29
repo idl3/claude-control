@@ -30,7 +30,7 @@ import { SessionRegistry, listRecentTranscripts, isClaudeKind } from './lib/sess
 import { Collab } from './lib/collab.js';
 import { recordClientError } from './lib/client-errors.js';
 import { recordClientPerf, summarizeClientPerf } from './lib/client-perf.js';
-import { loadPins, savePins, validateTranscriptPath, pinKey } from './lib/pins.js';
+import { loadPins, savePins, validateTranscriptPath, pinKey, makePin, pinPaths } from './lib/pins.js';
 import { writePaneRegistryRecord, deletePaneRegistryRecord } from './lib/pane-registry.js';
 import { ResourceMonitor, listProcesses, killProcess } from './lib/resources.js';
 import { buildAnswerProgram, parsePicker, planStep, planTextStep, isTextDirective, confirmSubmit } from './lib/answer.js';
@@ -494,7 +494,7 @@ const _handler = (req, res) => {
   if (u.pathname === '/api/pins') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
     if (req.method === 'POST') return handleSetPin(req, res);
-    return endJson(res, 200, { pins });
+    return endJson(res, 200, { pins: pinPaths(pins) });
   }
   if (u.pathname === '/api/transcripts') {
     if (!checkToken(req)) return endJson(res, 401, { error: 'unauthorized' });
@@ -2039,7 +2039,7 @@ async function handleSetPin(req, res) {
     }
     registry.setPins(pins);
     await registry.refresh().catch(() => {});
-    return endJson(res, 200, { ok: true, pins });
+    return endJson(res, 200, { ok: true, pins: pinPaths(pins) });
   }
 
   const id = typeof body?.id === 'string' ? body.id : '';
@@ -2053,7 +2053,7 @@ async function handleSetPin(req, res) {
   } else {
     const full = validateTranscriptPath(raw, CONFIG.projectsRoots);
     if (!full) return endJson(res, 400, { error: 'invalid transcript path' });
-    pins = { ...pins, [key]: full };
+    pins = { ...pins, [key]: makePin(full) };
   }
   try {
     savePins(CONFIG.pinsFile, pins);
@@ -2064,7 +2064,7 @@ async function handleSetPin(req, res) {
   // Re-run the matcher NOW so clearing/setting a pin re-binds immediately
   // (otherwise the change only lands on the next 4 s refresh tick).
   await registry.refresh().catch(() => {});
-  return endJson(res, 200, { ok: true, pins });
+  return endJson(res, 200, { ok: true, pins: pinPaths(pins) });
 }
 
 function serveStatic(pathname, res) {
