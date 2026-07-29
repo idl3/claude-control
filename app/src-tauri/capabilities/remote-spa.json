@@ -3,6 +3,7 @@
   "identifier": "remote-spa",
   "description": "Grants the tailnet-served SPA (remote origin) the IPC it needs: open external URLs / in-app browser windows, native notifications, file drop materialization, and window drag.",
   "windows": ["main"],
+  "webviews": ["main"],
   "remote": {
     "urls": [
       "https://*.ts.net",
