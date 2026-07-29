@@ -16,14 +16,9 @@
     -webkit-user-select: none; user-select: none;
   }
   .drag { width: 82px; height: 100%; flex: 0 0 auto; }
-  .brand {
-    flex: 0 0 auto; padding: 0 10px 0 0; font-weight: 600; letter-spacing: -0.01em;
-    color: #9fb4e0; opacity: 0.8; display: flex; align-items: center; gap: 6px;
-  }
-  .brand svg { width: 14px; height: 14px; fill: currentColor; }
   .tabs { display: flex; align-items: center; flex: 1 1 auto; height: 100%; gap: 4px; overflow: hidden; padding: 0 6px; }
   .tab {
-    display: flex; align-items: center; gap: 6px; max-width: 180px; min-width: 80px;
+    display: flex; align-items: center; gap: 6px; max-width: 180px; min-width: 64px;
     height: 28px; padding: 0 8px; border-radius: 6px; cursor: default;
     background: rgba(255,255,255,0.05); border: 1px solid transparent;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -37,6 +32,7 @@
     padding: 0; cursor: default; display: flex; align-items: center; justify-content: center;
   }
   .tab .close:hover { background: rgba(255,100,100,0.25); color: #fff; }
+  .tab.new-tab { min-width: 48px; justify-content: center; color: #9fb4e0; }
   .toolbar {
     flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
     padding: 0 10px 0 6px; height: 100%;
@@ -49,15 +45,26 @@
   }
   .btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
   .btn.add { padding: 0 7px; font-weight: 600; }
+  .new-url {
+    position: absolute; top: 38px; right: 8px;
+    display: none; align-items: center; gap: 6px;
+    padding: 6px; border-radius: 8px;
+    background: rgba(16, 21, 31, 0.98);
+    border: 1px solid rgba(90, 130, 220, 0.4);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .new-url.show { display: flex; }
+  .new-url input {
+    width: 280px; height: 26px; padding: 0 8px; border-radius: 5px;
+    border: 1px solid #2b3550; background: #0c1018; color: #e7e9ee;
+    font: 400 13px/1.2 -apple-system, system-ui, sans-serif; outline: none;
+  }
+  .new-url input:focus { border-color: #4f6bb0; }
   [data-tauri-drag-region] { -webkit-app-region: drag; app-region: drag; }
 </style>
 </head>
 <body>
 <div class="drag" data-tauri-drag-region></div>
-<div class="brand">
-  <svg viewBox="0 0 24 24"><path d="M12 2l2.4 7.2h7.6l-6 4.8 2.4 7.2-6-4.8-6 4.8 2.4-7.2-6-4.8h7.6z"/></svg>
-  Claude Control
-</div>
 <div class="tabs" id="tabs"></div>
 <div class="toolbar">
   <button class="btn add" id="new-tab" title="New tab">+</button>
@@ -65,9 +72,15 @@
   <button class="btn" id="processes" title="Processes">⚙</button>
   <button class="btn" id="settings" title="Settings">⋯</button>
 </div>
+<div class="new-url" id="new-url-box">
+  <input id="new-url" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false">
+  <button class="btn" id="go">Go</button>
+</div>
 <script>
   const $ = (sel) => document.querySelector(sel);
   const tabsEl = $('#tabs');
+  const newUrlBox = $('#new-url-box');
+  const newUrlInput = $('#new-url');
 
   function invoke(cmd, args) {
     const tauri = window.__TAURI__;
@@ -81,21 +94,24 @@
   function render(tabs, activeId) {
     tabsEl.innerHTML = '';
     for (const tab of tabs) {
+      const isChats = tab.id === 'chats';
       const el = document.createElement('div');
       el.className = 'tab' + (tab.id === activeId ? ' active' : '');
-      el.title = tab.url;
+      el.title = isChats ? 'Claude Control' : tab.url;
       const title = document.createElement('span');
-      title.textContent = tab.title || tab.url;
-      const close = document.createElement('button');
-      close.className = 'close';
-      close.textContent = '×';
-      close.title = 'Close tab';
-      close.addEventListener('click', (e) => {
-        e.stopPropagation();
-        invoke('close_browser_tab', { id: tab.id }).catch(console.error);
-      });
+      title.textContent = isChats ? '[Chats]' : (tab.title || tab.url);
       el.appendChild(title);
-      el.appendChild(close);
+      if (!isChats) {
+        const close = document.createElement('button');
+        close.className = 'close';
+        close.textContent = '×';
+        close.title = 'Close tab';
+        close.addEventListener('click', (e) => {
+          e.stopPropagation();
+          invoke('close_browser_tab', { id: tab.id }).catch(console.error);
+        });
+        el.appendChild(close);
+      }
       el.addEventListener('click', () => {
         invoke('activate_browser_tab', { id: tab.id }).catch(console.error);
       });
@@ -107,10 +123,28 @@
     render(Array.isArray(tabs) ? tabs : [], activeId);
   };
 
-  $('#new-tab').addEventListener('click', () => {
-    const url = window.prompt('Open URL in a new tab:');
+  function openNewTab() {
+    const url = newUrlInput.value.trim();
     if (!url) return;
-    invoke('open_browser_tab', { url: url.trim() }).catch(console.error);
+    invoke('open_browser_tab', { url }).catch(console.error);
+    newUrlInput.value = '';
+    newUrlBox.classList.remove('show');
+  }
+
+  $('#new-tab').addEventListener('click', () => {
+    newUrlBox.classList.toggle('show');
+    if (newUrlBox.classList.contains('show')) newUrlInput.focus();
+  });
+  $('#go').addEventListener('click', openNewTab);
+  newUrlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') openNewTab();
+    if (e.key === 'Escape') {
+      newUrlBox.classList.remove('show');
+      newUrlInput.value = '';
+    }
+  });
+  newUrlInput.addEventListener('blur', () => {
+    setTimeout(() => { if (document.activeElement !== newUrlInput) newUrlBox.classList.remove('show'); }, 200);
   });
 
   $('#reload').addEventListener('click', () => invoke('shell_action', { action: 'reload' }).catch(console.error));
