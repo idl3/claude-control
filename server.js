@@ -3786,6 +3786,12 @@ async function main() {
     process.exit(1);
   });
   server.listen(CONFIG.port, CONFIG.host, () => {
+    // Reap `_ccpty_*` ephemeral tmux sessions left by a crashed predecessor —
+    // deliberately HERE, not at bridge construction. Owning the port is what
+    // makes "every other one is my orphan" true; a doomed duplicate boot exits
+    // via the EADDRINUSE handler above and must never touch the live
+    // instance's in-use sessions. See sweepOrphans() in lib/pty-bridge.js.
+    ptyBridge.sweepOrphans().catch(() => {});
     // eslint-disable-next-line no-console
     console.log(`claude-control → ${_scheme}://${CONFIG.host}:${CONFIG.port}/`);
     if (CONFIG.token) {
