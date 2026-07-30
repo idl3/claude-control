@@ -1058,22 +1058,51 @@ test('LRU cap evicts an idle agent-kind entry via pipe-pane-off + fifo teardown,
   assert.ok(pipePaneOffTargets.includes('a:1'), 'the idle agent-kind entry was evicted via pipe-pane-off teardown');
 });
 
-test('bridge init sweeps and kills orphaned _ccpty_* sessions left by a prior crash, without touching non-matching sessions', async () => {
-  const killed = [];
-  const bridge = createPtyBridge(baseDeps({
+// `list-sessions -F '#{session_name}\t#{session_attached}'` — the sweep needs
+// the attach count to tell a crash orphan from another instance's LIVE session.
+function sweepBridge(sessionLines, killed) {
+  return createPtyBridge(baseDeps({
     resolveTmuxBin: async () => '/usr/bin/tmux',
     getSocketPath: async () => '/tmp/tmux-test/default',
     runTmuxCmd: async (tmuxBin, args) => {
-      if (args[2] === 'list-sessions') {
-        return { stdout: '_ccpty_stale_main_1_0\nmain\n_ccpty_other_2_1\n', stderr: '' };
-      }
+      if (args[2] === 'list-sessions') return { stdout: sessionLines, stderr: '' };
       if (args[2] === 'kill-session') { killed.push(args[4]); return { stdout: '', stderr: '' }; }
       return { stdout: '', stderr: '' };
     },
   }));
+}
 
-  await bridge.ephemeralSweepDone;
+test('sweepOrphans kills orphaned _ccpty_* sessions left by a prior crash, without touching non-matching sessions', async () => {
+  const killed = [];
+  const bridge = sweepBridge('_ccpty_stale_main_1_0\t0\nmain\t1\n_ccpty_other_2_1\t0\n', killed);
+
+  await bridge.sweepOrphans();
 
   assert.deepEqual(killed.sort(), ['_ccpty_other_2_1', '_ccpty_stale_main_1_0'], 'only _ccpty_-prefixed orphans are swept');
   assert.ok(!killed.includes('main'), 'a real, non-ephemeral session is never touched by the sweep');
+});
+
+test('the sweep does NOT run at bridge construction — only when server.js calls it after it owns the port', async () => {
+  const killed = [];
+  const bridge = sweepBridge('_ccpty_live_main_1_0\t0\n', killed);
+
+  // Give any construction-time fire-and-forget work a chance to land. A doomed
+  // duplicate boot (EADDRINUSE) exits around here, and must have killed nothing:
+  // it used to take the live instance's in-use sessions down with it, closing
+  // every open terminal with dead-target / "session ended".
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+
+  assert.deepEqual(killed, [], 'nothing swept until sweepOrphans() is called explicitly');
+  await bridge.sweepOrphans();
+  assert.deepEqual(killed, ['_ccpty_live_main_1_0'], 'and it does sweep once invoked');
+});
+
+test('an ATTACHED _ccpty_* session is never swept — it belongs to a live attach on another instance', async () => {
+  const killed = [];
+  const bridge = sweepBridge('_ccpty_inuse_main_1_0\t1\n_ccpty_crashed_main_2_0\t0\n', killed);
+
+  await bridge.sweepOrphans();
+
+  assert.deepEqual(killed, ['_ccpty_crashed_main_2_0'], 'only the unattached (genuinely orphaned) session is killed');
 });
