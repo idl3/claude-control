@@ -47,11 +47,21 @@ function getFreePort() {
   });
 }
 
+// Generous ready-wait deadline. The child's own boot work (sibling-reap scan,
+// registry.refresh() walking tmux, etc.) is bounded in the seconds, not tens
+// of seconds — but under `--test-concurrency=2` this file's child competes
+// for CPU/exec slots with a sibling test file's child, and (pre-fix) with a
+// leaked-real-config olam.json driving live GSM/gcloud + network calls at
+// boot (see CLAUDE_CONTROL_DATA below). 60s leaves headroom for that
+// contention without masking a genuinely broken boot (which fails fast via
+// the 'exit' handler, not by hanging).
+const READY_TIMEOUT_MS = 60_000;
+
 /**
  * Spawn the server as a child process and wait until it logs its startup line
  * (or reject after a timeout). Returns { child, port, uploadsDir }.
  */
-async function startServer(port, uploadsDir, presentDir) {
+async function startServer(port, uploadsDir, presentDir, dataDir) {
   const pinsFile = path.join(os.tmpdir(), `cc-test-pins-${port}.json`);
   fs.writeFileSync(pinsFile, '{}');
 
@@ -66,9 +76,44 @@ async function startServer(port, uploadsDir, presentDir) {
         CLAUDE_CONTROL_PINS: pinsFile,
         // Point at a known-empty directory so tmux errors don't crash startup.
         CLAUDE_CONTROL_PROJECTS: os.tmpdir(),
+        // Point tmux resolution at a non-existent binary (same isolation
+        // test/session-new-cwd.test.js already uses) so registry.refresh()'s
+        // tmux.listWindows() fails fast (ENOENT) instead of shelling out to
+        // the operator's REAL, live tmux server. On this host that server
+        // backs the live cockpit's many concurrent agent panes; enumerating
+        // it can legitimately take single-digit-to-tens of seconds under
+        // load — measured directly, this single isolation cut this file's
+        // own boot wait from ~12-33s to ~1s. No test in this file asserts on
+        // real tmux/session content (the promptselect "happy path" is
+        // explicitly out of scope below — only the deterministic error path
+        // is exercised), so this is a pure hermeticity win, not a coverage
+        // loss.
+        CLAUDE_CONTROL_TMUX: path.join(dataDir, 'no-such-tmux'),
+        // Isolate config/olam.json/token lookups from the operator's real
+        // ~/.claude-control (lib/config.js's getDataDir() honours this, same
+        // convention test/session-new-cwd.test.js already relies on).
+        // Without this, this child inherits the REAL ~/.claude-control/olam.json
+        // on a host running live cockpit — enabling real RemoteSessionSource
+        // polling that walks GSM/gcloud + hits real org endpoints on every
+        // boot tick, stealing wall-clock and CPU from the rest of boot.
+        CLAUDE_CONTROL_DATA: dataDir,
+        // Skip the pre-listen() sibling-reap scan (`ps -axo` + a synchronous
+        // `lsof` per same-script candidate — see lib/reap-siblings.js) and the
+        // startup upload/capture sweeps. Both are best-effort background
+        // maintenance the live server needs and a hermetic test child does
+        // not; under concurrent test-file load the synchronous exec calls in
+        // reap-siblings are the single biggest contributor to a slow boot.
+        CLAUDE_CONTROL_NO_REAP: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    // Captured for diagnostics only — never used to gate readiness. On a
+    // ready-timeout these are included in the rejection so the next failure
+    // shows WHY the child never printed its startup line instead of a bare
+    // "did not start within Ns".
+    const stdoutChunks = [];
+    const stderrChunks = [];
 
     let settled = false;
     const settle = (val, isErr) => {
@@ -76,23 +121,36 @@ async function startServer(port, uploadsDir, presentDir) {
       settled = true;
       clearTimeout(timer);
       if (isErr) reject(val);
-      else resolve({ child, port, uploadsDir, presentDir });
+      else resolve({ child, port, uploadsDir, presentDir, dataDir });
     };
 
-    // Wait for the "claude-control → http://" startup line.
+    // Wait for the "claude-control → http://" startup line — the actual
+    // readiness marker server.js prints from inside its listen() callback.
     child.stdout.on('data', (chunk) => {
-      if (chunk.toString().includes('claude-control →')) settle({ child, port, uploadsDir, presentDir });
+      stdoutChunks.push(chunk);
+      if (chunk.toString().includes('claude-control →')) {
+        settle({ child, port, uploadsDir, presentDir, dataDir });
+      }
     });
-    child.stderr.on('data', () => {/* swallow */});
+    child.stderr.on('data', (chunk) => { stderrChunks.push(chunk); });
     child.on('error', (err) => settle(err, true));
     child.on('exit', (code) => {
-      if (!settled) settle(new Error(`server exited prematurely (code ${code})`), true);
+      if (!settled) {
+        settle(new Error(
+          `server exited prematurely (code ${code})\n` +
+          `--- stdout ---\n${Buffer.concat(stdoutChunks).toString('utf8')}\n` +
+          `--- stderr ---\n${Buffer.concat(stderrChunks).toString('utf8')}`,
+        ), true);
+      }
     });
 
-    const timer = setTimeout(
-      () => settle(new Error('server did not start within 10 s'), true),
-      10_000,
-    );
+    const timer = setTimeout(() => {
+      settle(new Error(
+        `server did not start within ${READY_TIMEOUT_MS / 1000}s\n` +
+        `--- stdout ---\n${Buffer.concat(stdoutChunks).toString('utf8')}\n` +
+        `--- stderr ---\n${Buffer.concat(stderrChunks).toString('utf8')}`,
+      ), true);
+    }, READY_TIMEOUT_MS);
   });
 }
 
@@ -108,19 +166,22 @@ function req(port, pathname, options = {}) {
 let port;
 let uploadsDir;
 let presentDir;
-let serverCtx; // { child, port, uploadsDir, presentDir }
+let dataDir;
+let serverCtx; // { child, port, uploadsDir, presentDir, dataDir }
 
 before(async () => {
   port = await getFreePort();
   uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-uploads-test-'));
   presentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-present-test-'));
-  serverCtx = await startServer(port, uploadsDir, presentDir);
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-data-test-'));
+  serverCtx = await startServer(port, uploadsDir, presentDir, dataDir);
 });
 
 after(() => {
   try { serverCtx?.child?.kill('SIGTERM'); } catch { /* already gone */ }
   try { fs.rmSync(uploadsDir, { recursive: true, force: true }); } catch { /* best-effort */ }
   try { fs.rmSync(presentDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
 // ===========================================================================
