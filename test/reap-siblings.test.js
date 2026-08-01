@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { findSiblingServerPids, reapSiblingServers } from '../lib/reap-siblings.js';
 
 const SCRIPT = '/Users/ernie/Projects/claude-cockpit/server.js';
+const SCRIPT_DIR = '/Users/ernie/Projects/claude-cockpit';
+// Hermetic cwd double: the real one shells out to lsof. "cwd unknown" is the
+// matcher's safe answer, so a relative-argv candidate is left alone.
+const noCwd = () => null;
 
 // ── findSiblingServerPids — pure matcher ────────────────────────────────────
 
@@ -12,7 +16,7 @@ test('findSiblingServerPids returns siblings running the same server.js path', (
     { pid: 200, command: `/usr/local/bin/node ${SCRIPT}` },
     { pid: 300, command: 'node /Users/ernie/Projects/other-app/server.js' },
   ];
-  const result = findSiblingServerPids(psList, 999, SCRIPT);
+  const result = findSiblingServerPids(psList, 999, SCRIPT, noCwd);
   assert.deepEqual(result.sort((a, b) => a - b), [100, 200]);
 });
 
@@ -21,7 +25,7 @@ test('findSiblingServerPids excludes selfPid even when it matches the script pat
     { pid: 100, command: `node ${SCRIPT}` },
     { pid: 200, command: `node ${SCRIPT}` },
   ];
-  const result = findSiblingServerPids(psList, 100, SCRIPT);
+  const result = findSiblingServerPids(psList, 100, SCRIPT, noCwd);
   assert.deepEqual(result, [200]);
 });
 
@@ -32,7 +36,7 @@ test('findSiblingServerPids excludes unrelated node processes (MCP server, other
     { pid: 500, command: 'node --experimental-vm-modules /some/other/server.js' },
     { pid: 600, command: '/opt/homebrew/bin/node /Users/ernie/other-project/dist/server.js' },
   ];
-  const result = findSiblingServerPids(psList, 999, SCRIPT);
+  const result = findSiblingServerPids(psList, 999, SCRIPT, noCwd);
   assert.deepEqual(result, [100]);
 });
 
@@ -41,24 +45,24 @@ test('findSiblingServerPids does not match on a loose "server" substring', () =>
     { pid: 700, command: 'node /Users/ernie/Projects/claude-cockpit/lib/some-other-server.js' },
     { pid: 800, command: 'node /Users/ernie/Projects/claude-cockpit-clone/server.js' },
   ];
-  const result = findSiblingServerPids(psList, 999, SCRIPT);
+  const result = findSiblingServerPids(psList, 999, SCRIPT, noCwd);
   assert.deepEqual(result, []);
 });
 
 test('findSiblingServerPids returns [] when only self is present', () => {
   const psList = [{ pid: 100, command: `node ${SCRIPT}` }];
-  const result = findSiblingServerPids(psList, 100, SCRIPT);
+  const result = findSiblingServerPids(psList, 100, SCRIPT, noCwd);
   assert.deepEqual(result, []);
 });
 
 test('findSiblingServerPids returns [] for an empty or missing psList', () => {
-  assert.deepEqual(findSiblingServerPids([], 100, SCRIPT), []);
-  assert.deepEqual(findSiblingServerPids(undefined, 100, SCRIPT), []);
+  assert.deepEqual(findSiblingServerPids([], 100, SCRIPT, noCwd), []);
+  assert.deepEqual(findSiblingServerPids(undefined, 100, SCRIPT, noCwd), []);
 });
 
 test('findSiblingServerPids returns [] when scriptPath is missing', () => {
   const psList = [{ pid: 100, command: `node ${SCRIPT}` }];
-  assert.deepEqual(findSiblingServerPids(psList, 999, ''), []);
+  assert.deepEqual(findSiblingServerPids(psList, 999, '', noCwd), []);
 });
 
 // ── reapSiblingServers — injectable run/kill/getListeningPort ───────────────
@@ -274,4 +278,68 @@ test('reapSiblingServers defaults noReap from process.env.CLAUDE_CONTROL_NO_REAP
     if (original === undefined) delete process.env.CLAUDE_CONTROL_NO_REAP;
     else process.env.CLAUDE_CONTROL_NO_REAP = original;
   }
+});
+
+// ── relative-argv siblings (`npm start` / `node server.js` in the repo) ─────
+//
+// The live incident: a manual `node server.js` from the repo root held :4317
+// with argv "node server.js" — no absolute path — so every later boot's
+// matcher missed it, launchd's KeepAlive relaunched-and-exited every few
+// seconds, and each doomed boot swept the live instance's `_ccpty_*` sessions,
+// killing open terminals with "session ended".
+
+test('findSiblingServerPids matches a relative `node server.js` whose cwd is the script dir', () => {
+  const psList = [{ pid: 58225, command: 'node server.js' }];
+  assert.deepEqual(
+    findSiblingServerPids(psList, 999, SCRIPT, () => SCRIPT_DIR),
+    [58225],
+    'the relative-argv form that used to hide from the reaper is now matched',
+  );
+});
+
+test('findSiblingServerPids does NOT match a relative server.js from a different project', () => {
+  const psList = [{ pid: 321, command: 'node server.js' }];
+  assert.deepEqual(findSiblingServerPids(psList, 999, SCRIPT, () => '/Users/ernie/Projects/other-app'), []);
+  assert.deepEqual(findSiblingServerPids(psList, 999, SCRIPT, () => null), [], 'unknown cwd → leave it alone');
+});
+
+test('findSiblingServerPids resolves cwd only for relative candidates, never for absolute-path ones', () => {
+  const asked = [];
+  const psList = [
+    { pid: 100, command: `node ${SCRIPT}` },
+    { pid: 200, command: 'node server.js' },
+  ];
+  const result = findSiblingServerPids(psList, 999, SCRIPT, (pid) => { asked.push(pid); return SCRIPT_DIR; });
+  assert.deepEqual(result.sort((a, b) => a - b), [100, 200]);
+  assert.deepEqual(asked, [200], 'no lsof round-trip for a command that already carries the absolute path');
+});
+
+test('reapSiblingServers reaps a relative-argv sibling that holds this port', () => {
+  const killed = [];
+  const reaped = reapSiblingServers({
+    run: () => [{ pid: 58225, command: 'node server.js' }],
+    kill: (pid) => killed.push(pid),
+    getListeningPort: () => 4317,
+    getCwd: () => SCRIPT_DIR,
+    selfPid: 999,
+    scriptPath: SCRIPT,
+    port: 4317,
+  });
+  assert.deepEqual(reaped, [58225]);
+  assert.deepEqual(killed, [58225]);
+});
+
+test('reapSiblingServers still refuses to reap a relative-argv sibling on a DIFFERENT port', () => {
+  const killed = [];
+  const reaped = reapSiblingServers({
+    run: () => [{ pid: 58225, command: 'node server.js' }],
+    kill: (pid) => killed.push(pid),
+    getListeningPort: () => 4420,
+    getCwd: () => SCRIPT_DIR,
+    selfPid: 999,
+    scriptPath: SCRIPT,
+    port: 4317,
+  });
+  assert.deepEqual(reaped, [], 'port scoping still wins — an instance on port X never reaps port Y');
+  assert.deepEqual(killed, []);
 });
