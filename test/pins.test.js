@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadPins, savePins, validateTranscriptPath, pinKey } from '../lib/pins.js';
+import { loadPins, savePins, validateTranscriptPath, pinKey, pinPath, pinTs, makePin, pinPaths } from '../lib/pins.js';
+import { isPinSuperseded } from '../lib/sessions.js';
 
 test('pinKey is windowId.paneIndex', () => {
   assert.equal(pinKey('@5', 1), '@5.1');
@@ -96,4 +97,47 @@ test('validateTranscriptPath allows any configured root + rejects escapes', () =
   // Back-compat: single-string root still works, with array-vs-string parity.
   assert.equal(validateTranscriptPath(goodA, rootA), goodA);
   assert.equal(validateTranscriptPath(goodA, rootA), validateTranscriptPath(goodA, [rootA]));
+});
+
+// ── pin timestamps + supersession ────────────────────────────────────────────
+// A pin overrides the heuristic matcher, not the SessionStart hook. When a
+// pinned pane starts a NEW session the hook records a different transcript for
+// the same %N; without expiry the pin keeps the cockpit showing the dead one.
+
+test('pinPath/pinTs accept both the legacy string and the timestamped form', () => {
+  assert.equal(pinPath('/p/a.jsonl'), '/p/a.jsonl');
+  assert.equal(pinTs('/p/a.jsonl'), 0, 'legacy pins predate timestamps');
+  assert.equal(pinPath({ path: '/p/b.jsonl', ts: 42 }), '/p/b.jsonl');
+  assert.equal(pinTs({ path: '/p/b.jsonl', ts: 42 }), 42);
+  assert.equal(pinPath(undefined), null);
+  assert.equal(pinPath({}), null);
+});
+
+test('makePin stamps now; pinPaths flattens mixed shapes for the SPA', () => {
+  assert.deepEqual(makePin('/p/a.jsonl', 7), { path: '/p/a.jsonl', ts: 7 });
+  assert.deepEqual(
+    pinPaths({ '@1.1': '/p/a.jsonl', '@2.1': { path: '/p/b.jsonl', ts: 9 }, '@3.1': {} }),
+    { '@1.1': '/p/a.jsonl', '@2.1': '/p/b.jsonl' },
+  );
+});
+
+test('a hook record newer than the pin supersedes it', () => {
+  const cwd = '/w';
+  const reg = { transcriptPath: '/p/new.jsonl', cwd, ts: 1000 };
+
+  // The live bug: legacy pin (ts 0) on a pane that has since started a new
+  // session — the hook record wins.
+  assert.equal(isPinSuperseded('/p/old.jsonl', reg, cwd), true);
+  assert.equal(isPinSuperseded({ path: '/p/old.jsonl', ts: 500 }, reg, cwd), true);
+
+  // Pinned AFTER the hook record: a deliberate operator override — pin wins.
+  assert.equal(isPinSuperseded({ path: '/p/old.jsonl', ts: 2000 }, reg, cwd), false);
+
+  // They agree, or there is no hook record at all — nothing to supersede.
+  assert.equal(isPinSuperseded('/p/new.jsonl', reg, cwd), false);
+  assert.equal(isPinSuperseded('/p/old.jsonl', null, cwd), false);
+
+  // Reused tmux %N: the hook record's launch cwd no longer matches the live
+  // pane, so IT is the stale one — it must not evict the pin.
+  assert.equal(isPinSuperseded('/p/old.jsonl', { ...reg, cwd: '/other' }, cwd), false);
 });
