@@ -18,7 +18,33 @@ import {
   createWindowInSession,
   assertTmuxSupportsEnv,
   scrubEnvValuesFromError,
+  dedupePanesByPaneId,
 } from '../lib/tmux.js';
+
+// ── dedupePanesByPaneId (grouped-session mirror dedup) ───────────────────────
+
+describe('dedupePanesByPaneId', () => {
+  test('collapses panes that share a tmux pane id, keeping the first occurrence', () => {
+    // home + home-mobile are a grouped-session mirror sharing pane %183.
+    const panes = [
+      { paneId: '%183', sessionName: 'home', target: 'home:2.0' },
+      { paneId: '%183', sessionName: 'home-mobile', target: 'home-mobile:2.0' },
+      { paneId: '%29', sessionName: 'work', target: 'work:1.0' },
+    ];
+    const out = dedupePanesByPaneId(panes);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].sessionName, 'home'); // first occurrence wins
+    assert.equal(out[1].paneId, '%29');
+  });
+
+  test('keeps every pane with a null id (nothing reliable to dedupe on)', () => {
+    const panes = [
+      { paneId: null, sessionName: 'a' },
+      { paneId: null, sessionName: 'b' },
+    ];
+    assert.equal(dedupePanesByPaneId(panes).length, 2);
+  });
+});
 
 /** Stub runner returning fixed pane text (ignores argv). */
 function stubRunner(stdout) {
