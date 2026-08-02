@@ -1,5 +1,6 @@
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import type { Block, Msg } from './types';
+import { parseSessionInit, formatSessionInit } from './sessionInit';
 
 // assistant-ui content part shapes we emit (subset of ThreadMessageLike content).
 type TextPart = { type: 'text'; text: string };
@@ -336,6 +337,15 @@ function buildParts(
       case 'text': {
         // Empty text parts are dropped by assistant-ui; skip to avoid noise.
         if (block.text && block.text.length > 0) {
+          // olam session-init manifest: render a readable summary (MCP connect
+          // status + skill count) instead of the raw {"type":"session_init",…}
+          // JSON blob a CF-Sandbox run posts at start. A FAILED gateway
+          // connection surfaces loudly rather than as an inscrutable envelope.
+          const init = parseSessionInit(block.text);
+          if (init) {
+            parts.push({ type: 'text', text: formatSessionInit(init) });
+            break;
+          }
           const compact = state.isUser ? compactSystemText(block.text) : null;
           parts.push({ type: 'text', text: compact ?? block.text });
         }
