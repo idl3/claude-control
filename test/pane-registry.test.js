@@ -81,9 +81,41 @@ test('skips malformed files and missing dir', async () => {
   assert.equal(missing.size, 0);
 });
 
+// When a tmux server restarts (reboot), pane-ids reset (%0, %2, …) but the
+// pre-reboot pins (%84, %252, …) linger — their transcript is still live, so
+// transcript-existence GC never collects them. Two pins then reference the SAME
+// transcript. The resumed session's pin is always the most recently written, so
+// newest ts wins: one transcript → one live binding.
+test('dedupes pins that share a transcript — newest ts wins (reboot pane-id churn)', async () => {
+  const dir = await tmpDir();
+  const transcript = path.join(dir, 'session.jsonl');
+  await fs.writeFile(transcript, '{}');
+  await fs.writeFile(
+    path.join(dir, '252.json'),
+    JSON.stringify({ paneId: '%252', sessionId: 's', transcriptPath: transcript, ts: 1000 }),
+  );
+  await fs.writeFile(
+    path.join(dir, '11.json'),
+    JSON.stringify({ paneId: '%11', sessionId: 's', transcriptPath: transcript, ts: 2000 }),
+  );
+  const map = await readPaneRegistry(dir);
+  assert.equal(map.size, 1, 'one transcript resolves to exactly one pane binding');
+  assert.ok(map.has('%11'), 'newest-ts pin (the resumed live pane) wins');
+  assert.ok(!map.has('%252'), 'the superseded pre-reboot pin is dropped');
+});
+
+test('does not dedupe distinct transcripts', async () => {
+  const dir = await tmpDir();
+  await writePaneLive(dir, '28.json', '%28');
+  await writePaneLive(dir, '29.json', '%29');
+  const map = await readPaneRegistry(dir);
+  assert.equal(map.size, 2, 'different transcripts are never merged');
+});
+
 // ─── gcPaneRegistry ──────────────────────────────────────────────────────────
-// New contract: gc deletes a pin IFF its transcript file is gone. The live tmux
-// pane set is NOT consulted — a flickering scan must never delete a live pin.
+// Contract: gc deletes a pin IFF (a) its transcript file is gone, OR (b) it is
+// superseded by a newer-ts pin for the SAME transcript. The live tmux pane set
+// is NOT consulted — a flickering scan must never delete a live pin.
 
 test('gc keeps a pin whose transcript still exists (live binding)', async () => {
   const dir = await tmpDir();
@@ -117,6 +149,37 @@ test('gc removes stale pins but keeps live ones in the same pass', async () => {
 
   const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
   assert.deepEqual(files, ['28.json'], 'only the stale pin is removed');
+});
+
+test('gc removes a pin superseded by a newer pin for the same live transcript', async () => {
+  const dir = await tmpDir();
+  const transcript = path.join(dir, 'session.jsonl');
+  await fs.writeFile(transcript, '{}');
+  // Pre-reboot pin (old pane id, older ts) beside the resumed pin (newer ts).
+  await fs.writeFile(
+    path.join(dir, '252.json'),
+    JSON.stringify({ paneId: '%252', transcriptPath: transcript, ts: 1000 }),
+  );
+  await fs.writeFile(
+    path.join(dir, '11.json'),
+    JSON.stringify({ paneId: '%11', transcriptPath: transcript, ts: 2000 }),
+  );
+
+  await gcPaneRegistry(dir);
+
+  const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
+  assert.deepEqual(files, ['11.json'], 'older superseded pin collected; newest live pin survives');
+});
+
+test('gc keeps distinct-transcript pins (no false supersede)', async () => {
+  const dir = await tmpDir();
+  await writePaneLive(dir, '28.json', '%28');
+  await writePaneLive(dir, '29.json', '%29');
+
+  await gcPaneRegistry(dir);
+
+  const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json')).sort();
+  assert.deepEqual(files, ['28.json', '29.json'], 'different transcripts are never deduped');
 });
 
 test('gc on a missing dir is a no-op (no throw)', async () => {
