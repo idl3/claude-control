@@ -4541,8 +4541,15 @@ body.is-external-display .composer {
    textarea text. It is pointer-events:none and aria-hidden; it only renders
    pill highlights for committed /skill and @agent mentions. The textarea text
    is made transparent (via [data-has-pills]) so the pill colors are visible.
-   When no pills are present, the overlay is empty and the textarea renders
-   its own color — zero risk in the common case.
+   When no pills are present the overlay renders null (BOTH users of this class
+   — Composer.tsx and NewSessionDraft.tsx — gate their children on hasPills) and
+   the textarea paints alone.
+
+   This color is opaque and identical to .composer-input's, so the gate is
+   load-bearing, not cosmetic: painting both layers stacks two copies of the
+   same string. They coincide only while their scrollTop matches — past
+   .composer-input's max-height the textarea scrolls internally and the copies
+   visibly separate. Do not render overlay text outside the hasPills path.
 
    METRIC CONSTRAINT: .composer-pill must NOT change glyph advance width vs.
    the textarea. No horizontal padding/margin, no font-weight/size/family

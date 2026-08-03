@@ -1131,16 +1131,23 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 {/* READ-ONLY reserved-token overlay — see the overlayNodes/hasPills
                     memo above. Absolutely positioned over the textarea;
                     pointer-events:none so it never interferes with input.
-                    Visible only once hasPills flips the textarea transparent
-                    (.composer-input-wrap[data-has-pills] in styles.css). */}
+                    Renders text ONLY once hasPills flips the textarea
+                    transparent (.composer-input-wrap[data-has-pills] in
+                    styles.css) — enforced by the gate below, not assumed. */}
                 <div className="composer-overlay" aria-hidden="true" ref={overlayRef}>
-                  {overlayNodes}
+                  {/* Gated on hasPills — overlayNodes is NON-EMPTY without pills
+                      (plain segments are pushed as text above), and
+                      .composer-overlay's color is opaque and identical to the
+                      textarea's. Painting both stacks two copies of the prompt,
+                      which separate visibly once the textarea scrolls past its
+                      max-height. Exactly one layer may paint text. */}
+                  {hasPills ? overlayNodes : null}
                   {/* A lone trailing "\n" collapses to zero extra height in a
                       white-space:pre-wrap block unless something follows it —
                       this zero-width space keeps the overlay's height matched
                       to the textarea's, which does render the trailing blank
                       line. */}
-                  {prompt.endsWith('\n') ? '\u200B' : null}
+                  {hasPills && prompt.endsWith('\n') ? '\u200B' : null}
                 </div>
               </div>
 
