@@ -1689,6 +1689,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // textarea text is made transparent only when ≥1 pill exists (data-has-pills),
   // so the common no-mention case has zero visual change and zero risk of
   // misalignment. The overlay NEVER touches the textarea value or events.
+  //
+  // INVARIANT — exactly one layer paints text at a time. `hasPills` gates BOTH
+  // the textarea's transparency (CSS) and whether the overlay renders its nodes
+  // (JSX). Note that overlayNodes is NON-EMPTY even with no pills: renderMentions
+  // returns the whole string as plain text nodes. Painting it unconditionally is
+  // what put two opaque copies on screen — see the JSX gate below and the
+  // "never paints a second copy" tests in Composer.vitest.ts.
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Known name sets for fast O(1) lookup during rendering.
@@ -2077,8 +2084,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             working + invisible) and overlay a hint shown only while empty. */}
         {/* data-has-pills: when ≥1 pill exists, the textarea text is made
             transparent (CSS) and the overlay renders the visible text with
-            pill highlights. When no pills are present, the overlay is empty
-            and the textarea renders normally — zero divergence risk. */}
+            pill highlights. When no pills are present, the overlay renders
+            null (see the gate below) and the textarea paints alone — the two
+            layers can never both paint, so they cannot diverge. */}
         <div className="composer-input-wrap" data-has-pills={hasPills ? 'true' : undefined}
         >
           <ComposerPrimitive.Input
@@ -2238,12 +2246,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             aria-hidden="true"
             ref={overlayRef}
           >
-            {overlayNodes}
+            {/* Painted ONLY when the textarea is transparent (hasPills). The
+                overlay's color is opaque var(--text), identical to the
+                textarea's — painting it while the textarea also paints puts
+                two copies of the same string on top of each other. That is
+                invisible only while both sit at the same scrollTop; once the
+                text passes .composer-input's max-height the textarea scrolls
+                internally and the two layers visibly separate (reported on
+                iOS, 2026-08-03). hasPills already gates the textarea's
+                transparency — gate the overlay's content on the same signal so
+                exactly one layer ever paints text. */}
+            {hasPills ? overlayNodes : null}
             {/* A lone trailing "\n" collapses to zero extra height in a
                 white-space:pre-wrap block unless something follows it — this
                 zero-width space keeps the overlay's height matched to the
                 textarea's, which does render the trailing blank line. */}
-            {text.endsWith('\n') ? '\u200B' : null}
+            {hasPills && text.endsWith('\n') ? '\u200B' : null}
           </div>
           {terminal ? (
             <div className="composer-hint" aria-hidden="true">

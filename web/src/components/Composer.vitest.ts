@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, waitFor } from '@testing-library/react';
 import { fireEvent } from '@testing-library/dom';
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react';
 import { Composer, type ComposerServices } from './Composer';
@@ -97,6 +97,54 @@ describe('Composer drag-and-drop — never navigates away on a stray drop', () =
 
     expect(fireEvent.dragOver(card, { dataTransfer: makeFileDataTransfer() })).toBe(false);
     expect(fireEvent.drop(card, { dataTransfer: makeFileDataTransfer() })).toBe(false);
+  });
+});
+
+describe('Composer pill overlay — never paints a second copy of the text', () => {
+  // The overlay is an opaque (color: var(--text)) layer sitting exactly on top
+  // of the textarea. The textarea only turns transparent when hasPills is true.
+  // So if the overlay paints text while hasPills is false, BOTH layers paint
+  // the same string — invisible while they share scrollTop, two visibly offset
+  // copies the moment the textarea scrolls internally past its max-height.
+  function typeInto(value: string) {
+    const ta = document.querySelector('.composer-input') as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value } });
+    return ta;
+  }
+
+  it('renders NOTHING in the overlay when the text has no mentions', async () => {
+    render(createElement(Harness, { disabled: false }));
+    typeInto('So architecturally, Workspace - a thematic bucket with some goals');
+
+    await waitFor(() => {
+      expect((document.querySelector('.composer-input') as HTMLTextAreaElement).value).toContain('architecturally');
+    });
+    // The textarea is still opaque here (no data-has-pills), so ANY overlay
+    // text is a duplicate of what the textarea already paints.
+    expect(document.querySelector('.composer-input-wrap')?.getAttribute('data-has-pills')).toBeNull();
+    expect(document.querySelector('.composer-overlay')?.textContent).toBe('');
+  });
+
+  // Control arm: proves the fix is "don't paint a duplicate", not "blank the
+  // overlay always" — which would silently kill pill rendering and still pass
+  // the test above.
+  it('still renders the pill layer when a committed /skill mention exists', async () => {
+    render(createElement(Harness, {
+      disabled: false,
+      services: {
+        ...STUB_SERVICES,
+        loadSkills: async () => [{ name: 'deploy', description: 'd', source: 'user' as const }],
+      },
+    }));
+    // Wait for loadSkills to land — renderMentions only pills KNOWN names.
+    await waitFor(() => {
+      typeInto('run /deploy now');
+      expect(document.querySelector('.composer-pill')).toBeTruthy();
+    });
+    expect(document.querySelector('.composer-input-wrap')?.getAttribute('data-has-pills')).toBe('true');
+    // With pills, the textarea goes transparent, so the overlay MUST carry the
+    // full text — it is now the only visible copy.
+    expect(document.querySelector('.composer-overlay')?.textContent).toBe('run /deploy now');
   });
 });
 
