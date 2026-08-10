@@ -103,6 +103,28 @@ interface AskInputQuestion {
   options?: { label: string; description?: string }[];
 }
 
+// `questions` is occasionally recorded as a STRING rather than an array (seen
+// once in 512 records: two JSON arrays concatenated, `[…][…]`, from a botched
+// generation). Rendering that threw `questions.map is not a function`, and the
+// throw took the ENTIRE transcript down — not just the one card. Parse what we
+// can; anything we can't becomes [] and the caller falls back to the raw tool
+// row, which still shows the content. Non-array `options` gets the same
+// treatment so the `.find`/`.filter` below can't throw either.
+export function normalizeAskQuestions(raw: unknown): AskInputQuestion[] {
+  let arr = raw;
+  if (typeof arr === 'string') {
+    try {
+      arr = JSON.parse(arr);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((q): q is AskInputQuestion => !!q && typeof q === 'object' && typeof q.question === 'string')
+    .map((q) => (Array.isArray(q.options) ? q : { ...q, options: undefined }));
+}
+
 export function parseAskAnswers(text: string): { question: string; answer: string }[] {
   const out: { question: string; answer: string }[] = [];
   const re = /"([^"]+)"="([^"]*)"/g;
@@ -126,7 +148,7 @@ function AskCard({
 }) {
   return (
     <div className="ask-answered" data-answered={answered ? 'true' : 'false'}>
-      {questions.map((q, i) => {
+      {(Array.isArray(questions) ? questions : []).map((q, i) => {
         const chosen = (pairs.find((p) => p.question === q.question) ?? pairs[i])?.answer ?? null;
         const opt = q.options?.find((o) => o.label === chosen);
         return (
@@ -164,8 +186,8 @@ function AskCard({
 
 export const AskAnsweredPart: ToolCallMessagePartComponent = (props) => {
   const { args, result } = props;
-  const input = toolInput(args) as { questions?: AskInputQuestion[] } | null;
-  const questions = input?.questions ?? [];
+  const input = toolInput(args) as { questions?: unknown } | null;
+  const questions = normalizeAskQuestions(input?.questions);
   const res = toolResult(result);
   const answered = res != null && !res.isError;
   const pairs = answered ? parseAskAnswers(res.text) : [];
