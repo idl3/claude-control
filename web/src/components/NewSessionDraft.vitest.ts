@@ -1598,4 +1598,37 @@ describe('NewSessionDraft composer parity (overlay + slash/at autocomplete)', ()
     // Give any pending fetch a tick; the listbox must never appear with 0 items.
     await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Skill suggestions' })).toBeNull());
   });
+
+  // The overlay is an opaque (color: var(--text)) layer sitting exactly on top
+  // of the textarea, which only turns transparent once hasPills flips. So an
+  // overlay that paints text while hasPills is false puts TWO copies of the
+  // same string on screen — invisible while they share scrollTop, two visibly
+  // offset copies the moment the textarea scrolls past its max-height. The
+  // existing "/goal pill" test above only asserts no *pills*; overlayNodes is
+  // non-empty regardless (plain segments are pushed as raw text), so this is
+  // the assertion that actually catches the duplicate.
+  it('paints NOTHING in the overlay when the prompt has no reserved tokens', async () => {
+    stubApi();
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: 'So architecturally, Workspace - a thematic bucket with some goals' } });
+    await waitFor(() => expect(ta.value).toContain('architecturally'));
+    // Textarea still opaque (no data-has-pills) ⇒ any overlay text is a dupe.
+    expect(document.querySelector('.composer-input-wrap')?.getAttribute('data-has-pills')).toBeNull();
+    expect(document.querySelector('.composer-overlay')?.textContent).toBe('');
+  });
+
+  // Control arm: proves the fix is "don't paint a duplicate", not "blank the
+  // overlay always" — the latter would silently kill pill rendering and still
+  // pass the test above.
+  it('still paints the full prompt in the overlay once a pill exists', async () => {
+    stubApi();
+    draft();
+    const ta = await promptBox();
+    fireEvent.change(ta, { target: { value: '/goal ship the parity fix' } });
+    await waitFor(() => expect(document.querySelector('.composer-goal-pill')).toBeTruthy());
+    expect(document.querySelector('.composer-input-wrap')?.getAttribute('data-has-pills')).toBe('true');
+    // Textarea is transparent now, so the overlay is the ONLY visible copy.
+    expect(document.querySelector('.composer-overlay')?.textContent).toBe('/goal ship the parity fix');
+  });
 });
