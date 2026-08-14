@@ -23,10 +23,11 @@ function tmpConfig(json) {
 }
 
 const ATLAS = {
-  org: 'atlas',
+  org: 'example',
   runnerUrl: 'https://runner.example.dev/',
   spaBase: 'https://spa.example.dev',
 };
+const GSM = { gsmProject: 'proj-example', gsmAccount: 'ops@example.test' };
 
 // --- loadOlamConfig ----------------------------------------------------------
 
@@ -43,10 +44,18 @@ test('valid config parses with defaults filled + trailing slashes stripped', () 
   assert.equal(cfg.enabled, true);
   const org = cfg.orgs[0];
   assert.equal(org.runnerUrl, 'https://runner.example.dev'); // slash stripped
-  assert.equal(org.gsmProject, '<gcp-project>');
-  assert.equal(org.gsmAccount, '<operator-account>');
-  assert.equal(org.runnerTokenGsmSecret, '<atlas-runner-token-secret>');
+  // No baked-in GCP identity: absent from both env and the file → null.
+  assert.equal(org.gsmProject, null);
+  assert.equal(org.gsmAccount, null);
+  assert.equal(org.runnerTokenGsmSecret, 'olam-example-sandbox-runner-token');
   assert.deepEqual(org.runnerTokenFiles, []);
+});
+
+test('GSM identity comes from the config file, not a hardcoded default', () => {
+  const file = tmpConfig({ orgs: [{ ...ATLAS, ...GSM }] });
+  const [org] = loadOlamConfig({ file }).orgs;
+  assert.equal(org.gsmProject, 'proj-example');
+  assert.equal(org.gsmAccount, 'ops@example.test');
 });
 
 test('malformed JSON throws loudly, naming the file', () => {
@@ -66,7 +75,7 @@ test('non-https URLs are rejected', () => {
 
 test('duplicate org names are rejected', () => {
   const file = tmpConfig({ orgs: [ATLAS, ATLAS] });
-  assert.throws(() => loadOlamConfig({ file }), /duplicate org "atlas"/);
+  assert.throws(() => loadOlamConfig({ file }), /duplicate org "example"/);
 });
 
 // --- token file path validation ----------------------------------------------
@@ -101,13 +110,23 @@ test('orgs configured + token set → ok; no orgs + no token → ok (unchanged l
 // --- runnerTokenCandidates ----------------------------------------------------
 
 test('candidates are GSM-first, then files, with non-secret labels', () => {
-  const file = tmpConfig({ orgs: [{ ...ATLAS, runnerTokenFiles: ['~/.olam/secrets/t'] }] });
+  const file = tmpConfig({ orgs: [{ ...ATLAS, ...GSM, runnerTokenFiles: ['~/.olam/secrets/t'] }] });
   const [org] = loadOlamConfig({ file }).orgs;
   const cands = runnerTokenCandidates(org);
   assert.equal(cands[0].kind, 'gsm');
-  assert.equal(cands[0].label, 'gsm:<atlas-runner-token-secret>');
+  assert.equal(cands[0].label, 'gsm:olam-example-sandbox-runner-token');
   assert.equal(cands[1].kind, 'file');
   assert.match(cands[1].label, /^file:\//);
+});
+
+// Without a project+account there is nothing to query GSM with — shelling out
+// to gcloud with undefined flags would fail slowly and confusingly.
+test('GSM candidate is skipped entirely when no project/account is resolvable', () => {
+  const file = tmpConfig({ orgs: [{ ...ATLAS, runnerTokenFiles: ['~/.olam/secrets/t'] }] });
+  const [org] = loadOlamConfig({ file }).orgs;
+  const cands = runnerTokenCandidates(org);
+  assert.equal(cands.length, 1);
+  assert.equal(cands[0].kind, 'file');
 });
 
 // --- readSecretCandidate ------------------------------------------------------

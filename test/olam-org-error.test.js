@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 
 import { classifyOrgError } from '../lib/olam-sessions.js';
 
-const SPA = 'https://<atlas-spa>';
+const SPA = 'https://spa.example.test';
 
 test('classifyOrgError: CF Access wall (HTML parse error) → login-red with re-login prompt', () => {
   const e = new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON');
   const h = classifyOrgError(e, SPA);
   assert.equal(h.status, 'red');
-  assert.match(h.reason, /cloudflared access login https:\/\/olam\.dev-atlas\.kitchen/);
+  assert.match(h.reason, /cloudflared access login https:\/\/spa\.example\.test/);
   // The raw parse error is NOT surfaced to the operator.
   assert.doesNotMatch(h.reason, /Unexpected token/);
 });

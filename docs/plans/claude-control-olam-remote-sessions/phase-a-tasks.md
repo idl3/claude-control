@@ -53,9 +53,9 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 
 ### A1 — Live-verify the SPA contract (finish A0 residue)
 
-> **Goal**: The four A0 recipes are confirmed against live atlas with authenticated calls, documented in `docs/olam-contract.md`.
-> **Files**: docs/olam-contract.md, scripts/olam-contract-check.mjs
-> **Acceptance**: Script exits 0 against atlas: sessions list 200 (fields snapshot recorded), shape endpoint auth behavior recorded, runner status/terminal-token 200; findings (incl. any recipe corrections) written to docs/olam-contract.md.
+> **Goal**: The four A0 recipes are confirmed against live atlas with authenticated calls, documented in `the operator's local olam contract notes`.
+> **Files**: the operator's local olam contract notes, scripts/olam-contract-check.mjs
+> **Acceptance**: Script exits 0 against atlas: sessions list 200 (fields snapshot recorded), shape endpoint auth behavior recorded, runner status/terminal-token 200; findings (incl. any recipe corrections) written to the operator's local olam contract notes.
 > **Verification**: node scripts/olam-contract-check.mjs --org atlas
 > **Depends on**: none
 > **Reversibility**: clean-revert
@@ -68,7 +68,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 - [x] Probe shape endpoint auth with the operator JWT; record accept/reject
 <!-- e2e: full PASS (4/4 checks) on 2026-07-02 after SSO; recipe corrected: two-layer auth (JWT + /api/bootstrap app bearer); live list RICHER than source snapshot (linear_issue_id/title/plan_status present) -->
 - [x] Re-run runner status/terminal-token checks; record `feed`/`feedCursor` shape
-- [x] Write docs/olam-contract.md (per-org recipe table; correction notes if any recipe diverges)
+- [x] Write the operator's local olam contract notes (per-org recipe table; correction notes if any recipe diverges)
 <!-- e2e: pass-with-skips (runner legs PASS live; SPA legs [e2e:skipped] no Access session) on 2026-07-02 -->
 <!-- A1 partial: 3 SPA subtasks blocked on operator SSO (cloudflared access login https://<atlas-spa>) -->
 <!-- live finding: GSM <atlas-runner-token-secret> stale (401) vs rotation file (200) - probe-arbitrated; GSM version refresh escalated -->
@@ -85,7 +85,7 @@ umbrella-branch: feat/cockpit-olam-remote-sessions-integration
 > **Integration-test**: node --test test/olam-config.test.js
 
 - [x] Config schema + loader (absent file → remote sources disabled, zero behavior change)
-- [x] Secret resolver: GSM-first (`<operator-account>` account), file fallback, in-memory only
+- [x] Secret resolver: GSM-first (operator gcloud account), file fallback, in-memory only
 - [x] Mandatory-auth gate (decision 7) — fail-loud startup
 - [x] Path validation + no-logging discipline + tests
 <!-- e2e: pass (gate fires against tokenless server with orgs configured) on 2026-07-02 -->
@@ -176,7 +176,7 @@ cd ~/Projects/claude-cockpit && git revert "$PHASE_A_MERGE_SHA"                 
 - [ ] All 6 tasks done + verification commands green
 - [ ] T1/T2/T3/T5/P1 rubric rows demonstrably covered (see Audit item coverage)
 - [ ] Local-only claude-control behavior byte-identical (snapshots)
-- [ ] docs/olam-contract.md committed with live-verified recipes
+- [ ] the operator's local olam contract notes committed with live-verified recipes
 
 ## Assumptions log
 - task A2: config path = `~/.claude-control/olam.json` (honours CLAUDE_CONTROL_DATA), not the plan's `~/.cockpit/olam.json`; reason: repo's established data-dir convention (lib/config.js); cost-if-wrong: small (path rename)
