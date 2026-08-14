@@ -2,7 +2,10 @@
 // olam-contract-check — live-verifies the per-org olam surface contract that
 // the remote-sessions feature (docs/plans/cockpit-olam-remote-sessions/) builds on.
 //
-//   node scripts/olam-contract-check.mjs --org atlas [--org grain ...]
+//   node scripts/olam-contract-check.mjs --org <name> [--org <name> ...]
+//
+// Orgs (endpoints, GSM project/account, secret names) come from the operator's
+// ~/.claude-control/olam.json — this repo hardcodes no live infrastructure.
 //
 // Checks per org:
 //   1. runner-status          GET  <runner>/agent-run/status         (bearer)
@@ -18,90 +21,27 @@
 // probe is the arbiter when copies drift (both stale copies observed 2026-07-02).
 // Values never leave process memory; logs show sha256 digests only.
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { loadOlamConfig, runnerTokenCandidates, readSecretCandidate } from "../lib/olam-config.js";
 
-const exec = promisify(execFile);
-const GSM_ACCOUNT = "ernest.codes@gmail.com";
-const GSM_PROJECT = "pleri-500205";
-
-// ponytail: inline org registry; A2's ~/.claude-control/olam.json loader supersedes
-// this for cockpit runtime — the script keeps its own copy so it runs standalone.
-const ORGS = {
-  atlas: {
-    runnerUrl: "https://olam-worker-runner-sandbox.atlas-kitchen.workers.dev",
-    spaBase: "https://olam.dev-atlas.kitchen",
-    runnerTokenCandidates: [
-      { kind: "gsm", secret: "olam-atlas-sandbox-runner-token" },
-      { kind: "file", path: join(homedir(), ".olam/secrets/sandbox-runner-token") },
-      { kind: "file", path: join(homedir(), ".olam/secrets/atlas-olam-task-token") },
-    ],
-  },
-  grain: {
-    // Verified 2026-07-02: worker name from wrangler.grain.jsonc `name`
-    // (account 1069793468ee…); live-probed 401 on /agent-run/status (auth-gated,
-    // correct host). Previously-guessed olam-worker-runner-sandbox.grain.workers.dev
-    // returns 404.
-    runnerUrl: "https://grain-worker-runner-sandbox.grain.workers.dev",
-    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.grain.toml `pattern`;
-    // curl 302 -> grain.cloudflareaccess.com login, kid matches toml CF_ACCESS_AUD.
-    spaBase: "https://olam.grain.com.sg",
-    runnerTokenCandidates: [
-      { kind: "gsm", secret: "olam-grain-sandbox-runner-token" },
-      { kind: "file", path: join(homedir(), ".olam/secrets/grain-olam-task-token") },
-    ],
-  },
-  pleri: {
-    // Verified live 2026-07-02: workers.dev account subdomain is "ernestcodes"
-    // (CF API accounts/9f52732a13cb…/workers/subdomain); bearer-authed status
-    // probe to the URL below returned HTTP 200.
-    runnerUrl: "https://pleri-worker-runner-sandbox.ernestcodes.workers.dev",
-    // Verified 2026-07-02: packages/plan-chat-spa/wrangler.pleri.toml `pattern`;
-    // curl 302 -> idl3.cloudflareaccess.com login, kid matches toml CF_ACCESS_AUD.
-    // olam.kaluga.co is also live but redirects to the ATLAS Access team
-    // (atlaskitchen.cloudflareaccess.com) — it is not pleri's SPA, do not use.
-    spaBase: "https://olam.pleri.com",
-    runnerTokenCandidates: [
-      { kind: "gsm", secret: "olam-pleri-sandbox-runner-token" },
-      { kind: "file", path: join(homedir(), ".olam/secrets/pleri-olam-task-token") },
-    ],
-  },
-};
+// Org endpoints are OPERATOR DATA, never repo data: they come from
+// ~/.claude-control/olam.json (see lib/olam-config.js for the schema). This
+// script deliberately hardcodes no hostname, account id or secret name.
+const ORGS = Object.fromEntries(loadOlamConfig().orgs.map((o) => [o.org, o]));
 
 const digest = (v) => createHash("sha256").update(v).digest("hex").slice(0, 8);
 
-async function candidateValue(c) {
-  if (c.kind === "gsm") {
-    const { stdout } = await exec("gcloud", [
-      "secrets", "versions", "access", "latest",
-      `--secret=${c.secret}`, `--project=${GSM_PROJECT}`, `--account=${GSM_ACCOUNT}`,
-    ]);
-    return stdout.trim();
-  }
-  return (await readFile(c.path, "utf8")).trim();
-}
-
 /** Try candidates in order; the live status probe arbitrates which copy is current. */
 async function resolveRunnerToken(org, cfg) {
-  for (const c of cfg.runnerTokenCandidates) {
-    let value;
-    try {
-      value = await candidateValue(c);
-    } catch {
-      continue; // unreadable candidate (no gcloud / missing file) — try next
-    }
-    if (!value) continue;
+  for (const c of runnerTokenCandidates(cfg)) {
+    const value = await readSecretCandidate(c);
+    if (!value) continue; // unreadable candidate (no gcloud / missing file) — try next
     const res = await fetch(
       `${cfg.runnerUrl}/agent-run/status?sessionId=contract-check&pool=agentrun`,
       { headers: { Authorization: `Bearer ${value}` } },
     ).catch(() => null);
-    const src = c.kind === "gsm" ? `gsm:${c.secret}` : `file:${c.path}`;
-    if (res?.ok) return { value, src, digest: digest(value) };
-    console.error(`  [token] ${org} candidate ${src} (sha256:${digest(value)}) -> ${res ? res.status : "network-error"}; trying next`);
+    if (res?.ok) return { value, src: c.label, digest: digest(value) };
+    console.error(`  [token] ${org} candidate ${c.label} (sha256:${digest(value)}) -> ${res ? res.status : "network-error"}; trying next`);
   }
   return null;
 }
@@ -119,7 +59,12 @@ async function accessJwt(spaBase) {
 async function checkOrg(org) {
   const cfg = ORGS[org];
   if (!cfg) {
-    console.error(`[${org}] unknown org (expected one of: ${Object.keys(ORGS).join(", ")})`);
+    const known = Object.keys(ORGS);
+    console.error(
+      known.length === 0
+        ? `[${org}] no orgs configured — add them to ~/.claude-control/olam.json (schema: lib/olam-config.js)`
+        : `[${org}] unknown org (configured: ${known.join(", ")})`,
+    );
     return { org, failed: 1, results: [] };
   }
   const results = [];
@@ -196,7 +141,10 @@ async function checkOrg(org) {
 
 const orgs = process.argv.flatMap((a, i, all) => (a === "--org" && all[i + 1] ? [all[i + 1]] : []));
 if (orgs.length === 0) {
-  console.error("usage: node scripts/olam-contract-check.mjs --org atlas [--org grain] [--org pleri]");
+  console.error(
+    `usage: node scripts/olam-contract-check.mjs --org <name> [--org <name> ...]\n` +
+      `configured orgs (~/.claude-control/olam.json): ${Object.keys(ORGS).join(", ") || "(none)"}`,
+  );
   process.exit(1);
 }
 let failures = 0;
