@@ -18,7 +18,7 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
-import { resolveClaudexBaseUrl, preflightClaudexModel } from './lib/cloud-bearer.js';
+import { readCloudBearer, resolveClaudexBaseUrl, preflightClaudexModel } from './lib/cloud-bearer.js';
 import * as shell from './lib/shell.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import { TranscriptTailer } from './lib/transcript.js';
@@ -49,6 +49,13 @@ import { OlamTranscriptSource } from './lib/olam-transcript.js';
 import { dispatchLiveSteer, dispatchResume, replyTransport, preSendGate } from './lib/olam-transport.js';
 import { LivenessCache } from './lib/olam-liveness.js';
 import { parseCodexRecord, parseCodexPrompt, parseCodexSubagentNotificationRecord, buildSpawnCommand, buildAppServerCommand } from './lib/codex.js';
+import { buildTuiLaunchCommand as buildCodeWhaleTuiLaunchCommand } from './lib/codewhale.js';
+import {
+  CodeWhaleRuntimeClient,
+  CodeWhaleRuntimeSessionSource,
+  CodeWhaleRuntimeTranscriptSource,
+  threadIdFromRuntimeSession,
+} from './lib/codewhale-runtime.js';
 import { CodexRpcManager, isCodexActiveStatus, isCodexAppServerCapture, parseCodexAppServerEndpoint } from './lib/codex-rpc.js';
 import { ClaudePrintManager, buildBridgeCommand } from './lib/claude-print.js';
 import { optimizePrompt, rulesOptimize } from './lib/optimize.js';
@@ -137,6 +144,13 @@ const CONFIG = {
   // tripped "over limit" permanently. Override with CLAUDE_CONTROL_RSS_LIMIT_MB.
   rssLimitMB: Number(env('RSS_LIMIT_MB')) || 768,
   token: env('TOKEN') || readPersistedToken() || null,
+  // CodeWhale's canonical Runtime API is optional and loopback-first. The
+  // token is server-only: it is never spread through /api/config or sent to a
+  // browser. Disable discovery explicitly when this machine should expose only
+  // terminal passthrough.
+  codeWhaleRuntimeEnabled: !envFlag('CODEWHALE_RUNTIME_DISABLED'),
+  codeWhaleRuntimeUrl: env('CODEWHALE_RUNTIME_URL') || 'http://127.0.0.1:7878',
+  codeWhaleRuntimeToken: env('CODEWHALE_RUNTIME_TOKEN') || '',
   // 4000: within lib/transcript's 8 MB byte tail, the message-count cap governs
   // how much history a fresh subscribe serves. Raised 1500 → 4000 for deeper
   // scrollback. Shares the CLAUDE_CONTROL_MAX_BUFFER override with lib/transcript.
@@ -221,6 +235,13 @@ const VIDEO_MIME = {
 
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoots: CONFIG.projectsRoots, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
+const codeWhaleRuntimeClient = CONFIG.codeWhaleRuntimeEnabled
+  ? new CodeWhaleRuntimeClient({
+      baseUrl: CONFIG.codeWhaleRuntimeUrl,
+      token: CONFIG.codeWhaleRuntimeToken,
+    })
+  : null;
+let codeWhaleRuntimeSource = null;
 const collab = new Collab(); // session-to-session collaboration rooms (lib/collab.js)
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 // R8: registry.start()/resources.start() run unconditionally at boot (main(),
@@ -604,7 +625,8 @@ const _handler = (req, res) => {
     return Promise.all([
       resolveBin(cfg.claudeBin || cfg.launchCommand),
       resolveBin(cfg.codexBin || cfg.codexLaunchCommand),
-    ]).then(async ([claudeResult, codexResult]) => {
+      resolveBin(cfg.codewhaleBin || cfg.codewhaleLaunchCommand),
+    ]).then(async ([claudeResult, codexResult, codewhaleResult]) => {
       // Claudex spawns the claude binary pointed at the olam auth-worker (see
       // handleSessionNew's claudex pre-validation, which this mirrors), so its
       // availability is claude's availability AND the cloud-bearer artifact
@@ -677,6 +699,13 @@ const _handler = (req, res) => {
             defaultTransport: CONFIG.codexTransport,
             transports: ['rpc', 'tmux'],
             ...(codexResult.available ? {} : { reason: codexResult.reason }),
+          },
+          {
+            id: 'codewhale',
+            available: codewhaleResult.available,
+            defaultTransport: 'tmux',
+            transports: ['tmux'],
+            ...(codewhaleResult.available ? {} : { reason: codewhaleResult.reason }),
           },
         ],
       });
@@ -1300,19 +1329,21 @@ async function handleSessionNew(req, res) {
   // client sets this after the user confirms the create-folder prompt.
   const createCwd = body.createCwd === true;
 
-  // agent ∈ {'claude','codex','claudex','claudemi'}, default 'claude'. Claudex
+  // agent ∈ {'claude','codex','claudex','claudemi','codewhale'}, default 'claude'. Claudex
   // = the claude binary backed by Codex via the olam auth-worker (ENV-only
   // setup). Claudemi = the same claude binary backed by Kimi via the worker's
   // `/kimi` provider-selector segment (also ENV-only — see the claudemi
   // pre-validation block below).
   const agent =
-    body.agent === 'codex'
-      ? 'codex'
-      : body.agent === 'claudex'
-        ? 'claudex'
-        : body.agent === 'claudemi'
-          ? 'claudemi'
-          : 'claude';
+    body.agent === 'codewhale'
+      ? 'codewhale'
+      : body.agent === 'codex'
+        ? 'codex'
+        : body.agent === 'claudex'
+          ? 'claudex'
+          : body.agent === 'claudemi'
+            ? 'claudemi'
+            : 'claude';
   // Claudex/claudemi are tmux-only, ALWAYS — never the print-bridge path.
   // Below, the `else if (claudeTransport === 'print')` branch does not itself
   // check `agent`; without this force, a host running CLAUDE_TRANSPORT=print
@@ -1393,9 +1424,11 @@ async function handleSessionNew(req, res) {
   // --- Pre-validation: binary resolution + cwd check BEFORE creating any window ---
 
   // (i) Resolve the agent binary and return 400 if unavailable.
-  const agentBin = agent === 'codex'
-    ? (config.codexBin || config.codexLaunchCommand)
-    : (agent === 'claude' && claudeTransport === 'print'
+  const agentBin = agent === 'codewhale'
+    ? (config.codewhaleBin || config.codewhaleLaunchCommand)
+    : agent === 'codex'
+      ? (config.codexBin || config.codexLaunchCommand)
+      : (agent === 'claude' && claudeTransport === 'print'
       ? (resolveClaudeBin() || 'claude')
       : (config.claudeBin || config.launchCommand));
   const binCheck = await resolveBin(agentBin);
@@ -1556,7 +1589,13 @@ async function handleSessionNew(req, res) {
     let codexRpcEndpoint = null;
     let printPaneTarget = target;
     let printClient = null;
-    if (agent === 'codex') {
+    if (agent === 'codewhale') {
+      launch = buildCodeWhaleTuiLaunchCommand({
+        command: config.codewhaleLaunchCommand,
+        prompt,
+        quote: tmux.shellQuoteName,
+      });
+    } else if (agent === 'codex') {
       const codexCommand = config.codexBin || config.codexLaunchCommand;
       if (codexTransport === 'rpc') {
         codexRpcEndpoint = await codexRpc.prepareEndpoint(target);
@@ -1640,7 +1679,10 @@ async function handleSessionNew(req, res) {
       if (prompt) launch += ` -- ${tmux.shellQuoteName(prompt)}`;
     }
 
-    if (agent === 'codex') {
+    if (agent === 'codewhale') {
+      await tmux.setPaneOption(target, '@cc_agent', 'codewhale');
+      await tmux.setPaneOption(target, '@cc_transport', 'tmux');
+    } else if (agent === 'codex') {
       await tmux.setPaneOption(target, '@cc_agent', 'codex');
       await tmux.setPaneOption(target, '@cc_transport', codexTransport);
       if (codexRpcEndpoint) await tmux.setPaneOption(target, '@cc_endpoint', codexRpcEndpoint);
@@ -1704,7 +1746,7 @@ async function handleSessionNew(req, res) {
       target: returnTarget,
       name,
       agent,
-      transport: agent === 'codex' ? codexTransport : claudeTransport,
+      transport: agent === 'codewhale' ? 'tmux' : agent === 'codex' ? codexTransport : claudeTransport,
     });
   } catch (err) {
     return endJson(res, 500, { error: String(err?.message || err) });
@@ -2244,7 +2286,13 @@ const ptyBridge = createPtyBridge({
     if (sessionId.startsWith('pane:')) {
       const s = sessionById(sessionId.slice('pane:'.length));
       if (!s || !tmux.isValidTarget(s.target)) return null;
-      return { target: s.target };
+      // CodeWhale is an agent TUI already running in the operator's real pane.
+      // Mirror it with pipe-pane/send-keys so the web viewer never contributes
+      // a tmux client size or triggers client/window hooks in that shared
+      // session. Ordinary shell terminals retain the full node-pty attach path.
+      return s.kind === 'codewhale'
+        ? { target: s.target, mode: 'agent-pane' }
+        : { target: s.target };
     }
     // Cmd+J agent-pane mirror (AgentTerminalOverlay): raw bidirectional
     // pass-through to the session's LIVE agent tmux pane — the pane the
@@ -2483,6 +2531,59 @@ claudePrint.on('close', (id) => {
 });
 
 function ensureSubscription(id) {
+  // CodeWhale Runtime threads use the same TranscriptSource interface as file
+  // tailers and Olam: start/stop/snapshot/pending/trim plus normalized change
+  // events. Snapshot hydration happens before the SSE cursor is opened inside
+  // CodeWhaleRuntimeTranscriptSource, so this server fan-out stays substrate-
+  // agnostic and Runtime tokens never leave the backend.
+  {
+    const runtime = sessionById(id);
+    if (runtime?.transport === 'codewhale-http-sse') {
+      const existing = subscriptions.get(id);
+      if (existing) return existing;
+      if (!codeWhaleRuntimeClient) return null;
+      const threadId = runtime.sessionId || threadIdFromRuntimeSession(id);
+      if (!threadId) return null;
+      const source = new CodeWhaleRuntimeTranscriptSource(codeWhaleRuntimeClient, {
+        threadId,
+        maxBuffer: CONFIG.maxBuffer,
+      });
+      const runtimeSub = {
+        tailer: source,
+        subagents: source.subagents,
+        clients: new Set(),
+        pending: null,
+        ready: null,
+        external: true,
+      };
+      subscriptions.set(id, runtimeSub);
+      source.subagents.on('change', (entry) => {
+        const running = source.subagents.snapshot().filter((agent) => agent.status === 'running').length;
+        registry.setSubAgentState(id, running);
+        broadcastTo(id, { type: 'subagent', id, subagent: entry });
+      });
+      source.on('upsert', (messages) => broadcastTo(id, { type: 'upsert', id, messages }));
+      source.on('reset', (messages) => broadcastTo(id, { type: 'reset', id, messages }));
+      source.on('pending', (pending) => {
+        runtimeSub.pending = pending;
+        registry.setPending(id, !!pending);
+        registry.setPrompt(id, pending ? {
+          question: pending.questions?.[0]?.question || 'CodeWhale approval required',
+        } : null);
+        broadcastTo(id, { type: 'pending', id, pending });
+      });
+      source.on('error', (err) =>
+        broadcastTo(id, {
+          type: 'ack',
+          op: 'codewhale-runtime',
+          ok: false,
+          error: String(err?.message || err),
+        }));
+      runtimeSub.ready = source.start();
+      runtimeSub.ready.catch(() => {});
+      return runtimeSub;
+    }
+  }
   // Remote (olam) sessions stream from the chunks substrate, not a local
   // transcript file. Build an OlamTranscriptSource whose 'append' events carry
   // the SAME NormalizedMessage shape as the local tailer, so the WS fan-out +
@@ -2672,7 +2773,7 @@ function sendSubscriptionSnapshot(ws, id, sub) {
 
 function upgradeSubscriptionIfTranscriptReady(id) {
   const old = subscriptions.get(id);
-  if (!old || old.remote) return;
+  if (!old || old.remote || old.external) return;
   const session = sessionById(id);
   if (!session?.transcriptPath) return;
   // Rebuild when there is no tailer yet, OR the session's transcript moved to
@@ -2937,11 +3038,34 @@ async function handleClientMessage(ws, msg) {
     case 'reply': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      const transport = replyTransport(session);
+      if (transport === 'codewhale-runtime') {
+        if (!codeWhaleRuntimeClient || !session.sessionId) {
+          throw new Error('CodeWhale Runtime is unavailable');
+        }
+        const text = String(msg.text ?? '');
+        if (!text.trim()) throw new Error('prompt is required');
+        const runtimeSub = subscriptions.get(msg.id);
+        if (runtimeSub?.tailer?.getPending?.()) {
+          throw new Error('An approval is open — answer it in the approval card');
+        }
+        const result = await codeWhaleRuntimeClient.startTurn(session.sessionId, text);
+        send(ws, {
+          type: 'ack',
+          op: 'reply',
+          ok: true,
+          transport: 'codewhale-http-sse',
+          reqId: msg.reqId,
+          turnId: result?.turn?.id || result?.id || null,
+        });
+        codeWhaleRuntimeSource?.tick().catch(() => {});
+        return;
+      }
       // Remote (olam) sessions steer via the cloud-dispatch mirror, not tmux:
       // no tmux target, no pane picker, no send-settle delay — so this branch
       // early-returns BEFORE all of that. The agent's reply streams back as
       // chunks (Phase B), so there is no separate response plumbing.
-      if (replyTransport(session) === 'olam') {
+      if (transport === 'olam') {
         const reqId = msg.reqId;
         // Phase A (task A4) + CP3 audit follow-up: pre-send liveness check,
         // on-demand only, ALWAYS attempted for a remote session —
@@ -3108,6 +3232,28 @@ async function handleClientMessage(ws, msg) {
     case 'answer': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      if (session.transport === 'codewhale-http-sse') {
+        const runtimeSub = subscriptions.get(msg.id);
+        if (!runtimeSub?.tailer?.answerPending) throw new Error('CodeWhale Runtime approval source is unavailable');
+        const answerKey = `${session.id}\0${String(msg.toolUseId ?? '')}`;
+        if (answersInFlight.has(answerKey)) {
+          return send(ws, { type: 'ack', op: 'answer', ok: false, error: 'answer already in progress' });
+        }
+        answersInFlight.add(answerKey);
+        try {
+          await runtimeSub.tailer.answerPending(msg.toolUseId, msg.selections || []);
+          send(ws, {
+            type: 'ack',
+            op: 'answer',
+            ok: true,
+            transport: 'codewhale-http-sse',
+          });
+          codeWhaleRuntimeSource?.tick().catch(() => {});
+          return;
+        } finally {
+          answersInFlight.delete(answerKey);
+        }
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const answerKey = `${session.target}\0${String(msg.toolUseId ?? '')}`;
       const now = Date.now();
@@ -3531,6 +3677,21 @@ async function handleClientMessage(ws, msg) {
       // keys only — never arbitrary text — so this can't be used to inject input.
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      if (session.transport === 'codewhale-http-sse') {
+        if (msg.key !== 'Escape') throw new Error('key not allowed for CodeWhale Runtime');
+        if (!codeWhaleRuntimeClient || !session.sessionId) {
+          throw new Error('CodeWhale Runtime is unavailable');
+        }
+        const result = await codeWhaleRuntimeClient.interruptActiveTurn(session.sessionId);
+        codeWhaleRuntimeSource?.tick().catch(() => {});
+        return send(ws, {
+          type: 'ack',
+          op: 'promptkey',
+          ok: true,
+          transport: 'codewhale-http-sse',
+          interrupted: result?.interrupted !== false,
+        });
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const ALLOWED = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down']);
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
@@ -3761,6 +3922,11 @@ async function main() {
     olamSource.start();
     console.log(`[olam] remote sessions enabled for orgs: ${OLAM.orgs.map((o) => o.org).join(', ')}`);
   }
+  if (codeWhaleRuntimeClient) {
+    codeWhaleRuntimeSource = new CodeWhaleRuntimeSessionSource(codeWhaleRuntimeClient, registry);
+    codeWhaleRuntimeSource.start();
+    console.log(`[codewhale-runtime] discovery enabled at ${new URL(CONFIG.codeWhaleRuntimeUrl).origin}`);
+  }
   await registry.refresh().catch(() => {});
 
   // Media root for transcript inline embeds — must exist so control-session
@@ -3854,6 +4020,8 @@ function shutdown() {
   for (const [, sub] of subscriptions) sub.tailer?.stop();
   ptyBridge.shutdownAll();
   mlx.shutdown();
+  codeWhaleRuntimeSource?.stop();
+  olamSource?.stop();
   registry.stop();
   resources.stop();
   if (uploadSweepTimer) clearInterval(uploadSweepTimer);

@@ -105,7 +105,7 @@ const AC_MAX = 4;
  * with the same `.composer-card` / `.composer-input` CSS classes.
  */
 export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }: NewSessionDraftProps) {
-  const [agent, setAgent] = useState<'claude' | 'codex' | 'claudex' | 'claudemi'>(() => defaultAgentForFilter(filter));
+  const [agent, setAgent] = useState<'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale'>(() => defaultAgentForFilter(filter));
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   // Single model slot shared by all harnesses — switching harness
@@ -364,12 +364,12 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   // falls back to claude's (same fallback as agentInfo() below).
   useEffect(() => {
     if (agentInfos.length === 0) return;
-    const infoFor = (id: 'claude' | 'codex' | 'claudex' | 'claudemi'): SpawnAgentInfo | undefined =>
+    const infoFor = (id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale'): SpawnAgentInfo | undefined =>
       agentInfos.find((a) => a.id === id) ??
       (id === 'claudex' || id === 'claudemi' ? agentInfos.find((a) => a.id === 'claude') : undefined);
     setAgent((prev) => {
       if (infoFor(prev)?.available !== false) return prev;
-      const fallback = (['claude', 'claudex', 'claudemi', 'codex'] as const).find(
+      const fallback = (['claude', 'codewhale', 'claudex', 'claudemi', 'codex'] as const).find(
         (id) => id !== prev && infoFor(id)?.available !== false,
       );
       return fallback ?? prev;
@@ -577,12 +577,13 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   ]);
 
   // Helper: look up availability for an agent id.
-  function agentInfo(id: 'claude' | 'codex' | 'claudex' | 'claudemi'): SpawnAgentInfo | undefined {
+  function agentInfo(id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale'): SpawnAgentInfo | undefined {
     return agentInfos.find((a) => a.id === id);
   }
 
   const claudeInfo = agentInfo('claude');
   const codexInfo = agentInfo('codex');
+  const codewhaleInfo = agentInfo('codewhale');
   // Claudex/claudemi both spawn the claude binary (pointed at the olam
   // auth-worker), so until the server reports a dedicated entry for each,
   // claude's binary availability governs them.
@@ -595,7 +596,9 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
         ? claudexModels
         : agent === 'claudemi'
           ? claudemiModels
-          : codexModels;
+          : agent === 'codex'
+            ? codexModels
+            : [];
 
   // ASSUMPTION: modelOptions[0] is the harness default (flagship-first
   // ordering in lib/models.js — CLAUDE_MODELS[0]/CODEX_MODELS[0] are the ids
@@ -730,6 +733,8 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
             agentName={
               agent === 'codex'
                 ? 'Codex'
+                : agent === 'codewhale'
+                  ? 'CodeWhale'
                 : agent === 'claudex'
                   ? 'Claudex'
                   : agent === 'claudemi'
@@ -825,6 +830,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 ['claudex', 'Claudex', claudexInfo],
                 ['claudemi', 'Claudemi', claudemiInfo],
                 ['codex', 'Codex', codexInfo],
+                ['codewhale', 'CodeWhale', codewhaleInfo],
               ] as const).map(([id, label, info]) => {
                 const isActive = agent === id;
                 return (
@@ -860,13 +866,17 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 exact model ids the CLI accepts. Options + default reset
                 whenever the harness above changes (see the agent-change
                 effect). */}
-            <Dropdown
-              value={model}
-              onChange={setModel}
-              options={modelDropdownOptions}
-              disabled={creating}
-              ariaLabel="Model"
-            />
+            {agent !== 'codewhale' ? (
+              <Dropdown
+                value={model}
+                onChange={setModel}
+                options={modelDropdownOptions}
+                disabled={creating}
+                ariaLabel="Model"
+              />
+            ) : (
+              <span className="new-session-draft-harness-note">Interactive TUI · terminal passthrough</span>
+            )}
 
             {/* Directory: dropdown of project directories + Custom…
                 option. Defaults to the first entry that looks like this
@@ -928,8 +938,8 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
               {showAdvanced ? 'Advanced ▴' : 'Advanced ▾'}
             </button>
 
-            {/* Name field — Claude + Claudex + Claudemi (all three use the
-                claude tmux launch shape); Codex has no --name flag. Compact
+            {/* Name field — Claude/Claudex/Claudemi use the claude launch
+                shape; CodeWhale uses the tmux window name. Codex has no --name flag. Compact
                 auto-width (not a stretched full-width field) via
                 new-session-draft-name-compact. */}
             {agent !== 'codex' ? (

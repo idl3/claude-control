@@ -14,7 +14,8 @@ import { parseGoalInvocation } from '../lib/reservedTokens';
 import { useArtifactPanel } from './ArtifactContext';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { CodexIcon } from './CodexIcon';
-import { useAgentKind } from './AgentContext';
+import { WhaleIcon } from './icons';
+import { useAgentKind, type AgentKind } from './AgentContext';
 import { WorkflowCard } from './WorkflowCard';
 import { useWorkflows } from './WorkflowContext';
 
@@ -22,18 +23,21 @@ import { useWorkflows } from './WorkflowContext';
 // pending) renders as an animated spinner; everything else is GitHub-flavored
 // markdown (see MarkdownText).
 const WORKING_RE = /^\s*working…?\s*$/i;
+
+export function WorkingAgentIcon({ agentKind }: { agentKind: AgentKind }) {
+  if (agentKind === 'codex') return <CodexIcon size={14} />;
+  if (agentKind === 'codewhale') return <WhaleIcon size={14} />;
+  return <ClaudeRobotIcon size={14} />;
+}
+
 export const TextPart: TextMessagePartComponent = (props) => {
   const agentKind = useAgentKind();
   const role = useMessage((m) => m.role);
   if (typeof props.text === 'string' && WORKING_RE.test(props.text)) {
     return (
       <span className="working-indicator" role="status" aria-live="polite">
-        <span className="working-claude" aria-hidden="true">
-          {agentKind === 'codex' ? (
-            <CodexIcon size={14} />
-          ) : (
-            <ClaudeRobotIcon size={14} />
-          )}
+        <span className="working-agent" data-agent-kind={agentKind} aria-hidden="true">
+          <WorkingAgentIcon agentKind={agentKind} />
         </span>
         <span className="shimmer-text">Working…</span>
       </span>

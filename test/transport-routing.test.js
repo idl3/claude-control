@@ -12,6 +12,14 @@ test('remote sessions route to the olam transport', () => {
   assert.equal(replyTransport({ kind: 'remote' }), 'olam'); // transport optional
 });
 
+test('CodeWhale Runtime threads route to HTTP/SSE controls while terminal CodeWhale stays tmux', () => {
+  assert.equal(
+    replyTransport({ kind: 'codewhale', transport: 'codewhale-http-sse' }),
+    'codewhale-runtime',
+  );
+  assert.equal(replyTransport({ kind: 'codewhale', transport: 'tmux' }), 'tmux');
+});
+
 test('claude print sessions route to claude-print (unchanged)', () => {
   assert.equal(replyTransport({ kind: 'claude', transport: 'print' }), 'claude-print');
 });

@@ -3,12 +3,13 @@ import { SlotText } from 'slot-text/react';
 import type { OrgHealth, Session } from '../lib/types';
 import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
-import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons';
+import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon, WhaleIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession, terminateSession } from '../lib/api';
 import { createPointerGhost, type PointerGhost } from '../lib/dragGhost';
 import { defaultOrgLabel } from './RailTabs';
+import { isTerminalPresentation } from '../lib/sessionPresentation';
 import {
   loadRailTokens,
   orderMetaFields,
@@ -1146,9 +1147,11 @@ function PaneRow({
     onDrop,
     onDragEnd,
   });
-  const isTerminal = s.kind === 'terminal';
+  const isTerminal = isTerminalPresentation(s);
+  const isPlainTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
-  const label = isTerminal
+  const isCodeWhale = s.kind === 'codewhale';
+  const label = isPlainTerminal
     ? s.ccShell
       ? `shell · ${s.cmd || 'sh'}`
       : s.cmd || s.tmuxName || 'shell'
@@ -1280,10 +1283,10 @@ function PaneRow({
             opacity; inactive panes dim (this replaces the old green/grey orb). */}
         <span
           className="pane-icon"
-          data-kind={isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude'}
+          data-kind={isCodeWhale ? 'codewhale' : isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude'}
           data-active={s.active ? 'true' : 'false'}
           data-state={claudeState ?? undefined}
-          aria-label={isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane'}
+          aria-label={isCodeWhale ? 'CodeWhale pane' : isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane'}
           title={
             isTerminal
               ? s.active
@@ -1298,7 +1301,9 @@ function PaneRow({
                     : 'idle'
           }
         >
-          {isTerminal ? (
+          {isCodeWhale ? (
+            <WhaleIcon size={18} />
+          ) : isTerminal ? (
             <TerminalSquareIcon size={18} />
           ) : isCodex ? (
             <CodexIcon size={15} />
@@ -1494,8 +1499,8 @@ export function SessionRail({
     const visible = sessions.filter((s) => {
       if (s.kind === 'remote') return false; // remote rows render in their own org sections
       if (filter === 'all') return true;
-      if (filter === 'agents') return s.kind !== 'terminal'; // claude + claudex + claudemi + codex, no shells
-      if (filter === 'terminal') return s.kind === 'terminal';
+      if (filter === 'agents') return s.kind !== 'terminal'; // includes CodeWhale; excludes plain shells
+      if (filter === 'terminal') return isTerminalPresentation(s);
       // 'codex' filter: the codex-flavored bucket — legacy codex panes AND
       // claudex/claudemi panes (design decision 7: claudex is the PRIMARY
       // codex-flavored option, claudemi its sibling, so the operator who
@@ -1581,6 +1586,17 @@ export function SessionRail({
       {groups.map((g) => {
         const isCollapsed = collapsed.has(g.sessionName);
         const paneCount = g.windows.reduce((n, w) => n + w.panes.length, 0);
+        const panes = g.windows.flatMap((w) => w.panes);
+        // A real tmux group always has a sessionName. External transcript
+        // sources (CodeWhale Runtime) intentionally do not, even though they
+        // share the local rail.
+        const isTmuxGroup = panes.some((s) => Boolean(s.sessionName));
+        const allCodeWhale = panes.length > 0 && panes.every((s) => s.kind === 'codewhale');
+        const groupLabel = !isTmuxGroup && panes.every((s) => s.transport === 'codewhale-http-sse')
+          ? 'Runtime'
+          : isTmuxGroup && allCodeWhale
+            ? `Terminal · ${g.sessionName}`
+            : g.sessionName;
         const isRenamingThis = renamingSession === g.sessionName;
         return (
           <section key={g.sessionName} className="session-group" data-collapsed={isCollapsed ? 'true' : undefined}>
@@ -1592,7 +1608,7 @@ export function SessionRail({
               // probe (useRowPointerDrag → dropTargetAt): the header carries
               // its own tmux session name so a hit maps straight back to the
               // destination without any DOM-order bookkeeping.
-              data-session-name={g.sessionName}
+              data-session-name={isTmuxGroup ? g.sessionName : undefined}
             >
               <button
                 type="button"
@@ -1607,11 +1623,12 @@ export function SessionRail({
                   <span
                     className="session-group-name"
                     onDoubleClick={(e) => {
+                      if (!isTmuxGroup) return;
                       e.stopPropagation();
                       startRenameSession(g.sessionName);
                     }}
                   >
-                    {g.sessionName}
+                    {groupLabel}
                   </span>
                 )}
               </button>
@@ -1635,7 +1652,7 @@ export function SessionRail({
                   }}
                   onBlur={() => void submitRenameSession()}
                 />
-              ) : (
+              ) : isTmuxGroup ? (
                 <button
                   type="button"
                   className="session-group-rename-btn"
@@ -1648,7 +1665,7 @@ export function SessionRail({
                 >
                   <PencilIcon size={12} />
                 </button>
-              )}
+              ) : null}
               {isCollapsed ? <span className="session-group-count">{paneCount}</span> : null}
             </div>
             {isCollapsed
@@ -1672,11 +1689,11 @@ export function SessionRail({
                           metaTick={metaTick}
                           railTokens={railTokens}
                           dragging={s.id === draggingId}
-                          onDragStart={setDraggingId}
-                          onDragHover={setDragOverSession}
-                          onDrop={handleRowDrop}
-                          onDragEnd={clearDrag}
-                          onTerminate={handleTerminate}
+                          onDragStart={isTmuxGroup ? setDraggingId : undefined}
+                          onDragHover={isTmuxGroup ? setDragOverSession : undefined}
+                          onDrop={isTmuxGroup ? handleRowDrop : undefined}
+                          onDragEnd={isTmuxGroup ? clearDrag : undefined}
+                          onTerminate={isTmuxGroup ? handleTerminate : undefined}
                         />
                       ))}
                     </ul>

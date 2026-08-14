@@ -33,6 +33,15 @@ const REMOTE_ROW = {
   orgHealth: { status: 'green', reason: null },
 };
 
+const RUNTIME_ROW = {
+  id: 'codewhale:runtime:thr-1',
+  sessionId: 'thr-1',
+  kind: 'codewhale',
+  presentation: 'thread',
+  transport: 'codewhale-http-sse',
+  pending: false,
+};
+
 // --- setRemoteSessions merge semantics -----------------------------------------
 
 test('setRemoteSessions appends remote rows without touching local ones', () => {
@@ -78,6 +87,48 @@ test('change event fires when the remote set changes', () => {
   reg.on('change', () => { fired += 1; });
   reg.setRemoteSessions([REMOTE_ROW]);
   assert.ok(fired >= 1);
+});
+
+test('external session adapters coexist and replace only their own rows', () => {
+  const reg = makeRegistry();
+  reg._sessions = [{ id: 'tmux-1', kind: 'claude', transport: 'tmux', pending: false }];
+  reg.setRemoteSessions([REMOTE_ROW]);
+  reg.setExternalSessions('codewhale-runtime', [RUNTIME_ROW]);
+  assert.deepEqual(reg.getSessions().map((s) => s.id), [
+    'tmux-1',
+    'olam:atlas:sess-1',
+    'codewhale:runtime:thr-1',
+  ]);
+
+  reg.setExternalSessions('codewhale-runtime', []);
+  assert.deepEqual(reg.getSessions().map((s) => s.id), ['tmux-1', 'olam:atlas:sess-1']);
+});
+
+test('external source refresh preserves structured pending state owned by its transcript adapter', () => {
+  const reg = makeRegistry();
+  reg.setExternalSessions('codewhale-runtime', [RUNTIME_ROW]);
+  reg.setPending(RUNTIME_ROW.id, true);
+  reg.setPrompt(RUNTIME_ROW.id, { question: 'Allow agent?' });
+
+  reg.setExternalSessions('codewhale-runtime', [{ ...RUNTIME_ROW, name: 'refreshed' }]);
+  const runtime = reg.getSessions().find((session) => session.id === RUNTIME_ROW.id);
+  assert.equal(runtime.pending, true);
+  assert.equal(runtime.pendingQuestion, 'Allow agent?');
+});
+
+test('external source refresh preserves structured sub-agent activity owned by its transcript adapter', () => {
+  const reg = makeRegistry();
+  reg.setExternalSessions('codewhale-runtime', [RUNTIME_ROW]);
+  reg.setSubAgentState(RUNTIME_ROW.id, 2);
+
+  reg.setExternalSessions('codewhale-runtime', [{ ...RUNTIME_ROW, name: 'refreshed' }]);
+  const runtime = reg.getSessions().find((session) => session.id === RUNTIME_ROW.id);
+  assert.equal(runtime.subAgentActive, true);
+  assert.equal(runtime.runningSubagentCount, 2);
+
+  reg.setSubAgentState(RUNTIME_ROW.id, 0);
+  assert.equal(runtime.subAgentActive, false);
+  assert.equal(runtime.runningSubagentCount, 0);
 });
 
 // --- RemoteSessionSource --------------------------------------------------------

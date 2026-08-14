@@ -131,7 +131,7 @@ interface GeneralSectionProps {
   onResetIcon: () => void;
 }
 
-/** Display/appearance: font sizes (with a live preview), app icon, cosmos backdrop toggles. */
+/** Display/appearance: font sizes (with a live preview), app icon, underwater backdrop toggles. */
 function GeneralSection({
   transcriptFontSize,
   setTranscriptFontSize,
@@ -207,7 +207,7 @@ function GeneralSection({
                 You: Can you restyle the settings modal?
               </div>
               <div className="config-preview-row">
-                Sure — two-pane nav now, matches the cosmic theme.
+                Sure — two-pane nav now, matches the underwater theme.
               </div>
               <div className="config-preview-meta">Claude Code · just now</div>
             </div>
@@ -243,8 +243,8 @@ function GeneralSection({
             onChange={(e) => setCosmosBackground(e.target.checked)}
           />
           <span className="config-checkbox-text">
-            <span className="config-label">Background cosmos</span>
-            <span className="config-hint">Starfield/nebula backdrop. Off shows a flat dark background.</span>
+            <span className="config-label">Underwater background</span>
+            <span className="config-hint">Deep-water gradient, light shafts, and suspended plankton. Off shows a flat dark background.</span>
           </span>
         </label>
         <label className="config-checkbox-field">
@@ -256,7 +256,7 @@ function GeneralSection({
           />
           <span className="config-checkbox-text">
             <span className="config-label">Parallax scrolling</span>
-            <span className="config-hint">Star planes shift depth while you scroll. Off keeps the backdrop still on scroll.</span>
+            <span className="config-hint">Plankton planes shift depth while you scroll. Off keeps the water still on scroll.</span>
           </span>
         </label>
         <label className="config-checkbox-field">
@@ -267,8 +267,8 @@ function GeneralSection({
             onChange={(e) => setCosmosShootingStars(e.target.checked)}
           />
           <span className="config-checkbox-text">
-            <span className="config-label">Shooting stars</span>
-            <span className="config-hint">A rare ambient streak, plus one whenever an agent finishes a turn.</span>
+            <span className="config-label">Swimming fish</span>
+            <span className="config-hint">A small fish occasionally crosses the background, and one swims by when an agent finishes.</span>
           </span>
         </label>
 
@@ -326,12 +326,16 @@ interface HarnessSectionProps {
   setCodexLaunchCommand: (s: string) => void;
   codexBin: string;
   setCodexBin: (s: string) => void;
+  codewhaleLaunchCommand: string;
+  setCodewhaleLaunchCommand: (s: string) => void;
+  codewhaleBin: string;
+  setCodewhaleBin: (s: string) => void;
   skipPermissions: boolean;
   setSkipPermissions: (b: boolean) => void;
   loading: boolean;
 }
 
-/** Agent CLIs: Claude Code + Codex launch config, plus an OpenCode placeholder. */
+/** Agent CLIs: Claude Code, CodeWhale, and Codex, plus an OpenCode placeholder. */
 function HarnessSection({
   launchCommand,
   setLaunchCommand,
@@ -341,6 +345,10 @@ function HarnessSection({
   setCodexLaunchCommand,
   codexBin,
   setCodexBin,
+  codewhaleLaunchCommand,
+  setCodewhaleLaunchCommand,
+  codewhaleBin,
+  setCodewhaleBin,
   skipPermissions,
   setSkipPermissions,
   loading,
@@ -401,6 +409,44 @@ function HarnessSection({
             />
             <span className="config-hint">
               Optional absolute path to the binary for availability checks; blank = resolve from PATH.
+            </span>
+          </label>
+        </div>
+
+        <div className="config-agent-group">
+          <span className="config-agent-group-title">CodeWhale</span>
+          <label className="config-field">
+            <span className="config-label">Command to run</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="codewhale"
+              value={codewhaleLaunchCommand}
+              disabled={loading}
+              onChange={(e) => setCodewhaleLaunchCommand(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              Launches CodeWhale's interactive TUI in tmux and presents it through the embedded terminal.
+            </span>
+          </label>
+          <label className="config-field config-field--wide">
+            <span className="config-label">CLI path (optional)</span>
+            <input
+              className="config-input"
+              type="text"
+              placeholder="auto-detected"
+              value={codewhaleBin}
+              disabled={loading}
+              onChange={(e) => setCodewhaleBin(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <span className="config-hint">
+              Optional absolute path for availability checks; blank resolves <code>codewhale</code> from PATH.
             </span>
           </label>
         </div>
@@ -863,6 +909,8 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
   const [claudeBin, setClaudeBin] = useState('');
   const [codexLaunchCommand, setCodexLaunchCommand] = useState('');
   const [codexBin, setCodexBin] = useState('');
+  const [codewhaleLaunchCommand, setCodewhaleLaunchCommand] = useState('');
+  const [codewhaleBin, setCodewhaleBin] = useState('');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [optimizeModel, setOptimizeModel] = useState('');
   const [optimizeBackend, setOptimizeBackend] = useState<OptimizeBackend>('mlx');
@@ -949,6 +997,8 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
         setClaudeBin(c.claudeBin ?? '');
         setCodexLaunchCommand(c.codexLaunchCommand ?? 'codex');
         setCodexBin(c.codexBin ?? '');
+        setCodewhaleLaunchCommand(c.codewhaleLaunchCommand ?? 'codewhale');
+        setCodewhaleBin(c.codewhaleBin ?? '');
         setDefaultCwd(c.defaultCwd);
         setOptimizeModel(c.optimizeModel ?? '');
         setOptimizeBackend(c.optimizeBackend ?? 'mlx');
@@ -1036,6 +1086,8 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
         claudeBin,
         codexLaunchCommand,
         codexBin,
+        codewhaleLaunchCommand,
+        codewhaleBin,
         defaultCwd,
         optimizeModel,
         optimizeBackend,
@@ -1049,6 +1101,8 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
       setClaudeBin(saved.claudeBin ?? '');
       setCodexLaunchCommand(saved.codexLaunchCommand ?? 'codex');
       setCodexBin(saved.codexBin ?? '');
+      setCodewhaleLaunchCommand(saved.codewhaleLaunchCommand ?? 'codewhale');
+      setCodewhaleBin(saved.codewhaleBin ?? '');
       setDefaultCwd(saved.defaultCwd);
       setOptimizeModel(saved.optimizeModel ?? '');
       setOptimizeBackend(saved.optimizeBackend ?? 'mlx');
@@ -1214,6 +1268,10 @@ export function ConfigModal({ onClose: rawClose, onToast, initialSection }: Conf
                 setCodexLaunchCommand={setCodexLaunchCommand}
                 codexBin={codexBin}
                 setCodexBin={setCodexBin}
+                codewhaleLaunchCommand={codewhaleLaunchCommand}
+                setCodewhaleLaunchCommand={setCodewhaleLaunchCommand}
+                codewhaleBin={codewhaleBin}
+                setCodewhaleBin={setCodewhaleBin}
                 skipPermissions={skipPermissions}
                 setSkipPermissions={setSkipPermissions}
                 loading={loading}

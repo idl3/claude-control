@@ -44,6 +44,17 @@ describe('dedupePanesByPaneId', () => {
     ];
     assert.equal(dedupePanesByPaneId(panes).length, 2);
   });
+
+  test('prefers the real session when a PTY mirror is listed first', () => {
+    const panes = [
+      { paneId: '%183', sessionName: '_ccpty_home_2_0', target: '_ccpty_home_2_0:2.0' },
+      { paneId: '%183', sessionName: 'home', target: 'home:2.0' },
+    ];
+    const out = dedupePanesByPaneId(panes);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].sessionName, 'home');
+    assert.equal(out[0].target, 'home:2.0');
+  });
 });
 
 /** Stub runner returning fixed pane text (ignores argv). */

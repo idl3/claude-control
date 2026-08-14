@@ -92,7 +92,8 @@ import { useIsNarrow } from './hooks/useIsNarrow';
 import { useModifierHeld } from './hooks/useModifierHeld';
 import gsap, { prefersReducedMotion } from './lib/anim';
 import { loadCosmosPref } from './lib/cosmosPrefs';
-import { buildShot, nextAmbientDelayMs, detectTurnCompletions, type Shot } from './lib/shootingStars';
+import { isTerminalPresentation } from './lib/sessionPresentation';
+import { buildFishSwim, nextFishDelayMs, detectTurnCompletions, type FishSwim } from './lib/ambientFish';
 import { isNativeShell, notifySessionNative, openExternal } from './lib/nativeShell';
 import { loadPerfDiagnosticsEnabled, recordPerfEvent, savePerfDiagnosticsEnabled } from './lib/perfDiagnostics';
 
@@ -321,15 +322,15 @@ function AppInner() {
     };
   }, []);
 
-  // Cosmos backdrop toggles (Settings → General): device-local, no server
+  // Underwater backdrop toggles (legacy cosmos preference keys): device-local, no server
   // round-trip (see lib/cosmosPrefs.ts). `cosmosBackground` drives the JSX
-  // mount below (needs a re-render); parallax/shooting-stars are read inside
+  // mount below (needs a re-render); parallax/fish are read inside
   // non-React loops (rAF scroll handler, ambient timer, GSAP tween) so they
   // live in refs instead — same live-apply CustomEvent as font size, just
   // updating a ref for those two instead of triggering a re-render.
   const [cosmosBackground, setCosmosBackground] = useState(() => loadCosmosPref('background'));
   const parallaxEnabledRef = useRef(loadCosmosPref('parallax'));
-  const shootingStarsEnabledRef = useRef(loadCosmosPref('shootingStars'));
+  const fishEnabledRef = useRef(loadCosmosPref('shootingStars'));
   useEffect(() => {
     const onPrefs = (e: Event) => {
       const d = (e as CustomEvent<{
@@ -340,7 +341,7 @@ function AppInner() {
       if (!d) return;
       if (typeof d.cosmosBackground === 'boolean') setCosmosBackground(d.cosmosBackground);
       if (typeof d.cosmosParallax === 'boolean') parallaxEnabledRef.current = d.cosmosParallax;
-      if (typeof d.cosmosShootingStars === 'boolean') shootingStarsEnabledRef.current = d.cosmosShootingStars;
+      if (typeof d.cosmosShootingStars === 'boolean') fishEnabledRef.current = d.cosmosShootingStars;
     };
     window.addEventListener('cockpit:cosmosprefs', onPrefs);
     return () => window.removeEventListener('cockpit:cosmosprefs', onPrefs);
@@ -1413,8 +1414,8 @@ function AppInner() {
     );
   }, [cockpit.selectedId]);
 
-  // Subtle cosmic parallax: the transcript scroll nudges each starfield
-  // plane's background-position via --cosmos-shift(-near/-far). Shifting a
+  // Subtle underwater parallax: transcript scroll nudges each plankton
+  // plane via --cosmos-shift(-near/-far). Shifting a
   // repeating tile never reveals an edge and leaves each plane's own drift
   // transform free to animate independently. Three different multipliers
   // (near moves most, far almost not at all) is what actually sells the
@@ -1445,42 +1446,32 @@ function AppInner() {
     };
   }, []);
 
-  // Shooting stars — a small pool of real, ref-able elements (CSS
-  // pseudo-elements can't be targeted by GSAP/DOM APIs, which is why this
-  // used to be three infinite-loop ::before/::after streaks instead — see
-  // styles.css's .cosmos-shoot-slot comment). One-shot fired from JS: rare
-  // ambient timer (at most once a minute) + once per agent turn completing.
-  // A round-robin index picks the next slot so overlapping shots (ambient +
-  // turn-done landing close together) never fight over the same element.
-  const shootSlotRefs = useRef<(HTMLElement | null)[]>([]);
-  const shootSlotCursor = useRef(0);
-  const fireShootingStar = useCallback((depth?: Shot['depth']) => {
-    if (prefersReducedMotion() || !shootingStarsEnabledRef.current) return;
-    const slots = shootSlotRefs.current;
+  // Rare, one-shot fish crossings. Real DOM slots are animated with bounded
+  // GSAP timelines; there is no idle/infinite CSS animation, preserving the
+  // desktop shell's low-idle-CPU contract.
+  const fishSlotRefs = useRef<(HTMLElement | null)[]>([]);
+  const fishSlotCursor = useRef(0);
+  const fireFish = useCallback((depth?: FishSwim['depth']) => {
+    if (prefersReducedMotion() || !fishEnabledRef.current) return;
+    const slots = fishSlotRefs.current;
     if (!slots.length) return;
-    const el = slots[shootSlotCursor.current % slots.length];
-    shootSlotCursor.current += 1;
+    const el = slots[fishSlotCursor.current % slots.length];
+    fishSlotCursor.current += 1;
     if (!el) return;
-    const shot = buildShot(depth);
-    el.dataset.depth = shot.depth;
-    el.style.top = `${shot.topPercent}%`;
+    const swim = buildFishSwim(depth);
+    el.dataset.depth = swim.depth;
+    el.style.top = `${swim.topPercent}%`;
     gsap.killTweensOf(el);
-    gsap.set(el, { opacity: 0, x: 0, y: 0, rotate: shot.angleDeg });
-    // durationMs is the whole one-shot flight (already 2.1x-speedup'd in
-    // shootingStars.ts's PRESETS) — position travels the full distance at a
-    // constant rate across it, while opacity ramps in over the first ~12%
-    // and fades out over the last ~30%, so the streak flashes in, crosses,
-    // and dims out rather than popping abruptly at either end.
-    const totalS = shot.durationMs / 1000;
+    gsap.set(el, { opacity: 0, x: 0, y: 0 });
+    const totalS = swim.durationMs / 1000;
     const tl = gsap.timeline();
-    tl.to(el, { x: `${shot.travelXvw}vw`, y: `${shot.travelYvw}vw`, duration: totalS, ease: 'none' }, 0)
-      .to(el, { opacity: shot.peakAlpha, duration: totalS * 0.12, ease: 'power1.in' }, 0)
-      .to(el, { opacity: 0, duration: totalS * 0.3, ease: 'power1.out' }, totalS * 0.7);
+    tl.to(el, { x: `${swim.travelXvw}vw`, y: `${swim.travelYvh}vh`, duration: totalS, ease: 'none' }, 0)
+      .to(el, { opacity: swim.peakAlpha, duration: totalS * 0.16, ease: 'power1.in' }, 0)
+      .to(el, { opacity: 0, duration: totalS * 0.22, ease: 'power1.out' }, totalS * 0.78);
   }, []);
 
   // Ambient cadence: self-rescheduling timeout (not setInterval) so each gap
-  // is freshly randomized — see lib/shootingStars.ts's nextAmbientDelayMs
-  // (never less than a minute). Skips entirely under reduced-motion/toggle-
+  // is freshly randomized. Skips entirely under reduced-motion/toggle-
   // off, but keeps rescheduling so a later re-enable picks back up without
   // remounting.
   useEffect(() => {
@@ -1488,21 +1479,21 @@ function AppInner() {
     let timer = 0;
     const tick = () => {
       if (!alive) return;
-      if (!prefersReducedMotion() && shootingStarsEnabledRef.current) fireShootingStar();
-      timer = window.setTimeout(tick, nextAmbientDelayMs());
+      if (!prefersReducedMotion() && fishEnabledRef.current) fireFish();
+      timer = window.setTimeout(tick, nextFishDelayMs());
     };
-    timer = window.setTimeout(tick, nextAmbientDelayMs());
+    timer = window.setTimeout(tick, nextFishDelayMs());
     return () => {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [fireShootingStar]);
+  }, [fireFish]);
 
-  // Turn-completion trigger: fire one shooting star whenever any session's
+  // Turn-completion trigger: send one fish across whenever any session's
   // active→idle edge fires — the same signal lib/push-trigger.js's
   // evaluateEdges uses server-side to send the "✅ finished" push
   // (wasActive && !nowActive && !pending), mirrored client-side via
-  // claudeWorking() over cockpit.sessions. See lib/shootingStars.ts's
+  // claudeWorking() over cockpit.sessions. See lib/ambientFish.ts's
   // detectTurnCompletions for the pure edge-detection logic.
   const turnActiveRef = useRef<Map<string, boolean>>(new Map());
   const askPendingRef = useRef<Map<string, boolean>>(new Map());
@@ -1513,7 +1504,7 @@ function AppInner() {
       claudeWorking,
     );
     turnActiveRef.current = nextActive;
-    if (completed.length) fireShootingStar();
+    if (completed.length) fireFish();
     // Desktop shell: WKWebView gets no Web Push, so mirror the server's push
     // triggers (lib/push-trigger.js) natively when the window is unfocused —
     // the turn-completion edges above plus ask-raised edges below. Clicking
@@ -1540,7 +1531,7 @@ function AppInner() {
         askPendingRef.current.set(s.id, now);
       }
     }
-  }, [cockpit.sessions, fireShootingStar]);
+  }, [cockpit.sessions, fireFish]);
 
   // Sticky tail: while PINNED (the viewport sits at the bottom) every new,
   // streaming, OR reflowing message scrolls to the latest — no Ctrl+. needed.
@@ -1749,6 +1740,11 @@ function AppInner() {
   const selectedSession = cockpit.sessions.find(
     (s) => s.id === cockpit.selectedId,
   );
+  const agentTerminalAvailable = Boolean(selectedSession?.target);
+
+  useEffect(() => {
+    if (!agentTerminalAvailable) setAgentTerminalOpen(false);
+  }, [agentTerminalAvailable]);
 
   // Phase A (cloud-session-chat task A4) + CP3 audit follow-up (Finding 1):
   // on-demand liveness for the selected remote session, held as SEPARATE
@@ -2194,7 +2190,7 @@ function AppInner() {
       if (k === 'b') {
         e.preventDefault();
         toggleRail();
-      } else if (k === 'j' && selectedSession) {
+      } else if (k === 'j' && agentTerminalAvailable) {
         e.preventDefault();
         // Not a toggle: the aria-modal guard above already blocks this branch
         // while the overlay (or any other dialog) is open, and closing it is
@@ -2208,7 +2204,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedSession, cockpit.subagents.length, selectedWorkflows, toggleRail]);
+  }, [agentTerminalAvailable, cockpit.subagents.length, selectedWorkflows, toggleRail]);
 
   // Claude panes ⌘1-9 can address: VISIBLE, LOCAL RUNNING sessions only — filter
   // must allow Claude (not 'terminal'), exclude remote/olam cloud sessions (they
@@ -2220,7 +2216,7 @@ function AppInner() {
     return cockpit.sessions
       .filter(
         (s) =>
-          s.kind !== 'terminal' && s.kind !== 'remote' && !collapsedSessions.has(s.sessionName ?? '?'),
+          !isTerminalPresentation(s) && s.kind !== 'remote' && !collapsedSessions.has(s.sessionName ?? '?'),
       )
       .sort(
         (a, b) =>
@@ -2378,9 +2374,10 @@ function AppInner() {
     // mirror the rail's natural tmux order (session name → window → pane) so
     // positions feel stable.
     const ordered = [...cockpit.sessions].sort((a, b) => {
-      const tierOf = (k: string | undefined) => (k === 'remote' ? 2 : k === 'terminal' ? 1 : 0);
-      const at = tierOf(a.kind);
-      const bt = tierOf(b.kind);
+      const tierOf = (session: Session) =>
+        session.kind === 'remote' ? 2 : isTerminalPresentation(session) ? 1 : 0;
+      const at = tierOf(a);
+      const bt = tierOf(b);
       if (at !== bt) return at - bt;
       return (
         (a.sessionName ?? '').localeCompare(b.sessionName ?? '', undefined, { numeric: true }) ||
@@ -2389,7 +2386,7 @@ function AppInner() {
       );
     });
     for (const s of ordered) {
-      const term = s.kind === 'terminal';
+      const term = isTerminalPresentation(s);
       const remote = s.kind === 'remote';
       cmds.push({
         id: `switch:${s.id}`,
@@ -2671,19 +2668,20 @@ function AppInner() {
         data-rail-collapsed={!narrow && railCollapsed ? 'true' : undefined}
         data-cmd-held={cmdHeld ? 'true' : undefined}
         data-terminal-mode={terminalMode ? 'true' : undefined}
+        data-codewhale-mode={selectedSession?.kind === 'codewhale' ? 'true' : undefined}
       >
         {cosmosBackground && (
           <div className="cosmos-backdrop" aria-hidden="true" ref={cosmosRef}>
             <i className="cosmos-stars-far" />
             <i className="cosmos-stars-mid" />
             <i className="cosmos-stars-near" />
-            <div className="cosmos-shoot-stars">
+            <div className="underwater-fish">
               {[0, 1, 2].map((i) => (
                 <i
                   key={i}
-                  className="cosmos-shoot-slot"
+                  className="underwater-fish-slot"
                   ref={(el) => {
-                    shootSlotRefs.current[i] = el;
+                    fishSlotRefs.current[i] = el;
                   }}
                 />
               ))}
@@ -2844,6 +2842,11 @@ function AppInner() {
                         {selectedSession.cwd.replace(/\/$/, '').split('/').pop() || selectedSession.cwd}
                       </span>
                     ) : null}
+                    {selectedSession?.kind === 'codewhale' ? (
+                      <span className="detail-mode" data-mode={selectedSession.presentation === 'terminal' ? 'terminal' : 'runtime'}>
+                        {selectedSession.presentation === 'terminal' ? 'Terminal' : 'Runtime'}
+                      </span>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -2866,15 +2869,17 @@ function AppInner() {
               <div className="detail-actions" data-collapsed={!actionsOpen ? 'true' : undefined}>
                 {selectedSession && renaming === null ? (
                   <>
-                    <button
-                      type="button"
-                      className="detail-action"
-                      aria-label="Rename session"
-                      title="Rename session"
-                      onClick={() => setRenaming(selectedSession.name ?? selectedSession.id)}
-                    >
-                      <PencilIcon />
-                    </button>
+                    {selectedSession.target ? (
+                      <button
+                        type="button"
+                        className="detail-action"
+                        aria-label="Rename session"
+                        title="Rename session"
+                        onClick={() => setRenaming(selectedSession.name ?? selectedSession.id)}
+                      >
+                        <PencilIcon />
+                      </button>
+                    ) : null}
                     {/* Inside .detail-actions (visible by default; on mobile it
                         shows with the rest of the bar, ⋯ collapses it). */}
                     <button
@@ -2891,26 +2896,30 @@ function AppInner() {
                         <span className="detail-action-count">{Math.min(artifactCount, 99)}</span>
                       ) : null}
                     </button>
-                    <button
-                      type="button"
-                      className="detail-action"
-                      aria-label="Open raw terminal"
-                      title="Raw terminal — scratch shell"
-                      onClick={openTerminal}
-                    >
-                      <TerminalSquareIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-action"
-                      aria-label="Open agent terminal"
-                      title="Agent terminal — live mirror of this session's agent pane (⌘J)"
-                      data-hotkey="⌘J"
-                      data-hotkey-dir="down"
-                      onClick={() => setAgentTerminalOpen(true)}
-                    >
-                      <TerminalIcon />
-                    </button>
+                    {selectedSession.target ? (
+                      <button
+                        type="button"
+                        className="detail-action"
+                        aria-label="Open raw terminal"
+                        title="Raw terminal — scratch shell"
+                        onClick={openTerminal}
+                      >
+                        <TerminalSquareIcon />
+                      </button>
+                    ) : null}
+                    {agentTerminalAvailable ? (
+                      <button
+                        type="button"
+                        className="detail-action"
+                        aria-label="Open agent terminal"
+                        title="Agent terminal — live mirror of this session's agent pane (⌘J)"
+                        data-hotkey="⌘J"
+                        data-hotkey-dir="down"
+                        onClick={() => setAgentTerminalOpen(true)}
+                      >
+                        <TerminalIcon />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="detail-action"
@@ -3049,12 +3058,13 @@ function AppInner() {
 
             <div className="detail-body" ref={detailBodyRef}>
             <ShellContext.Provider value={shellApi}>
-            {selectedSession && selectedSession.kind === 'terminal' ? (
+            {selectedSession && isTerminalPresentation(selectedSession) ? (
               // Plain (non-Claude) pane: a fully interactive live terminal —
               // ANSI view + key bar + keystroke relay. No transcript, by design.
               <TerminalPane
                 sessionId={selectedSession.id}
                 sendKey={cockpit.sendPaneKey}
+                mirrorPane={selectedSession.kind === 'codewhale'}
               />
             ) : (
               <div className="detail-split">
@@ -3130,10 +3140,17 @@ function AppInner() {
                   <Thread
                     ref={composerRef}
                     hasSelection={!!cockpit.selectedId}
-                    agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
+                    agentName={
+                      selectedSession?.kind === 'codex'
+                        ? 'Codex'
+                        : selectedSession?.kind === 'codewhale'
+                          ? 'CodeWhale'
+                          : 'Claude'
+                    }
                     loading={!cockpit.messagesLoaded}
                     emptyState={threadEmptyState}
                     sessionId={cockpit.selectedId}
+                    terminalAvailable={!!selectedSession?.target}
                     hiddenCount={hiddenCount}
                     onLoadEarlier={loadEarlier}
                     subAgentMode={activeSubAgentMode}
@@ -3261,7 +3278,7 @@ function AppInner() {
           />
         ) : null}
 
-        {agentTerminalOpen && selectedSession ? (
+        {agentTerminalOpen && selectedSession && agentTerminalAvailable ? (
           <ErrorBoundary label="Agent terminal failed to render">
             <AgentTerminalOverlay
               session={selectedSession}

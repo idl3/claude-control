@@ -11,6 +11,10 @@ interface TerminalViewProps {
   mods: Mods;
   /** Toggle a sticky modifier on/off. */
   onToggleMod: (m: keyof Mods) => void;
+  /** Pin xterm to the mirrored pane's real rows/columns and scale visually. */
+  paneScale?: boolean;
+  /** Harness-aware label for the terminal chrome. */
+  title?: string;
 }
 
 /**
@@ -21,11 +25,18 @@ interface TerminalViewProps {
  * composer card and hoists TerminalKeyBar into the composer action row (so the
  * composer window itself becomes the terminal).
  */
-export function TerminalView({ ptySessionId, sendKey, mods, onToggleMod }: TerminalViewProps) {
+export function TerminalView({
+  ptySessionId,
+  sendKey,
+  mods,
+  onToggleMod,
+  paneScale = false,
+  title = 'terminal · cc-shell',
+}: TerminalViewProps) {
   return (
     <div className="terminal-view">
       <div className="terminal-view-head">
-        <span className="terminal-view-title">terminal · cc-shell</span>
+        <span className="terminal-view-title">{title}</span>
         <button
           type="button"
           className="terminal-view-btn"
@@ -35,7 +46,7 @@ export function TerminalView({ ptySessionId, sendKey, mods, onToggleMod }: Termi
           Stop
         </button>
       </div>
-      <XtermHost sessionId={ptySessionId} className="terminal-view-canvas" />
+      <XtermHost sessionId={ptySessionId} className="terminal-view-canvas" paneScale={paneScale} />
       <TerminalKeyBar sendKey={sendKey} mods={mods} onToggleMod={onToggleMod} />
     </div>
   );

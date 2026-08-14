@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Session } from '../lib/types';
+import { isTerminalPresentation } from '../lib/sessionPresentation';
 import type { SessionFilter } from './SessionRail';
 
 // ── Codex filter logic ───────────────────────────────────────────────────────
@@ -16,7 +17,8 @@ import type { SessionFilter } from './SessionRail';
 function applyFilter(sessions: Session[], filter: SessionFilter): Session[] {
   return sessions.filter((s) => {
     if (filter === 'all') return true;
-    if (filter === 'terminal') return s.kind === 'terminal';
+    if (filter === 'agents') return s.kind !== 'terminal';
+    if (filter === 'terminal') return isTerminalPresentation(s);
     if (filter === 'codex') return s.kind === 'codex' || s.kind === 'claudex' || s.kind === 'claudemi';
     // 'claude': claude-only — kind === 'claude' or kind unset
     return s.kind === 'claude' || s.kind === undefined;
@@ -33,11 +35,12 @@ describe('SessionRail codex filter', () => {
   const claudemi = makeSession({ id: 'cm0', kind: 'claudemi' });
   const codex = makeSession({ id: 'cx1', kind: 'codex' });
   const terminal = makeSession({ id: 't1', kind: 'terminal' });
+  const codewhale = makeSession({ id: 'cw1', kind: 'codewhale', presentation: 'terminal' });
   const unknown = makeSession({ id: 'u1' }); // kind unset
 
   it('filter="all" shows all session kinds', () => {
-    const result = applyFilter([claude, claudex, claudemi, codex, terminal, unknown], 'all');
-    expect(result).toHaveLength(6);
+    const result = applyFilter([claude, claudex, claudemi, codex, codewhale, terminal, unknown], 'all');
+    expect(result).toHaveLength(7);
   });
 
   it('filter="codex" shows codex, claudex, AND claudemi sessions (codex-flavored bucket)', () => {
@@ -57,9 +60,13 @@ describe('SessionRail codex filter', () => {
   });
 
   it('filter="terminal" shows only terminal sessions', () => {
-    const result = applyFilter([claude, claudex, claudemi, codex, terminal, unknown], 'terminal');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('t1');
+    const result = applyFilter([claude, claudex, claudemi, codex, codewhale, terminal, unknown], 'terminal');
+    expect(result.map((s) => s.id).sort()).toEqual(['cw1', 't1']);
+  });
+
+  it('filter="agents" includes CodeWhale as a harness despite its terminal presentation', () => {
+    const result = applyFilter([codewhale, terminal], 'agents');
+    expect(result.map((s) => s.id)).toEqual(['cw1']);
   });
 
   it('filter="codex" returns empty when no codex/claudex/claudemi sessions exist', () => {
@@ -80,9 +87,10 @@ describe('SessionRail codex filter', () => {
 //   default  → 'claude' (s.kind ?? 'claude')
 
 function deriveDataKind(s: Session): string {
-  const isTerminal = s.kind === 'terminal';
+  const isTerminal = isTerminalPresentation(s);
   const isCodex = s.kind === 'codex';
-  return isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude';
+  const isCodeWhale = s.kind === 'codewhale';
+  return isCodeWhale ? 'codewhale' : isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude';
 }
 
 describe('SessionRail codex badge data-kind derivation', () => {
@@ -92,6 +100,10 @@ describe('SessionRail codex badge data-kind derivation', () => {
 
   it('codex session gets data-kind="codex"', () => {
     expect(deriveDataKind(makeSession({ kind: 'codex' }))).toBe('codex');
+  });
+
+  it('CodeWhale keeps its harness badge while using terminal presentation', () => {
+    expect(deriveDataKind(makeSession({ kind: 'codewhale', presentation: 'terminal' }))).toBe('codewhale');
   });
 
   it('claude session gets data-kind="claude"', () => {
@@ -114,14 +126,19 @@ describe('SessionRail codex badge data-kind derivation', () => {
 // ── aria-label derivation for codex rows ─────────────────────────────────────
 
 function deriveAriaLabel(s: Session): string {
-  const isTerminal = s.kind === 'terminal';
+  const isTerminal = isTerminalPresentation(s);
   const isCodex = s.kind === 'codex';
-  return isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane';
+  const isCodeWhale = s.kind === 'codewhale';
+  return isCodeWhale ? 'CodeWhale pane' : isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane';
 }
 
 describe('SessionRail codex aria-label', () => {
   it('codex session gets "Codex pane" aria-label', () => {
     expect(deriveAriaLabel(makeSession({ kind: 'codex' }))).toBe('Codex pane');
+  });
+
+  it('CodeWhale session gets "CodeWhale pane" aria-label', () => {
+    expect(deriveAriaLabel(makeSession({ kind: 'codewhale', presentation: 'terminal' }))).toBe('CodeWhale pane');
   });
 
   it('claude session gets "Claude pane" aria-label', () => {

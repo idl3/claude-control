@@ -69,6 +69,24 @@ describe('sanitizeGroupName', () => {
 // ── Rename affordance (rendered component) ──────────────────────────────
 
 describe('SessionRail — tmux session-group rename', () => {
+  it('labels a CodeWhale Runtime group and hides tmux-only actions', () => {
+    renderRail({
+      sessions: [makeSession({
+        id: 'codewhale:runtime:thr_test',
+        sessionName: undefined,
+        target: undefined,
+        kind: 'codewhale',
+        transport: 'codewhale-http-sse',
+        presentation: 'thread',
+        name: 'Native CodeWhale thread',
+      })],
+    });
+
+    expect(screen.getByText('Runtime')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Rename tmux session/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Terminate Native CodeWhale thread/ })).toBeNull();
+  });
+
   it('double-clicking the group name enters rename mode with the current name prefilled', () => {
     renderRail();
     fireEvent.doubleClick(screen.getByText('work'));

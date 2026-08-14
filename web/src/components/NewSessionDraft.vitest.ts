@@ -49,7 +49,7 @@ function harnessGroup(): HTMLElement {
 
 /** Clicks a harness segment by its accessible name (the Legacy tag on the
  *  Codex button is aria-hidden, so 'Codex' still matches exactly). */
-function pickHarness(name: 'Claude' | 'Claudex' | 'Claudemi' | 'Codex') {
+function pickHarness(name: 'Claude' | 'Claudex' | 'Claudemi' | 'Codex' | 'CodeWhale') {
   fireEvent.click(within(harnessGroup()).getByRole('button', { name }));
 }
 
@@ -70,6 +70,17 @@ describe('SpawnAgentInfo type contract', () => {
     const info: SpawnAgentInfo = { id: 'codex', available: false, reason: 'not found' };
     expect(info.available).toBe(false);
     expect(info.reason).toBe('not found');
+  });
+
+  it('CodeWhale is a tmux-only first-class harness entry', () => {
+    const info: SpawnAgentInfo = {
+      id: 'codewhale',
+      available: true,
+      defaultTransport: 'tmux',
+      transports: ['tmux'],
+    };
+    expect(info.id).toBe('codewhale');
+    expect(info.transports).toEqual(['tmux']);
   });
 });
 
@@ -171,6 +182,7 @@ const FIXTURE_CLAUDE_MODELS = [
 function stubApi({
   claudeAvailable = true,
   codexAvailable = true,
+  codewhaleAvailable = false,
   createResponse,
   tmuxSessions,
   projectDirs,
@@ -182,6 +194,7 @@ function stubApi({
 }: {
   claudeAvailable?: boolean;
   codexAvailable?: boolean;
+  codewhaleAvailable?: boolean;
   createResponse?: (body: Record<string, unknown>) => Response;
   tmuxSessions?: { name: string; windows: number; grouped?: boolean; groupSize?: number }[];
   projectDirs?: { label: string; path: string }[];
@@ -250,6 +263,13 @@ function stubApi({
             reason: codexAvailable ? undefined : 'codex missing',
             defaultTransport: 'rpc',
             transports: ['rpc', 'tmux'],
+          },
+          {
+            id: 'codewhale',
+            available: codewhaleAvailable,
+            reason: codewhaleAvailable ? undefined : 'codewhale missing',
+            defaultTransport: 'tmux',
+            transports: ['tmux'],
           },
         ],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -399,6 +419,37 @@ describe('NewSessionDraft harness segmented control + model dropdown', () => {
     expect(screen.queryByRole('group', { name: 'Claude mode' })).toBeNull();
     expect(screen.getByText('Codex has no session name')).toBeTruthy();
   });
+
+  it('selects CodeWhale as a terminal passthrough, hides the model picker, and submits its harness id', async () => {
+    const { createCalls } = stubApi({ codewhaleAvailable: true });
+    render(createElement(NewSessionDraft, {
+      filter: 'all',
+      onToast: () => {},
+      onCancel: () => {},
+      onCreated: () => {},
+    }));
+
+    const codewhale = await waitFor(() =>
+      within(harnessGroup()).getByRole('button', { name: 'CodeWhale' }),
+    );
+    fireEvent.click(codewhale);
+
+    expect(codewhale.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByLabelText('Model')).toBeNull();
+    expect(screen.getByText('Interactive TUI · terminal passthrough')).toBeTruthy();
+    expect(screen.getByText(/Talk to CodeWhale/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Initial prompt'), {
+      target: { value: 'inspect the workspace' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => expect(createCalls.length).toBe(1));
+    expect(createCalls[0].agent).toBe('codewhale');
+    expect(createCalls[0].prompt).toBe('inspect the workspace');
+    expect(createCalls[0].model).toBeUndefined();
+    expect(createCalls[0].codexModel).toBeUndefined();
+  });
 });
 
 // The codex filter now seeds the draft with CLAUDEX (design decision 7) —
@@ -505,8 +556,8 @@ describe('NewSessionDraft Claudex (primary Codex-flavored harness)', () => {
 
     const group = await screen.findByRole('group', { name: 'Harness' });
     const buttons = within(group).getAllByRole('button');
-    // 4 segments now: Claude, Claudex, Claudemi, Codex (in that order).
-    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false']);
+    // Five segments: Claude, Claudex, Claudemi, Codex, CodeWhale.
+    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false']);
     expect(within(group).getByRole('button', { name: 'Claudex' })).toBeTruthy();
     // The legacy Codex segment carries the muted "Legacy" tag (aria-hidden,
     // so its accessible name stays exactly "Codex").
@@ -626,7 +677,8 @@ describe('NewSessionDraft Claudemi (Kimi K3 harness)', () => {
     const claudexBtn = within(group).getByRole('button', { name: 'Claudex' });
     const claudemiBtn = within(group).getByRole('button', { name: 'Claudemi' });
     const codexBtn = within(group).getByRole('button', { name: 'Codex' });
-    expect(buttons).toEqual([claudeBtn, claudexBtn, claudemiBtn, codexBtn]);
+    const codewhaleBtn = within(group).getByRole('button', { name: 'CodeWhale (unavailable)' });
+    expect(buttons).toEqual([claudeBtn, claudexBtn, claudemiBtn, codexBtn, codewhaleBtn]);
     expect(claudemiBtn.textContent).not.toContain('Legacy');
   });
 

@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Perf regression guard: the ambient/decorative animation loops (cosmos
+// Perf regression guard: the old ambient/decorative animation loops (cosmos
 // backdrop + composer/pill conic ring) were retired because they kept the
 // compositor — and, in the WKWebView desktop shell, the host process's CA
 // layer-commit path — busy 100% of the time at idle (measured as a
-// continuous double-digit %CPU burn). Decorative layers must stay static;
-// motion is reserved for bounded transitions and transient STATE indicators
-// (spinners, status pulses, streaming shimmers), which stop when their state
-// ends. If one of these names reappears as an animation, that contract broke.
+// continuous double-digit %CPU burn). Decorative layers stay static by
+// default. CodeWhale's explicit bubble mode is the narrow exception: exactly
+// three already-existing layers may animate transform only. No background
+// repaint, filter, per-bubble DOM, or unscoped ambient loop is allowed.
 const raw = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), 'styles.css'),
   'utf8',
@@ -34,12 +34,35 @@ describe('ambient animation ban', () => {
     expect(css).not.toMatch(new RegExp(`(?<![\\w-])${name}\\b`));
   });
 
-  it('cosmos backdrop layers declare no animation at all', () => {
+  it('only CodeWhale-scoped bubble planes may declare cosmos animation', () => {
     // Every `animation:` inside a rule whose selector mentions cosmos-.
     // Cheap structural scan: pair each top-level selector block with its body.
     const cosmosAnimated = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
       ([, sel, body]) => sel.includes('cosmos-') && /animation\s*:/.test(body),
     );
-    expect(cosmosAnimated.map(([, sel]) => sel.trim())).toEqual([]);
+    expect(cosmosAnimated.length).toBeGreaterThan(0);
+    for (const [, selector] of cosmosAnimated) {
+      expect(selector).toContain(".app[data-codewhale-mode='true']");
+      expect(selector).toMatch(/\.cosmos-stars-(far|mid|near)/);
+    }
+  });
+
+  it('CodeWhale bubble keyframes animate compositor transforms only', () => {
+    const bubbleKeyframes = [...css.matchAll(
+      /@keyframes\s+(codewhale-bubbles-(?:far|mid|near))\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g,
+    )];
+    expect(bubbleKeyframes.map(([, name]) => name).sort()).toEqual([
+      'codewhale-bubbles-far',
+      'codewhale-bubbles-mid',
+      'codewhale-bubbles-near',
+    ]);
+    for (const [, , body] of bubbleKeyframes) {
+      const declarations = [...body.matchAll(/\{([^{}]*)\}/g)]
+        .flatMap(([, step]) => step.split(';'))
+        .map((declaration) => declaration.trim())
+        .filter(Boolean);
+      expect(declarations.length).toBeGreaterThan(0);
+      expect(declarations.every((declaration) => declaration.startsWith('transform:'))).toBe(true);
+    }
   });
 });

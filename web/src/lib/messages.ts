@@ -37,6 +37,31 @@ export function mergeMessages(
   return cap([...existing, ...fresh]);
 }
 
+/** Replace stable UUIDs in place and append newly-created Runtime items. */
+export function upsertMessages(existing: Msg[] | undefined, incoming: Msg[]): Msg[] {
+  if (!existing || existing.length === 0) return cap(incoming);
+  if (incoming.length === 0) return existing;
+  const replacements = new Map(incoming.map((message) => [message.uuid, message]));
+  let changed = false;
+  const next = existing.map((message) => {
+    const replacement = replacements.get(message.uuid);
+    if (!replacement) return message;
+    replacements.delete(message.uuid);
+    if (replacement !== message) changed = true;
+    return replacement;
+  });
+  if (replacements.size) {
+    changed = true;
+    next.push(...replacements.values());
+  }
+  return changed ? cap(next) : existing;
+}
+
+/** A cursor discontinuity makes the server snapshot authoritative. */
+export function resetMessages(incoming: Msg[]): Msg[] {
+  return cap(incoming);
+}
+
 function cap(msgs: Msg[]): Msg[] {
   return msgs.length > MAX_RETAINED_MESSAGES
     ? msgs.slice(msgs.length - MAX_RETAINED_MESSAGES)

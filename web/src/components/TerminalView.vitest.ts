@@ -11,10 +11,11 @@ import { TerminalView } from './TerminalView';
 // through, so this file can assert the "chrome" contract stays intact around
 // whatever XtermHost renders.
 vi.mock('./XtermHost', () => ({
-  XtermHost: (props: { sessionId: string; className?: string }) =>
+  XtermHost: (props: { sessionId: string; className?: string; paneScale?: boolean }) =>
     createElement('div', {
       'data-testid': 'xterm-host',
       'data-session-id': props.sessionId,
+      'data-pane-scale': props.paneScale ? 'true' : 'false',
       className: props.className,
     }),
 }));
@@ -59,6 +60,16 @@ describe('TerminalView chrome', () => {
       }),
     );
     expect(screen.getByTestId('xterm-host').getAttribute('data-session-id')).toBe('cc-shell:second');
+  });
+
+  it('forwards paneScale for non-resizing agent TUI mirrors', () => {
+    renderTerminal({ paneScale: true });
+    expect(screen.getByTestId('xterm-host').getAttribute('data-pane-scale')).toBe('true');
+  });
+
+  it('supports a harness-aware terminal title', () => {
+    renderTerminal({ title: 'terminal · CodeWhale' });
+    expect(screen.getByText('terminal · CodeWhale')).toBeTruthy();
   });
 
   it('keeps the header title, and Stop sends C-c', () => {

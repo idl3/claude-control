@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModalTransition } from '../lib/anim';
 import type { Session } from '../lib/types';
+import { isTerminalPresentation } from '../lib/sessionPresentation';
 import { XtermHost } from './XtermHost';
 import { XIcon, TypeIcon, MousePointerIcon } from './icons';
 
@@ -32,6 +33,14 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
   const { rootRef, requestClose: onClose } = useModalTransition(rawClose);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const title = session.name || session.id;
+  // A terminal-presented CodeWhale row already owns a pane: mirror in the
+  // main view. Reuse that bridge entry so opening Cmd+J adds a second client
+  // instead of installing a competing pipe-pane for the same tmux target.
+  // Native Runtime threads remain agent: mirrors when a future linker gives
+  // them a target, because their default view does not own a pane mirror.
+  const ptySessionId = session.kind === 'codewhale' && isTerminalPresentation(session)
+    ? `pane:${session.id}`
+    : `agent:${session.id}`;
   // Select/copy mode: flips XtermHost out of pty-passthrough so a drag-select
   // (or the guaranteed "Select all") + Copy can grab text without every
   // keystroke racing off to the live agent. See XtermHost's `copyMode` prop.
@@ -76,7 +85,7 @@ export function AgentTerminalOverlay({ session, onClose: rawClose }: AgentTermin
         <div ref={canvasWrapRef} className="agent-term-canvas-wrap">
           <XtermHost
             key={session.id}
-            sessionId={`agent:${session.id}`}
+            sessionId={ptySessionId}
             className="agent-term-canvas"
             autoFocus
             onExit={onClose}

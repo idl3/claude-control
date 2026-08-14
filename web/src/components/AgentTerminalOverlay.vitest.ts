@@ -62,6 +62,18 @@ describe('AgentTerminalOverlay', () => {
     expect(host.className).toBe('agent-term-canvas');
   });
 
+  it('reuses the existing pane mirror for a terminal-presented CodeWhale session', () => {
+    renderOverlay({
+      id: '0:3.1',
+      name: 'node',
+      kind: 'codewhale',
+      presentation: 'terminal',
+      target: '0:3.1',
+    });
+
+    expect(screen.getByTestId('xterm-host').getAttribute('data-session-id')).toBe('pane:0:3.1');
+  });
+
   it('is a labelled aria-modal dialog (so global hotkey guards recognise it)', () => {
     renderOverlay();
     const dialog = screen.getByRole('dialog');

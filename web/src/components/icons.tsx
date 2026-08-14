@@ -189,6 +189,19 @@ export function CloudIcon(p: IconProps) {
   );
 }
 
+// Compact whale mark for CodeWhale harness rows. Kept in the shared inline
+// icon set so the rail and future Runtime-thread surfaces use one identity.
+export function WhaleIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 15c1.2 3 4 5 8 5 4.8 0 8-2.8 8-7-2.6 1.4-5.3.9-7.2-.9C11.4 10.7 9.7 10 7.5 10H5" />
+      <path d="M4 15c-1.2 0-2-.8-2-2s.8-2 2-2c1.1 0 2 .9 2 2" />
+      <path d="M16 8c.2-2 1.3-3.3 3-4-.1 1.8.5 3 2 4-1.9.2-3.2-.2-4-1.2" />
+      <circle cx="14.5" cy="12.5" r=".6" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 // Battery with a fill bar (width set inline by the caller) + optional charge bolt.
 export function StopIcon(p: IconProps) {
   return (

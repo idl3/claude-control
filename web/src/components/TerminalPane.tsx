@@ -4,11 +4,13 @@ import gsap, { prefersReducedMotion } from '../lib/anim';
 import type { Mods } from '../lib/terminalKeys';
 
 interface TerminalPaneProps {
-  /** App session id (kind === 'terminal') — resolved server-side to the pane's
+  /** App session id (presentation === 'terminal') — resolved server-side to the pane's
       tmux target and attached as a pty (`pane:<id>`). */
   sessionId: string;
   /** Send an allow-listed control key to the pane (on-screen key bar). */
   sendKey: (key: string) => boolean;
+  /** Preserve and scale the real pane geometry instead of resizing it. */
+  mirrorPane?: boolean;
 }
 
 /**
@@ -19,7 +21,7 @@ interface TerminalPaneProps {
  * poll(`capture-pane`)+relay(`send-keys`) model (and its local-echo/backspace
  * race): physical typing now goes straight to the pty, which is the echo.
  */
-export function TerminalPane({ sessionId, sendKey }: TerminalPaneProps) {
+export function TerminalPane({ sessionId, sendKey, mirrorPane = false }: TerminalPaneProps) {
   // On-screen sticky Ctrl/Opt state for the key bar (mobile helper). The
   // arm-then-physical-letter chord is a deferred mobile-polish item; the bar's
   // discrete ^C/^D/^R/^Z/^L keys cover the high-frequency control keys directly.
@@ -46,6 +48,8 @@ export function TerminalPane({ sessionId, sendKey }: TerminalPaneProps) {
         sendKey={sendKey}
         mods={sticky}
         onToggleMod={toggleMod}
+        paneScale={mirrorPane}
+        title={mirrorPane ? 'terminal · CodeWhale' : 'terminal · cc-shell'}
       />
     </div>
   );

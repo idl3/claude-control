@@ -100,22 +100,21 @@
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
 
-  /* ── Cosmic backdrop system — tune intensity HERE (single source) ───────
-     Three star planes (far/mid/near) give the starfield actual depth: near
-     is bigger, brighter, drifts faster and gets the strongest scroll
-     parallax; far is tiny, dim, dense, and barely moves. --star-near/
-     --star-far were previously declared but never wired to a layer (dead
-     tokens from an earlier pass) — both are now live. */
-  --space-base:   oklch(12% 0.02 265);   /* near-black deep-space base */
-  --space-lift:   oklch(16% 0.03 265);   /* faint glow-from-above vignette center */
-  --space-edge:   oklch(7%  0.015 265);  /* darkest, viewport edges — deepened a touch */
-  --star:         oklch(88% 0.08 250);   /* blue star (raised chroma for a clearer blue tint) */
+  /* ── Underwater backdrop system — tune intensity HERE ─────────────────
+     The legacy cosmos class names remain stable for preference/backward
+     compatibility, but the visual language is now deep water: a cyan-lit
+     surface, blue-green depth falloff, suspended plankton/bubbles, and rare
+     one-shot fish crossings. */
+  --space-base:   oklch(17% 0.055 225);
+  --space-lift:   oklch(31% 0.085 210);
+  --space-edge:   oklch(9% 0.035 238);
+  --star:         oklch(86% 0.07 195);
   --star-near:    0.62;                   /* near plane — biggest/brightest, fastest drift + strongest parallax (~30% dimmer, same hue) */
   --star-mid:     0.35;                   /* mid plane — the original starfield (~30% dimmer, same hue) */
   --star-far:     0.22;                   /* far plane — dense, tiny, dim; barely moves (depth cue) (~30% dimmer, same hue) */
-  --nebula-1:     oklch(55% 0.12 285);   /* desaturated indigo/violet */
-  --nebula-2:     oklch(58% 0.10 200);   /* desaturated teal (echoes --accent) */
-  --nebula-alpha:      0.08;              /* static wash alpha — midpoint of the retired breathe cycle (0.06–0.11) */
+  --nebula-1:     oklch(61% 0.11 194);
+  --nebula-2:     oklch(48% 0.10 215);
+  --nebula-alpha:      0.12;
   /* Shooting stars are now one-shot, JS/GSAP-triggered (rare ambient timer +
      turn-completion event — see lib/shootingStars.ts + App.tsx's
      fireShootingStar), not an always-on CSS @keyframes loop, so the old
@@ -286,21 +285,23 @@ html.pwa-fill .app {
   }
 }
 
-/* ── Cosmic backdrop — deep-space base + a two-tone static nebula wash +
-   a three-plane parallax starfield (far/mid/near) + rare shooting stars,
+/* ── Underwater backdrop — deep-water base + static light shafts +
+   a three-plane parallax plankton field + rare swimming fish,
    painted BEHIND the entire app (z-index:-1 relative to .app's own
    stacking context) but ABOVE body's flat --space-base fill.
-   STATIC BY DESIGN: no ambient/infinite animation anywhere in this system.
+   STATIC BY DEFAULT: no ambient/infinite animation outside CodeWhale mode.
    The former nebula-breathe / star-drift / twinkle loops kept the
    compositor (and, in the WKWebView desktop shell, the host process's CA
    layer-commit path) busy 100% of the time for motion nobody consciously
    saw — measured as a continuous double-digit %CPU burn at idle. What
    remains is exactly what prefers-reduced-motion always rendered: the full
-   layered backdrop, frozen. Softness is baked into gradient stops (no
+   layered backdrop, frozen. CodeWhale is the deliberate exception: these
+   same three compositor layers become sparse bubble tiles moving upward with
+   transform-only keyframes. Softness is baked into gradient stops (no
    runtime `filter: blur()` — a blurred viewport-scale layer holds a large
    GPU texture and re-filters on every invalidation). Motion that survives
    is strictly event-driven and bounded: the rAF scroll-parallax handler in
-   App.tsx (runs only while scrolling) and one-shot JS-fired shooting stars
+   App.tsx (runs only while scrolling) and one-shot JS-fired fish crossings
    (idle slots paint nothing). Every intensity value lives in the --space-,
    --star- and --nebula- tokens above so tuning is a one-file edit. */
 .cosmos-backdrop {
@@ -309,11 +310,12 @@ html.pwa-fill .app {
   z-index: -1;               /* behind ALL app content, above body's base fill */
   pointer-events: none;
   overflow: hidden;
-  background: radial-gradient(125% 90% at 50% -8%,
-    var(--space-lift) 0%, var(--space-base) 46%, var(--space-edge) 100%);
+  background:
+    radial-gradient(90% 42% at 50% -8%, oklch(66% 0.12 190 / 0.26) 0%, transparent 70%),
+    linear-gradient(180deg, var(--space-lift) 0%, var(--space-base) 44%, var(--space-edge) 100%);
   /* Composer-active boost transition target — see the block near the bottom
      of this section. Declared here (not repeated per-layer) so ONE filter/
-     transform on the container lifts every child (nebula/stars/shooting)
+     transform on the container lifts every child (water/plankton/fish)
      at once instead of touching each layer individually. */
   transition:
     filter var(--cosmos-active-ease) var(--ease),
@@ -337,10 +339,16 @@ html.pwa-fill .app {
   opacity: var(--nebula-alpha);
 }
 .cosmos-backdrop::before {
-  background: radial-gradient(46% 42% at 22% 18%, var(--nebula-1) 0%, transparent 74%);
+  background:
+    linear-gradient(104deg, transparent 14%, oklch(85% 0.09 190 / 0.2) 31%, transparent 43%),
+    linear-gradient(78deg, transparent 46%, oklch(82% 0.08 195 / 0.14) 58%, transparent 72%);
+  transform: perspective(700px) rotateX(18deg);
+  transform-origin: 50% 0;
 }
 .cosmos-backdrop::after {
-  background: radial-gradient(52% 46% at 82% 74%, var(--nebula-2) 0%, transparent 76%);
+  background:
+    radial-gradient(44% 38% at 16% 72%, var(--nebula-1) 0%, transparent 76%),
+    radial-gradient(50% 40% at 86% 82%, var(--nebula-2) 0%, transparent 78%);
 }
 
 /* starfield — three depth planes, back to front. Each is an ordinary tiled
@@ -413,46 +421,136 @@ html.pwa-fill .app {
   background-size: 460px 460px, 460px 460px, 400px 400px, 400px 400px, 520px 520px;
 }
 
-/* shooting stars — a pool of real (ref-able) elements, one-shot fired from
-   JS via GSAP (App.tsx's fireShootingStar), NOT an always-on CSS @keyframes
-   loop: CSS pseudo-elements can't be targeted by GSAP/DOM APIs, which is
-   exactly why this used to be three infinite-loop ::before/::after streaks
-   (see git history) — now each slot is idle (opacity: 0, no motion) until
-   JS drives it. Firing itself is rare by construction: at most once a
-   minute ambient (lib/shootingStars.ts's nextAmbientDelayMs) plus one shot
-   per agent turn completing (detectTurnCompletions), both gated behind the
-   Feature-B "shooting stars" setting AND prefers-reduced-motion — so no
-   media query is needed here (JS never fires a tween when reduced-motion is
-   on, and an idle slot with opacity 0 paints nothing either way). transform
-   + opacity only (box-shadow is static relative to the element, baked into
-   the layer once, moves as a unit with the transform — never recomputed per
-   frame), matching the compositor-only constraint on every other cosmos
-   layer. Depth ([data-depth]) reuses the retired streaks' exact look: near
-   = biggest/brightest, far = thinnest/dimmest; per-shot angle/travel/
-   duration/start-row are randomized in JS (buildShot's jitter). */
-.cosmos-shoot-stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.cosmos-shoot-slot {
+/* CodeWhale mode: reinterpret the existing three painted depth planes as
+   bubbles. Each plane is ONE repeating raster tile on ONE compositor layer;
+   only the outer layer's transform changes. There are no bubble DOM nodes,
+   timers, layout reads, background-position repaints, filters, or JS loops.
+   The final Y offset exactly matches that plane's tile height and the final X
+   matches its starting X, making the animation seam visually identical.
+   Three slowly moving layers are the whole steady-state cost. Each tile has
+   one bubble; compared with the previous three-bubble tiles, the 5.4% larger
+   tile edge yields approximately 30% of the former bubble density. */
+.app[data-codewhale-mode='true'] .cosmos-stars-far,
+.app[data-codewhale-mode='true'] .cosmos-stars-mid,
+.app[data-codewhale-mode='true'] .cosmos-stars-near {
+  inset: -340px -40px;
+  opacity: 1;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-far::before,
+.app[data-codewhale-mode='true'] .cosmos-stars-mid::before,
+.app[data-codewhale-mode='true'] .cosmos-stars-near::before {
+  background-repeat: repeat;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-far {
+  animation: codewhale-bubbles-far 34s linear infinite;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-far::before {
+  opacity: 0.28;
+  background-image: radial-gradient(circle at 99px 44px, transparent 0 0.8px, var(--star) 1.2px 1.7px, transparent 2.1px);
+  background-size: 190px 190px;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-mid {
+  animation: codewhale-bubbles-mid 27s linear infinite;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-mid::before {
+  opacity: 0.38;
+  background-image: radial-gradient(circle at 145px 65px, transparent 0 1.4px, var(--star) 1.9px 2.6px, transparent 3.1px);
+  background-size: 264px 264px;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-near {
+  animation: codewhale-bubbles-near 21s linear infinite;
+}
+.app[data-codewhale-mode='true'] .cosmos-stars-near::before {
+  opacity: 0.46;
+  background-image: radial-gradient(circle at 202px 89px, transparent 0 2.2px, var(--star) 2.8px 3.6px, transparent 4.2px);
+  background-size: 358px 358px;
+}
+
+@keyframes codewhale-bubbles-far {
+  0%   { transform: translate3d(-3px, 0, 0); }
+  20%  { transform: translate3d(3px, -38px, 0); }
+  40%  { transform: translate3d(-2px, -76px, 0); }
+  60%  { transform: translate3d(4px, -114px, 0); }
+  80%  { transform: translate3d(-4px, -152px, 0); }
+  100% { transform: translate3d(-3px, -190px, 0); }
+}
+@keyframes codewhale-bubbles-mid {
+  0%   { transform: translate3d(3px, 0, 0); }
+  20%  { transform: translate3d(-5px, -52.8px, 0); }
+  40%  { transform: translate3d(4px, -105.6px, 0); }
+  60%  { transform: translate3d(-3px, -158.4px, 0); }
+  80%  { transform: translate3d(6px, -211.2px, 0); }
+  100% { transform: translate3d(3px, -264px, 0); }
+}
+@keyframes codewhale-bubbles-near {
+  0%   { transform: translate3d(-4px, 0, 0); }
+  20%  { transform: translate3d(7px, -71.6px, 0); }
+  40%  { transform: translate3d(-6px, -143.2px, 0); }
+  60%  { transform: translate3d(5px, -214.8px, 0); }
+  80%  { transform: translate3d(-8px, -286.4px, 0); }
+  100% { transform: translate3d(-4px, -358px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-codewhale-mode='true'] .cosmos-stars-far,
+  .app[data-codewhale-mode='true'] .cosmos-stars-mid,
+  .app[data-codewhale-mode='true'] .cosmos-stars-near {
+    animation: none;
+    transform: none;
+  }
+}
+
+/* Fish are real DOM slots driven by rare, bounded GSAP timelines in App.tsx.
+   They remain opacity:0 with no CSS animation at idle. The oval body, tail,
+   and eye are pure CSS so the background adds no image/network dependency. */
+.underwater-fish { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.underwater-fish-slot {
   position: absolute;
-  left: -14%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, var(--star) 55%, oklch(100% 0 0 / 0.9));
+  left: -8%;
+  width: 22px;
+  height: 11px;
+  scale: 0.5;
+  transform-origin: center;
+  border-radius: 60% 48% 48% 60%;
+  background: linear-gradient(135deg, oklch(87% 0.11 185), oklch(62% 0.12 210));
   opacity: 0;
   will-change: transform, opacity;
 }
-.cosmos-shoot-slot[data-depth='near'] {
-  width: 110px;
+.underwater-fish-slot::before {
+  content: '';
+  position: absolute;
+  /* Broad edge trails left; the point meets the rear of the body. */
+  left: -9px;
+  top: 1px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 9px solid oklch(66% 0.11 207);
+}
+.underwater-fish-slot::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  width: 2px;
   height: 2px;
-  box-shadow: 0 0 7px 0.5px color-mix(in oklch, var(--star) 70%, transparent);
+  border-radius: 50%;
+  background: oklch(12% 0.04 230);
 }
-.cosmos-shoot-slot[data-depth='mid'] {
-  width: 70px;
-  height: 1.3px;
-  box-shadow: 0 0 5px 0.5px color-mix(in oklch, var(--star) 55%, transparent);
+.underwater-fish-slot[data-depth='near'] {
+  width: 28px;
+  height: 14px;
+  filter: drop-shadow(0 0 7px oklch(72% 0.10 195 / 0.25));
 }
-.cosmos-shoot-slot[data-depth='far'] {
-  width: 40px;
-  height: 0.8px;
-  box-shadow: 0 0 3px 0.4px color-mix(in oklch, var(--star) 40%, transparent);
+.underwater-fish-slot[data-depth='mid'] {
+  width: 21px;
+  height: 10px;
+}
+.underwater-fish-slot[data-depth='far'] {
+  width: 15px;
+  height: 7px;
+  filter: saturate(0.7);
 }
 
 /* Composer-active boost — the cosmos leans in + tints toward the composer's
@@ -957,6 +1055,10 @@ body.is-external-display .rail {
 .pane-icon[data-kind='terminal'] {
   color: var(--accent-2);
 }
+.pane-icon[data-kind='codewhale'] {
+  color: oklch(76% 0.12 205);
+  filter: drop-shadow(0 0 5px oklch(65% 0.12 205 / 0.26));
+}
 .pane-icon[data-kind='remote'] {
   color: var(--green);
 }
@@ -1105,6 +1207,15 @@ body.is-external-display .rail {
   border-color: var(--line);
   padding-top: 7px;
   padding-bottom: 7px;
+}
+.session-item[data-kind='codewhale'] {
+  border-color: color-mix(in oklch, var(--accent) 34%, var(--line));
+  background: color-mix(in oklch, var(--bg-1) 80%, oklch(34% 0.09 210 / 0.2));
+}
+.new-session-draft-harness-note {
+  color: var(--accent-2);
+  font-size: var(--txt-meta);
+  white-space: nowrap;
 }
 .meta-cwd {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -1711,6 +1822,17 @@ body.is-external-display .rail {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.detail-mode {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, var(--line));
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--txt-meta);
+  letter-spacing: 0.03em;
+}
+.detail-mode[data-mode='runtime'] { color: var(--accent-2); }
 .detail-name-row {
   display: flex;
   align-items: center;
@@ -5373,13 +5495,13 @@ body.is-external-display .composer {
   cursor: pointer;
 }
 .composer-retry:hover { background: oklch(68% 0.18 25); }
-/* The optimistic "Working…" loader uses the SAME jumping Claude robot as the
-   session activity icon (pane-icon-bob), so the two read as one signal. */
-.working-claude {
+/* The optimistic "Working…" loader uses the selected harness's jumping mark,
+   matching the corresponding session activity icon. */
+.working-agent {
   flex: none;
   display: inline-flex;
 }
-.working-claude svg {
+.working-agent svg {
   width: calc(20px * var(--ui-scale)) !important; height: calc(20px * var(--ui-scale)) !important;
   animation: pane-icon-bob 0.9s var(--ease) infinite;
 }
@@ -5392,7 +5514,7 @@ body.is-external-display .composer {
   .working-spinner {
     animation-duration: 1.6s;
   }
-  .working-claude svg {
+  .working-agent svg {
     animation: none;
   }
   /* No flashing/sweeping for reduced-motion users — settle to a solid accent
