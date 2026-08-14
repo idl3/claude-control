@@ -81,12 +81,14 @@ test('writeConfig merges partial updates over existing config', () => {
   assert.equal(cfg.defaultCwd, dataDir);
 });
 
-// ── Codex fields ──────────────────────────────────────────────────────────────
+// ── Codex + CodeWhale fields ─────────────────────────────────────────────────
 
 test('readConfig returns codex defaults when no file exists', () => {
   const cfg = readConfig();
   assert.equal(cfg.codexLaunchCommand, 'codex');
   assert.equal(cfg.codexBin, '');
+  assert.equal(cfg.codewhaleLaunchCommand, 'codewhale');
+  assert.equal(cfg.codewhaleBin, '');
 });
 
 test('writeConfig persists a valid codexLaunchCommand', () => {
@@ -107,6 +109,23 @@ test('writeConfig persists a non-empty codexBin', () => {
   assert.equal(readConfig().codexBin, '/usr/local/bin/codex');
 });
 
+test('writeConfig persists CodeWhale launch command and binary path', () => {
+  const saved = writeConfig({
+    codewhaleLaunchCommand: 'cw --skip-onboarding',
+    codewhaleBin: '/opt/homebrew/bin/codewhale',
+  });
+  assert.equal(saved.codewhaleLaunchCommand, 'cw --skip-onboarding');
+  assert.equal(saved.codewhaleBin, '/opt/homebrew/bin/codewhale');
+  const read = readConfig();
+  assert.equal(read.codewhaleLaunchCommand, 'cw --skip-onboarding');
+  assert.equal(read.codewhaleBin, '/opt/homebrew/bin/codewhale');
+});
+
+test('writeConfig validates CodeWhale launch configuration', () => {
+  assert.throws(() => writeConfig({ codewhaleLaunchCommand: '   ' }), /non-empty/);
+  assert.throws(() => writeConfig({ codewhaleBin: 42 }), /must be a string/);
+});
+
 test('writeConfig rejects an empty codexLaunchCommand', () => {
   assert.throws(() => writeConfig({ codexLaunchCommand: '   ' }), /non-empty/);
 });
@@ -115,22 +134,28 @@ test('writeConfig rejects a codexLaunchCommand over 500 chars', () => {
   assert.throws(() => writeConfig({ codexLaunchCommand: 'x'.repeat(501) }), /500/);
 });
 
-test('writeConfig round-trips all four CLI fields together', () => {
+test('writeConfig round-trips all harness CLI fields together', () => {
   const saved = writeConfig({
     launchCommand: 'yolo',
     claudeBin: '/opt/homebrew/bin/claude',
     codexLaunchCommand: 'yodex',
     codexBin: '/opt/homebrew/bin/codex',
+    codewhaleLaunchCommand: 'cw --skip-onboarding',
+    codewhaleBin: '/opt/homebrew/bin/codewhale',
   });
   assert.equal(saved.launchCommand, 'yolo');
   assert.equal(saved.claudeBin, '/opt/homebrew/bin/claude');
   assert.equal(saved.codexLaunchCommand, 'yodex');
   assert.equal(saved.codexBin, '/opt/homebrew/bin/codex');
+  assert.equal(saved.codewhaleLaunchCommand, 'cw --skip-onboarding');
+  assert.equal(saved.codewhaleBin, '/opt/homebrew/bin/codewhale');
   const read = readConfig();
   assert.equal(read.launchCommand, 'yolo');
   assert.equal(read.claudeBin, '/opt/homebrew/bin/claude');
   assert.equal(read.codexLaunchCommand, 'yodex');
   assert.equal(read.codexBin, '/opt/homebrew/bin/codex');
+  assert.equal(read.codewhaleLaunchCommand, 'cw --skip-onboarding');
+  assert.equal(read.codewhaleBin, '/opt/homebrew/bin/codewhale');
 });
 
 // ── Claudex fields ────────────────────────────────────────────────────────────

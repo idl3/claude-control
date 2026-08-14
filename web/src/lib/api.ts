@@ -302,6 +302,10 @@ export interface ControlConfig {
    * this to the real binary path so availability checks pass.
   */
   codexBin: string;
+  /** Command typed into a tmux pane for CodeWhale terminal mode. */
+  codewhaleLaunchCommand?: string;
+  /** Optional absolute path used for CodeWhale availability checks. */
+  codewhaleBin?: string;
   defaultCwd: string;
   optimizeModel: string;
   /** Prompt-enhancer backend: local MLX model, claude -p, or deterministic rules. */
@@ -469,8 +473,8 @@ export interface CreateSessionResult {
   target: string;
   /** Resolved name (server-generated default when the request name was blank). */
   name: string;
-  /** Agent type used to spawn the session ('claude' | 'codex' | 'claudex' | 'claudemi'). */
-  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  /** Agent type used to spawn the session. */
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale';
   /** Transport used for the spawned pane. */
   transport?: 'tmux' | 'rpc' | 'print';
 }
@@ -491,7 +495,7 @@ export async function createSession(opts?: {
   cwd?: string;
   name?: string;
   /** Agent type to spawn. Defaults to 'claude' on the server when absent. */
-  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale';
   /** Claude-only transport. Defaults to the server's configured transport. */
   claudeTransport?: 'tmux' | 'print';
   /** Codex-only transport. Defaults to the server's configured transport. */
@@ -554,7 +558,7 @@ export async function createSession(opts?: {
  *  claude's availability governs them) — consumers fall back to the claude
  *  entry. */
 export interface SpawnAgentInfo {
-  id: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'codewhale';
   available: boolean;
   /** Present when available is false. */
   reason?: string;

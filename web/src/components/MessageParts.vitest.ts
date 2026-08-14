@@ -11,10 +11,23 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { createElement } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
-import { ExitPlanPart } from './MessageParts';
+import { ExitPlanPart, WorkingAgentIcon } from './MessageParts';
 import { ArtifactPanelProvider } from './ArtifactContext';
 
 afterEach(cleanup);
+
+describe('WorkingAgentIcon', () => {
+  it('uses the whale mark for CodeWhale working placeholders', () => {
+    const { container } = render(createElement(WorkingAgentIcon, { agentKind: 'codewhale' }));
+    expect(container.querySelector('path')?.getAttribute('d')).toMatch(/^M4 15/);
+    expect(container.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24');
+  });
+
+  it('keeps the Claude robot fallback for Claude-family harnesses', () => {
+    const { container } = render(createElement(WorkingAgentIcon, { agentKind: 'claudex' }));
+    expect(container.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 10 12');
+  });
+});
 
 function baseProps(
   args: Record<string, unknown>,

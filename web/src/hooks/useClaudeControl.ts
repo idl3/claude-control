@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClaudeControlSocket, type ConnState } from '../lib/ws';
-import { mergeMessages } from '../lib/messages';
+import { mergeMessages, resetMessages, upsertMessages } from '../lib/messages';
 import { mergeById, seedFromHead, canLoadMore, applyPage, EMPTY_PAGING, type OrgPaging } from '../lib/olamPaging';
 import { fetchOlamPage } from '../lib/api';
 import type {
@@ -346,6 +346,18 @@ export function useClaudeControl(): ClaudeControlStore {
           setMessagesById((prev) => ({
             ...prev,
             [msg.id]: mergeMessages(prev[msg.id], msg.messages ?? []),
+          }));
+          break;
+        case 'upsert':
+          setMessagesById((prev) => ({
+            ...prev,
+            [msg.id]: upsertMessages(prev[msg.id], msg.messages ?? []),
+          }));
+          break;
+        case 'reset':
+          setMessagesById((prev) => ({
+            ...prev,
+            [msg.id]: resetMessages(msg.messages ?? []),
           }));
           break;
         case 'olam-degraded':

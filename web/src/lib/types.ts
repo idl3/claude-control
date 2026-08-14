@@ -50,10 +50,13 @@ export interface Session {
    *  binary pointed at the olam auth-worker's Kimi provider (identical
    *  rail-FILTER-bucket / pane-treatment story as 'claudex'); 'codex' = an
    *  OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal);
-   *  'remote' = an olam remote sandbox session. */
-  kind?: 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'remote';
+   *  'codewhale' = a CodeWhale harness (terminal-backed now, Runtime-backed
+   *  later); 'remote' = an olam remote sandbox session. */
+  kind?: 'claude' | 'claudex' | 'claudemi' | 'codex' | 'codewhale' | 'terminal' | 'remote';
+  /** UI treatment, deliberately independent from harness identity. */
+  presentation?: 'thread' | 'terminal';
   /** Per-session control transport. */
-  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
+  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | 'codewhale-http-sse' | null;
   // --- remote (olam) rows only — additive; absent on local sessions ---------
   /** Org slug the remote session belongs to (atlas | grain | pleri | ...). */
   org?: string;
@@ -354,6 +357,8 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: Session[]; orgHealth?: Record<string, OrgHealth> }
   | { type: 'messages'; id: string; messages: Msg[]; pending: Pending | null }
   | { type: 'append'; id: string; messages: Msg[] }
+  | { type: 'upsert'; id: string; messages: Msg[] }
+  | { type: 'reset'; id: string; messages: Msg[] }
   | { type: 'olam-degraded'; id: string; degraded: boolean; reason: string | null }
   // Remote (olam) session only: the Electric chunks shape's initial snapshot
   // has drained to its live cursor — the transcript is no longer ambiguous

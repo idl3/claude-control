@@ -26,6 +26,8 @@ interface ThreadProps {
   /** Active session id — passed to the Composer so enhance/review state is
    *  scoped per session. */
   sessionId?: string | null;
+  /** A real tmux target exists for the Composer's scratch terminal. */
+  terminalAvailable?: boolean;
   /** Messages older than the render cap that are currently hidden. */
   hiddenCount: number;
   /** Reveal an older chunk of messages. */
@@ -175,6 +177,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
   agentName = 'Claude',
   loading = false,
   sessionId,
+  terminalAvailable = true,
   hiddenCount,
   onLoadEarlier,
   subAgentMode,
@@ -334,6 +337,7 @@ const ThreadImpl = forwardRef<ComposerHandle, ThreadProps>(function ThreadImpl({
         disabled={!hasSelection || loading}
         loading={loading}
         sessionId={sessionId}
+        terminalAvailable={terminalAvailable}
         subAgentMode={subAgentMode}
         onSubAgentModeChange={onSubAgentModeChange}
         onTerminalModeChange={onTerminalModeChange}

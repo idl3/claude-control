@@ -113,6 +113,8 @@ interface ComposerProps {
   /** Active session id — used to scope the enhance/review state so an
    *  improvement from one session can't leak into another on switch. */
   sessionId?: string | null;
+  /** Whether this session has a real tmux target for the scratch-shell mode. */
+  terminalAvailable?: boolean;
   /** Per-session sub-agent mode. Defaults to false (off) when not provided. */
   subAgentMode?: SubAgentMode;
   /** Called when the sub-agent checkbox changes. */
@@ -273,6 +275,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   disabled,
   loading = false,
   sessionId,
+  terminalAvailable = true,
   subAgentMode = false,
   onSubAgentModeChange,
   onTerminalModeChange,
@@ -315,16 +318,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // closing unmounts it. Unloads on session change (the effect below resets it).
   const [terminal, setTerminal] = useState(false);
   const openTerminal = useCallback(() => {
+    if (!terminalAvailable) return;
     setTerminal(true);
     onTerminalModeChange?.(true);
-  }, [onTerminalModeChange]);
+  }, [onTerminalModeChange, terminalAvailable]);
 
   // Real unload on session change: leave terminal mode.
   useEffect(() => {
     setTerminal(false);
     onTerminalModeChange?.(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, terminalAvailable]);
 
   // Enhance state BOUND PER SESSION (keyed by session id), like the per-session
   // AskUserQuestion pending state. The Composer stays mounted across session
@@ -2329,9 +2333,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               type="button"
               className="composer-skills-btn composer-term-toggle"
               aria-label="Terminal mode"
-              title="Terminal mode — run shell commands"
+              title={terminalAvailable
+                ? 'Terminal mode — run shell commands'
+                : 'Runtime transcript has no PTY — choose a CodeWhale Terminal row in the sidebar'}
               aria-pressed={terminal}
               data-on={terminal ? 'true' : undefined}
+              disabled={!terminalAvailable}
               onClick={() => (terminal ? closeTerminal() : openTerminal())}
             >
               <TerminalIcon />
@@ -2662,5 +2669,4 @@ function VoiceInline({ active, bodyRef, onCommit, onClose, stopRef, phase2DoneRe
     </div>
   );
 }
-
 

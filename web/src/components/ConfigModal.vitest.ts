@@ -45,6 +45,8 @@ const FIXTURE_CONFIG: ControlConfig = {
   claudeBin: '',
   codexLaunchCommand: 'codex',
   codexBin: '',
+  codewhaleLaunchCommand: 'codewhale',
+  codewhaleBin: '',
   defaultCwd: '/Users/dev/project',
   optimizeModel: 'claude-sonnet',
   optimizeBackend: 'mlx',
@@ -130,8 +132,9 @@ describe('ConfigModal — sections', () => {
     expect(screen.getByRole('button', { name: /Harness/ }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('button', { name: /General/ }).getAttribute('aria-current')).toBeNull();
 
-    // Harness section now visible (Claude Code + Codex + OpenCode placeholder).
+    // Harness section now visible (Claude Code + CodeWhale + Codex + OpenCode placeholder).
     expect(screen.getAllByText('Command to run').length).toBeGreaterThan(0);
+    expect(screen.getByText('CodeWhale')).toBeTruthy();
     expect(screen.getByText('OpenCode')).toBeTruthy();
     expect(screen.getByText('Coming soon')).toBeTruthy();
 
@@ -188,6 +191,8 @@ describe('ConfigModal — Save persists the full payload regardless of active se
         'claudeBin',
         'codexLaunchCommand',
         'codexBin',
+        'codewhaleLaunchCommand',
+        'codewhaleBin',
         'defaultCwd',
         'optimizeModel',
         'optimizeBackend',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeMessages, MAX_RETAINED_MESSAGES } from './messages';
+import { mergeMessages, resetMessages, upsertMessages, MAX_RETAINED_MESSAGES } from './messages';
 import type { Msg } from './types';
 
 const m = (uuid: string, role: Msg['role'] = 'user'): Msg => ({
@@ -47,5 +47,23 @@ describe('mergeMessages', () => {
     expect(out).toHaveLength(MAX_RETAINED_MESSAGES);
     expect(out[out.length - 1].uuid).toBe('new');
     expect(out[0].uuid).toBe('old-1'); // 'old-0' evicted
+  });
+});
+
+describe('Runtime transcript changes', () => {
+  it('upserts an existing stable UUID without duplicating the bubble', () => {
+    const existing = [m('a'), m('item')];
+    const updated = { ...m('item', 'assistant'), blocks: [{ kind: 'text' as const, text: 'updated' }] };
+    const out = upsertMessages(existing, [updated]);
+    expect(out.map((x) => x.uuid)).toEqual(['a', 'item']);
+    expect(out[1].blocks[0]).toEqual({ kind: 'text', text: 'updated' });
+  });
+
+  it('appends a new UUID during an upsert batch', () => {
+    expect(upsertMessages([m('a')], [m('b')]).map((x) => x.uuid)).toEqual(['a', 'b']);
+  });
+
+  it('reset replaces stale history after a cursor gap', () => {
+    expect(resetMessages([m('fresh')]).map((x) => x.uuid)).toEqual(['fresh']);
   });
 });

@@ -125,6 +125,8 @@ function baseDeps(overrides = {}) {
     resolveTmuxBin: async () => '/usr/bin/tmux',
     getSocketPath: async () => '/tmp/tmux-test/default',
     runTmuxCmd: async () => ({ stdout: '', stderr: '' }),
+    capturePane: async () => '',
+    cursorPosition: async () => ({ x: 0, y: 0 }),
     wait: () => Promise.resolve(),
     log: () => {},
     ...overrides,
@@ -183,6 +185,54 @@ test('two clients attaching the same session dedupe onto exactly ONE ephemeral g
   assert.equal(newSessionCalls.length, 1, 'exactly one grouped ephemeral tmux session created, not one per viewer');
   assert.deepEqual(newSessionCalls[0].slice(3), ['-d', '-t', 'demo', '-s', ephemeralSessionName('demo:1')]);
   assert.equal(bridge.liveCount(), 1);
+});
+
+test('attach-kind client receives an immediate capture-pane seed instead of a blank terminal', async () => {
+  const bridge = createPtyBridge(baseDeps({
+    spawn: () => makeFakePty(),
+    capturePane: async () => 'CodeWhale is ready',
+    cursorPosition: async () => ({ x: 3, y: 1 }),
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'demo:1');
+  await tick();
+
+  assert.deepEqual(jsonFrames(ws), [{ type: 'attached', sessionId: 'demo:1' }]);
+  const frames = binaryFrames(ws);
+  assert.equal(frames.length, 1, 'the initial visible pane is sent immediately after attach');
+  const body = frames[0].subarray(1).toString('utf8');
+  assert.ok(body.startsWith('\x1b[2J\x1b[H'), 'seed clears the stale canvas and homes the cursor');
+  assert.ok(body.includes('CodeWhale is ready'), 'seed contains the current tmux pane contents');
+  assert.ok(body.endsWith('\x1b[2;4H'), 'seed restores the pane cursor position');
+});
+
+test('attach-kind drains node-pty output before the dead-target grace window', async () => {
+  const order = [];
+  const handle = makeFakePty();
+  const originalOnData = handle.onData;
+  handle.onData = (cb) => {
+    order.push('onData');
+    originalOnData(cb);
+  };
+  const bridge = createPtyBridge(baseDeps({
+    spawn: () => handle,
+    wait: () => {
+      order.push('wait');
+      return Promise.resolve();
+    },
+  }));
+
+  const ws = new FakeWs();
+  bridge.handleConnection(ws, fakeReq());
+  attach(ws, 'demo:1');
+  await tick();
+
+  assert.ok(
+    order.indexOf('onData') < order.indexOf('wait'),
+    `node-pty output must be drained during the grace window; observed ${order.join(' -> ')}`,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -525,9 +575,17 @@ test('attach creates a grouped ephemeral session (status off, aggressive-resize 
   assert.ok(aggressiveCall, 'aggressive-resize was set on');
   assert.deepEqual(aggressiveCall.slice(3), ['-t', `${eph}:1`, 'aggressive-resize', 'on'], 'targets the WINDOW explicitly, not the bare session');
 
+  const suppressHookCall = calls.find((a) => a[2] === 'set-hook');
+  assert.ok(suppressHookCall, 'the ephemeral session shadows global after-select-window hooks');
+  assert.deepEqual(suppressHookCall.slice(3), ['-t', eph, 'after-select-window', '']);
+
   const selectWindowCall = calls.find((a) => a[2] === 'select-window');
   assert.ok(selectWindowCall, 'select-window pinned the ephemeral session to the target window');
   assert.deepEqual(selectWindowCall.slice(3), ['-t', `${eph}:1`]);
+  assert.ok(
+    calls.indexOf(suppressHookCall) < calls.indexOf(selectWindowCall),
+    'hook suppression must happen before selecting the target window',
+  );
 
   const selectPaneCall = calls.find((a) => a[2] === 'select-pane');
   assert.ok(selectPaneCall, 'select-pane pinned to the specific pane from the target');

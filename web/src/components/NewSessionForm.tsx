@@ -13,8 +13,8 @@ interface NewSessionFormProps {
 }
 
 const FILTER_TITLE: Record<SessionFilter, string> = {
-  all: 'Showing all panes — tap to show agents (Claude + Claudex + Claudemi + Codex)',
-  agents: 'Showing agents (Claude + Claudex + Claudemi + Codex) — tap to show only Claude',
+  all: 'Showing all panes — tap to show agents (Claude + Claudex + Claudemi + Codex + CodeWhale)',
+  agents: 'Showing agents (Claude + Claudex + Claudemi + Codex + CodeWhale) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
   codex: 'Showing Codex-flavored sessions (Claudex + Claudemi + legacy Codex) — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
