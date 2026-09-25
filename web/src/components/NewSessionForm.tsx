@@ -1,8 +1,8 @@
 import { FunnelIcon } from './icons';
 import type { SessionFilter } from './SessionRail';
 
-export type CodexTransport = 'rpc' | 'tmux';
-export type ClaudeTransport = 'tmux' | 'print';
+export type CodexTransport = 'rpc' | 'tmux' | 'acp';
+export type ClaudeTransport = 'tmux' | 'print' | 'acp';
 
 interface NewSessionFormProps {
   /** Opens the new-session draft screen in the main content area. */
@@ -32,16 +32,20 @@ export function defaultName(now: number = Date.now()): string {
  *  Claude remains the overall default for every other filter. Claudemi (the
  *  same claude binary → olam auth-worker → Kimi) mirrors claudex's shape but
  *  is never auto-selected as a default — it's picker-reachable only. */
-export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' | 'claudex' | 'claudemi' {
+export function defaultAgentForFilter(filter: SessionFilter): 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok' {
   return filter === 'codex' ? 'claudex' : 'claude';
 }
 
 export function normalizeCodexTransport(value: unknown): CodexTransport {
-  return value === 'tmux' ? 'tmux' : 'rpc';
+  if (value === 'tmux') return 'tmux';
+  if (value === 'acp') return 'acp';
+  return 'rpc';
 }
 
 export function normalizeClaudeTransport(value: unknown): ClaudeTransport {
-  return value === 'print' ? 'print' : 'tmux';
+  if (value === 'print') return 'print';
+  if (value === 'acp') return 'acp';
+  return 'tmux';
 }
 
 /** Derive filter badge label for the funnel button. */

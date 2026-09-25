@@ -20,6 +20,16 @@ test('codex rpc sessions route to codex-rpc (unchanged)', () => {
   assert.equal(replyTransport({ kind: 'codex', transport: 'rpc' }), 'codex-rpc');
 });
 
+test('ACP sessions route to acp regardless of kind', () => {
+  assert.equal(replyTransport({ kind: 'grok', transport: 'acp' }), 'acp');
+  assert.equal(replyTransport({ kind: 'codex', transport: 'acp' }), 'acp');
+});
+
+test('Codex ACP is never shadowed by the codex-rpc branch', () => {
+  assert.notEqual(replyTransport({ kind: 'codex', transport: 'acp' }), 'codex-rpc');
+  assert.notEqual(replyTransport({ kind: 'codex', transport: 'acp' }), 'tmux');
+});
+
 test('everything else (tmux claude, claudex, codex-tui, plain terminal) routes to tmux', () => {
   assert.equal(replyTransport({ kind: 'claude', transport: 'tmux' }), 'tmux');
   assert.equal(replyTransport({ kind: 'claude' }), 'tmux');

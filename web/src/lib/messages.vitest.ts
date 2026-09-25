@@ -41,6 +41,14 @@ describe('mergeMessages', () => {
     expect(acc.map((x) => x.uuid)).toEqual(['a', 'u-msg', 'b']);
   });
 
+  it('upserts an in-flight ACP stream when the same uuid grows', () => {
+    const first: Msg = { uuid: 'acp-assistant-1', role: 'assistant', blocks: [{ kind: 'text', text: 'ac' }] };
+    const grown: Msg = { uuid: 'acp-assistant-1', role: 'assistant', blocks: [{ kind: 'text', text: 'ack' }] };
+    const out = mergeMessages([first], [grown]);
+    expect(out).toHaveLength(1);
+    expect(out[0].blocks[0]).toEqual({ kind: 'text', text: 'ack' });
+  });
+
   it('caps retained history to the memory bound, keeping the newest', () => {
     const existing = Array.from({ length: MAX_RETAINED_MESSAGES }, (_, i) => m(`old-${i}`));
     const out = mergeMessages(existing, [m('new')]);

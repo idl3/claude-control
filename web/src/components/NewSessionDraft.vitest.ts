@@ -249,7 +249,14 @@ function stubApi({
             available: codexAvailable,
             reason: codexAvailable ? undefined : 'codex missing',
             defaultTransport: 'rpc',
-            transports: ['rpc', 'tmux'],
+            transports: ['rpc', 'tmux', 'acp'],
+          },
+          {
+            id: 'grok',
+            available: false,
+            reason: 'grok not found on PATH',
+            defaultTransport: 'acp',
+            transports: ['acp'],
           },
         ],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -505,8 +512,8 @@ describe('NewSessionDraft Claudex (primary Codex-flavored harness)', () => {
 
     const group = await screen.findByRole('group', { name: 'Harness' });
     const buttons = within(group).getAllByRole('button');
-    // 4 segments now: Claude, Claudex, Claudemi, Codex (in that order).
-    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false']);
+    // Claude, Claudex, Claudemi, Grok, Codex (in that order).
+    expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false']);
     expect(within(group).getByRole('button', { name: 'Claudex' })).toBeTruthy();
     // The legacy Codex segment carries the muted "Legacy" tag (aria-hidden,
     // so its accessible name stays exactly "Codex").
@@ -625,8 +632,9 @@ describe('NewSessionDraft Claudemi (Kimi K3 harness)', () => {
     const claudeBtn = within(group).getByRole('button', { name: 'Claude' });
     const claudexBtn = within(group).getByRole('button', { name: 'Claudex' });
     const claudemiBtn = within(group).getByRole('button', { name: 'Claudemi' });
+    const grokBtn = within(group).getByRole('button', { name: /Grok/ });
     const codexBtn = within(group).getByRole('button', { name: 'Codex' });
-    expect(buttons).toEqual([claudeBtn, claudexBtn, claudemiBtn, codexBtn]);
+    expect(buttons).toEqual([claudeBtn, claudexBtn, claudemiBtn, grokBtn, codexBtn]);
     expect(claudemiBtn.textContent).not.toContain('Legacy');
   });
 

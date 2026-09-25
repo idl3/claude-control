@@ -105,7 +105,7 @@ const AC_MAX = 4;
  * with the same `.composer-card` / `.composer-input` CSS classes.
  */
 export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }: NewSessionDraftProps) {
-  const [agent, setAgent] = useState<'claude' | 'codex' | 'claudex' | 'claudemi'>(() => defaultAgentForFilter(filter));
+  const [agent, setAgent] = useState<'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok'>(() => defaultAgentForFilter(filter));
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransport>('tmux');
   const [codexTransport, setCodexTransport] = useState<CodexTransport>('rpc');
   // Single model slot shared by all harnesses — switching harness
@@ -364,12 +364,12 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   // falls back to claude's (same fallback as agentInfo() below).
   useEffect(() => {
     if (agentInfos.length === 0) return;
-    const infoFor = (id: 'claude' | 'codex' | 'claudex' | 'claudemi'): SpawnAgentInfo | undefined =>
+    const infoFor = (id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok'): SpawnAgentInfo | undefined =>
       agentInfos.find((a) => a.id === id) ??
       (id === 'claudex' || id === 'claudemi' ? agentInfos.find((a) => a.id === 'claude') : undefined);
     setAgent((prev) => {
       if (infoFor(prev)?.available !== false) return prev;
-      const fallback = (['claude', 'claudex', 'claudemi', 'codex'] as const).find(
+      const fallback = (['claude', 'claudex', 'claudemi', 'codex', 'grok'] as const).find(
         (id) => id !== prev && infoFor(id)?.available !== false,
       );
       return fallback ?? prev;
@@ -543,19 +543,21 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
     const resolvedNewTmuxSession =
       tmuxChoice === NEW_TMUX_SESSION ? newTmuxSessionName.trim() || undefined : undefined;
 
+    const isAcp = agent === 'grok' || (agent === 'claude' && claudeTransport === 'acp');
     const opts: CreateOpts = {
       name: resolvedName,
       cwd: resolvedCwd,
       agent,
       claudeTransport: agent === 'claude' ? claudeTransport : undefined,
       codexTransport: agent === 'codex' ? codexTransport : undefined,
+      transport: agent === 'grok' || (agent === 'claude' && claudeTransport === 'acp') ? 'acp' : undefined,
       model: agent === 'claude' && model !== 'default' ? model : undefined,
       codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
       claudexModel: agent === 'claudex' && model !== 'default' ? model : undefined,
       claudemiModel: agent === 'claudemi' && model !== 'default' ? model : undefined,
       prompt: finalPrompt || undefined,
-      tmuxSession: resolvedTmuxSession,
-      newTmuxSession: resolvedNewTmuxSession,
+      tmuxSession: isAcp ? undefined : resolvedTmuxSession,
+      newTmuxSession: isAcp ? undefined : resolvedNewTmuxSession,
     };
     void runCreate(opts);
   }, [
@@ -577,7 +579,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   ]);
 
   // Helper: look up availability for an agent id.
-  function agentInfo(id: 'claude' | 'codex' | 'claudex' | 'claudemi'): SpawnAgentInfo | undefined {
+  function agentInfo(id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok'): SpawnAgentInfo | undefined {
     return agentInfos.find((a) => a.id === id);
   }
 
@@ -588,6 +590,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   // claude's binary availability governs them.
   const claudexInfo = agentInfo('claudex') ?? claudeInfo;
   const claudemiInfo = agentInfo('claudemi') ?? claudeInfo;
+  const grokInfo = agentInfo('grok');
   const modelOptions =
     agent === 'claude'
       ? claudeModels
@@ -734,7 +737,9 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                   ? 'Claudex'
                   : agent === 'claudemi'
                     ? 'Claudemi'
-                    : 'Claude'
+                    : agent === 'grok'
+                      ? 'Grok'
+                      : 'Claude'
             }
             onInsert={(t) => {
               setPrompt(t);
@@ -824,6 +829,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 ['claude', 'Claude', claudeInfo],
                 ['claudex', 'Claudex', claudexInfo],
                 ['claudemi', 'Claudemi', claudemiInfo],
+                ['grok', 'Grok', grokInfo],
                 ['codex', 'Codex', codexInfo],
               ] as const).map(([id, label, info]) => {
                 const isActive = agent === id;
@@ -962,6 +968,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 {([
                   ['tmux', 'Interactive'],
                   ['print', 'Print mode'],
+                  ['acp', 'ACP'],
                 ] as const).map(([id, label]) => {
                   const isActive = claudeTransport === id;
                   return (
@@ -985,6 +992,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
                 {([
                   ['rpc', 'RPC'],
                   ['tmux', 'TUI'],
+                  ['acp', 'ACP'],
                 ] as const).map(([id, label]) => {
                   const isActive = codexTransport === id;
                   return (

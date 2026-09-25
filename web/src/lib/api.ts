@@ -469,8 +469,8 @@ export interface CreateSessionResult {
   target: string;
   /** Resolved name (server-generated default when the request name was blank). */
   name: string;
-  /** Agent type used to spawn the session ('claude' | 'codex' | 'claudex' | 'claudemi'). */
-  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  /** Agent type used to spawn the session. */
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok';
   /** Transport used for the spawned pane. */
   transport?: 'tmux' | 'rpc' | 'print';
 }
@@ -491,11 +491,13 @@ export async function createSession(opts?: {
   cwd?: string;
   name?: string;
   /** Agent type to spawn. Defaults to 'claude' on the server when absent. */
-  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  agent?: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok';
   /** Claude-only transport. Defaults to the server's configured transport. */
-  claudeTransport?: 'tmux' | 'print';
+  claudeTransport?: 'tmux' | 'print' | 'acp';
   /** Codex-only transport. Defaults to the server's configured transport. */
-  codexTransport?: 'tmux' | 'rpc';
+  codexTransport?: 'tmux' | 'rpc' | 'acp';
+  /** Generic transport override (ACP sessions). */
+  transport?: 'acp';
   /** Claude-only model override — a full model id from ClaudeModelInfo.id
    *  (e.g. 'claude-opus-4-8'). Omitted/'default' → agent's own default. */
   model?: string;
@@ -554,14 +556,14 @@ export async function createSession(opts?: {
  *  claude's availability governs them) — consumers fall back to the claude
  *  entry. */
 export interface SpawnAgentInfo {
-  id: 'claude' | 'codex' | 'claudex' | 'claudemi';
+  id: 'claude' | 'codex' | 'claudex' | 'claudemi' | 'grok';
   available: boolean;
   /** Present when available is false. */
   reason?: string;
   /** Server default transport for this agent. */
-  defaultTransport?: 'tmux' | 'rpc' | 'print';
+  defaultTransport?: 'tmux' | 'rpc' | 'print' | 'acp';
   /** Transports this UI may request per session. */
-  transports?: Array<'tmux' | 'rpc' | 'print'>;
+  transports?: Array<'tmux' | 'rpc' | 'print' | 'acp'>;
 }
 
 /**

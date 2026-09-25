@@ -1494,7 +1494,7 @@ export function SessionRail({
     const visible = sessions.filter((s) => {
       if (s.kind === 'remote') return false; // remote rows render in their own org sections
       if (filter === 'all') return true;
-      if (filter === 'agents') return s.kind !== 'terminal'; // claude + claudex + claudemi + codex, no shells
+      if (filter === 'agents') return s.kind !== 'terminal'; // claude + claudex + claudemi + codex + grok, no shells
       if (filter === 'terminal') return s.kind === 'terminal';
       // 'codex' filter: the codex-flavored bucket — legacy codex panes AND
       // claudex/claudemi panes (design decision 7: claudex is the PRIMARY
