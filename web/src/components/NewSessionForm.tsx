@@ -7,7 +7,7 @@ export type ClaudeTransport = 'tmux' | 'print' | 'acp';
 interface NewSessionFormProps {
   /** Opens the new-session draft screen in the main content area. */
   onOpenDraft: () => void;
-  /** Rail filter state + cycle (all → claude → codex → terminal). */
+  /** Rail filter state + cycle (all → agents → claude → codex → grok → terminal). */
   filter: SessionFilter;
   onCycleFilter: () => void;
 }
@@ -16,7 +16,8 @@ const FILTER_TITLE: Record<SessionFilter, string> = {
   all: 'Showing all panes — tap to show agents (Claude + Claudex + Claudemi + Codex)',
   agents: 'Showing agents (Claude + Claudex + Claudemi + Codex) — tap to show only Claude',
   claude: 'Showing Claude sessions — tap to show only Codex',
-  codex: 'Showing Codex-flavored sessions (Claudex + Claudemi + legacy Codex) — tap to show only terminals',
+  codex: 'Showing Codex-flavored sessions (Claudex + Claudemi + legacy Codex) — tap to show only Grok',
+  grok: 'Showing Grok sessions (ACP) — tap to show only terminals',
   terminal: 'Showing terminals — tap to show all',
 };
 
@@ -53,6 +54,7 @@ export function filterTag(filter: SessionFilter): string | null {
   if (filter === 'agents') return 'AI';
   if (filter === 'claude') return 'CC';
   if (filter === 'codex') return 'CX';
+  if (filter === 'grok') return 'GK';
   if (filter === 'terminal') return '>_';
   return null;
 }

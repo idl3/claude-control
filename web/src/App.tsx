@@ -1189,7 +1189,7 @@ function AppInner() {
       const v = localStorage.getItem('cc:sessionFilter');
       // Default is 'agents' (Claude + Codex) — a persisted choice (including an
       // explicit 'all') always wins over that default on reload.
-      return v === 'all' || v === 'agents' || v === 'claude' || v === 'codex' || v === 'terminal'
+      return v === 'all' || v === 'agents' || v === 'claude' || v === 'codex' || v === 'grok' || v === 'terminal'
         ? v
         : 'agents';
     } catch {
@@ -1202,7 +1202,8 @@ function AppInner() {
         f === 'all' ? 'agents'
         : f === 'agents' ? 'claude'
         : f === 'claude' ? 'codex'
-        : f === 'codex' ? 'terminal'
+        : f === 'codex' ? 'grok'
+        : f === 'grok' ? 'terminal'
         : 'all';
       try {
         localStorage.setItem('cc:sessionFilter', next);

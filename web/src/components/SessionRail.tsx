@@ -5,6 +5,7 @@ import gsap, { prefersReducedMotion } from '../lib/anim';
 import { ClaudeRobotIcon } from './ClaudeRobotIcon';
 import { TerminalSquareIcon, CloudIcon, PencilIcon, SettingsIcon } from './icons';
 import { CodexIcon } from './CodexIcon';
+import { GrokIcon } from './GrokIcon';
 import { prettifyRemoteId } from '../lib/olamLabel';
 import { renameTmuxSession, terminateSession } from '../lib/api';
 import { createPointerGhost, type PointerGhost } from '../lib/dragGhost';
@@ -32,7 +33,7 @@ import {
  *  this filter BUCKET is codex-flavored. A dedicated chip would also need
  *  App.tsx's cycle + persisted-filter validation extended — fold into the
  *  codex bucket instead, per the claudex-integration phase-b tracker. */
-export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'terminal';
+export type SessionFilter = 'all' | 'agents' | 'claude' | 'codex' | 'grok' | 'terminal';
 
 interface SessionRailProps {
   sessions: Session[];
@@ -1148,6 +1149,7 @@ function PaneRow({
   });
   const isTerminal = s.kind === 'terminal';
   const isCodex = s.kind === 'codex';
+  const isGrok = s.kind === 'grok';
   const label = isTerminal
     ? s.ccShell
       ? `shell · ${s.cmd || 'sh'}`
@@ -1280,10 +1282,10 @@ function PaneRow({
             opacity; inactive panes dim (this replaces the old green/grey orb). */}
         <span
           className="pane-icon"
-          data-kind={isTerminal ? 'terminal' : isCodex ? 'codex' : 'claude'}
+          data-kind={isTerminal ? 'terminal' : isCodex ? 'codex' : isGrok ? 'grok' : 'claude'}
           data-active={s.active ? 'true' : 'false'}
           data-state={claudeState ?? undefined}
-          aria-label={isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : 'Claude pane'}
+          aria-label={isTerminal ? 'terminal pane' : isCodex ? 'Codex pane' : isGrok ? 'Grok pane' : 'Claude pane'}
           title={
             isTerminal
               ? s.active
@@ -1302,6 +1304,8 @@ function PaneRow({
             <TerminalSquareIcon size={18} />
           ) : isCodex ? (
             <CodexIcon size={15} />
+          ) : isGrok ? (
+            <GrokIcon size={15} />
           ) : (
             <ClaudeRobotIcon size={17} />
           )}
@@ -1503,6 +1507,7 @@ export function SessionRail({
       // MUST see those sessions here, not stranded under 'claude'). No
       // dedicated claudex/claudemi chip (see the SessionFilter doc above).
       if (filter === 'codex') return s.kind === 'codex' || s.kind === 'claudex' || s.kind === 'claudemi';
+      if (filter === 'grok') return s.kind === 'grok';
       // 'claude' filter: claude-only — kind === 'claude' or kind unset
       // (legacy panes with no classifier tag yet). Explicitly EXCLUDES
       // claudex/claudemi (they live under 'codex' above) rather than the old

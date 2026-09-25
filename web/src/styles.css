@@ -963,7 +963,8 @@ body.is-external-display .rail {
 
 /* ── Claude/Codex character state: working / sleeping / question ── */
 .pane-icon[data-kind='claude'],
-.pane-icon[data-kind='codex'] {
+.pane-icon[data-kind='codex'],
+.pane-icon[data-kind='grok'] {
   position: relative;
   overflow: visible;
 }

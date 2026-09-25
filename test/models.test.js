@@ -5,6 +5,7 @@ import {
   CLAUDE_MODELS,
   CLAUDEX_MODELS,
   CLAUDEMI_MODELS,
+  GROK_MODELS,
   recommendMlxModel,
   recommendClaudeModel,
   detectMachine,
@@ -43,6 +44,15 @@ test('catalog entries are well-formed', () => {
     assert.ok(typeof m.id === 'string' && m.id.length > 0);
     assert.ok(typeof m.label === 'string' && m.label.length > 0);
   }
+});
+
+test('grok catalog leads with the operator default grok-4.7 and is well-formed', () => {
+  assert.equal(GROK_MODELS[0].id, 'grok-4.7');
+  for (const m of GROK_MODELS) {
+    assert.match(m.id, /^grok-/);
+    assert.ok(typeof m.label === 'string' && m.label.length > 0);
+  }
+  assert.equal(new Set(GROK_MODELS.map((m) => m.id)).size, GROK_MODELS.length);
 });
 
 test('claudex catalog is a closed single-entry list', () => {
