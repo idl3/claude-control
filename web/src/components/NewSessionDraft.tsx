@@ -135,6 +135,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
   const [claudeModels, setClaudeModels] = useState<ClaudeModelInfo[]>([]);
   const [codexModels, setCodexModels] = useState<ClaudeModelInfo[]>([]);
   const [claudexModels, setClaudexModels] = useState<ClaudeModelInfo[]>([]);
+  const [grokModels, setGrokModels] = useState<ClaudeModelInfo[]>([]);
   const [claudemiModels, setClaudemiModels] = useState<ClaudeModelInfo[]>([]);
   const [defaultCwd, setDefaultCwd] = useState('~');
   const [projectDirs, setProjectDirs] = useState<{ label: string; path: string }[]>([]);
@@ -339,6 +340,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
         setClaudeModels(info.claudeModels ?? []);
         setCodexModels(info.codexModels ?? []);
         setClaudexModels(info.claudexModels ?? []);
+        setGrokModels(info.grokModels ?? []);
         setClaudemiModels(info.claudemiModels ?? []);
       })
       .catch(() => {
@@ -553,6 +555,7 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
       transport: agent === 'grok' || (agent === 'claude' && claudeTransport === 'acp') ? 'acp' : undefined,
       model: agent === 'claude' && model !== 'default' ? model : undefined,
       codexModel: agent === 'codex' && model !== 'default' ? model : undefined,
+      grokModel: agent === 'grok' && model !== 'default' ? model : undefined,
       claudexModel: agent === 'claudex' && model !== 'default' ? model : undefined,
       claudemiModel: agent === 'claudemi' && model !== 'default' ? model : undefined,
       prompt: finalPrompt || undefined,
@@ -598,7 +601,9 @@ export function NewSessionDraft({ filter, onToast, onCancel, onBack, onCreated }
         ? claudexModels
         : agent === 'claudemi'
           ? claudemiModels
-          : codexModels;
+          : agent === 'grok'
+            ? grokModels
+            : codexModels;
 
   // ASSUMPTION: modelOptions[0] is the harness default (flagship-first
   // ordering in lib/models.js — CLAUDE_MODELS[0]/CODEX_MODELS[0] are the ids

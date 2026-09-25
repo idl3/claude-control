@@ -62,8 +62,7 @@ import {
   CLAUDEMI_MODELS,
   detectMachine,
   recommendMlxModel,
-  recommendClaudeModel,
-} from './lib/models.js';
+  recommendClaudeModel, GROK_MODELS } from './lib/models.js';
 import { transcribe } from './lib/transcribe.js';
 import { replyShouldBlock } from './lib/reply-guard.js';
 import { shouldRefuseSendForPicker } from './lib/picker-send-guard.js';
@@ -594,6 +593,7 @@ const _handler = (req, res) => {
       codexModels: CODEX_MODELS,
       claudexModels: CLAUDEX_MODELS,
       claudemiModels: CLAUDEMI_MODELS,
+      grokModels: GROK_MODELS,
       recommendedMlxModel: recommendMlxModel(machine.ramGB),
       recommendedClaudeModel: recommendClaudeModel(),
     });
@@ -1270,6 +1270,7 @@ const ALLOWED_CLAUDE_MODELS = new Set(CLAUDE_MODELS.map((m) => m.id));
 
 // Same pattern for Codex — single source of truth is CODEX_MODELS (lib/models.js).
 const ALLOWED_CODEX_MODELS = new Set(CODEX_MODELS.map((m) => m.id));
+const ALLOWED_GROK_MODELS = new Set(GROK_MODELS.map((m) => m.id));
 
 // Same pattern for Claudex — single source of truth is CLAUDEX_MODELS (lib/models.js).
 const ALLOWED_CLAUDEX_MODELS = new Set(CLAUDEX_MODELS.map((m) => m.id));
@@ -1371,6 +1372,8 @@ async function handleSessionNew(req, res) {
   // codexModel: same pattern, Codex-only. Unknown/absent → null (no --model
   // flag / no thread/start model field, Codex CLI default).
   const codexModel = agent === 'codex' && ALLOWED_CODEX_MODELS.has(body.codexModel) ? body.codexModel : null;
+  // Grok model — validated against the closed catalog (never interpolated raw).
+  const grokModel = agent === 'grok' && ALLOWED_GROK_MODELS.has(body.grokModel ?? body.model) ? (body.grokModel ?? body.model) : null;
 
   // claudexModel: DELIBERATELY fail-closed, unlike the silent-fallback
   // ternaries above — a claudex session with the wrong model would silently
@@ -1584,7 +1587,7 @@ async function handleSessionNew(req, res) {
         cwd,
         name,
         prompt: prompt || undefined,
-        model: kind === 'codex' ? (codexModel || null) : (kind === 'claude' ? (model || null) : (body.model || null)),
+        model: kind === 'codex' ? (codexModel || null) : kind === 'claude' ? (model || null) : (grokModel || null),
         skipPermissions,
       });
       return endJson(res, 200, {

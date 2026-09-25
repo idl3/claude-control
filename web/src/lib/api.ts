@@ -384,6 +384,8 @@ export interface ModelsInfo {
    *  reads it as `info.claudexModels ?? []`) — the server has always sent it,
    *  but the type shouldn't claim a guarantee the code doesn't rely on. */
   claudexModels?: ClaudeModelInfo[];
+  /** Grok model catalog (id/label) — GROK_MODELS in lib/models.js; grok runs over ACP. */
+  grokModels?: ClaudeModelInfo[];
   /** Claudemi model catalog (id/label) — the claude CLI pointed at the olam
    *  auth-worker's Kimi provider-selector segment (CLAUDEMI_MODELS in
    *  lib/models.js). Optional for the same runtime-defense reason as
@@ -504,6 +506,8 @@ export async function createSession(opts?: {
   /** Codex-only model override — a full model id from ClaudeModelInfo.id
    *  (e.g. 'gpt-5.5'). Omitted/'default' → agent's own default. */
   codexModel?: string;
+  /** Grok-only explicit model id (validated server-side against GROK_MODELS). */
+  grokModel?: string;
   /** Claudex-only model override — a full model id from ClaudeModelInfo.id
    *  (e.g. 'gpt-5.6-sol'). Omitted/'default' → the server's configured
    *  claudexModel default. */
