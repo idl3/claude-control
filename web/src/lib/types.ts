@@ -51,9 +51,9 @@ export interface Session {
    *  rail-FILTER-bucket / pane-treatment story as 'claudex'); 'codex' = an
    *  OpenAI Codex pane; 'terminal' = a plain shell pane (live terminal);
    *  'remote' = an olam remote sandbox session. */
-  kind?: 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'remote';
+  kind?: 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'remote' | 'grok';
   /** Per-session control transport. */
-  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | null;
+  transport?: 'tmux' | 'rpc' | 'print' | 'olam' | 'acp' | null;
   // --- remote (olam) rows only — additive; absent on local sessions ---------
   /** Org slug the remote session belongs to (atlas | grain | pleri | ...). */
   org?: string;

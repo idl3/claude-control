@@ -1987,7 +1987,7 @@ function AppInner() {
         kind: 'prompt',
         prompt: cockpit.prompt!,
         planMarkdown,
-        agentName: selectedSession?.kind === 'codex' ? 'Codex' : 'Claude',
+        agentName: selectedSession?.kind === 'codex' ? 'Codex' : selectedSession?.kind === 'grok' ? 'Grok' : 'Claude',
       };
     }
     return null;
@@ -3130,7 +3130,7 @@ function AppInner() {
                   <Thread
                     ref={composerRef}
                     hasSelection={!!cockpit.selectedId}
-                    agentName={selectedSession?.kind === 'codex' ? 'Codex' : 'Claude'}
+                    agentName={selectedSession?.kind === 'codex' ? 'Codex' : selectedSession?.kind === 'grok' ? 'Grok' : 'Claude'}
                     loading={!cockpit.messagesLoaded}
                     emptyState={threadEmptyState}
                     sessionId={cockpit.selectedId}

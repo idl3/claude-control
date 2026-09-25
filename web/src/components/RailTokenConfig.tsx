@@ -74,7 +74,7 @@ function RailArrow() {
 // SlotText + the same slotOpts) so the preview looks like an actual rail
 // group, not an approximation of one.
 
-const CLAUDE_MODELS = ['opus-4.8', 'sonnet-5', 'fable-5'];
+const CLAUDE_MODELS = ['opus-5.5', 'fable-5.1', 'sonnet-5', 'opus-4.8', 'fable-5'];
 const CODEX_MODELS = ['gpt-5.5', 'gpt-5.6'];
 const CLAUDE_EFFORTS = ['max', 'xhigh', 'high', 'medium', 'low'];
 const CODEX_EFFORTS = ['xhigh', 'high', 'medium', 'low'];

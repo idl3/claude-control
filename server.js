@@ -18,7 +18,7 @@ const _execFile = promisify(_execFileRaw);
 import { WebSocketServer } from 'ws';
 
 import * as tmux from './lib/tmux.js';
-import { resolveClaudexBaseUrl, preflightClaudexModel } from './lib/cloud-bearer.js';
+import { readCloudBearer, resolveClaudexBaseUrl, preflightClaudexModel } from './lib/cloud-bearer.js';
 import * as shell from './lib/shell.js';
 import { createPtyBridge, handlePtyUpgrade } from './lib/pty-bridge.js';
 import { TranscriptTailer } from './lib/transcript.js';
@@ -70,6 +70,8 @@ import { shouldRefuseSendForPicker } from './lib/picker-send-guard.js';
 import { listSkills, readSkill } from './lib/skills.js';
 import { reapSiblingServers } from './lib/reap-siblings.js';
 import { deriveProjectsRoots } from './lib/projects-roots.js';
+import { AcpRegistry } from './lib/acp/registry.js';
+import { isAcpId } from './lib/acp/ids.js';
 // Note: the client offers [WS_PROTOCOL, token] as subprotocols; the `ws`
 // library auto-selects the FIRST offered one (the non-secret WS_PROTOCOL label)
 // and echoes it, so we never reflect the raw token back and need no custom
@@ -221,6 +223,13 @@ const VIDEO_MIME = {
 
 // --- shared state -----------------------------------------------------------
 const registry = new SessionRegistry({ projectsRoots: CONFIG.projectsRoots, codexSessionsRoot: CONFIG.codexSessionsRoot, tmux });
+const acpRegistry = new AcpRegistry({
+  sessionRegistry: registry,
+  grokBin: process.env.GROK_BIN || 'grok',
+  codexAcpBin: process.env.CODEX_ACP_BIN || 'codex-acp',
+  claudeAcpBin: process.env.CLAUDE_ACP_BIN || 'claude-agent-acp',
+  dataDir: CONFIG.dataDir || getDataDir(),
+});
 const collab = new Collab(); // session-to-session collaboration rooms (lib/collab.js)
 const resources = new ResourceMonitor({ rssLimitMB: CONFIG.rssLimitMB });
 // R8: registry.start()/resources.start() run unconditionally at boot (main(),
@@ -604,7 +613,10 @@ const _handler = (req, res) => {
     return Promise.all([
       resolveBin(cfg.claudeBin || cfg.launchCommand),
       resolveBin(cfg.codexBin || cfg.codexLaunchCommand),
-    ]).then(async ([claudeResult, codexResult]) => {
+      resolveBin(cfg.grokBin || process.env.GROK_BIN || 'grok'),
+      resolveBin(process.env.CODEX_ACP_BIN || 'codex-acp'),
+      resolveBin(process.env.CLAUDE_ACP_BIN || 'claude-agent-acp'),
+    ]).then(async ([claudeResult, codexResult, grokResult, codexAcpResult, claudeAcpResult]) => {
       // Claudex spawns the claude binary pointed at the olam auth-worker (see
       // handleSessionNew's claudex pre-validation, which this mirrors), so its
       // availability is claude's availability AND the cloud-bearer artifact
@@ -650,8 +662,10 @@ const _handler = (req, res) => {
             id: 'claude',
             available: claudeResult.available,
             defaultTransport: CONFIG.claudeTransport,
-            transports: ['tmux', 'print'],
+            transports: ['tmux', 'print', 'acp'],
             ...(claudeResult.available ? {} : { reason: claudeResult.reason }),
+            acpAvailable: !!claudeAcpResult.available,
+            ...(claudeAcpResult.available ? {} : { acpReason: claudeAcpResult.reason }),
           },
           {
             id: 'claudex',
@@ -675,8 +689,17 @@ const _handler = (req, res) => {
             id: 'codex',
             available: codexResult.available,
             defaultTransport: CONFIG.codexTransport,
-            transports: ['rpc', 'tmux'],
+            transports: ['rpc', 'tmux', 'acp'],
             ...(codexResult.available ? {} : { reason: codexResult.reason }),
+            acpAvailable: !!codexAcpResult.available,
+            ...(codexAcpResult.available ? {} : { acpReason: codexAcpResult.reason }),
+          },
+          {
+            id: 'grok',
+            available: grokResult.available,
+            defaultTransport: 'acp',
+            transports: ['acp'],
+            ...(grokResult.available ? {} : { reason: grokResult.reason }),
           },
         ],
       });
@@ -1312,7 +1335,9 @@ async function handleSessionNew(req, res) {
         ? 'claudex'
         : body.agent === 'claudemi'
           ? 'claudemi'
-          : 'claude';
+          : body.agent === 'grok'
+            ? 'grok'
+            : 'claude';
   // Claudex/claudemi are tmux-only, ALWAYS — never the print-bridge path.
   // Below, the `else if (claudeTransport === 'print')` branch does not itself
   // check `agent`; without this force, a host running CLAUDE_TRANSPORT=print
@@ -1393,11 +1418,20 @@ async function handleSessionNew(req, res) {
   // --- Pre-validation: binary resolution + cwd check BEFORE creating any window ---
 
   // (i) Resolve the agent binary and return 400 if unavailable.
-  const agentBin = agent === 'codex'
-    ? (config.codexBin || config.codexLaunchCommand)
-    : (agent === 'claude' && claudeTransport === 'print'
-      ? (resolveClaudeBin() || 'claude')
-      : (config.claudeBin || config.launchCommand));
+  const wantAcp = agent === 'grok'
+    || (agent === 'codex' && (body.transport === 'acp' || body.codexTransport === 'acp'))
+    || (agent === 'claude' && (body.transport === 'acp' || body.claudeTransport === 'acp'));
+  const agentBin = wantAcp && agent === 'codex'
+    ? (process.env.CODEX_ACP_BIN || 'codex-acp')
+    : wantAcp && agent === 'claude'
+      ? (process.env.CLAUDE_ACP_BIN || 'claude-agent-acp')
+    : agent === 'grok'
+      ? (config.grokBin || process.env.GROK_BIN || 'grok')
+      : agent === 'codex'
+        ? (config.codexBin || config.codexLaunchCommand)
+        : (agent === 'claude' && claudeTransport === 'print'
+          ? (resolveClaudeBin() || 'claude')
+          : (config.claudeBin || config.launchCommand));
   const binCheck = await resolveBin(agentBin);
   if (!binCheck.available) {
     return endJson(res, 400, { error: `agent binary unavailable: ${binCheck.reason}` });
@@ -1540,6 +1574,30 @@ async function handleSessionNew(req, res) {
       CLAUDE_CODE_EFFORT_LEVEL: 'max',
       ENABLE_TOOL_SEARCH: 'false',
     };
+  }
+
+  if (wantAcp) {
+    const kind = agent === 'codex' || agent === 'claude' ? agent : 'grok';
+    try {
+      const row = await acpRegistry.create({
+        kind,
+        cwd,
+        name,
+        prompt: prompt || undefined,
+        model: kind === 'codex' ? (codexModel || null) : (kind === 'claude' ? (model || null) : (body.model || null)),
+        skipPermissions,
+      });
+      return endJson(res, 200, {
+        ok: true,
+        target: row.id,
+        name: row.name,
+        agent: kind,
+        transport: 'acp',
+        sessionId: row.sessionId,
+      });
+    } catch (err) {
+      return endJson(res, 500, { error: String(err?.message || err) });
+    }
   }
 
   try {
@@ -1729,6 +1787,16 @@ async function handleSessionRename(req, res) {
   if (!name) return endJson(res, 400, { error: 'name is required' });
   const session = sessionById(id);
   if (!session) return endJson(res, 404, { error: 'unknown session' });
+  if (session.transport === 'acp' || isAcpId(id)) {
+    const entry = acpRegistry.get(id);
+    if (entry) {
+      entry.row.name = name;
+      entry.row.title = name;
+      entry.row.sessionName = name;
+      acpRegistry.publish();
+    }
+    return endJson(res, 200, { ok: true });
+  }
   if (!tmux.isValidTarget(session.target)) {
     return endJson(res, 400, { error: 'invalid tmux target' });
   }
@@ -1759,6 +1827,10 @@ async function handleSessionTerminate(req, res) {
   const id = typeof body?.id === 'string' ? body.id : '';
   const session = sessionById(id);
   if (!session) return endJson(res, 404, { error: 'unknown session' });
+  if (session.transport === 'acp' || isAcpId(id)) {
+    await acpRegistry.disconnect(id, { forget: true });
+    return endJson(res, 200, { ok: true, killed: true });
+  }
   if (!tmux.isValidTarget(session.target)) {
     return endJson(res, 400, { error: 'invalid tmux target' });
   }
@@ -2483,6 +2555,32 @@ claudePrint.on('close', (id) => {
 });
 
 function ensureSubscription(id) {
+  {
+    const acpSess = sessionById(id);
+    if (acpSess?.transport === 'acp' || isAcpId(id)) {
+      const existing = subscriptions.get(id);
+      if (existing) return existing;
+      const tailer = acpRegistry.tailerFor(id);
+      const sub = {
+        tailer,
+        subagents: null,
+        clients: new Set(),
+        pending: tailer?.getPending?.() || null,
+        acp: true,
+        ready: Promise.resolve(),
+      };
+      subscriptions.set(id, sub);
+      if (tailer) {
+        tailer.on('append', (msgs) => broadcastTo(id, { type: 'append', id, messages: msgs }));
+        tailer.on('pending', (pending) => {
+          sub.pending = pending;
+          registry.setPending(id, !!pending);
+          broadcastTo(id, { type: 'pending', id, pending });
+        });
+      }
+      return sub;
+    }
+  }
   // Remote (olam) sessions stream from the chunks substrate, not a local
   // transcript file. Build an OlamTranscriptSource whose 'append' events carry
   // the SAME NormalizedMessage shape as the local tailer, so the WS fan-out +
@@ -2941,6 +3039,16 @@ async function handleClientMessage(ws, msg) {
       // no tmux target, no pane picker, no send-settle delay — so this branch
       // early-returns BEFORE all of that. The agent's reply streams back as
       // chunks (Phase B), so there is no separate response plumbing.
+      if (replyTransport(session) === 'acp') {
+        const reqId = msg.reqId;
+        try {
+          await acpRegistry.prompt(session.id, String(msg.text ?? ''));
+          send(ws, { type: 'ack', op: 'reply', ok: true, transport: 'acp', reqId });
+        } catch (err) {
+          send(ws, { type: 'ack', op: 'reply', ok: false, reqId, error: String(err?.message || err) });
+        }
+        return;
+      }
       if (replyTransport(session) === 'olam') {
         const reqId = msg.reqId;
         // Phase A (task A4) + CP3 audit follow-up: pre-send liveness check,
@@ -3108,6 +3216,26 @@ async function handleClientMessage(ws, msg) {
     case 'answer': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      if (session.transport === 'acp' || isAcpId(msg.id)) {
+        const entry = acpRegistry.get(session.id);
+        const pending = entry?.pending;
+        if (!pending) throw new Error('no pending question');
+        if (msg.toolUseId && msg.toolUseId !== pending.toolUseId) {
+          throw new Error('stale question (already answered or changed)');
+        }
+        const label = Array.isArray(msg.selections?.[0]) ? msg.selections[0][0] : null;
+        const opt = (pending.questions?.[0]?.options || []).find((o) => o.label === label);
+        if (!opt?.optionId) throw new Error('unknown permission option');
+        const cancelled = String(opt.optionId).startsWith('reject');
+        if (!entry.runtime?.permissionHost) throw new Error('ACP session is not connected');
+        entry.runtime.permissionHost.answer(pending.toolUseId, { optionId: opt.optionId, cancelled });
+        entry.pending = null;
+        entry.row.pending = false;
+        registry.setPending(session.id, false);
+        send(ws, { type: 'ack', op: 'answer', ok: true, transport: 'acp' });
+        broadcastTo(session.id, { type: 'pending', id: session.id, pending: null });
+        return;
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const answerKey = `${session.target}\0${String(msg.toolUseId ?? '')}`;
       const now = Date.now();
@@ -3462,6 +3590,9 @@ async function handleClientMessage(ws, msg) {
     case 'capture': {
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      if (session.transport === 'acp' || isAcpId(msg.id)) {
+        return send(ws, { type: 'capture', id: msg.id, text: '' });
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const lines = Math.max(1, Math.min(10000, Number(msg.lines) || 40));
       // Terminal-pane rows opt into ANSI escapes so colours render; the plain
@@ -3531,6 +3662,14 @@ async function handleClientMessage(ws, msg) {
       // keys only — never arbitrary text — so this can't be used to inject input.
       const session = sessionById(msg.id);
       if (!session) throw new Error('unknown session');
+      if (session.transport === 'acp' || isAcpId(msg.id)) {
+        if (msg.key === 'Escape') {
+          await acpRegistry.cancel(session.id);
+          send(ws, { type: 'ack', op: 'promptkey', ok: true, transport: 'acp' });
+          return;
+        }
+        throw new Error('key not allowed for ACP session');
+      }
       if (!tmux.isValidTarget(session.target)) throw new Error('invalid tmux target');
       const ALLOWED = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down']);
       if (!ALLOWED.has(msg.key)) throw new Error('key not allowed');
@@ -3755,6 +3894,9 @@ async function main() {
 
   registry.setPins(pins); // apply persisted pins before the first refresh
   registry.start();
+  await acpRegistry.restore().catch((err) => {
+    console.warn(`[acp] restore skipped: ${err?.message || err}`);
+  });
   resources.start();
   if (OLAM.enabled) {
     olamSource = new RemoteSessionSource(OLAM, registry);
@@ -3852,6 +3994,7 @@ async function main() {
 function shutdown() {
   clearInterval(heartbeatInterval);
   for (const [, sub] of subscriptions) sub.tailer?.stop();
+  acpRegistry.shutdownAll().catch(() => {});
   ptyBridge.shutdownAll();
   mlx.shutdown();
   registry.stop();

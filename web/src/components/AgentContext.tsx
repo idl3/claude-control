@@ -10,8 +10,8 @@ import { createContext, useContext } from 'react';
  * pointed at the olam auth-worker (OpenAI or Kimi respectively) — already
  * render correctly with no dedicated branch.
  */
-export const AgentKindContext = createContext<'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal'>('claude');
+export const AgentKindContext = createContext<'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'grok'>('claude');
 
-export function useAgentKind(): 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' {
+export function useAgentKind(): 'claude' | 'claudex' | 'claudemi' | 'codex' | 'terminal' | 'grok' {
   return useContext(AgentKindContext);
 }

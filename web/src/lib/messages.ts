@@ -28,13 +28,31 @@ export function mergeMessages(
   if (!existing || existing.length === 0) return cap(incoming);
   if (incoming.length === 0) return existing;
 
-  const seen = new Set<string>();
-  for (const m of existing) seen.add(m.uuid);
+  const indexByUuid = new Map<string, number>();
+  for (let i = 0; i < existing.length; i++) indexByUuid.set(existing[i].uuid, i);
 
-  const fresh = incoming.filter((m) => !seen.has(m.uuid));
-  if (fresh.length === 0) return existing;
+  let changed = false;
+  const next = existing.slice();
+  for (const msg of incoming) {
+    const idx = indexByUuid.get(msg.uuid);
+    if (idx == null) {
+      indexByUuid.set(msg.uuid, next.length);
+      next.push(msg);
+      changed = true;
+      continue;
+    }
+    if (messageBodyChanged(next[idx], msg)) {
+      next[idx] = msg;
+      changed = true;
+    }
+  }
+  if (!changed) return existing;
+  return cap(next);
+}
 
-  return cap([...existing, ...fresh]);
+function messageBodyChanged(a: Msg, b: Msg): boolean {
+  if (a.role !== b.role) return true;
+  return JSON.stringify(a.blocks) !== JSON.stringify(b.blocks);
 }
 
 function cap(msgs: Msg[]): Msg[] {
