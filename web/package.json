@@ -20,6 +20,8 @@
     "gsap": "^3.15.0",
     "highlight.js": "^11.11.1",
     "html-to-image": "^1.11.13",
+    "motion": "^13.4.4",
+    "motion-panels": "^0.6.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "remark-gfm": "^4.0.1",

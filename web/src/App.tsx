@@ -34,7 +34,8 @@ import { AgentKindContext } from './components/AgentContext';
 import { WorkflowContext, type WorkflowContextValue } from './components/WorkflowContext';
 import { ArtifactPanelProvider } from './components/ArtifactContext';
 import { UrlActionProvider } from './components/UrlActionContext';
-import { ArtifactPanel } from './components/ArtifactPanel';
+import { ArtifactSidePanel, Fill, Sized, Split } from './components/ResizablePanels';
+import { panelsEnabled, usePanelSize } from './lib/panelLayout';
 import { ArtifactGallery } from './components/ArtifactGallery';
 import { loadGalleryOpen, saveGalleryOpen } from './lib/sessionArtifacts';
 import { loadFontSize } from './lib/fontSizePrefs';
@@ -1126,6 +1127,10 @@ function AppInner() {
   // Desktop focus mode: collapse the sidebar (persisted). On mobile the rail is
   // the master pane (handled by data-detail), so focus mode is desktop-only.
   const narrow = useIsNarrow();
+  // motion-panels shell: desktop only, kill switch localStorage cc:panels=0.
+  const panels = !narrow && panelsEnabled();
+  const [railW, setRailW] = usePanelSize('rail', 375);
+  const [rawW, setRawW] = usePanelSize('raw', 480);
 
   // ── Mobile back-gesture (SPA nav): the iOS edge-swipe-back / browser Back
   // should move detail → rail IN-APP, not reload/leave the page. Push a history
@@ -1169,17 +1174,15 @@ function AppInner() {
       return false;
     }
   });
-  const toggleRail = useCallback(() => {
-    setRailCollapsed((v) => {
-      const next = !v;
-      try {
-        localStorage.setItem('cc:railCollapsed', next ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
+  const setRailCollapsedPersist = useCallback((next: boolean) => {
+    setRailCollapsed(next);
+    try {
+      localStorage.setItem('cc:railCollapsed', next ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
   }, []);
+  const toggleRail = useCallback(() => setRailCollapsedPersist(!railCollapsed), [railCollapsed, setRailCollapsedPersist]);
 
   // Rail filter (all / claude / terminal) + per-session accordion collapse, both
   // persisted. ⌘1-9 only addresses sessions that are VISIBLE (filter-allowed and
@@ -1351,7 +1354,9 @@ function AppInner() {
   useEffect(() => {
     const rail = railRef.current;
     if (!rail) return;
-    if (narrow) {
+    if (narrow || panels) {
+      // Mobile: responsive CSS owns the rail. Panels: the motion-panels <Panel>
+      // owns width + collapse (its own fold animation), so leave no inline style.
       gsap.set(rail, { clearProps: 'width,flexBasis,opacity' });
       return;
     }
@@ -1385,7 +1390,7 @@ function AppInner() {
       return;
     }
     gsap.to(rail, { ...target, duration: 0.3, ease: 'power3.out' });
-  }, [railCollapsed, narrow]);
+  }, [railCollapsed, narrow, panels]);
 
   // Subtle content transition when switching sessions (desktop + mobile).
   // Scoped to the thread/live-pane content element only — the .composer is
@@ -2727,7 +2732,18 @@ function AppInner() {
           </div>
         ) : null}
 
-        <div className="app-body">
+        <Split enabled={panels} className="app-body">
+          <Sized
+            enabled={panels}
+            grip="after"
+            className="mp-rail"
+            size={railW}
+            minSize={220}
+            maxSize={760}
+            onSizeChange={setRailW}
+            collapsed={railCollapsed}
+            onCollapsedChange={setRailCollapsedPersist}
+          >
           <aside className="rail" ref={railRef}>
             {/* The sidebar-minimise toggle (⌘B) used to live here as the rail's own
                 top strip; it now lives permanently in .detail-head (see below) so
@@ -2773,7 +2789,9 @@ function AppInner() {
                 filter on the left, "+ New session" (primary action) on the right. */}
             <NewSessionForm onOpenDraft={openDraft} filter={sessionFilter} onCycleFilter={cycleFilter} />
           </aside>
+          </Sized>
 
+          <Fill enabled={panels} className="mp-fill">
           <main className="detail">
             {draftOpen ? (
               <NewSessionDraft
@@ -3057,7 +3075,7 @@ function AppInner() {
                 sendKey={cockpit.sendPaneKey}
               />
             ) : (
-              <div className="detail-split">
+              <Split enabled={panels} className="detail-split">
                 {cockpit.degraded?.degraded ? (
                   <div className="olam-degraded-banner" role="status">
                     ⚠ log tail only — live conversation stream unavailable
@@ -3118,6 +3136,7 @@ function AppInner() {
                     )}
                   </div>
                 ) : null}
+                <Fill enabled={panels} className="mp-fill mp-thread">
                 <AgentKindContext.Provider value={selectedSession?.kind === 'remote' ? 'claude' : selectedSession?.kind ?? 'claude'}>
                 <LiveThinkingContext.Provider value={liveThinkingId}>
                 <WorkflowContext.Provider value={workflowCtx}>
@@ -3165,29 +3184,31 @@ function AppInner() {
                 </WorkflowContext.Provider>
                 </LiveThinkingContext.Provider>
                 </AgentKindContext.Provider>
-                <ErrorBoundary label="Artifact panel failed to render">
-                  <ArtifactPanel />
-                </ErrorBoundary>
+                </Fill>
+                <ArtifactSidePanel enabled={panels} />
                 <ArtifactGallery transcriptText={transcriptText} open={galleryOpen} onCountChange={setArtifactCount} />
                 {rawOpen ? (
-                  <RawEventPanel
-                    key={cockpit.selectedId}
-                    events={cockpit.rawEvents}
-                    onClose={() => setRawOpen(false)}
-                  />
+                  <Sized enabled={panels} className="mp-side" size={rawW} minSize={320} maxSize={900} onSizeChange={setRawW}>
+                    <RawEventPanel
+                      key={cockpit.selectedId}
+                      events={cockpit.rawEvents}
+                      onClose={() => setRawOpen(false)}
+                    />
+                  </Sized>
                 ) : null}
                 <TranscriptSearch
                   open={searchOpen}
                   onClose={() => setSearchOpen(false)}
                 />
-              </div>
+              </Split>
             )}
             </ShellContext.Provider>
             </div>
               </>
             )}
           </main>
-        </div>
+          </Fill>
+        </Split>
 
         {configOpen ? (
           <ConfigModal
