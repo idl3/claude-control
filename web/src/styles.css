@@ -13502,3 +13502,65 @@ body.studio-capture-reviewing .embed-app-hoist[data-embed-app-context='studio'] 
   padding: 10px 12px;
 }
 .sa-workflows .wf-card { margin: 0; }
+
+/* ── motion-panels shell (desktop only; see components/ResizablePanels.tsx) ──
+   <Panel> renders a clipping slot around a content div that carries our
+   className, so `.mp-*` is the CONTENT div and the region inside it must fill
+   it — the old breakpoint widths on .rail/.raw-panel/.artifact-panel give way
+   to the dragged size. Kill switch: localStorage cc:panels=0. */
+.mp-rail,
+.mp-fill,
+.mp-side {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.mp-rail > .rail,
+.mp-fill > .detail,
+.mp-fill > .thread-root,
+.mp-side > .artifact-panel,
+.mp-side > .raw-panel {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+body.is-external-display .mp-rail > .rail {
+  width: 100%;
+  flex: 1 1 auto;
+}
+/* The library renders a 0-width flex container centring a [role=separator]
+   child; the consumer gives that child its hit area and look. */
+[data-motion-panels-separator] {
+  position: relative;
+  z-index: 3;
+  overflow: visible;
+}
+[data-motion-panels-separator] > [role='separator'] {
+  position: relative;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+[data-motion-panels-separator] > [role='separator']::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 2px;
+  background: var(--amber, #d6a24b);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease, ease);
+}
+[data-motion-panels-separator] > [role='separator']:hover::after,
+[data-motion-panels-separator] > [role='separator']:focus-visible::after,
+[data-motion-panels-separator][data-resizing] > [role='separator']::after {
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-motion-panels-separator] > [role='separator']::after {
+    transition: none;
+  }
+}
