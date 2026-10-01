@@ -12,7 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { copyText } from '../lib/terminalClipboard';
 import { computeMenuPosition, framingFallbackState, type RectLike } from '../lib/linkify';
-import { isNativeShell, openExternal, openInAppWindow } from '../lib/nativeShell';
+import { isNativeShell, openBrowserTab, openInAppWindow } from '../lib/nativeShell';
 import { XIcon } from './icons';
 
 /**
@@ -164,9 +164,9 @@ function UrlActionMenu({
   }, [onClose]);
 
   const handleNewTab = () => {
-    // Browser: a plain new tab. Desktop shell: the native "browser" child
-    // window (window.open is a silent WKWebView no-op there).
-    openExternal(url);
+    // Browser: a plain new tab. Desktop shell: the native top browser tab
+    // above the SPA (window.open is a silent WKWebView no-op there).
+    openBrowserTab(url);
     onClose();
   };
 

@@ -111,8 +111,7 @@ pub fn probe(port: u16, timeout: Duration) -> bool {
     };
     let _ = s.set_read_timeout(Some(timeout));
     let _ = s.set_write_timeout(Some(timeout));
-    if s
-        .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+    if s.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .is_err()
     {
         return false;
@@ -335,7 +334,10 @@ mod tests {
             matches!(child.try_wait(), Ok(Some(_)))
         });
         assert!(gone, "child survived SIGTERM");
-        assert!(!probe(port, Duration::from_millis(300)), "port still serving after kill");
+        assert!(
+            !probe(port, Duration::from_millis(300)),
+            "port still serving after kill"
+        );
         let _ = fs::remove_dir_all(checkout);
     }
 }
@@ -352,7 +354,10 @@ mod live_tests {
     fn adopts_live_server_without_spawning() {
         let sup = Supervisor::new();
         let res = sup.start().expect("start");
-        assert!(res.adopted, "expected adoption of the live server, not a spawn");
+        assert!(
+            res.adopted,
+            "expected adoption of the live server, not a spawn"
+        );
         assert!(res.url.starts_with("http://127.0.0.1:"));
         assert!(
             !sup.status().supervised,

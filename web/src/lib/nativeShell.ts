@@ -57,14 +57,14 @@ function reportShellOpenFailure(stage: string, url: string, err: unknown): void 
 
 /**
  * Open an external http(s) URL. Outside the shell this is a plain
- * `window.open` new tab. In-shell it opens the operator's REAL system
- * browser via the shell's `open_system_browser` command (macOS `open`) —
- * `window.open`/`target="_blank"` are silent no-ops there (WKWebView has no
- * UI-delegate). Fallback chain for older shell builds: `open_url_window`
- * (the native in-app browser window), then `window.open`, reporting each
- * in-shell failure to the client-error sink.
+ * `window.open` new tab. In-shell it opens a native top-level browser tab
+ * via the shell's `open_browser_tab` command; the tab lives above the SPA
+ * and is not subject to X-Frame-Options / CSP. Fallback chain for older shell
+ * builds: `open_system_browser` (macOS `open`), then `window.open`, then
+ * `open_url_window` (legacy single-window), reporting each in-shell failure
+ * to the client-error sink.
  */
-export function openExternal(url: string): void {
+export function openBrowserTab(url: string): void {
   const fallback = () => {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
@@ -79,37 +79,39 @@ export function openExternal(url: string): void {
     fallback();
     return;
   }
-  void invoke('open_system_browser', { url }).catch((err) => {
-    reportShellOpenFailure('open_system_browser', url, err);
-    return invoke('open_url_window', { url }).catch((err2: unknown) => {
-      reportShellOpenFailure('open_url_window', url, err2);
-      fallback();
+  void invoke('open_browser_tab', { url }).catch((err: unknown) => {
+    reportShellOpenFailure('open_browser_tab', url, err);
+    return invoke('open_system_browser', { url }).catch((err2: unknown) => {
+      reportShellOpenFailure('open_system_browser', url, err2);
+      return invoke('open_url_window', { url }).catch((err3: unknown) => {
+        reportShellOpenFailure('open_url_window', url, err3);
+        fallback();
+      });
     });
   });
 }
 
+export function openExternal(url: string): void {
+  if (!isNativeShell) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  openBrowserTab(url);
+}
+
 /**
- * Open a URL in the shell's native in-app "browser" child window — a
- * top-level browsing context immune to X-Frame-Options / CSP
- * frame-ancestors, unlike any iframe (the reason the transcript's inline
- * URL preview uses this in-shell instead of its iframe overlay). Outside
- * the shell (or on invoke failure) falls back to openExternal's chain.
+ * Open a URL in the shell's native browser tab area — a top-level browsing
+ * context immune to X-Frame-Options / CSP frame-ancestors, unlike any
+ * iframe (the reason the transcript's inline URL preview uses this in-shell
+ * instead of its iframe overlay). Outside the shell (or on invoke failure)
+ * falls back to openExternal's chain.
  */
 export function openInAppWindow(url: string): void {
   if (!isNativeShell) {
     openExternal(url);
     return;
   }
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  const invoked = tauri?.core?.invoke?.('open_url_window', { url });
-  if (!invoked) {
-    reportShellOpenFailure('no __TAURI__ global (in-app window)', url, 'init script missing');
-    return;
-  }
-  void invoked.catch((err) => {
-    reportShellOpenFailure('open_url_window (inline)', url, err);
-    openExternal(url);
-  });
+  openBrowserTab(url);
 }
 
 /** Fire-and-forget native notification (no-op outside the shell). */
